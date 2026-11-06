@@ -5,12 +5,13 @@ import { Public } from '../../common/decorators/public.decorator';
 import { InitialSetupDto } from './dto/company.dto';
 import { SetupService } from './setup.service';
 
-/// The first-run flow, open until the installation has a company.
+/// The first-run status and initialization flow.
 ///
-/// Both routes are public because nobody can sign in before this has run —
-/// but `initialSetup` closes itself the moment a company exists, and the
-/// rate-limit guard applies to it like every other route, so it cannot be
-/// used to guess passwords at speed.
+/// Both routes are public because a pristine installation has no account to
+/// authenticate with. The service enforces a stricter invariant for the
+/// mutation: any company row (including soft-deleted rows) or any user row
+/// permanently closes public initial setup. Recovery is a separate,
+/// authenticated/verified workflow and must never reuse this endpoint.
 @Controller('setup')
 export class SetupController {
   constructor(private readonly service: SetupService) {}

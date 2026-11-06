@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers and physical counts. Separate permissions for
@@ -15,35 +16,61 @@ export class StockDocumentsController {
   findAll(@CurrentUser() user: AuthUser, @Query() query: Record<string, string>) {
     return this.service.findAll(user.companyId, {
       kind: query.kind,
+      q: query.q,
+      voucherOnly: query.voucherOnly === 'true',
       branchId: query.branchId,
       from: query.from,
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
       pageSize: query.pageSize ? Number(query.pageSize) : undefined,
-    });
+    }, user.branchId ?? null);
   }
 
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, canReadCost(user), user.branchId ?? null);
   }
 
   @Post()
   @RequirePermissions('inventory.stock.adjust')
   create(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.service.create(user.companyId, user.branchId, user.userId, body as never);
+    return this.service.create(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
+  }
+
+  @Put(':id/voucher-draft')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.adjust')
+  updateVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, canReadCost(user));
+  }
+
+  @Post(':id/review')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
+  review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user), this.voucherVersion(body));
+  }
+
+  @Post(':id/approve')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.approve')
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user), this.voucherVersion(body));
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
-  post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id);
+  post(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId, body?.expectedVersion, true);
+  }
+
+  private voucherVersion(body: Record<string, unknown> | undefined): number {
+    const version = body?.expectedVersion;
+    if (!Number.isSafeInteger(version) || (version as number) < 0) throw new BadRequestException('expectedVersion is required');
+    return version as number;
   }
 
   @Post(':id/reverse')
   @RequirePermissions('inventory.stock.adjust')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id);
+    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user), user.branchId);
   }
 }

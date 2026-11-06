@@ -4,9 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/auth/presentation/widgets/user_photo.dart';
+import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
+import '../../shared/widgets/app_error_dialog.dart';
+import '../router/draft_exit_guard.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -56,6 +60,17 @@ class _NavItem {
 /// "Accounting" heading.
 enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
 
+class _CollapsedNav extends Notifier<Set<_NavGroup>> {
+  @override
+  Set<_NavGroup> build() => const {};
+  void toggle(_NavGroup group) {
+    final next = {...state};
+    if (!next.add(group)) next.remove(group);
+    state = next;
+  }
+}
+final _collapsedNavProvider = NotifierProvider<_CollapsedNav, Set<_NavGroup>>(_CollapsedNav.new);
+
 /// Each section owns one colour (see [SectionAccents]): the selected entry
 /// is recognisable by its text, icon tile, background and edge indicator
 /// all switching to it, and the top bar repeats it — so where you are is
@@ -81,10 +96,12 @@ SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
 /// The navigation model itself changes with the available width; this is not
 /// a phone layout stretched across a monitor.
 class ErpShell extends ConsumerStatefulWidget {
-  const ErpShell({super.key, required this.currentPath, required this.child});
+  const ErpShell({super.key, required this.currentPath, required this.child, this.guardKey});
 
   final String currentPath;
   final Widget child;
+  /// Key for the current route when it registers a draft exit guard.
+  final ValueKey<String>? guardKey;
 
   static const _wideBreakpoint = 900.0;
   static const _extendedBreakpoint = 1280.0;
@@ -95,6 +112,36 @@ class ErpShell extends ConsumerStatefulWidget {
 
 class _ErpShellState extends ConsumerState<ErpShell> {
   final ScrollController _navScrollController = ScrollController();
+  final GlobalKey _selectedNavKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelection();
+  }
+
+  @override
+  void didUpdateWidget(covariant ErpShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentPath != widget.currentPath) _revealSelection();
+  }
+
+  void _revealSelection() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final target = _selectedNavKey.currentContext;
+      if (target == null) return; // A narrow viewport uses a drawer instead.
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+      if (!mounted || !target.mounted || _selectedNavKey.currentContext != target) return;
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -108,6 +155,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final isWide = width >= ErpShell._wideBreakpoint;
     final isExtended = width >= ErpShell._extendedBreakpoint;
     final items = _navigationItems(context);
+    final collapsed = ref.watch(_collapsedNavProvider);
+    void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
     final selectedIndex = _selectedIndex(items);
 
     return Scaffold(
@@ -117,6 +166,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           : _ModuleDrawer(
               items: items,
               current: widget.currentPath,
+              collapsed:collapsed,
+              onToggle:toggleGroup,
             ),
       body: SafeArea(
         bottom: false,
@@ -125,9 +176,12 @@ class _ErpShellState extends ConsumerState<ErpShell> {
             if (isWide)
               _Sidebar(
                 items: items,
-                current: widget.currentPath,
+                selectedPath: items[selectedIndex].path,
+                selectedKey: _selectedNavKey,
                 extended: isExtended,
                 scrollController: _navScrollController,
+                collapsed:collapsed,
+                onToggle:toggleGroup,
               ),
             Expanded(
               child: Column(
@@ -140,8 +194,14 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     ),
                     isWide: isWide,
                     isExtended: isExtended,
+                    guardKey: widget.guardKey,
                   ),
-                  Expanded(child: widget.child),
+                  Expanded(
+                    child: LicenceGate(
+                      currentPath: widget.currentPath,
+                      child: widget.child,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -279,6 +339,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.salesOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر البيع' : 'Sales orders',
+        permissions: const ['sales.orders.read'],
+        group: _NavGroup.sales,
+      ),
+      _NavItem(
         AppRoutes.salesInvoices,
         Icons.point_of_sale_outlined,
         l10n.salesInvoices,
@@ -305,6 +372,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           'sales.invoices.create',
         ],
         group: _NavGroup.sales,
+      ),
+      _NavItem(
+        AppRoutes.purchaseOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر الشراء' : 'Purchase orders',
+        permissions: const ['purchases.orders.read'],
+        group: _NavGroup.purchases,
       ),
       _NavItem(
         AppRoutes.purchaseInvoices,
@@ -389,13 +463,19 @@ bool _belongsTo(String path, String current) =>
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.items,
-    required this.current,
+    required this.selectedPath,
+    required this.selectedKey,
     required this.extended,
     required this.scrollController,
+    required this.collapsed,
+    required this.onToggle,
   });
 
+  final Set<_NavGroup> collapsed;
+  final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
-  final String current;
+  final String selectedPath;
+  final GlobalKey selectedKey;
   final bool extended;
   final ScrollController scrollController;
 
@@ -449,15 +529,19 @@ class _Sidebar extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
+                        key:ValueKey('nav-group-${group.name}'),
                         extended: extended,
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        expanded: !collapsed.contains(group),
+                        onToggle: () => onToggle(group),
                       ),
-                      for (final item in groups[group]!)
+                      if (!collapsed.contains(group)) for (final item in groups[group]!)
                         _NavEntry(
+                          key: item.path == selectedPath ? selectedKey : null,
                           item: item,
-                          selected: _belongsTo(item.path, current),
+                          selected: item.path == selectedPath,
                           extended: extended,
                         ),
                     ],
@@ -553,12 +637,17 @@ class _SidebarBrand extends StatelessWidget {
 
 class _GroupLabel extends StatelessWidget {
   const _GroupLabel({
+    super.key,
     required this.extended,
     required this.first,
     required this.label,
     required this.accent,
+    required this.expanded,
+    required this.onToggle,
   });
 
+  final bool expanded;
+  final VoidCallback onToggle;
   final bool extended;
   final bool first;
   final String label;
@@ -566,13 +655,17 @@ class _GroupLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final action = expanded ? (arabic ? 'طي' : 'Collapse') : (arabic ? 'فتح' : 'Expand');
     if (!extended) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(10, first ? 4 : 12, 10, 6),
-        child: Container(height: 1, color: AppColors.sidebarHairline),
-      );
+      return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
+        message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
+          padding: EdgeInsets.fromLTRB(10, first ? 8 : 12, 10, 8),
+          child: Container(height: 1, color: AppColors.sidebarHairline),
+        ))));
     }
-    return Padding(
+    return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
+      message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
       padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
       child: Row(
         children: [
@@ -602,14 +695,16 @@ class _GroupLabel extends StatelessWidget {
               ),
             ),
           ),
+          if (!expanded) const Icon(Icons.chevron_right, size:14,color:AppColors.onSidebarMuted),
         ],
       ),
-    );
+    ))));
   }
 }
 
 class _NavEntry extends StatelessWidget {
   const _NavEntry({
+    super.key,
     required this.item,
     required this.selected,
     required this.extended,
@@ -651,7 +746,10 @@ class _NavEntry extends StatelessWidget {
       child: Icon(
         item.icon,
         size: iconSize,
-        color: selected ? Colors.white : accentColor,
+        // The selected tile uses the light accent step. A white glyph on
+        // those pastel fills has insufficient contrast; navy remains legible
+        // for every section while retaining the section's colour on the tile.
+        color: selected ? AppColors.navyDeep : accentColor,
       ),
     );
 
@@ -754,6 +852,7 @@ class _SidebarFooter extends ConsumerWidget {
     if (user == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final initials = _initials(user.fullName, user.username);
+    final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
     return Container(
       decoration: const BoxDecoration(
@@ -770,14 +869,15 @@ class _SidebarFooter extends ConsumerWidget {
               color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
-            child: Text(
+            child: photo == null ? Text(
               initials,
               style: const TextStyle(
                 color: AppColors.onSidebar,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
-            ),
+            ) : ClipOval(child:Image.memory(photo,width:30,height:30,fit:BoxFit.cover,
+              errorBuilder:(_, _, _) => Text(initials))),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -831,12 +931,14 @@ class _TopBar extends StatelessWidget {
     required this.sectionLabel,
     required this.isWide,
     required this.isExtended,
+    required this.guardKey,
   });
 
   final _NavItem item;
   final String sectionLabel;
   final bool isWide;
   final bool isExtended;
+  final ValueKey<String>? guardKey;
 
   @override
   Widget build(BuildContext context) {
@@ -936,11 +1038,17 @@ class _TopBar extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            key: const ValueKey('erp-home-shortcut'),
+            tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'الرئيسية' : 'Home',
+            icon: const Icon(Icons.home_outlined, size: 20),
+            onPressed: () => context.go(AppRoutes.dashboard),
+          ),
           _SearchTrigger(expanded: isExtended),
           const SizedBox(width: AppSpacing.xs),
           const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xxs),
-          const _SignOutButton(),
+          _SignOutButton(guardKey: guardKey),
         ],
       ),
     );
@@ -1022,24 +1130,47 @@ class _LanguageMenu extends ConsumerWidget {
   }
 }
 
-class _SignOutButton extends ConsumerWidget {
-  const _SignOutButton();
+class _SignOutButton extends ConsumerStatefulWidget {
+  const _SignOutButton({required this.guardKey});
+  final ValueKey<String>? guardKey;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return IconButton(
-      icon: const Icon(Icons.logout_rounded, size: 19),
-      tooltip: context.l10n.signOut,
-      onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-    );
+  ConsumerState<_SignOutButton> createState() => _SignOutButtonState();
+}
+
+class _SignOutButtonState extends ConsumerState<_SignOutButton> {
+  bool _busy = false;
+
+  Future<void> _signOut() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final key = widget.guardKey;
+      if (key != null && !await ref.read(draftExitGuardProvider).canLeave(key)) return;
+      if (!mounted) return;
+      await ref.read(authControllerProvider.notifier).signOut();
+    } catch (error) {
+      if (mounted) await showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: const Icon(Icons.logout_rounded, size: 19),
+    tooltip: context.l10n.signOut,
+    onPressed: _busy ? null : _signOut,
+  );
 }
 
 /// The navigation for narrow windows: the same items, the same permissions,
 /// the same order — inside the standard drawer.
 class _ModuleDrawer extends StatelessWidget {
-  const _ModuleDrawer({required this.items, required this.current});
+  const _ModuleDrawer({required this.items, required this.current, required this.collapsed, required this.onToggle});
 
+  final Set<_NavGroup> collapsed;
+  final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String current;
 
@@ -1066,12 +1197,15 @@ class _ModuleDrawer extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
+                        key:ValueKey('nav-group-${group.name}'),
                         extended: true,
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        expanded: !collapsed.contains(group),
+                        onToggle: () => onToggle(group),
                       ),
-                      for (final item in groups[group]!)
+                      if (!collapsed.contains(group)) for (final item in groups[group]!)
                         _NavEntry(
                           item: item,
                           selected: _belongsTo(item.path, current),

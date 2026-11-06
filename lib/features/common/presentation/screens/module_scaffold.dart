@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../../app/router/app_router.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -42,7 +45,18 @@ class ModuleScaffold extends StatelessWidget {
           title: title,
           subtitle: subtitle,
           eyebrow: eyebrow,
-          leading: leading,
+          leading: leading ?? IconButton(
+            tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+            onPressed: () {
+              final navigator = Navigator.of(context);
+              if (navigator.canPop()) {
+                navigator.maybePop();
+              } else {
+                context.go(AppRoutes.dashboard);
+              }
+            },
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
           dense: denseHeader,
           actions: [
             ?trailing,
@@ -148,11 +162,12 @@ class _SearchFieldState extends State<SearchField> {
 /// is doing. An error is the opposite — it needs to be read and
 /// acknowledged — so it goes to the central [AppErrorDialog] instead of
 /// sliding away after four seconds.
-void showMessage(BuildContext context, String message, {bool error = false}) {
+void showMessage(BuildContext context, Object message, {bool error = false}) {
   if (error) {
     showAppError(context, message);
     return;
   }
+  assert(message is String, 'Success messages must be strings');
   final scheme = Theme.of(context).colorScheme;
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
@@ -168,7 +183,7 @@ void showMessage(BuildContext context, String message, {bool error = false}) {
               color: Colors.white,
             ),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: Text(message)),
+            Expanded(child: Text(message is String ? message : '')),
           ],
         ),
         backgroundColor: error ? scheme.error : AppColors.navy,

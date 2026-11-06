@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsNumber,
@@ -32,7 +32,7 @@ export class CreateItemDto {
 
   /// Percent, e.g. "14" for 14%.
   /// REQUIRES BUSINESS DECISION: the statutory rate.
-  @IsOptional() @IsString() taxRate?: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
 
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   /// Where the item was made, printed on quotations. Optional: the program
@@ -59,7 +59,7 @@ export class UpdateItemDto {
   @IsOptional() @IsString() purchasePrice?: string;
   @IsOptional() @IsString() reorderLevel?: string;
   @IsOptional() @IsString() categoryId?: string;
-  @IsOptional() @IsString() taxRate?: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(80) countryOfOrigin?: string;

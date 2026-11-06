@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -11,6 +14,8 @@ import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
@@ -399,9 +404,10 @@ class _AddColumnDialogState extends State<_AddColumnDialog> {
 }
 
 class QuotationEditorScreen extends ConsumerStatefulWidget {
-  const QuotationEditorScreen({super.key, this.quotationId});
+  const QuotationEditorScreen({super.key, this.quotationId, this.navigationKey});
 
   final String? quotationId;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<QuotationEditorScreen> createState() =>
@@ -426,6 +432,37 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   String? _validUntil;
   bool _saving = false;
   bool _loading = false;
+  bool _loadFailed = false;
+  bool _confirmingExit = false;
+  late String _savedSnapshot;
+  late final DraftExitGuard _exitGuard;
+
+  String _snapshot() => jsonEncode({
+    'customer':_customerId, 'currency':_currency, 'date':_date, 'validUntil':_validUntil,
+    'subject':_subject.text, 'terms':_terms.text, 'notes':_notes.text, 'taxId':_showTaxId,
+    'manager':_managerName.text, 'responsible':_responsibleName.text, 'phone':_responsiblePhone.text,
+    'discountKind':_discountKind.name, 'discount':_discountValue.text, 'design':_design.toJson(),
+    'tables':[for (final table in _tables) {
+      'title':table.title.text, 'discountKind':table.discountKind.name, 'discount':table.discountValue.text,
+      'columns':[for (final column in table.columns) [column.key,column.labelEn.text,column.labelAr.text,
+        column.visible,column.width,column.numeric,column.kind]],
+      'lines':[for (final line in table.lines) [line.itemId,line.description.text,line.origin.text,line.unit.text,
+        line.quantity.text,line.unitPrice.text,line.customValues]],
+    }],
+  });
+
+  Future<bool> _confirmExit() async {
+    if (_saving || _confirmingExit) return false;
+    if (_loading || _loadFailed || _snapshot() == _savedSnapshot) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ عرض السعر؟' : 'Leave without saving the quotation?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
+    } finally { _confirmingExit = false; }
+  }
 
   @override
   void initState() {
@@ -435,8 +472,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _tables.add(_QTableDraft());
+    _savedSnapshot = _snapshot();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _confirmExit);
     if (widget.quotationId != null) {
       _loading = true;
+      _loadFailed = true;
       _load();
     }
   }
@@ -524,12 +566,20 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           );
         }
         _loading = false;
+        _loadFailed = false;
+        _savedSnapshot = _snapshot();
       });
-    } on Failure catch (error) {
+    } catch (error) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showMessage(context, error.message, error: true);
+      setState(() { _loading = false; _loadFailed = true; });
+      showAppError(context, error);
     }
+  }
+
+  void _retryLoad() {
+    if (_loading || widget.quotationId == null) return;
+    setState(() { _loading = true; _loadFailed = true; });
+    _load();
   }
 
   /// The column catalogue, in the order the picker offers it.
@@ -630,7 +680,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       ref.invalidate(quotationTermsProvider);
       if (mounted) showMessage(context, l10n.termsSaved);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -643,6 +693,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
 
   @override
   void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _confirmExit);
     for (final table in _tables) {
       table.dispose();
     }
@@ -713,6 +765,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving || _loading || _loadFailed) return;
     final l10n = context.l10n;
     if (_customerId == null) {
       showMessage(context, l10n.selectCustomer, error: true);
@@ -778,6 +831,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
 
+    // The submitted snapshot must not be edited while it is in flight.
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _saving = true);
     try {
       final body = <String, dynamic>{
@@ -814,11 +869,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
       ref.invalidate(quotationsProvider);
       if (mounted) {
+        // From this point only the exact submitted snapshot is clean. If a
+        // route transition is delayed, later edits must still be protected.
+        setState(() { _savedSnapshot = _snapshot(); _saving = false; });
         showMessage(context, l10n.quotationSaved);
         context.go(AppRoutes.quotations);
       }
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -843,12 +901,16 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         children: [
           PageHeader(
             dense: true,
+            leading:IconButton(key:const Key('quotation-editor-back'),tooltip:MaterialLocalizations.of(context).backButtonTooltip,
+              icon:const Icon(Icons.arrow_back),onPressed:_saving ? null : () {
+                if (context.canPop()) { context.pop(); } else { context.go(AppRoutes.quotations); }
+              }),
             title: widget.quotationId == null
                 ? l10n.newQuotation
                 : l10n.editQuotation,
             actions: [
               FilledButton.icon(
-                onPressed: _saving || _loading ? null : _save,
+                onPressed: _saving || _loading || _loadFailed ? null : _save,
                 icon: const Icon(Icons.save_outlined, size: 17),
                 label: Text(l10n.save),
               ),
@@ -861,7 +923,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView(
+                : _loadFailed
+                  ? Center(child:OutlinedButton(
+                      key:const Key('quotation-retry-load'),
+                      onPressed:_retryLoad,
+                      child:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'إعادة المحاولة' : 'Retry')))
+                  : AbsorbPointer(key:const Key('quotation-edit-lock'),absorbing:_saving,child: ListView(
                     padding: const EdgeInsets.all(AppSpacing.xl),
                     children: [
                 Text(
@@ -1091,7 +1158,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 const SizedBox(height: 8),
                 _summary(context),
                     ],
-                  ),
+                  )),
           ),
         ],
       ),
@@ -1197,9 +1264,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       ref.invalidate(quotationDesignTemplatesProvider);
       if (mounted) showMessage(context, 'تم حفظ قالب التصميم');
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, 'تعذر حفظ قالب التصميم: $error', error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -1270,7 +1337,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       Navigator.of(dialogContext).pop();
                                     }
                                   } on Failure catch (error) {
-                                    if (dialogContext.mounted) showMessage(dialogContext, error.message, error: true);
+                                    if (dialogContext.mounted) showMessage(dialogContext, error, error: true);
                                   }
                                 },
                               ),
@@ -1290,9 +1357,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ),
       );
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, 'تعذر تحميل قوالب التصميم: $error', error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -1989,7 +2056,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       if (mounted) showMessage(context, l10n.templateSaved);
       return created;
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
       return null;
     }
   }
@@ -2465,7 +2532,7 @@ class _QuotationTermsDialog extends ConsumerWidget {
         height: 380,
         child: terms.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Text(error is Failure ? error.message : '$error'),
+          error: (error, _) => Text(presentErrorText(context, error)),
           data: (rows) {
             if (rows.isEmpty) return Center(child: Text(l10n.noSavedTerms));
             return ListView.separated(
@@ -2519,7 +2586,7 @@ class _QuotationTermsDialog extends ConsumerWidget {
                             ref.invalidate(quotationTermsProvider);
                           } on Failure catch (error) {
                             if (context.mounted) {
-                              showMessage(context, error.message, error: true);
+                              showMessage(context, error, error: true);
                             }
                           }
                         },

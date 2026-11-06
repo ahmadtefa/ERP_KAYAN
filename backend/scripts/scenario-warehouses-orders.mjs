@@ -26,7 +26,7 @@
  *   8. a partially invoiced order says so, and can be finished later
  *   9. a cancelled order, or one that is fully invoiced, refuses more invoices
  *  10. an order computes its own totals: quantity x price, less discount, plus
- *      the tax rate that applies - the item's own, or the company's
+ *      the explicitly entered line tax rate; omitted rates are zero
  *  11. the permissions hold: a user who may not manage warehouses is refused,
  *      and so is one who may not approve orders
  *  12. everything the new screens do is written to the audit log
@@ -197,8 +197,7 @@ async function main() {
   });
   if (!item || !supplier || !customer) { process.exitCode = 1; return; }
 
-  const settings = await must('the company policy is readable', '/accounting/settings');
-  const taxRate = Number(settings?.taxRate ?? 0);
+  await must('the company policy is readable', '/accounting/settings');
 
   // ─────────────────────────── goods received into one warehouse, not the other
   const purchase = await must('a purchase invoice can name the warehouse it arrives in', '/purchases/invoices', {
@@ -361,9 +360,9 @@ async function main() {
     `unit price ${lineOf(pricedTyped)?.unitPrice}`,
   );
   check(
-    'the invoice total follows the price the list produced, plus the company tax rate',
-    near(priced1?.taxAmount, (120 * taxRate) / 100) && near(priced1?.totalAmount, 120 + (120 * taxRate) / 100),
-    `tax ${priced1?.taxAmount}, total ${priced1?.totalAmount}, rate ${taxRate}`,
+    'an omitted invoice tax is zero even when company tax is set',
+    near(priced1?.taxAmount, 0) && near(priced1?.totalAmount, 120),
+    `tax ${priced1?.taxAmount}, total ${priced1?.totalAmount}`,
   );
 
   // ────────────────────────────────────────────── purchase orders
@@ -375,16 +374,16 @@ async function main() {
       supplierId: supplier.id,
       lines: [
         { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000' },
-        { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000', discountPercent: '10.0000' },
+        { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000', discountPercent: '10.0000', taxRate: '14' },
       ],
     },
   });
   if (!po) { process.exitCode = 1; return; }
 
   const expectedNet = 500 + 450;
-  const expectedTax = (expectedNet * taxRate) / 100;
+  const expectedTax = (450 * 14) / 100;
   check(
-    'an order computes its own totals: list price, then discount, then tax',
+    'an order computes omitted and explicit line taxes after discount',
     near(po.subTotal, expectedNet) &&
       near(po.taxAmount, expectedTax) &&
       near(po.totalAmount, expectedNet + expectedTax),

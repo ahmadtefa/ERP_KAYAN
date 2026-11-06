@@ -1,6 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/failure.dart';
+
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/image/company_logo_image.dart';
 import '../../../../core/image/company_logo_url.dart';
@@ -8,20 +13,70 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/company_providers.dart';
 
 /// Company profile, logo and units — the records every report and document
-/// is headed by. Editing needs `admin.company.manage`; the server checks.
-class CompanySettingsScreen extends ConsumerWidget {
-  const CompanySettingsScreen({super.key});
+/// is headed by. Profile and logo edits require super admin on the server.
+class CompanySettingsScreen extends ConsumerStatefulWidget {
+  const CompanySettingsScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
+  @override
+  ConsumerState<CompanySettingsScreen> createState() => _CompanySettingsScreenState();
+}
+
+class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
+  GlobalKey<_ProfileCardState> _profileKey = GlobalKey<_ProfileCardState>();
+  late final DraftExitGuard _exitGuard;
+  Map<String,dynamic>? _lastProfile;
+  String? _scope;
+  bool _confirming = false;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _confirmExit);
+  }
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _confirmExit);
+    super.dispose();
+  }
+  Future<bool> _confirmExit() async {
+    final card = _profileKey.currentState;
+    if (card == null) return true;
+    if (card.busy || _confirming) return false;
+    if (!card.dirty) return true;
+    _confirming = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(context, title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ بيانات الشركة؟' : 'Leave without saving the company profile?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive:true);
+    } finally { _confirming = false; }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final user = ref.watch(currentUserProvider);
+    final scope = user == null ? null : '${user.companyId}/${user.id}';
+    if (_scope != scope) {
+      _scope = scope;
+      _lastProfile = null;
+      _profileKey = GlobalKey<_ProfileCardState>();
+    }
     final profile = ref.watch(companyProfileProvider);
+    final loaded = profile.asData?.value;
+    // Never carry a previous company's fields across a session switch.
+    if (loaded != null && user != null && loaded['id'] == user.companyId) _lastProfile = loaded;
+    final shown = _lastProfile;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -45,13 +100,18 @@ class CompanySettingsScreen extends ConsumerWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    AsyncStateView<Map<String, dynamic>>(
+                    if (shown != null) ...[
+                      _ProfileCard(key:_profileKey,profile:shown,canCommit:!profile.isLoading && !profile.hasError),
+                      if (profile.hasError) TextButton(
+                        onPressed:() => ref.read(companyProfileProvider.notifier).refresh(),
+                        child:Text(Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'تعذر التحديث — إعادة المحاولة' : 'Refresh failed — retry')),
+                    ] else AsyncStateView<Map<String, dynamic>>(
                       value: profile,
-                      onRetry: () =>
-                          ref.read(companyProfileProvider.notifier).refresh(),
-                      isEmpty: (map) => map.isEmpty,
+                      onRetry: () => ref.read(companyProfileProvider.notifier).refresh(),
+                      isEmpty: (map) => map.isEmpty || user == null || map['id'] != user.companyId,
                       emptyMessage: l10n.noData,
-                      data: (data) => _ProfileCard(profile: data),
+                      data: (data) => _ProfileCard(key:_profileKey,profile:data,canCommit:true),
                     ),
                     const SizedBox(height: AppSpacing.xxl),
                     Text(
@@ -72,9 +132,10 @@ class CompanySettingsScreen extends ConsumerWidget {
 }
 
 class _ProfileCard extends ConsumerStatefulWidget {
-  const _ProfileCard({required this.profile});
+  const _ProfileCard({super.key, required this.profile, required this.canCommit});
 
   final Map<String, dynamic> profile;
+  final bool canCommit;
 
   @override
   ConsumerState<_ProfileCard> createState() => _ProfileCardState();
@@ -89,6 +150,27 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   late final TextEditingController _email;
   late final TextEditingController _address;
   bool _saving = false;
+  bool _externalChange = false;
+  late String _savedSnapshot;
+  final _logoKey = GlobalKey<_LogoRowState>();
+  String _snapshot() => jsonEncode([_code.text,_nameAr.text,_nameEn.text,_taxId.text,_phone.text,_email.text,_address.text]);
+  String _profileSnapshot(Map<String,dynamic> p) => jsonEncode([
+    for (final field in ['code','nameAr','nameEn','taxId','phone','email','address']) '${p[field] ?? ''}',
+  ]);
+  bool get dirty => _snapshot() != _savedSnapshot;
+  bool get busy => _saving || (_logoKey.currentState?._busy ?? false);
+
+  void _applyProfile(Map<String,dynamic> p) {
+    _code.text = '${p['code'] ?? ''}';
+    _nameAr.text = '${p['nameAr'] ?? ''}';
+    _nameEn.text = '${p['nameEn'] ?? ''}';
+    _taxId.text = '${p['taxId'] ?? ''}';
+    _phone.text = '${p['phone'] ?? ''}';
+    _email.text = '${p['email'] ?? ''}';
+    _address.text = '${p['address'] ?? ''}';
+    _savedSnapshot = _snapshot();
+    _externalChange = false;
+  }
 
   @override
   void initState() {
@@ -101,20 +183,20 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
     _phone = TextEditingController(text: '${p['phone'] ?? ''}');
     _email = TextEditingController(text: '${p['email'] ?? ''}');
     _address = TextEditingController(text: '${p['address'] ?? ''}');
+    _savedSnapshot = _snapshot();
   }
 
   @override
   void didUpdateWidget(_ProfileCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.profile != oldWidget.profile && !_saving) {
-      final p = widget.profile;
-      _code.text = '${p['code'] ?? ''}';
-      _nameAr.text = '${p['nameAr'] ?? ''}';
-      _nameEn.text = '${p['nameEn'] ?? ''}';
-      _taxId.text = '${p['taxId'] ?? ''}';
-      _phone.text = '${p['phone'] ?? ''}';
-      _email.text = '${p['email'] ?? ''}';
-      _address.text = '${p['address'] ?? ''}';
+      if (dirty) {
+        // A logo-only refresh must not erase typed fields. A real remote
+        // profile change requires an explicit reload before writing over it.
+        if (_profileSnapshot(widget.profile) != _savedSnapshot) _externalChange = true;
+      } else {
+        _applyProfile(widget.profile);
+      }
     }
   }
 
@@ -131,6 +213,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   }
 
   Future<void> _save() async {
+    if (busy || _externalChange || !widget.canCommit) return;
     setState(() => _saving = true);
     final error = await ref.read(companyProfileProvider.notifier).updateProfile(
       {
@@ -147,6 +230,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
     setState(() => _saving = false);
     final l10n = context.l10n;
     if (error == null) {
+      _savedSnapshot = _snapshot();
       ref.invalidate(companyProfileProvider);
       showMessage(context, l10n.profileSaved);
     } else {
@@ -157,6 +241,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final canEdit = ref.watch(currentUserProvider)?.isSuperAdmin == true;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -164,9 +249,13 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _LogoRow(
+              key:_logoKey,
+              profileSaving:_saving || !widget.canCommit,
+              onBusyChanged:() { if (mounted) setState(() {}); },
               hasLogo: widget.profile['hasLogo'] == true,
               logoUrl: widget.profile['logoUrl'] as String?,
               companyId: widget.profile['id'] as String?,
+              canEdit: canEdit,
             ),
             const SizedBox(height: 16),
             Row(
@@ -174,6 +263,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _code,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.companyCode),
                   ),
                 ),
@@ -181,6 +271,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _taxId,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.taxId),
                   ),
                 ),
@@ -189,11 +280,13 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             const SizedBox(height: 12),
             TextField(
               controller: _nameAr,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.nameArabic),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _nameEn,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.nameEnglish),
             ),
             const SizedBox(height: 12),
@@ -202,6 +295,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _phone,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.phone),
                   ),
                 ),
@@ -209,6 +303,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _email,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.email),
                   ),
                 ),
@@ -217,13 +312,27 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             const SizedBox(height: 12),
             TextField(
               controller: _address,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.address),
             ),
             const SizedBox(height: 16),
-            Align(
+            if (_externalChange) ...[
+              Text(Localizations.localeOf(context).languageCode == 'ar'
+                ? 'تغيرت بيانات الشركة على الخادم. احتفظ بمدخلاتك أو أعد تحميل البيانات قبل الحفظ.'
+                : 'The company profile changed on the server. Keep your input or reload before saving.'),
+              TextButton(key:const Key('company-profile-reload-conflict'),onPressed:!widget.canCommit ? null : () async {
+                final ar = Localizations.localeOf(context).languageCode == 'ar';
+                final accepted = await confirmAction(context,
+                  title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+                  message: ar ? 'تجاهل المدخلات وتحميل بيانات الشركة من الخادم؟' : 'Discard your input and reload the company profile?',
+                  confirmLabel: ar ? 'تجاهل' : 'Discard',destructive:true);
+                if (accepted && mounted) setState(() => _applyProfile(widget.profile));
+              },child:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'تحميل بيانات الخادم' : 'Reload server data')),
+            ],
+            if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
-                onPressed: _saving ? null : _save,
+                onPressed: busy || _externalChange || !widget.canCommit ? null : _save,
                 child: _saving
                     ? const SizedBox(
                         height: 18,
@@ -242,12 +351,19 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 
 class _LogoRow extends ConsumerStatefulWidget {
   const _LogoRow({
+    super.key,
     required this.hasLogo,
+    required this.canEdit,
+    required this.profileSaving,
+    required this.onBusyChanged,
     this.logoUrl,
     this.companyId,
   });
 
   final bool hasLogo;
+  final bool canEdit;
+  final bool profileSaving;
+  final VoidCallback onBusyChanged;
 
   /// The relative path the profile reports; [companyLogoUrl] resolves it
   /// against the address this client talks to.
@@ -260,8 +376,13 @@ class _LogoRow extends ConsumerStatefulWidget {
 
 class _LogoRowState extends ConsumerState<_LogoRow> {
   bool _busy = false;
+  void _setBusy(bool value) {
+    setState(() => _busy = value);
+    widget.onBusyChanged();
+  }
 
   Future<void> _upload() async {
+    if (_busy || widget.profileSaving) return;
     final l10n = context.l10n;
     PickedFile? picked;
     try {
@@ -270,10 +391,10 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
     } catch (error) {
       if (!mounted) return;
-      showMessage(context, '$error', error: true);
+      showMessage(context, error, error: true);
       return;
     }
-    if (picked == null || !mounted) return;
+    if (picked == null || !mounted || widget.profileSaving) return;
 
     late final PickedFile normalized;
     try {
@@ -292,14 +413,14 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
       return;
     }
-    if (!mounted) return;
+    if (!mounted || widget.profileSaving) return;
 
-    setState(() => _busy = true);
+    _setBusy(true);
     final error = await ref
         .read(companyProfileProvider.notifier)
         .uploadLogo(normalized);
     if (!mounted) return;
-    setState(() => _busy = false);
+    _setBusy(false);
     if (error == null) {
       showMessage(context, l10n.logoUpdated);
     } else {
@@ -315,12 +436,15 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
     }
   }
 
-  String _localizedLogoError(
-    String error, {
+  Object _localizedLogoError(
+    Object error, {
     required String tooLarge,
     required String invalid,
   }) {
-    final lower = error.toLowerCase();
+    // Image validation is a 4xx business refusal, not a substitute for a
+    // network or server failure where the result may be uncertain.
+    if (error is! ApiFailure || error.statusCode == null || error.statusCode! >= 500) return error;
+    final lower = error.message.toLowerCase();
     if (lower.contains('larger than') || lower.contains('too large')) {
       return tooLarge;
     }
@@ -335,12 +459,13 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
   }
 
   Future<void> _remove() async {
+    if (_busy || widget.profileSaving) return;
     final l10n = context.l10n;
-    setState(() => _busy = true);
+    _setBusy(true);
     final error =
         await ref.read(companyProfileProvider.notifier).removeLogo();
     if (!mounted) return;
-    setState(() => _busy = false);
+    _setBusy(false);
     if (error == null) {
       showMessage(context, l10n.logoRemoved);
     } else {
@@ -397,14 +522,14 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
             ],
           ),
         ),
-        TextButton.icon(
-          onPressed: _busy ? null : _upload,
+        if (widget.canEdit) TextButton.icon(
+          onPressed: _busy || widget.profileSaving ? null : _upload,
           icon: const Icon(Icons.upload, size: 18),
           label: Text(l10n.uploadLogo),
         ),
-        if (widget.hasLogo)
+        if (widget.canEdit && widget.hasLogo)
           TextButton.icon(
-            onPressed: _busy ? null : _remove,
+            onPressed: _busy || widget.profileSaving ? null : _remove,
             icon: const Icon(Icons.delete_outline, size: 18),
             label: Text(l10n.removeLogo),
           ),
@@ -420,6 +545,7 @@ class _BranchesCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final branches = ref.watch(branchesProvider);
+    final canEdit = ref.watch(currentUserProvider)?.isSuperAdmin ?? false;
 
     return Card(
       child: Padding(
@@ -427,7 +553,7 @@ class _BranchesCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Align(
+            if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton.icon(
                 onPressed: () => _editBranch(context, ref, null),
@@ -460,12 +586,12 @@ class _BranchesCard extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
+                          if (canEdit) IconButton(
                             tooltip: l10n.editBranch,
                             icon: const Icon(Icons.edit_outlined, size: 20),
                             onPressed: () => _editBranch(context, ref, branch),
                           ),
-                          IconButton(
+                          if (canEdit) IconButton(
                             tooltip: l10n.deleteBranch,
                             icon: const Icon(Icons.delete_outline, size: 20),
                             onPressed: () =>

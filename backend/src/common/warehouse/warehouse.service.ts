@@ -285,6 +285,84 @@ export class WarehouseService {
     return historical.id;
   }
 
+  /**
+   * Takes a row lock on the warehouse so two postings draining the same
+   * warehouse cannot both read the same available quantity. The second
+   * transaction blocks here until the first commits, then re-reads the
+   * movements and sees the reduced availability.
+   */
+  async lockForPosting(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+  ): Promise<void> {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id
+        FROM warehouses
+       WHERE id = ${warehouseId}::uuid
+         AND "companyId" = ${companyId}::uuid
+         AND "deletedAt" IS NULL
+       FOR UPDATE
+    `);
+  }
+
+  /**
+   * Base-unit quantity one warehouse currently holds for an item, derived
+   * from stock_movements with exactly the same IN-minus-OUT formula used by
+   * `stock()` and the /inventory/stock endpoint. `stock_balances` has no
+   * warehouse dimension, so this SUM is the authoritative per-warehouse
+   * figure, not the branch-level balance.
+   */
+  async availableQuantity(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+  ): Promise<Prisma.Decimal> {
+    const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal }>>(Prisma.sql`
+      SELECT COALESCE(
+               SUM(CASE WHEN direction = 'IN' THEN quantity ELSE -quantity END),
+               0
+             ) AS quantity
+        FROM stock_movements
+       WHERE "companyId" = ${companyId}::uuid
+         AND "warehouseId" = ${warehouseId}::uuid
+         AND "itemId" = ${itemId}::uuid
+    `);
+    return new Prisma.Decimal(rows[0]?.quantity ?? 0);
+  }
+
+  /**
+   * Business rule enforced at the domain layer (never only in a controller or
+   * the Flutter client): when negative stock is disallowed, no OUT operation
+   * may push a specific warehouse below zero, even when the branch total or
+   * another aggregation level would cover the quantity.
+   *
+   * Deliberately a no-op when the posting resolves to no warehouse at all
+   * (the branch-level guard and the stock_balances nonnegative CHECK remain
+   * the backstop), or when the company explicitly permits negative stock.
+   */
+  async assertWarehouseAvailable(input: {
+    tx: Prisma.TransactionClient;
+    companyId: string;
+    warehouseId: string | null | undefined;
+    itemId: string;
+    quantity: Prisma.Decimal;
+    allowNegative: boolean;
+    reference: string;
+  }): Promise<void> {
+    const { tx, companyId, warehouseId, itemId, quantity, allowNegative, reference } = input;
+    if (allowNegative || !warehouseId) return;
+    await this.lockForPosting(tx, companyId, warehouseId);
+    const available = await this.availableQuantity(tx, companyId, warehouseId, itemId);
+    if (available.lessThan(quantity)) {
+      throw new BadRequestException(
+        `Not enough stock in the selected warehouse: ${available.toFixed(MONEY_SCALE)} available, ` +
+          `${quantity.toFixed(MONEY_SCALE)} requested in ${reference}.`,
+      );
+    }
+  }
+
   /** What one warehouse holds, read from the movements that put it there. */
   async stock(
     companyId: string,

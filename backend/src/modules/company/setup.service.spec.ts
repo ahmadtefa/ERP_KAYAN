@@ -1,9 +1,100 @@
 import { SetupService } from './setup.service';
 
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
+
+describe('SetupService status and public setup boundary', () => {
+  const makeService = (companyRows: number, userRows: number, activeUsers = 0) => {
+    const prisma = {
+      company: { count: jest.fn().mockResolvedValue(companyRows) },
+      user: {
+        count: jest.fn()
+          .mockResolvedValueOnce(userRows)
+          .mockResolvedValueOnce(activeUsers),
+      },
+      $transaction: jest.fn(),
+    };
+    return { service: new SetupService(prisma as any, {} as any, licensingStub), prisma };
+  };
+
+  it('allows first-run setup only on a truly empty database', async () => {
+    const { service } = makeService(0, 0, 0);
+    expect(await service.status()).toMatchObject({
+      needsSetup: true, recoveryRequired: false, companyCount: 0, hasUsers: false,
+    });
+  });
+
+  it('classifies a soft-deleted company as recovery, never first-run setup', async () => {
+    const { service } = makeService(1, 0, 0);
+    expect(await service.status()).toMatchObject({
+      needsSetup: false, recoveryRequired: true, companyCount: 1,
+    });
+  });
+
+  it('classifies orphaned users as recovery, never first-run setup', async () => {
+    const { service } = makeService(0, 2, 0);
+    expect(await service.status()).toMatchObject({
+      needsSetup: false, recoveryRequired: true, companyCount: 0, hasUsers: true,
+    });
+  });
+
+  it('does not require recovery when an active company user can sign in', async () => {
+    const { service } = makeService(1, 1, 1);
+    expect(await service.status()).toMatchObject({
+      needsSetup: false, recoveryRequired: false, companyCount: 1, hasUsers: true,
+    });
+  });
+
+  it.each([
+    ['soft-deleted company data', 1, 0],
+    ['orphaned user data', 0, 1],
+    ['active company data', 1, 1],
+  ])('rejects public initial setup over %s before opening a transaction', async (_case, companies, users) => {
+    const prisma = {
+      company: { count: jest.fn().mockResolvedValue(companies) },
+      user: { count: jest.fn().mockResolvedValue(users) },
+      $transaction: jest.fn(),
+    };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+
+    await expect(service.initialSetup({} as any)).rejects.toThrow(
+      'This installation already contains company or user data',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rechecks company and user rows after taking the transaction lock', async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const tx = {
+      $executeRaw: executeRaw,
+      company: { count: jest.fn().mockResolvedValue(1) },
+      user: { count: jest.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      company: { count: jest.fn().mockResolvedValue(0) },
+      user: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(async (callback: (transaction: unknown) => unknown) =>
+        callback(tx),
+      ),
+    };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+
+    await expect(
+      service.initialSetup({ adminPassword: 'safe-test-password' } as any),
+    ).rejects.toThrow(
+      'This installation already contains company or user data',
+    );
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.company.count).toHaveBeenCalledWith();
+    expect(tx.user.count).toHaveBeenCalledWith();
+  });
+});
+
 describe('SetupService seedRoles', () => {
   it('seeds the company profile permission needed by profile-management routes', async () => {
     const permissionUpsert = jest.fn().mockResolvedValue({});
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
 
     await (service as any).seedPermissions({
       permission: { upsert: permissionUpsert },
@@ -27,7 +118,7 @@ describe('SetupService seedRoles', () => {
 
   it('creates the current open fiscal year during first-run setup', async () => {
     const upsert = jest.fn().mockResolvedValue({});
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
     const year = new Date().getUTCFullYear();
 
     await (service as any).seedFiscalPeriod(
@@ -71,7 +162,7 @@ describe('SetupService seedRoles', () => {
       permission: { findMany: jest.fn().mockResolvedValue(permissions) },
       rolePermission: { upsert: rolePermissionUpsert },
     };
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
 
     await expect((service as any).seedRoles(tx, 'company-1')).resolves.toEqual({
       admin: 'admin-role',

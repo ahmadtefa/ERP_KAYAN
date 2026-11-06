@@ -13,6 +13,7 @@ class ColumnSpec {
     this.numeric = false,
     this.flex = 1,
     this.emphasise = false,
+    this.textDirection,
     this.tone,
   });
 
@@ -23,6 +24,8 @@ class ColumnSpec {
   final bool numeric;
   final int flex;
   final bool emphasise;
+  /// Overrides the ambient direction for values such as international phone numbers.
+  final TextDirection? textDirection;
 
   /// When set, the cell is drawn as a status pill tinted by this tone. The
   /// text is still the same label the column already produced, so nothing is
@@ -132,6 +135,7 @@ class RecordsTable extends StatelessWidget {
                                   // the table scrolls.
                                   ? Text(
                                       column.value(row) ?? '—',
+                                      textDirection: column.textDirection,
                                       softWrap: false,
                                       style: _cellStyle(theme, column),
                                     )
@@ -145,6 +149,7 @@ class RecordsTable extends StatelessWidget {
                                       ),
                                       child: Text(
                                         column.value(row) ?? '—',
+                                        textDirection: column.textDirection,
                                         style: _cellStyle(theme, column),
                                       ),
                                     )
@@ -217,6 +222,7 @@ class RecordsTable extends StatelessWidget {
                 children: [
                   Text(
                     headline,
+                    textDirection: columns.isEmpty ? null : columns.first.textDirection,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -254,6 +260,7 @@ class RecordsTable extends StatelessWidget {
                               scrollDirection: Axis.horizontal,
                               child: Text(
                                 column.value(row) ?? '—',
+                                textDirection: column.textDirection,
                                 softWrap: false,
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontFeatures: const [
@@ -263,7 +270,10 @@ class RecordsTable extends StatelessWidget {
                               ),
                             )
                           else
-                            Text(column.value(row) ?? '—'),
+                            Text(
+                              column.value(row) ?? '—',
+                              textDirection: column.textDirection,
+                            ),
                         ],
                       ),
                     ),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,25 +11,106 @@ import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
+/// Active units a line can choose for [item], smallest factor first.
+///
+/// A legacy item that predates multi-unit and carries no `units` array is
+/// synthesised as a single base unit, so the picker always offers the item's
+/// own unit and the document stays valid. An item that has not been picked yet
+/// yields an empty list and the control is disabled.
+List<Json> lineUnitsOf(Json? item) {
+  if (item == null) return const <Json>[];
+  final raw = item['units'];
+  final stored = (raw is List ? raw.cast<Json>() : const <Json>[])
+      .where((unit) => flag(unit, 'isActive', fallback: true))
+      .toList();
+  if (stored.isNotEmpty) {
+    stored.sort((a, b) {
+      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
+      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
+      return fa.compareTo(fb);
+    });
+    return stored;
+  }
+  return <Json>[
+    <String, dynamic>{
+      'id': null,
+      'unit': text(item, 'unit'),
+      'factor': '1.000000',
+      'isBase': true,
+      'isActive': true,
+      'salePrice': item['salePrice'],
+      'purchasePrice': item['purchasePrice'],
+    },
+  ];
+}
+
+String defaultLineUnit(Json item, {required bool isSales}) {
+  final units = lineUnitsOf(item);
+  final preferredKey = isSales ? 'isDefaultSale' : 'isDefaultPurchase';
+  for (final unit in units) {
+    if (flag(unit, preferredKey)) return text(unit, 'unit');
+  }
+  final base = text(item, 'unit');
+  return units.any((unit) => text(unit, 'unit') == base)
+      ? base
+      : (units.isEmpty ? base : text(units.first, 'unit'));
+}
+
+/// The unit-specific list price, or the base-unit price converted once into
+/// the chosen unit. An unknown/invalid unit or missing cost stays empty.
+String unitListPrice(Json item, String unitName, {required bool isSales}) {
+  final key = isSales ? 'salePrice' : 'purchasePrice';
+  for (final unit in lineUnitsOf(item)) {
+    if (text(unit, 'unit') == unitName) {
+      final specific = text(unit, key);
+      if (specific.isNotEmpty) return specific;
+      final basePrice = Decimal.tryParse(text(item, key));
+      if (basePrice == null) return '';
+      final parsedFactor = Decimal.tryParse(text(unit, 'factor'));
+      final factor =
+          parsedFactor ?? (unitName == text(item, 'unit') ? Decimal.one : null);
+      if (factor == null || factor <= Decimal.zero) return '';
+      return (basePrice * factor).round(scale: moneyScale).toString();
+    }
+  }
+  return unitName == text(item, 'unit') ? text(item, key) : '';
+}
+
+/// An automatic price may follow a changed unit; a price typed by the user
+/// (including an explicit zero) must not be silently replaced.
+bool maySuggestUnitPrice(
+  String current, {
+  required bool automatic,
+  required bool edited,
+}) =>
+    automatic || (!edited && (current.trim().isEmpty || current.trim() == '0'));
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
     String quantity = '1',
     String unitPrice = '0',
-    String taxRate = '0',
+    String taxRate = '',
     String discountValue = '',
   }) : quantity = TextEditingController(text: quantity),
-      unitPrice = TextEditingController(text: unitPrice),
-      taxRate = TextEditingController(text: taxRate),
-      discountValue = TextEditingController(text: discountValue);
+       unitPrice = TextEditingController(text: unitPrice),
+       taxRate = TextEditingController(text: taxRate),
+       discountValue = TextEditingController(text: discountValue);
 
   String? itemId;
+
+  /// The measurement unit the quantity is expressed in. Null on a free line
+  /// without an item; the server treats a missing unit as the item's base unit
+  /// and keeps legacy documents untouched.
+  String? unitName;
 
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
@@ -35,6 +118,9 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+  bool taxRateEdited = false;
+  bool unitPriceAutomatic = false;
+  bool unitPriceEdited = false;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -43,7 +129,8 @@ class _LineDraft {
 
   /// The line's own arithmetic, for the summary under the inputs.
   ({Decimal gross, ResolvedDiscount discount}) get pricing {
-    final quantityValue = Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
+    final quantityValue =
+        Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
     final price = Decimal.tryParse(unitPrice.text.trim()) ?? Decimal.zero;
     final gross = quantityValue * price;
     return (
@@ -66,8 +153,8 @@ class _LineDraft {
 
 class _LandedCostDraft {
   _LandedCostDraft({String description = '', String amount = '0'})
-      : description = TextEditingController(text: description),
-        amount = TextEditingController(text: amount);
+    : description = TextEditingController(text: description),
+      amount = TextEditingController(text: amount);
 
   final TextEditingController description;
   final TextEditingController amount;
@@ -78,15 +165,36 @@ class _LandedCostDraft {
   }
 }
 
+/// The routed invoice list owns the navigation guard; an imperative editor
+/// temporarily attaches its own confirmation while it is on top.
+class InvoiceDraftExitRelay {
+  Future<bool> Function()? _guard;
+  void attach(Future<bool> Function() guard) {
+    _guard = guard;
+  }
+
+  void detach(Future<bool> Function() guard) {
+    if (_guard == guard) _guard = null;
+  }
+
+  Future<bool> canLeave() => _guard?.call() ?? Future.value(true);
+}
+
 /// Creates a draft sales or purchase invoice.
 ///
 /// The screen only ever creates a draft. Posting is a separate, deliberate
 /// step from the list, because posting moves stock and writes to the ledger.
 class InvoiceEditorScreen extends ConsumerStatefulWidget {
-  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId});
+  const InvoiceEditorScreen({
+    super.key,
+    required this.kind,
+    this.invoiceId,
+    this.exitRelay,
+  });
 
   final InvoiceKind kind;
   final String? invoiceId;
+  final InvoiceDraftExitRelay? exitRelay;
 
   @override
   ConsumerState<InvoiceEditorScreen> createState() =>
@@ -104,6 +212,61 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
   bool _loadingExisting = false;
+  bool _loadFailed = false;
+  bool _confirmingExit = false;
+  late String _savedSnapshot;
+
+  String _snapshot() => jsonEncode({
+    'party': _partyId,
+    'reference': _supplierReference,
+    'notes': _notes,
+    'date': _invoiceDate,
+    'discountKind': _documentDiscountKind.name,
+    'discount': _documentDiscount.text,
+    'costs': [
+      for (final cost in _landedCosts)
+        [cost.description.text, cost.amount.text],
+    ],
+    'lines': [
+      for (final line in _lines)
+        [
+          line.itemId,
+          line.unitName,
+          line.costCenterId,
+          line.quantity.text,
+          line.unitPrice.text,
+          line.taxRate.text,
+          line.taxRateEdited,
+          line.discountKind.name,
+          line.discountValue.text,
+        ],
+    ],
+  });
+
+  Future<bool> _confirmExit() async {
+    if (_saving || _loadingExisting || _confirmingExit) return false;
+    if (_snapshot() == _savedSnapshot) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      final leave = await confirmAction(
+        context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar
+            ? 'الخروج دون حفظ الفاتورة؟'
+            : 'Leave without saving the invoice?',
+        confirmLabel: ar ? 'خروج' : 'Discard',
+        destructive: true,
+      );
+      return leave && mounted;
+    } finally {
+      _confirmingExit = false;
+    }
+  }
+
+  Future<void> _close() async {
+    if (await _confirmExit() && mounted) Navigator.of(context).pop();
+  }
 
   @override
   void initState() {
@@ -114,6 +277,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    _savedSnapshot = _snapshot();
+    widget.exitRelay?.attach(_confirmExit);
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
@@ -127,8 +292,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .getObject('${widget.kind.basePath}/${widget.invoiceId}');
       if (!mounted) return;
       if (text(invoice, 'status').toLowerCase() != 'draft') {
-        showMessage(context, context.l10n.onlyDraftInvoiceCanBeEdited, error: true);
-        Navigator.of(context).pop();
+        await showAppError(context, context.l10n.onlyDraftInvoiceCanBeEdited);
+        if (mounted) Navigator.of(context).pop();
         return;
       }
       for (final line in _lines) {
@@ -140,28 +305,47 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       }
       _landedCosts.clear();
       for (final row in listOf(invoice['landedCostCharges'])) {
-        _landedCosts.add(_LandedCostDraft(
-          description: text(row, 'description'),
-          amount: text(row, 'amount', fallback: '0'),
-        ));
+        _landedCosts.add(
+          _LandedCostDraft(
+            description: text(row, 'description'),
+            amount: text(row, 'amount', fallback: '0'),
+          ),
+        );
       }
-      final legacyLandedCost = Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
+      final legacyLandedCost =
+          Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
       if (_landedCosts.isEmpty && legacyLandedCost > Decimal.zero) {
-        _landedCosts.add(_LandedCostDraft(
-          description: context.l10n.otherLandedCosts,
-          amount: legacyLandedCost.toString(),
-        ));
+        _landedCosts.add(
+          _LandedCostDraft(
+            description: context.l10n.otherLandedCosts,
+            amount: legacyLandedCost.toString(),
+          ),
+        );
       }
       for (final row in listOf(invoice['lines'])) {
-        final line = _LineDraft(
-          quantity: text(row, 'quantity', fallback: '1'),
-          unitPrice: text(row, 'unitPrice', fallback: '0'),
-          taxRate: text(row, 'taxRate', fallback: '0'),
-        )
-          ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
-          ..costCenterId = text(row, 'costCenterId').isEmpty
-              ? null
-              : text(row, 'costCenterId');
+        // Reopen shows exactly what the user entered. A multi-unit line keeps
+        // the entered quantity and its unit; a legacy row has no snapshot, so
+        // it falls back to the stored base quantity with no unit selected.
+        final line =
+            _LineDraft(
+                quantity: text(
+                  row,
+                  'unitQuantity',
+                  fallback: text(row, 'quantity', fallback: '1'),
+                ),
+                unitPrice: text(row, 'unitPrice', fallback: '0'),
+                taxRate: text(row, 'taxRate', fallback: ''),
+              )
+              ..itemId = text(row, 'itemId').isEmpty
+                  ? null
+                  : text(row, 'itemId')
+              ..unitName = text(row, 'unitName').isEmpty
+                  ? null
+                  : text(row, 'unitName')
+              ..unitPriceEdited = true
+              ..costCenterId = text(row, 'costCenterId').isEmpty
+                  ? null
+                  : text(row, 'costCenterId');
         final discountKind = discountKindOf(text(row, 'discountType'));
         if (discountKind == DiscountKind.percent) {
           line.discountValue.text = text(row, 'discountPercent', fallback: '');
@@ -174,8 +358,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _lines.add(line);
       }
       if (_lines.isEmpty) _lines.add(_LineDraft());
-      _documentDiscountKind =
-          discountKindOf(text(invoice, 'discountType'));
+      _documentDiscountKind = discountKindOf(text(invoice, 'discountType'));
       _documentDiscount.text = _documentDiscountKind == DiscountKind.percent
           ? text(invoice, 'discountPercent', fallback: '')
           : text(invoice, 'discountAmount', fallback: '');
@@ -183,7 +366,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       if (_documentDiscountKind == DiscountKind.none) _documentDiscount.clear();
       setState(() {
         _partyId = text(invoice, widget.kind.partyKey).isNotEmpty
-            ? text(Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map), 'id')
+            ? text(
+                Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map),
+                'id',
+              )
             : null;
         _supplierReference = text(invoice, 'supplierReference').isEmpty
             ? null
@@ -192,16 +378,21 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
       });
-    } on Failure catch (error) {
+      _savedSnapshot = _snapshot();
+    } catch (error) {
       if (mounted) {
-        setState(() => _loadingExisting = false);
-        showMessage(context, error.message, error: true);
+        setState(() {
+          _loadingExisting = false;
+          _loadFailed = true;
+        });
+        showAppError(context, error);
       }
     }
   }
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_confirmExit);
     for (final line in _lines) {
       line.dispose();
     }
@@ -223,14 +414,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     Decimal tax,
     Decimal landedCost,
     Decimal total,
-  }) get _totals {
+  })
+  get _totals {
     final nets = <Decimal>[];
     final rates = <Decimal>[];
     var gross = Decimal.zero;
     var lineDiscount = Decimal.zero;
     for (final line in _lines) {
       final pricing = line.pricing;
-      if (line.quantity.text.trim().isEmpty || line.unitPrice.text.trim().isEmpty) {
+      if (line.quantity.text.trim().isEmpty ||
+          line.unitPrice.text.trim().isEmpty) {
         continue;
       }
       gross += pricing.gross;
@@ -238,7 +431,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       nets.add(pricing.discount.net);
       rates.add(Decimal.tryParse(line.taxRate.text.trim()) ?? Decimal.zero);
     }
-    final netBeforeDocument = nets.fold(Decimal.zero, (sum, value) => sum + value);
+    final netBeforeDocument = nets.fold(
+      Decimal.zero,
+      (sum, value) => sum + value,
+    );
     final document = resolveDiscount(
       netBeforeDocument,
       _documentDiscountKind,
@@ -257,7 +453,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     var landedCost = Decimal.zero;
     if (!widget.kind.isSales) {
       for (final charge in _landedCosts) {
-        landedCost += Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
+        landedCost +=
+            Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
       }
     }
     return (
@@ -272,18 +469,29 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
-    // An explicit rate the user typed is respected; only the empty case is
-    // filled in from the item.
-    if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
-      line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
+    // The visible blank rate means zero, not an omitted server default.
+    // Never replace the entered or blank rate when selecting an item.
+    final units = lineUnitsOf(item);
+    final scannedUnit = text(item, '_scannedUnitName');
+    if (scannedUnit.isNotEmpty &&
+        units.any((unit) => text(unit, 'unit') == scannedUnit)) {
+      line.unitName = scannedUnit;
+    } else if ((line.unitName == null || line.unitName!.isEmpty) &&
+        units.isNotEmpty) {
+      line.unitName = defaultLineUnit(item, isSales: widget.kind.isSales);
     }
-    if (widget.kind.isSales &&
-        (line.unitPrice.text.trim().isEmpty ||
-            line.unitPrice.text.trim() == '0')) {
-      line.unitPrice.text = formatQuantity(
-        asString(item['salePrice']),
-        decimals: 2,
+    if (maySuggestUnitPrice(
+      line.unitPrice.text,
+      automatic: line.unitPriceAutomatic,
+      edited: line.unitPriceEdited,
+    )) {
+      final price = unitListPrice(
+        item,
+        line.unitName ?? text(item, 'unit'),
+        isSales: widget.kind.isSales,
       );
+      line.unitPrice.text = formatQuantity(price, decimals: 4);
+      line.unitPriceAutomatic = true;
     }
   }
 
@@ -322,7 +530,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           return;
         }
         landedCost += amount;
-        landedCostCharges.add({'description': description, 'amount': amount.toString()});
+        landedCostCharges.add({
+          'description': description,
+          'amount': amount.toString(),
+        });
       }
     }
 
@@ -339,13 +550,20 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.unitName != null && line.unitName!.trim().isNotEmpty)
+          'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        // The form always shows a tax field: blank or whitespace is an
+        // explicit zero, whereas omitting the API field has distinct meaning.
+        'taxRate': line.taxRate.text.trim().isEmpty
+            ? '0'
+            : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),
-        if (line.discountKind == DiscountKind.percent && discountText.isNotEmpty)
+        if (line.discountKind == DiscountKind.percent &&
+            discountText.isNotEmpty)
           'discountPercent': discountText,
         if (line.discountKind == DiscountKind.amount && discountText.isNotEmpty)
           'discountAmount': discountText,
@@ -379,12 +597,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         'lines': lines,
       };
       if (widget.invoiceId != null) {
-        await ref.read(apiClientProvider).put(
-          '${widget.kind.basePath}/${widget.invoiceId}',
-          body: body,
-        );
+        await ref
+            .read(apiClientProvider)
+            .put('${widget.kind.basePath}/${widget.invoiceId}', body: body);
       } else {
-        await ref.read(apiClientProvider).post(widget.kind.basePath, body: body);
+        await ref
+            .read(apiClientProvider)
+            .post(widget.kind.basePath, body: body);
       }
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) {
@@ -392,7 +611,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.invoiceSaved);
       }
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -411,129 +632,185 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.invoiceId != null
-              ? l10n.editDraftInvoice
-              : widget.kind.isSales
-                  ? l10n.newSalesInvoice
-                  : l10n.newPurchaseInvoice,
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 16),
-            child: FilledButton.icon(
-              onPressed: _saving || _loadingExisting ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(l10n.save),
-            ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.invoiceId != null
+                ? l10n.editDraftInvoice
+                : widget.kind.isSales
+                ? l10n.newSalesInvoice
+                : l10n.newPurchaseInvoice,
           ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _Header(
-            key: ValueKey('${widget.invoiceId ?? 'new'}-$_loadingExisting'),
-            kind: widget.kind,
-            invoiceDate: _invoiceDate,
-            onDateChanged: (value) => setState(() => _invoiceDate = value),
-            partyId: _partyId,
-            onPartyChanged: (value) => setState(() => _partyId = value),
-            supplierReference: _supplierReference,
-            onSupplierReferenceChanged: (value) =>
-                setState(() => _supplierReference = value),
-            notes: _notes,
-            onNotesChanged: (value) => setState(() => _notes = value),
-            discountKind: _documentDiscountKind,
-            discountController: _documentDiscount,
-            onDiscountKindChanged: (value) =>
-                setState(() => _documentDiscountKind = value),
-            onDiscountChanged: () => setState(() {}),
-            parties: partiesAsync.value ?? const [],
-          ),
-          if (!widget.kind.isSales) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
-                TextButton.icon(
-                  onPressed: () => setState(() => _landedCosts.add(_LandedCostDraft())),
-                  icon: const Icon(Icons.add),
-                  label: Text(l10n.addLandedCost),
-                ),
-              ],
-            ),
-            Text(l10n.landedCostAllocationHint, style: Theme.of(context).textTheme.bodySmall),
-            for (var index = 0; index < _landedCosts.length; index++) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      key: ValueKey('landed-cost-description-$index'),
-                      controller: _landedCosts[index].description,
-                      decoration: InputDecoration(
-                        labelText: l10n.description,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      key: ValueKey('landed-cost-amount-$index'),
-                      controller: _landedCosts[index].amount,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: l10n.amount,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: l10n.removeLandedCost,
-                    onPressed: () => setState(() => _landedCosts.removeAt(index).dispose()),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
+          actions: [
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 16),
+              child: FilledButton.icon(
+                onPressed: _saving || _loadingExisting || _loadFailed
+                    ? null
+                    : _save,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(l10n.save),
               ),
-            ],
+            ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text(l10n.invoiceLines, style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => setState(() => _lines.add(_LineDraft())),
-                icon: const Icon(Icons.add),
-                label: Text(l10n.addLine),
+        ),
+        body: _loadFailed
+            ? Center(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: Text(l10n.retry),
+                  onPressed: () {
+                    setState(() {
+                      _loadFailed = false;
+                      _loadingExisting = true;
+                    });
+                    _loadExisting();
+                  },
+                ),
+              )
+            : IgnorePointer(
+                ignoring: _loadingExisting || _saving,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _Header(
+                      key: ValueKey(
+                        '${widget.invoiceId ?? 'new'}-$_loadingExisting',
+                      ),
+                      kind: widget.kind,
+                      invoiceDate: _invoiceDate,
+                      onDateChanged: (value) =>
+                          setState(() => _invoiceDate = value),
+                      partyId: _partyId,
+                      onPartyChanged: (value) =>
+                          setState(() => _partyId = value),
+                      supplierReference: _supplierReference,
+                      onSupplierReferenceChanged: (value) =>
+                          setState(() => _supplierReference = value),
+                      notes: _notes,
+                      onNotesChanged: (value) => setState(() => _notes = value),
+                      discountKind: _documentDiscountKind,
+                      discountController: _documentDiscount,
+                      onDiscountKindChanged: (value) =>
+                          setState(() => _documentDiscountKind = value),
+                      onDiscountChanged: () => setState(() {}),
+                      parties: partiesAsync.value ?? const [],
+                    ),
+                    if (!widget.kind.isSales) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              l10n.landedCosts,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => setState(
+                              () => _landedCosts.add(_LandedCostDraft()),
+                            ),
+                            icon: const Icon(Icons.add),
+                            label: Text(l10n.addLandedCost),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        l10n.landedCostAllocationHint,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      for (
+                        var index = 0;
+                        index < _landedCosts.length;
+                        index++
+                      ) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                key: ValueKey('landed-cost-description-$index'),
+                                controller: _landedCosts[index].description,
+                                decoration: InputDecoration(
+                                  labelText: l10n.description,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2,
+                              child: TextField(
+                                key: ValueKey('landed-cost-amount-$index'),
+                                controller: _landedCosts[index].amount,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText: l10n.amount,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: l10n.removeLandedCost,
+                              onPressed: () => setState(
+                                () => _landedCosts.removeAt(index).dispose(),
+                              ),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text(
+                          l10n.invoiceLines,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _lines.add(_LineDraft())),
+                          icon: const Icon(Icons.add),
+                          label: Text(l10n.addLine),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _LinesTable(
+                      kind: widget.kind,
+                      lines: _lines,
+                      items: itemsAsync.value ?? const [],
+                      costCenters: costCenters,
+                      language: language,
+                      onChanged: () => setState(() {}),
+                      onAdd: () => setState(() => _lines.add(_LineDraft())),
+                      onRemove: (index) =>
+                          setState(() => _lines.removeAt(index).dispose()),
+                      onItemDefaults: _applyItemDefaults,
+                    ),
+                    const SizedBox(height: 16),
+                    _Totals(
+                      totals: _totals,
+                      showLandedCost: !widget.kind.isSales,
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _LinesTable(
-            kind: widget.kind,
-            lines: _lines,
-            items: itemsAsync.value ?? const [],
-            costCenters: costCenters,
-            language: language,
-            onChanged: () => setState(() {}),
-            onAdd: () => setState(() => _lines.add(_LineDraft())),
-            onRemove: (index) => setState(() => _lines.removeAt(index).dispose()),
-            onItemDefaults: _applyItemDefaults,
-          ),
-          const SizedBox(height: 16),
-          _Totals(totals: _totals, showLandedCost: !widget.kind.isSales),
-        ],
       ),
     );
   }
@@ -589,8 +866,7 @@ class _Header extends StatelessWidget {
                       final now = DateTime.now();
                       final picked = await showDatePicker(
                         context: context,
-                        initialDate:
-                            DateTime.tryParse(invoiceDate) ?? now,
+                        initialDate: DateTime.tryParse(invoiceDate) ?? now,
                         firstDate: DateTime(now.year - 5),
                         lastDate: DateTime(now.year + 5),
                       );
@@ -622,6 +898,20 @@ class _Header extends StatelessWidget {
                       border: const OutlineInputBorder(),
                     ),
                     items: [
+                      // Preserve an existing draft selection if a source refresh
+                      // deactivates/removes it. It remains visible but cannot be
+                      // newly selected; the server still validates on save/post.
+                      if (partyId != null &&
+                          !parties.any((party) => text(party, 'id') == partyId))
+                        DropdownMenuItem(
+                          value: partyId,
+                          enabled: false,
+                          child: Text(
+                            Localizations.localeOf(context).languageCode == 'ar'
+                                ? 'الطرف المحدد غير متاح'
+                                : 'Selected party unavailable',
+                          ),
+                        ),
                       for (final party in parties)
                         DropdownMenuItem(
                           value: text(party, 'id'),
@@ -767,240 +1057,348 @@ class _LinesTable extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Expanded(
-                      flex: 3,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                        key: ValueKey('item-choice-${lines[index].itemId}'),
-                        initialValue: lines[index].itemId,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: kind.isSales
-                              ? l10n.item
-                              : l10n.item,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        items: [
-                          for (final item in items)
-                            DropdownMenuItem(
-                              value: text(item, 'id'),
-                              child: Text(
-                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                overflow: TextOverflow.ellipsis,
+                        Expanded(
+                          flex: 3,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonFormField<String>(
+                                  key: ValueKey(
+                                    'item-choice-${lines[index].itemId}',
+                                  ),
+                                  initialValue: lines[index].itemId,
+                                  isExpanded: true,
+                                  decoration: InputDecoration(
+                                    labelText: kind.isSales
+                                        ? l10n.item
+                                        : l10n.item,
+                                    isDense: true,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  items: [
+                                    for (final item in items)
+                                      DropdownMenuItem(
+                                        value: text(item, 'id'),
+                                        child: Text(
+                                          '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) {
+                                    if (lines[index].itemId != value) {
+                                      lines[index].unitName = null;
+                                    }
+                                    lines[index].itemId = value;
+                                    final item = items.firstWhere(
+                                      (element) => text(element, 'id') == value,
+                                      orElse: () => const {},
+                                    );
+                                    if (item.isNotEmpty) {
+                                      onItemDefaults(lines[index], item);
+                                    }
+                                    onChanged();
+                                  },
+                                ),
                               ),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          lines[index].itemId = value;
-                          final item = items.firstWhere(
-                            (element) => text(element, 'id') == value,
-                            orElse: () => const {},
-                          );
-                          if (item.isNotEmpty) {
-                            onItemDefaults(lines[index], item);
-                          }
-                          onChanged();
-                        },
+                              IconButton(
+                                tooltip: l10n.selectItem,
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.search, size: 18),
+                                onPressed: () async {
+                                  final picked = await showItemPicker(
+                                    context,
+                                    title: l10n.selectItem,
+                                  );
+                                  if (picked == null) return;
+                                  final itemId = text(picked, 'id');
+                                  if (lines[index].itemId != itemId) {
+                                    lines[index].unitName = null;
+                                  }
+                                  lines[index].itemId = itemId;
+                                  onItemDefaults(lines[index], picked);
+                                  onChanged();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (costCenters.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _costCenterChoice(
+                                costCenters,
+                                lines[index].costCenterId,
+                              ),
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: l10n.costCenter,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              items: [
+                                DropdownMenuItem(
+                                  value: '',
+                                  child: Text(
+                                    l10n.noAllocation,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final center in costCenters)
+                                  DropdownMenuItem(
+                                    value: text(center, 'id'),
+                                    child: Text(
+                                      flag(center, 'isActive', fallback: true)
+                                          ? costCenterLabel(center, language)
+                                          : '${costCenterLabel(center, language)} '
+                                                '(${l10n.inactive})',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                lines[index].costCenterId =
+                                    value == null || value.isEmpty
+                                    ? null
+                                    : value;
+                                onChanged();
+                              },
                             ),
                           ),
-                          IconButton(
-                            tooltip: l10n.selectItem,
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.search, size: 18),
-                            onPressed: () async {
-                              final picked = await showItemPicker(
-                                context,
-                                title: l10n.selectItem,
+                        ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: Builder(
+                            builder: (context) {
+                              Json? selected;
+                              for (final candidate in items) {
+                                if (text(candidate, 'id') ==
+                                    lines[index].itemId) {
+                                  selected = candidate;
+                                  break;
+                                }
+                              }
+                              final units = lineUnitsOf(selected);
+                              final names = units
+                                  .map((unit) => text(unit, 'unit'))
+                                  .toList();
+                              final chosen =
+                                  names.contains(lines[index].unitName)
+                                  ? lines[index].unitName
+                                  : (names.isNotEmpty
+                                        ? defaultLineUnit(
+                                            selected!,
+                                            isSales: kind.isSales,
+                                          )
+                                        : null);
+                              return DropdownButtonFormField<String>(
+                                key: ValueKey('line-unit-$index'),
+                                initialValue: chosen,
+                                isExpanded: true,
+                                isDense: true,
+                                decoration: InputDecoration(
+                                  labelText: l10n.unit,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                items: [
+                                  for (final unit in units)
+                                    DropdownMenuItem<String>(
+                                      value: text(unit, 'unit'),
+                                      child: Text(
+                                        flag(unit, 'isBase', fallback: false)
+                                            ? text(unit, 'unit')
+                                            : '${text(unit, 'unit')} '
+                                                  '×${formatQuantity(asString(unit['factor']), decimals: 6)}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: units.isEmpty
+                                    ? null
+                                    : (value) {
+                                        if (value == null) return;
+                                        lines[index].unitName = value;
+                                        final line = lines[index];
+                                        if (maySuggestUnitPrice(
+                                          line.unitPrice.text,
+                                          automatic: line.unitPriceAutomatic,
+                                          edited: line.unitPriceEdited,
+                                        )) {
+                                          final price = selected == null
+                                              ? ''
+                                              : unitListPrice(
+                                                  selected,
+                                                  value,
+                                                  isSales: kind.isSales,
+                                                );
+                                          line.unitPrice.text = formatQuantity(
+                                            price,
+                                            decimals: 4,
+                                          );
+                                          line.unitPriceAutomatic = true;
+                                        }
+                                        onChanged();
+                                      },
                               );
-                              if (picked == null) return;
-                              lines[index].itemId = text(picked, 'id');
-                              onItemDefaults(lines[index], picked);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-quantity-$index'),
+                            controller: lines[index].quantity,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.quantity,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) => onChanged(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-price-$index'),
+                            controller: lines[index].unitPrice,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.unitPrice,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              lines[index].unitPriceAutomatic = false;
+                              lines[index].unitPriceEdited = true;
                               onChanged();
                             },
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-tax-rate-$index'),
+                            controller: lines[index].taxRate,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.taxRate,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              lines[index].taxRateEdited = true;
+                              onChanged();
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 120,
+                          child: _LineTotal(line: lines[index]),
+                        ),
+                        IconButton(
+                          tooltip: l10n.removeLine,
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: lines.length == 1
+                              ? null
+                              : () => onRemove(index),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 12,
+                        top: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 170,
+                            child: DropdownButtonFormField<DiscountKind>(
+                              key: ValueKey('line-discount-$index'),
+                              initialValue: lines[index].discountKind,
+                              isDense: true,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: l10n.lineDiscount,
+                                border: const OutlineInputBorder(),
+                              ),
+                              items: [
+                                for (final kind in DiscountKind.values)
+                                  DropdownMenuItem(
+                                    value: kind,
+                                    child: Text(
+                                      discountKindLabel(context, kind),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                lines[index].discountKind = value;
+                                if (value == DiscountKind.none) {
+                                  lines[index].discountValue.clear();
+                                }
+                                onChanged();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 150,
+                            child: TextFormField(
+                              key: ValueKey('line-discount-value-$index'),
+                              controller: lines[index].discountValue,
+                              enabled:
+                                  lines[index].discountKind !=
+                                  DiscountKind.none,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                labelText:
+                                    lines[index].discountKind ==
+                                        DiscountKind.percent
+                                    ? l10n.discountPercentValue
+                                    : l10n.discountAmountValue,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              onChanged: (_) => onChanged(),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${l10n.beforeDiscount}: '
+                              '${formatAmount(lines[index].pricing.gross.toString())}'
+                              '  −  ${formatAmount(lines[index].pricing.discount.amount.toString())}'
+                              '  =  ${l10n.netLine}: '
+                              '${formatAmount(lines[index].pricing.discount.net.toString())}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    if (costCenters.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 3,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _costCenterChoice(
-                            costCenters,
-                            lines[index].costCenterId,
-                          ),
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: l10n.costCenter,
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                          ),
-                          items: [
-                            DropdownMenuItem(
-                              value: '',
-                              child: Text(
-                                l10n.noAllocation,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            for (final center in costCenters)
-                              DropdownMenuItem(
-                                value: text(center, 'id'),
-                                child: Text(
-                                  flag(center, 'isActive', fallback: true)
-                                      ? costCenterLabel(center, language)
-                                      : '${costCenterLabel(center, language)} '
-                                            '(${l10n.inactive})',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          onChanged: (value) {
-                            lines[index].costCenterId =
-                                value == null || value.isEmpty ? null : value;
-                            onChanged();
-                          },
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        key: ValueKey('line-quantity-$index'),
-                        controller: lines[index].quantity,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.quantity,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        key: ValueKey('line-price-$index'),
-                        controller: lines[index].unitPrice,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.unitPrice,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: lines[index].taxRate,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.taxRate,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 120,
-                      child: _LineTotal(line: lines[index]),
-                    ),
-                    IconButton(
-                      tooltip: l10n.removeLine,
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: lines.length == 1 ? null : () => onRemove(index),
-                    ),
                   ],
                 ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 170,
-                        child: DropdownButtonFormField<DiscountKind>(
-                          key: ValueKey('line-discount-$index'),
-                          initialValue: lines[index].discountKind,
-                          isDense: true,
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: l10n.lineDiscount,
-                            border: const OutlineInputBorder(),
-                          ),
-                          items: [
-                            for (final kind in DiscountKind.values)
-                              DropdownMenuItem(
-                                value: kind,
-                                child: Text(discountKindLabel(context, kind)),
-                              ),
-                          ],
-                          onChanged: (value) {
-                            if (value == null) return;
-                            lines[index].discountKind = value;
-                            if (value == DiscountKind.none) {
-                              lines[index].discountValue.clear();
-                            }
-                            onChanged();
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 150,
-                        child: TextFormField(
-                          key: ValueKey('line-discount-value-$index'),
-                          controller: lines[index].discountValue,
-                          enabled:
-                              lines[index].discountKind != DiscountKind.none,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: lines[index].discountKind ==
-                                    DiscountKind.percent
-                                ? l10n.discountPercentValue
-                                : l10n.discountAmountValue,
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                          ),
-                          onChanged: (_) => onChanged(),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '${l10n.beforeDiscount}: '
-                          '${formatAmount(lines[index].pricing.gross.toString())}'
-                          '  −  ${formatAmount(lines[index].pricing.discount.amount.toString())}'
-                          '  =  ${l10n.netLine}: '
-                          '${formatAmount(lines[index].pricing.discount.net.toString())}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
           ],
         ),
       ),
@@ -1043,9 +1441,8 @@ class _LineTotal extends StatelessWidget {
             Text(
               formatAmount(pricing.gross.toString()),
               textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    decoration: TextDecoration.lineThrough,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(decoration: TextDecoration.lineThrough),
             ),
             Text(
               '− ${formatAmount(pricing.discount.amount.toString())}',
@@ -1076,7 +1473,8 @@ class _Totals extends StatelessWidget {
     Decimal tax,
     Decimal landedCost,
     Decimal total,
-  }) totals;
+  })
+  totals;
 
   final bool showLandedCost;
 

@@ -36,10 +36,10 @@ import { RESET_CONFIRMATION_WORD } from './dto/reset.dto';
  *  2. **The password, verified on the server.** Argon2id against the stored
  *     hash. A stolen token alone cannot wipe the books.
  *  3. **A typed confirmation.** `RESET`, checked here too.
- *  4. **A backup first, and a verified one.** `pg_dump` writes the file, then
- *     `pg_restore --list` proves the archive can actually be read back. If
- *     either step fails the reset does not happen — a reset without a way
- *     back is data destruction, not a reset.
+ *  4. **A backup attempt first.** `pg_restore --list` checks an archive index,
+ *     not a complete restore. A company-only JSON fallback can also be used;
+ *     neither proves external files or license recovery. If both backup checks
+ *     fail, the reset is aborted; passing them does not prove recovery.
  *  5. **One transaction.** Everything is deleted inside it, so a failure
  *     half way leaves the company exactly as it was.
  *  6. **Nothing structural is touched.** No database is dropped, no
@@ -108,6 +108,8 @@ export class ResetService {
       items,
       salesInvoices,
       purchaseInvoices,
+      quotations,
+      cashVouchers,
       stockMovements,
       fiscalPeriods,
       branches,
@@ -120,6 +122,11 @@ export class ResetService {
       this.prisma.item.count({ where: { companyId } }),
       this.prisma.salesInvoice.count({ where: { companyId } }),
       this.prisma.purchaseInvoice.count({ where: { companyId } }),
+      // The offers go too (they hold restrictive links to the invoices they
+      // became), and so does every receipt and payment. A confirmation screen
+      // that does not name them undersells what the button does.
+      this.prisma.quotation.count({ where: { companyId } }),
+      this.prisma.cashVoucher.count({ where: { companyId } }),
       this.prisma.stockMovement.count({ where: { companyId } }),
       this.prisma.fiscalPeriod.count({ where: { companyId } }),
       this.prisma.branch.count({ where: { companyId } }),
@@ -139,6 +146,8 @@ export class ResetService {
         items,
         salesInvoices,
         purchaseInvoices,
+        quotations,
+        cashVouchers,
         stockMovements,
         fiscalPeriods,
         branches,
@@ -222,8 +231,8 @@ export class ResetService {
     );
 
     try {
-      // 4. A verified backup first — and one that is proven readable, not merely a
-      //    file that exists. No backup, no reset.
+      // 4. Check the archive index or company JSON format before resetting.
+      //    This does not prove a complete restore or include external files.
       let verified: { name: string; sizeBytes: number; entries: number };
 
       const fullCapabilities =
@@ -310,6 +319,39 @@ export class ResetService {
             where: { companyId: me.companyId },
             data: { originalInvoiceId: null },
           });
+
+          // Offers point at the invoice they became, at their customer, at
+          // their items and at each other, every one of them with a
+          // restrictive constraint. A company that ever wrote an offer could
+          // therefore not be reset at all: the transaction died on
+          // `quotations_convertedInvoiceId_fkey` (or on the customer, or on
+          // the item) and the reset was refused with a 500. Break the two
+          // self-links, then remove the offers before the invoices and the
+          // parties they name. Tables, lines and events follow by cascade.
+          await tx.quotation.updateMany({
+            where: { companyId: me.companyId },
+            data: { convertedInvoiceId: null, revisionOfId: null },
+          });
+          await step('quotations', async () => {
+            const { count } = await tx.quotation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // Rows written before the offers were rebuilt live in two tables no
+          // model knows about any more, but the same restrictive constraints
+          // still apply to them. They belong to the company being cleared.
+          await step('legacyQuotationLines', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotation_lines_legacy
+               WHERE "quotationId" IN (
+                 SELECT id FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid
+               )`,
+          );
+          await step('legacyQuotations', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid`,
+          );
 
           // Cash vouchers/transfers and reconciliations all hold restrictive
           // references to cash accounts and other business masters.
@@ -687,7 +729,7 @@ export class ResetService {
 
       this.logger.warn(
         `Reset finished for company ${me.company?.code ?? me.companyId}: ` +
-          `${verified.name} holds the old data`,
+          `backup ${verified.name} was created; full restoration was not verified`,
       );
 
       return {

@@ -1,6 +1,8 @@
 import { Request } from 'express';
 import { HealthController } from './health.controller';
 
+const os = jest.requireActual<typeof import('node:os')>('node:os');
+
 /// The parts of the request the network report reads: where it arrived, and
 /// whether the transport was encrypted.
 function fakeRequest(overrides: Partial<Record<string, unknown>> = {}): Request {
@@ -12,14 +14,41 @@ function fakeRequest(overrides: Partial<Record<string, unknown>> = {}): Request 
   } as unknown as Request;
 }
 
+/// The SQL a `$queryRaw` tagged-template call was given. Written out rather
+/// than stubbed blindly so a test can prove which statement the controller
+/// really sends: the database-name query is the one that has to be cast.
+function sqlOfCall(call: unknown[]): string {
+  const strings = call[0] as unknown as TemplateStringsArray;
+  return Array.isArray(strings) ? strings.join('?') : String(strings);
+}
+
+const DATABASE_NAME_ERROR = new Error(
+  "Raw query failed. Code: `N/A`. Message: `Failed to deserialize column of type 'name'`",
+);
+
 describe('HealthController', () => {
   let controller: HealthController;
   let mockPrisma: any;
+  /// Set by a test to make the database-name query fail the way PostgreSQL
+  /// and Prisma can, while `SELECT 1` keeps answering.
+  let databaseNameError: Error | null;
 
   beforeEach(() => {
+    databaseNameError = null;
     mockPrisma = {
-      $queryRaw: jest.fn().mockResolvedValue([{ 1: 1 }]),
+      $queryRaw: jest.fn((strings: TemplateStringsArray) => {
+        const sql = sqlOfCall([strings]);
+        if (/current_database/i.test(sql)) {
+          return databaseNameError
+            ? Promise.reject(databaseNameError)
+            : Promise.resolve([{ name: 'erp_kayan' }]);
+        }
+        return Promise.resolve([{ '?column?': 1 }]);
+      }),
       company: {
+        count: jest.fn().mockResolvedValue(1),
+      },
+      user: {
         count: jest.fn().mockResolvedValue(1),
       },
     };
@@ -31,6 +60,71 @@ describe('HealthController', () => {
     expect(res.status).toBe('ok');
     expect(res.database).toBe('up');
     expect(res.needsSetup).toBe(false);
+    // The desktop shell proves it reached the right database with this.
+    expect(res.databaseName).toBe('erp_kayan');
+  });
+
+  it('does not report first-run setup for an existing company with no users', async () => {
+    mockPrisma.user = { count: jest.fn().mockResolvedValue(0) };
+    const res = await controller.check();
+    expect(res.needsSetup).toBe(false);
+    expect(res.recoveryRequired).toBe(true);
+  });
+
+  it('requires recovery when a reset company and its retained user are soft-deleted', async () => {
+    mockPrisma.company.count.mockImplementation((args?: { where?: unknown }) =>
+      Promise.resolve(args?.where ? 0 : 1),
+    );
+    mockPrisma.user.count.mockImplementation((args?: { where?: unknown }) =>
+      Promise.resolve(args?.where ? 0 : 1),
+    );
+
+    const res = await controller.check();
+
+    expect(res.needsSetup).toBe(false);
+    expect(res.recoveryRequired).toBe(true);
+    expect(mockPrisma.company.count).toHaveBeenCalledWith();
+    expect(mockPrisma.user.count).toHaveBeenCalledWith();
+  });
+
+  it('reports setup only when the database has no companies or users', async () => {
+    mockPrisma.company.count.mockResolvedValue(0);
+    mockPrisma.user.count.mockResolvedValue(0);
+
+    const res = await controller.check();
+
+    expect(res.needsSetup).toBe(true);
+    expect(res.recoveryRequired).toBe(false);
+  });
+
+  it('asks for the database name as text, the one shape Prisma can read', async () => {
+    // `current_database()` returns PostgreSQL's `name` type, which Prisma
+    // cannot deserialise in a raw query. Without the cast, /health reports a
+    // working database as down and no installation can ever prove which
+    // database it opened.
+    await controller.check();
+    const statements = mockPrisma.$queryRaw.mock.calls.map(sqlOfCall);
+    const nameQuery = statements.find((sql: string) => /current_database/i.test(sql));
+    expect(nameQuery).toBeDefined();
+    expect(nameQuery).toMatch(/current_database\(\)\s*::text/i);
+  });
+
+  it('keeps the database up when only the name query cannot be read', async () => {
+    databaseNameError = DATABASE_NAME_ERROR;
+    const res = await controller.check();
+    expect(res.status).toBe('ok');
+    expect(res.database).toBe('up');
+    // Not a name from nowhere: the answer says the name is unknown, and the
+    // shell decides what an unknown name means.
+    expect(res.databaseName).toBeNull();
+  });
+
+  it('reports no database name when the database cannot be asked', async () => {
+    mockPrisma.$queryRaw.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+    const res = await controller.check();
+    expect(res.status).toBe('degraded');
+    expect(res.database).toBe('down');
+    expect(res.databaseName).toBeNull();
   });
 
   it('reports network interface info', async () => {
@@ -40,7 +134,7 @@ describe('HealthController', () => {
       const net = await controller.network(fakeRequest({ headers: { host: '127.0.0.1:3000' } }));
       expect(net.port).toBeDefined();
       expect(net.host).toBe('0.0.0.0');
-      expect(net.isLanAccessible).toBe(true);
+      expect(net.isLanAccessible).toBe(net.addresses.length > 0);
       expect(net.bindAllInterfaces).toBe(true);
       expect(Array.isArray(net.addresses)).toBe(true);
       expect(typeof net.primaryUrl).toBe('string');
@@ -57,6 +151,68 @@ describe('HealthController', () => {
         expect(address.address.startsWith('127.')).toBe(false);
       }
     } finally {
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('does not present a public interface as a LAN address', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      public: [{ address: '203.0.113.10', family: 'IPv4', internal: false }],
+      local: [{ address: '192.168.1.25', family: 'IPv4', internal: false }],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.isLanAccessible).toBe(true);
+      expect(net.addresses.map((entry) => entry.address)).toEqual(['192.168.1.25']);
+      expect(net.interfaces.map((entry) => entry.address)).toEqual(['192.168.1.25']);
+      expect(net.primaryUrl).toMatch(/^http:\/\/192\.168\.1\.25:/);
+    } finally {
+      interfaces.mockRestore();
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('does not imply a LAN candidate when only a public interface exists', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      public: [{ address: '203.0.113.10', family: 'IPv4', internal: false }],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.isLanAccessible).toBe(false);
+      expect(net.addresses).toEqual([]);
+      expect(net.interfaces).toEqual([]);
+      expect(net.primaryUrl).toMatch(/^http:\/\/localhost:/);
+    } finally {
+      interfaces.mockRestore();
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('keeps RFC1918 and link-local candidates, but excludes public ranges', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const make = (address: string) => ({ address, family: 'IPv4', internal: false });
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      mixed: [
+        make('10.1.2.3'), make('172.16.0.1'), make('172.31.255.255'),
+        make('192.168.0.1'), make('169.254.10.1'), make('172.15.1.1'),
+        make('172.32.1.1'), make('198.51.100.1'), make('10.999.1.1'),
+      ],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.addresses.map((entry) => entry.address)).toEqual([
+        '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.0.1', '169.254.10.1',
+      ]);
+    } finally {
+      interfaces.mockRestore();
       if (previous === undefined) delete process.env.HOST;
       else process.env.HOST = previous;
     }

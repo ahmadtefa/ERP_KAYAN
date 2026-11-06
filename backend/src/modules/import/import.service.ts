@@ -7,6 +7,7 @@ import { AccountType, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OpeningBalancesService } from '../accounting/opening-balances.service';
+import { lockChart } from '../accounting/chart-lock';
 import {
   ImportFormatError,
   isXlsx,
@@ -75,6 +76,8 @@ export interface ImportReport {
   unknownColumns: string[];
   /// Rows that are fine and would be imported. Shown before anything is written.
   validRows: number;
+  /// Existing items whose blank tax cells will be cleared with explicit opt-in.
+  clearedBlankTaxRates?: number;
   /// The opening-balance draft created by a committed workbook.
   draft?: { id: string; documentNumber: string; status: string };
 }
@@ -489,7 +492,7 @@ export class ImportService {
     companyId: string,
     userId: string,
     file: { originalname: string; buffer: Buffer },
-    options: { dryRun: boolean; mode: Mode },
+    options: { dryRun: boolean; mode: Mode; clearBlankTaxRates?: boolean },
     branchId: string | null = null,
     canImportAcrossBranches = false,
   ): Promise<ImportReport> {
@@ -559,6 +562,12 @@ export class ImportService {
       );
     }
 
+    // Duplicate aliases for the tax field make a blank/explicit value
+    // ambiguous. Refuse instead of letting column order decide a bulk write.
+    if (kind === 'items' && sheet.headers.filter((header) => byHeader.get(normaliseHeader(header))?.key === 'taxrate').length > 1) {
+      throw new BadRequestException('The file contains multiple tax rate columns. Keep only one.');
+    }
+
     const unknownColumns = sheet.headers
       .map((header) => header.trim())
       .filter((header) => header !== '')
@@ -569,6 +578,7 @@ export class ImportService {
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let clearedBlankTaxRates = 0;
 
     // Existing records, so a file can be re-uploaded without inventing
     // duplicates.
@@ -580,6 +590,7 @@ export class ImportService {
     for (const row of sheet.rows) {
       const values: Record<string, string> = {};
       let rowCode = '';
+      let blankTaxCell = false;
 
       for (const [header, raw] of Object.entries(row.values)) {
         const field = byHeader.get(header);
@@ -590,6 +601,10 @@ export class ImportService {
         if (field.key === 'code') rowCode = value;
 
         if (!value) {
+          if (kind === 'items' && field.key === 'taxrate') {
+            blankTaxCell = true;
+            if (options.clearBlankTaxRates === true) values.taxrate = '0';
+          }
           if (field.required) {
             errors.push({
               row: row.rowNumber,
@@ -618,6 +633,13 @@ export class ImportService {
           continue;
         }
 
+        if (kind === 'items' && field.key === 'taxrate') {
+          const rate = new Prisma.Decimal(value);
+          if (rate.lessThan(0) || rate.greaterThan(100)) {
+            errors.push({row: row.rowNumber, column: field.labelEn, message: 'Tax rate must be between 0 and 100'});
+            continue;
+          }
+        }
         values[field.key] = field.boolean ? this.truthy(value) : value;
       }
 
@@ -657,6 +679,7 @@ export class ImportService {
       }
 
       if (exists) {
+        if (blankTaxCell && options.clearBlankTaxRates === true) clearedBlankTaxRates += 1;
         updated += 1;
         preview.push({ row: row.rowNumber, code: rowCode, action: 'updated' });
         if (!options.dryRun) {
@@ -691,6 +714,7 @@ export class ImportService {
         after: {
           fileName: file.originalname,
           mode: options.mode,
+          ...(kind === 'items' ? { clearBlankTaxRates: options.clearBlankTaxRates === true, clearedBlankTaxRates } : {}),
           created,
           updated,
           skipped,
@@ -703,6 +727,7 @@ export class ImportService {
       created = 0;
       updated = 0;
       skipped = 0;
+      clearedBlankTaxRates = 0;
       preview.length = 0;
     }
 
@@ -719,6 +744,7 @@ export class ImportService {
       preview: preview.slice(0, 50),
       unknownColumns,
       validRows: created + updated,
+      clearedBlankTaxRates,
     };
   }
 
@@ -981,11 +1007,21 @@ export class ImportService {
 
     if (!options.dryRun && errors.length === 0 && newRows.size > 0) {
       await this.prisma.$transaction(async (tx) => {
+        await lockChart(tx, companyId);
         const current = await tx.account.findMany({
           where: { companyId, code: { in: codes } },
           select: { id: true, code: true, type: true, parentId: true, isPostable: true, isActive: true, deletedAt: true },
         });
         const currentByCode = new Map(current.map((account) => [account.code, account]));
+        // The preview ran outside this transaction. A chart edit could have
+        // retired or changed a parent before the lock was acquired.
+        for (const row of newRows.values()) {
+          if (!row.parentCode || newRows.has(row.parentCode)) continue;
+          const parent = currentByCode.get(row.parentCode);
+          if (!parent || parent.deletedAt || !parent.isActive || parent.type !== row.type) {
+            throw new BadRequestException('An account parent changed while this workbook was being imported. Read it again and retry.');
+          }
+        }
         for (const row of newRows.values()) {
           if (currentByCode.has(row.code)) {
             throw new BadRequestException(`Account code "${row.code}" changed while this workbook was being imported. Read it again and retry.`);

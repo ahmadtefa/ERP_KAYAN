@@ -1,17 +1,21 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/chart_of_accounts_providers.dart';
@@ -36,7 +40,8 @@ final journalEntriesProvider =
 /// server, and only then posted. A posted entry is corrected by reversing it,
 /// never by editing it.
 class JournalEntriesScreen extends ConsumerStatefulWidget {
-  const JournalEntriesScreen({super.key});
+  const JournalEntriesScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<JournalEntriesScreen> createState() =>
@@ -45,46 +50,86 @@ class JournalEntriesScreen extends ConsumerStatefulWidget {
 
 class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   Future<void> _openEditor() async {
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const _JournalEditorScreen()),
+      MaterialPageRoute(
+        builder: (_) => _JournalEditorScreen(exitRelay: _exitRelay),
+      ),
     );
   }
 
-  Future<void> _post(Json row) async {
-    final l10n = context.l10n;
-    final ok = await confirmAction(
-      context,
-      title: l10n.post,
-      message: l10n.confirmPost,
-      confirmLabel: l10n.post,
-    );
-    if (!ok || !mounted) return;
-    await _run(
-      () => ref
-          .read(apiClientProvider)
-          .post('/accounting/journal-entries/${row['id']}/post'),
-      l10n.entryPosted,
-    );
-  }
+  String _label(String ar, String en) =>
+      Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 
-  Future<void> _reverse(Json row) async {
+  Future<void> _transition(Json row, String action) async {
+    if (_busy) return;
     final l10n = context.l10n;
-    final ok = await confirmAction(
-      context,
-      title: l10n.reverse,
-      message: l10n.confirmReverse,
-      confirmLabel: l10n.reverse,
-      destructive: true,
-    );
-    if (!ok || !mounted) return;
-    await _run(
-      () => ref
-          .read(apiClientProvider)
-          .post('/accounting/journal-entries/${row['id']}/reverse'),
-      l10n.entryReversed,
-    );
+    final title = switch (action) {
+      'post' => l10n.post,
+      'reverse' => l10n.reverse,
+      'submit' => _label('إرسال للاعتماد', 'Submit for approval'),
+      'approve' => _label('اعتماد القيد', 'Approve entry'),
+      _ => _label('إلغاء القيد', 'Cancel entry'),
+    };
+    final message = switch (action) {
+      'post' => l10n.confirmPost,
+      'reverse' => l10n.confirmReverse,
+      'submit' => _label(
+        'هل تريد إرسال القيد للاعتماد؟',
+        'Submit this entry for approval?',
+      ),
+      'approve' => _label('هل تريد اعتماد هذا القيد؟', 'Approve this entry?'),
+      _ => _label('هل تريد إلغاء هذا القيد؟', 'Cancel this entry?'),
+    };
+    final success = switch (action) {
+      'post' => l10n.entryPosted,
+      'reverse' => l10n.entryReversed,
+      'submit' => _label(
+        'أُرسل القيد للاعتماد',
+        'Entry submitted for approval',
+      ),
+      'approve' => _label('تم اعتماد القيد', 'Entry approved'),
+      _ => _label('تم إلغاء القيد', 'Entry cancelled'),
+    };
+    // Claim before opening the confirmation: repeated taps cannot queue
+    // several transitions while the first dialog is still open.
+    setState(() => _busy = true);
+    try {
+      final ok = await confirmAction(
+        context,
+        title: title,
+        message: message,
+        confirmLabel: title,
+        destructive: action == 'reverse' || action == 'cancel',
+      );
+      if (!ok || !mounted) return;
+      await _run(
+        () => ref
+            .read(apiClientProvider)
+            .post('/accounting/journal-entries/${row['id']}/$action'),
+        success,
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _run(Future<void> Function() action, String success) async {
@@ -93,10 +138,17 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
       await action();
       await ref.read(journalEntriesProvider.notifier).reload();
       if (mounted) showMessage(context, success);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        // A response can fail after the ledger action has committed.
+        ref.invalidate(journalEntriesProvider);
+        showAppError(context, error);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        invalidateDashboardAndReports(ref);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -104,14 +156,30 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(journalEntriesProvider);
+    final user = ref.watch(currentUserProvider);
+    bool can(String permission) => user?.can(permission) ?? false;
 
     return ModuleScaffold(
       title: l10n.journalEntries,
       actions: const [ListExportActions(list: 'journal-entries')],
-      trailing: FilledButton.icon(
-        onPressed: _busy ? null : _openEditor,
-        icon: const Icon(Icons.add),
-        label: Text(l10n.newJournalEntry),
+      trailing: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          IconButton(
+            tooltip: l10n.refresh,
+            onPressed: _busy || async.isLoading
+                ? null
+                : () => ref.read(journalEntriesProvider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
+          if (can('accounting.journal.create'))
+            FilledButton.icon(
+              onPressed: _busy ? null : _openEditor,
+              icon: const Icon(Icons.add),
+              label: Text(l10n.newJournalEntry),
+            ),
+        ],
       ),
       body: AsyncStateView<List<Json>>(
         value: async,
@@ -121,17 +189,35 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
         data: (rows) => RecordsTable(
           rows: rows,
           columns: [
-            ColumnSpec(l10n.entryNumber, value: (r) => text(r, 'entryNumber'), emphasise: true),
+            ColumnSpec(
+              l10n.entryNumber,
+              value: (r) => text(r, 'entryNumber'),
+              emphasise: true,
+            ),
             ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'entryDate')),
             ColumnSpec(l10n.description, value: (r) => text(r, 'description')),
-            ColumnSpec(l10n.debit, numeric: true, value: (r) => formatAmount(asString(r['totalDebit']))),
-            ColumnSpec(l10n.credit, numeric: true, value: (r) => formatAmount(asString(r['totalCredit']))),
+            ColumnSpec(
+              l10n.debit,
+              numeric: true,
+              value: (r) => formatAmount(asString(r['totalDebit'])),
+            ),
+            ColumnSpec(
+              l10n.credit,
+              numeric: true,
+              value: (r) => formatAmount(asString(r['totalCredit'])),
+            ),
             ColumnSpec(
               l10n.status,
               value: (r) => switch (text(r, 'status').toLowerCase()) {
                 'draft' => l10n.draft,
                 'posted' => l10n.posted,
                 'reversed' => l10n.reversed,
+                'pending_approval' => _label(
+                  'بانتظار الاعتماد',
+                  'Pending approval',
+                ),
+                'approved' => _label('معتمد', 'Approved'),
+                'cancelled' => _label('ملغي', 'Cancelled'),
                 _ => text(r, 'status'),
               },
               tone: (r) => toneForStatus(text(r, 'status')),
@@ -164,17 +250,38 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
                   ),
                 ),
               ),
-              if (status == 'draft')
+              if ((status == 'draft' || status == 'approved') &&
+                  can('accounting.journal.post'))
                 IconButton(
                   tooltip: l10n.post,
                   icon: const Icon(Icons.check_circle_outline, size: 20),
-                  onPressed: _busy ? null : () => _post(row),
+                  onPressed: _busy ? null : () => _transition(row, 'post'),
                 ),
-              if (status == 'posted')
+              if (status == 'draft' && can('accounting.journal.create'))
+                IconButton(
+                  tooltip: _label('إرسال للاعتماد', 'Submit for approval'),
+                  icon: const Icon(Icons.send_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'submit'),
+                ),
+              if (status == 'pending_approval' &&
+                  can('accounting.journal.approve'))
+                IconButton(
+                  tooltip: _label('اعتماد القيد', 'Approve entry'),
+                  icon: const Icon(Icons.verified_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'approve'),
+                ),
+              if (['draft', 'pending_approval', 'approved'].contains(status) &&
+                  can('accounting.journal.create'))
+                IconButton(
+                  tooltip: _label('إلغاء القيد', 'Cancel entry'),
+                  icon: const Icon(Icons.cancel_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'cancel'),
+                ),
+              if (status == 'posted' && can('accounting.journal.post'))
                 IconButton(
                   tooltip: l10n.reverse,
                   icon: const Icon(Icons.undo_outlined, size: 20),
-                  onPressed: _busy ? null : () => _reverse(row),
+                  onPressed: _busy ? null : () => _transition(row, 'reverse'),
                 ),
             ];
           },
@@ -228,7 +335,8 @@ class _EntryLineDraft {
 }
 
 class _JournalEditorScreen extends ConsumerStatefulWidget {
-  const _JournalEditorScreen();
+  const _JournalEditorScreen({required this.exitRelay});
+  final DraftExitRelay exitRelay;
 
   @override
   ConsumerState<_JournalEditorScreen> createState() =>
@@ -239,7 +347,52 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
   final _lines = <_EntryLineDraft>[_EntryLineDraft(), _EntryLineDraft()];
   final _description = TextEditingController();
   late String _entryDate;
-  bool _saving = false;
+  late String _initialSnapshot;
+  bool _saving = false, _saved = false, _confirmingExit = false;
+
+  String _snapshot() => jsonEncode({
+    'date': _entryDate,
+    'description': _description.text,
+    'lines': [
+      for (final line in _lines)
+        {
+          'account': line.accountId,
+          'center': line.costCenterId,
+          'debit': line.debit.text,
+          'credit': line.credit.text,
+          'description': line.description.text,
+          'allocations': [
+            for (final allocation in line.allocations)
+              [allocation.costCenterId, allocation.amount.text],
+          ],
+        },
+    ],
+  });
+
+  Future<bool> _canLeave() async {
+    if (_saved) return true;
+    if (_saving || _confirmingExit) return false;
+    if (_snapshot() == _initialSnapshot) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(
+        context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar
+            ? 'الخروج دون حفظ القيد؟'
+            : 'Leave without saving the journal entry?',
+        confirmLabel: ar ? 'خروج' : 'Discard',
+        destructive: true,
+      );
+    } finally {
+      _confirmingExit = false;
+    }
+  }
+
+  Future<void> _close() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop(false);
+  }
 
   @override
   void initState() {
@@ -249,10 +402,13 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
         '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
+    _initialSnapshot = _snapshot();
+    widget.exitRelay.attach(_canLeave);
   }
 
   @override
   void dispose() {
+    widget.exitRelay.detach(_canLeave);
     _description.dispose();
     for (final line in _lines) {
       line.dispose();
@@ -260,13 +416,18 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     super.dispose();
   }
 
-  Decimal get _totalDebit =>
-      _lines.fold(Decimal.zero, (sum, l) => sum + (Decimal.tryParse(l.debit.text.trim()) ?? Decimal.zero));
+  Decimal get _totalDebit => _lines.fold(
+    Decimal.zero,
+    (sum, l) => sum + (Decimal.tryParse(l.debit.text.trim()) ?? Decimal.zero),
+  );
 
-  Decimal get _totalCredit =>
-      _lines.fold(Decimal.zero, (sum, l) => sum + (Decimal.tryParse(l.credit.text.trim()) ?? Decimal.zero));
+  Decimal get _totalCredit => _lines.fold(
+    Decimal.zero,
+    (sum, l) => sum + (Decimal.tryParse(l.credit.text.trim()) ?? Decimal.zero),
+  );
 
-  bool get _balanced => _totalDebit == _totalCredit && _totalDebit > Decimal.zero;
+  bool get _balanced =>
+      _totalDebit == _totalCredit && _totalDebit > Decimal.zero;
 
   Future<void> _save() async {
     final l10n = context.l10n;
@@ -347,11 +508,15 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
           );
       await ref.read(journalEntriesProvider.notifier).reload();
       if (mounted) {
+        _saved = true;
         Navigator.of(context).pop(true);
         showMessage(context, l10n.createdSuccessfully);
       }
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(journalEntriesProvider);
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -362,307 +527,348 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     final l10n = context.l10n;
     final accounts = ref.watch(chartOfAccountsProvider);
     final postable = (accounts.value ?? const [])
-        .where((account) => account.isPostable)
+        .where((account) => account.isPostable && account.isActive)
         .toList(growable: false);
-    final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
+    final costCenters =
+        ref.watch(activeCostCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.newJournalEntry),
-        actions: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 16),
-            child: FilledButton.icon(
-              onPressed: _saving || !_balanced ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(l10n.save),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.newJournalEntry),
+          actions: [
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 16),
+              child: FilledButton.icon(
+                onPressed: _saving || !_balanced ? null : _save,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(l10n.save),
+              ),
             ),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final now = DateTime.now();
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.tryParse(_entryDate) ?? now,
-                          firstDate: DateTime(now.year - 5),
-                          lastDate: DateTime(now.year + 5),
-                        );
-                        if (picked == null) return;
-                        setState(() {
-                          _entryDate =
-                              '${picked.year.toString().padLeft(4, '0')}-'
-                              '${picked.month.toString().padLeft(2, '0')}-'
-                              '${picked.day.toString().padLeft(2, '0')}';
-                        });
-                      },
-                      child: InputDecorator(
-                        decoration: InputDecoration(
-                          labelText: l10n.invoiceDate,
-                          border: const OutlineInputBorder(),
-                          suffixIcon: const Icon(Icons.calendar_today_outlined),
+          ],
+        ),
+        body: IgnorePointer(
+          ignoring: _saving,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.tryParse(_entryDate) ?? now,
+                              firstDate: DateTime(now.year - 5),
+                              lastDate: DateTime(now.year + 5),
+                            );
+                            if (picked == null) return;
+                            setState(() {
+                              _entryDate =
+                                  '${picked.year.toString().padLeft(4, '0')}-'
+                                  '${picked.month.toString().padLeft(2, '0')}-'
+                                  '${picked.day.toString().padLeft(2, '0')}';
+                            });
+                          },
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: l10n.invoiceDate,
+                              border: const OutlineInputBorder(),
+                              suffixIcon: const Icon(
+                                Icons.calendar_today_outlined,
+                              ),
+                            ),
+                            child: Text(_entryDate),
+                          ),
                         ),
-                        child: Text(_entryDate),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _description,
-                      decoration: InputDecoration(
-                        labelText: l10n.description,
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                children: [
-                  for (var index = 0; index < _lines.length; index++)
-                    Padding(
-                      key: ValueKey(_lines[index]),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                        Row(
-                        children: [
-                          Expanded(
-                            flex: 4,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _lines[index].accountId,
-                              isExpanded: true,
-                              decoration: InputDecoration(
-                                labelText: l10n.account,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
-                              ),
-                              items: [
-                                for (final account in postable)
-                                  DropdownMenuItem(
-                                    value: account.id,
-                                    child: Text(
-                                      accountLabel(
-                                        account,
-                                        Localizations.localeOf(
-                                          context,
-                                        ).languageCode,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                              ],
-                              onChanged: (value) => setState(
-                                () => _lines[index].accountId = value,
-                              ),
-                            ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: _description,
+                          decoration: InputDecoration(
+                            labelText: l10n.description,
+                            border: const OutlineInputBorder(),
                           ),
-                          const SizedBox(width: 8),
-                          // Offered only when the company actually keeps cost
-                          // centres; a company that does not use the dimension
-                          // sees the form it always saw.
-                          if (costCenters.isNotEmpty) ...[
-                            if (_lines[index].allocations.isNotEmpty)
-                              Expanded(
-                                flex: 3,
-                                child: InputDecorator(
-                                  decoration: InputDecoration(
-                                    labelText: l10n.costCenter,
-                                    isDense: true,
-                                    border: const OutlineInputBorder(),
-                                  ),
-                                  child: Text(
-                                    '${l10n.splitAcrossCenters} '
-                                    '(${_lines[index].allocations.length})',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              )
-                            else
-                            Expanded(
-                              flex: 3,
-                              child: DropdownButtonFormField<String>(
-                                initialValue: _lines[index].costCenterId,
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  labelText: l10n.costCenter,
-                                  isDense: true,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                items: [
-                                  DropdownMenuItem(
-                                    value: '',
-                                    child: Text(
-                                      l10n.noAllocation,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  for (final center in costCenters)
-                                    DropdownMenuItem(
-                                      value: text(center, 'id'),
-                                      child: Text(
-                                        costCenterLabel(center, language),
-                                        overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    children: [
+                      for (var index = 0; index < _lines.length; index++)
+                        Padding(
+                          key: ValueKey(_lines[index]),
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 4,
+                                    child: DropdownButtonFormField<String>(
+                                      initialValue: _lines[index].accountId,
+                                      isExpanded: true,
+                                      decoration: InputDecoration(
+                                        labelText: l10n.account,
+                                        isDense: true,
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                      items: [
+                                        if (_lines[index].accountId != null &&
+                                            !postable.any(
+                                              (account) =>
+                                                  account.id ==
+                                                  _lines[index].accountId,
+                                            ))
+                                          DropdownMenuItem(
+                                            value: _lines[index].accountId,
+                                            enabled: false,
+                                            child: Text(
+                                              language == 'ar'
+                                                  ? 'الحساب المحدد غير متاح'
+                                                  : 'Selected account unavailable',
+                                            ),
+                                          ),
+                                        for (final account in postable)
+                                          DropdownMenuItem(
+                                            value: account.id,
+                                            child: Text(
+                                              accountLabel(
+                                                account,
+                                                Localizations.localeOf(context)
+                                                    .languageCode,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (value) => setState(
+                                        () => _lines[index].accountId = value,
                                       ),
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Offered only when the company actually keeps cost
+                                  // centres; a company that does not use the dimension
+                                  // sees the form it always saw.
+                                  if (costCenters.isNotEmpty) ...[
+                                    if (_lines[index].allocations.isNotEmpty)
+                                      Expanded(
+                                        flex: 3,
+                                        child: InputDecorator(
+                                          decoration: InputDecoration(
+                                            labelText: l10n.costCenter,
+                                            isDense: true,
+                                            border: const OutlineInputBorder(),
+                                          ),
+                                          child: Text(
+                                            '${l10n.splitAcrossCenters} '
+                                            '(${_lines[index].allocations.length})',
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      Expanded(
+                                        flex: 3,
+                                        child: DropdownButtonFormField<String>(
+                                          initialValue:
+                                              _lines[index].costCenterId,
+                                          isExpanded: true,
+                                          decoration: InputDecoration(
+                                            labelText: l10n.costCenter,
+                                            isDense: true,
+                                            border: const OutlineInputBorder(),
+                                          ),
+                                          items: [
+                                            DropdownMenuItem(
+                                              value: '',
+                                              child: Text(
+                                                l10n.noAllocation,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            for (final center in costCenters)
+                                              DropdownMenuItem(
+                                                value: text(center, 'id'),
+                                                child: Text(
+                                                  costCenterLabel(
+                                                    center,
+                                                    language,
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                          ],
+                                          onChanged: (value) => setState(
+                                            () => _lines[index].costCenterId =
+                                                value == null || value.isEmpty
+                                                ? null
+                                                : value,
+                                          ),
+                                        ),
+                                      ),
+                                    const SizedBox(width: 4),
+                                    IconButton(
+                                      tooltip: l10n.splitAcrossCenters,
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        _lines[index].allocations.isEmpty
+                                            ? Icons.call_split
+                                            : Icons.merge_type,
+                                        size: 18,
+                                      ),
+                                      onPressed: () => setState(() {
+                                        final line = _lines[index];
+                                        if (line.allocations.isNotEmpty) {
+                                          for (final allocation
+                                              in line.allocations) {
+                                            allocation.dispose();
+                                          }
+                                          line.allocations.clear();
+                                          return;
+                                        }
+                                        final amount =
+                                            line.debit.text.trim().isNotEmpty
+                                            ? line.debit.text.trim()
+                                            : line.credit.text.trim();
+                                        line.allocations.add(
+                                          _AllocationDraft(
+                                            costCenterId: line.costCenterId,
+                                            amount: amount,
+                                          ),
+                                        );
+                                      }),
+                                    ),
+                                    const SizedBox(width: 4),
+                                  ],
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextField(
+                                      controller: _lines[index].debit,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      decoration: InputDecoration(
+                                        labelText: l10n.debit,
+                                        isDense: true,
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                      onChanged: (_) => setState(() {}),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextField(
+                                      controller: _lines[index].credit,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      decoration: InputDecoration(
+                                        labelText: l10n.credit,
+                                        isDense: true,
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                      onChanged: (_) => setState(() {}),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 3,
+                                    child: TextField(
+                                      controller: _lines[index].description,
+                                      decoration: InputDecoration(
+                                        labelText: l10n.lineDescription,
+                                        isDense: true,
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline),
+                                    onPressed: _lines.length <= 2
+                                        ? null
+                                        : () => setState(
+                                            () => _lines
+                                                .removeAt(index)
+                                                .dispose(),
+                                          ),
+                                  ),
                                 ],
-                                onChanged: (value) => setState(
-                                  () => _lines[index].costCenterId = value == null ||
-                                          value.isEmpty
-                                      ? null
-                                      : value,
-                                ),
                               ),
-                            ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              tooltip: l10n.splitAcrossCenters,
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                _lines[index].allocations.isEmpty
-                                    ? Icons.call_split
-                                    : Icons.merge_type,
-                                size: 18,
-                              ),
-                              onPressed: () => setState(() {
-                                final line = _lines[index];
-                                if (line.allocations.isNotEmpty) {
-                                  for (final allocation in line.allocations) {
-                                    allocation.dispose();
-                                  }
-                                  line.allocations.clear();
-                                  return;
-                                }
-                                final amount = line.debit.text.trim().isNotEmpty
-                                    ? line.debit.text.trim()
-                                    : line.credit.text.trim();
-                                line.allocations.add(
-                                  _AllocationDraft(
-                                    costCenterId: line.costCenterId,
-                                    amount: amount,
-                                  ),
-                                );
-                              }),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: _lines[index].debit,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              decoration: InputDecoration(
-                                labelText: l10n.debit,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
-                              ),
-                              onChanged: (_) => setState(() {}),
-                            ),
+                              if (_lines[index].allocations.isNotEmpty)
+                                _allocationEditor(index, costCenters, language),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: _lines[index].credit,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              decoration: InputDecoration(
-                                labelText: l10n.credit,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
-                              ),
-                              onChanged: (_) => setState(() {}),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: _lines[index].description,
-                              decoration: InputDecoration(
-                                labelText: l10n.lineDescription,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: _lines.length <= 2
-                                ? null
-                                : () => setState(
-                                    () => _lines.removeAt(index).dispose(),
-                                  ),
-                          ),
-                        ],
+                        ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _lines.add(_EntryLineDraft())),
+                          icon: const Icon(Icons.add),
+                          label: Text(l10n.addLine),
+                        ),
                       ),
-                      if (_lines[index].allocations.isNotEmpty)
-                        _allocationEditor(index, costCenters, language),
-                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                color: _balanced
+                    ? Theme.of(context).colorScheme.surfaceContainerHighest
+                    : Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _balanced
+                            ? Icons.verified_outlined
+                            : Icons.error_outline,
                       ),
-                    ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton.icon(
-                      onPressed: () =>
-                          setState(() => _lines.add(_EntryLineDraft())),
-                      icon: const Icon(Icons.add),
-                      label: Text(l10n.addLine),
-                    ),
+                      const SizedBox(width: 8),
+                      Text(_balanced ? l10n.balanced : l10n.entryUnbalanced),
+                      const Spacer(),
+                      Text(
+                        '${l10n.debit}: ${formatAmount(_totalDebit.toString())}',
+                      ),
+                      const SizedBox(width: 20),
+                      Text(
+                        '${l10n.credit}: ${formatAmount(_totalCredit.toString())}',
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 16),
-          Card(
-            color: _balanced
-                ? Theme.of(context).colorScheme.surfaceContainerHighest
-                : Theme.of(context).colorScheme.errorContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(
-                    _balanced ? Icons.verified_outlined : Icons.error_outline,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(_balanced ? l10n.balanced : l10n.entryUnbalanced),
-                  const Spacer(),
-                  Text('${l10n.debit}: ${formatAmount(_totalDebit.toString())}'),
-                  const SizedBox(width: 20),
-                  Text(
-                    '${l10n.credit}: ${formatAmount(_totalCredit.toString())}',
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -673,15 +879,18 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
   Widget _allocationEditor(int index, List<Json> costCenters, String language) {
     final l10n = context.l10n;
     final line = _lines[index];
-    final lineAmount = Decimal.tryParse(
-      line.debit.text.trim().isNotEmpty
-          ? line.debit.text.trim()
-          : line.credit.text.trim(),
-    ) ?? Decimal.zero;
+    final lineAmount =
+        Decimal.tryParse(
+          line.debit.text.trim().isNotEmpty
+              ? line.debit.text.trim()
+              : line.credit.text.trim(),
+        ) ??
+        Decimal.zero;
     final allocated = line.allocations.fold(
       Decimal.zero,
       (sum, allocation) =>
-          sum + (Decimal.tryParse(allocation.amount.text.trim()) ?? Decimal.zero),
+          sum +
+          (Decimal.tryParse(allocation.amount.text.trim()) ?? Decimal.zero),
     );
     final remaining = lineAmount - allocated;
     return Padding(
@@ -689,9 +898,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var position = 0;
-              position < line.allocations.length;
-              position++)
+          for (var position = 0; position < line.allocations.length; position++)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
@@ -756,9 +963,8 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
           Row(
             children: [
               TextButton.icon(
-                onPressed: () => setState(
-                  () => line.allocations.add(_AllocationDraft()),
-                ),
+                onPressed: () =>
+                    setState(() => line.allocations.add(_AllocationDraft())),
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(l10n.addAllocation),
               ),

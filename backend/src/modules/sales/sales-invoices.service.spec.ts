@@ -22,7 +22,7 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
       .mockResolvedValue({ id: 'reversal-id', entryNumber: 'JV-REV-1' }),
   };
   const warehouses = { resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID) };
-  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const audit = { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) };
   const service = new SalesInvoicesService(
     prisma as never,
     numbers as never,
@@ -167,8 +167,68 @@ describe('SalesInvoicesService.reverse', () => {
     );
     expect(numbers.next).not.toHaveBeenCalledWith(tx, COMPANY_ID, 'JOURNAL', 'JV');
     expect(tx.journalEntry.create).not.toHaveBeenCalled();
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'REVERSE', entity: 'sales_invoices' }),
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'REVERSE', entity: 'sales_invoices' }), tx,
     );
+  });
+});
+
+describe('SalesInvoicesService.prepareLines tax-price options', () => {
+  it('can preserve tax-exclusive quotation prices when the company includes tax in invoice prices', async () => {
+    const settings = {
+      get: jest.fn().mockResolvedValue({ pricesIncludeTax: true, maxDiscountPercent: '100' }),
+    };
+    const service = new SalesInvoicesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      settings as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const lines = [{ description: 'Taxable service', quantity: '1', unitPrice: '120', taxRate: '20' }];
+    const inclusive = await (service as any).prepareLines(
+      COMPANY_ID, lines, null, {}, undefined, {} as never,
+    );
+    const exclusive = await (service as any).prepareLines(
+      COMPANY_ID, lines, null, {}, undefined, {} as never, { pricesExcludeTax: true },
+    );
+
+    expect(inclusive.lines[0].lineTotal).toEqual(new Prisma.Decimal('100'));
+    expect(inclusive.lines[0].taxAmount).toEqual(new Prisma.Decimal('20'));
+    expect(exclusive.lines[0].lineTotal).toEqual(new Prisma.Decimal('120'));
+    expect(exclusive.lines[0].taxAmount).toEqual(new Prisma.Decimal('24'));
+  });
+});
+ 
+
+describe('SalesInvoicesService line tax defaults', () => {
+  it('treats omitted, null, blank and whitespace tax as zero without inheriting item or company tax', async () => {
+    const item = {
+      code: 'TAX-1', nameEn: 'Tax test item', taxRate: new Prisma.Decimal('14'),
+      salePrice: new Prisma.Decimal('100'), unit: 'piece', isActive: true, units: [],
+    };
+    const prisma = { item: { findFirst: jest.fn().mockResolvedValue(item) } };
+    const settings = { get: jest.fn().mockResolvedValue({ pricesIncludeTax: false, maxDiscountPercent: '100', taxRate: '14' }) };
+    const service = new SalesInvoicesService(
+      prisma as never, {} as never, {} as never, {} as never, settings as never,
+      {} as never, { resolvePrice: jest.fn() } as never, {} as never,
+    );
+    const lines = await (service as any).prepareLines(COMPANY_ID, [
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: null },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '   ' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: 0 },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '7' },
+    ], null, {});
+    expect(lines.lines.map((line: any) => line.taxRate.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+    expect(lines.lines.map((line: any) => line.taxAmount.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
   });
 });

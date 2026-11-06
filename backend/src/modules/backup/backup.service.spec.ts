@@ -4,6 +4,10 @@ import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit
 import { BackupController } from './backup.controller';
 import { BackupFile, BackupService } from './backup.service';
 
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
+
 describe('BackupService & BackupController (Company JSON Backup)', () => {
   const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
   let service: BackupService;
@@ -139,7 +143,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
   });
 
@@ -257,6 +261,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       }).toThrow(
         /هذا الملف هو أرشيف قاعدة بيانات PostgreSQL \(\.dump\) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON/,
       );
+      try {
+        (controller as any).parse(file);
+      } catch (error) {
+        expect((error as Error).message).toContain('الاستعادة الكاملة متوقفة');
+        expect((error as Error).message).not.toContain('/backup/full/restore');
+      }
     });
 
     test('accepts valid JSON file on company restore route', () => {

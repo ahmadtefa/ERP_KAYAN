@@ -5,6 +5,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateRoleDto {
@@ -23,6 +24,10 @@ export class UpdateRoleDto {
 export class SetRolePermissionsDto {
   @IsArray() @ArrayUnique() @IsString({ each: true })
   permissions!: string[];
+  /// A client may supply the set it read to reject a stale replacement.
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  expectedPermissions?: string[];
 }
 
 export class AssignRoleDto {

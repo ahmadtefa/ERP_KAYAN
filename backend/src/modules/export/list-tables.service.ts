@@ -268,6 +268,7 @@ export class ListTablesService {
                 { nameEn: { contains: query.q, mode: 'insensitive' as const } },
                 { nameAr: { contains: query.q, mode: 'insensitive' as const } },
                 { barcode: { contains: query.q, mode: 'insensitive' as const } },
+                { units: { some: { barcode: { contains: query.q, mode: 'insensitive' as const } } } },
               ],
             }
           : {}),

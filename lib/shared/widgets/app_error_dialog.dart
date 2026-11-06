@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../core/error/app_error_text.dart';
-import '../../core/logging/app_logger.dart';
 import '../../l10n/generated/app_localizations.dart';
+import '../../l10n/generated/app_localizations_ar.dart';
 import '../extensions/l10n_extension.dart';
 
 /// The one place a system error is shown.
@@ -16,15 +16,13 @@ import '../extensions/l10n_extension.dart';
 /// in their language.
 ///
 /// Rules it enforces:
-///  * never auto-dismisses — only "حسنًا" (or a tap outside / the back
-///    gesture, both of which are the user's own choice) closes it;
-///  * never stacks: a second error arriving while one is open is dropped
-///    and logged, so the person is not asked to dismiss five identical
-///    dialogs after a retry storm;
-///  * never shows a stack trace, an SQL fragment or a field name from the
-///    API — [AppErrorMessageResolver] decides the wording;
-///  * reads right-to-left in the Arabic interface, because the whole app is
-///    wrapped in a [Directionality] by the localisation delegates.
+///  * never auto-dismisses — the person must acknowledge it with "حسنًا";
+///  * never stacks: errors for one navigator wait for the preceding dialog
+///    to be acknowledged instead of silently losing a different failure;
+///  * uses [AppErrorMessageResolver] to withhold known technical patterns and
+///    server-error bodies; this is not a complete sensitive-data classifier;
+///  * uses Arabic and right-to-left direction even if the surrounding screen
+///    is in another language, as required for central error dialogs.
 class AppErrorDialog extends StatelessWidget {
   const AppErrorDialog({
     super.key,
@@ -38,12 +36,14 @@ class AppErrorDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final l10n = context.l10n;
+    final l10n = AppLocalizationsAr();
     final isWarning = severity == AppErrorSeverity.warning;
     final accent = isWarning ? AppColors.warning : theme.colorScheme.error;
     final soft = isWarning ? AppColors.warningSoft : AppColors.errorSoft;
 
-    return AlertDialog(
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
       // The title and the action sit at the start edge, which is the right
       // edge under RTL.
       titlePadding: const EdgeInsets.fromLTRB(
@@ -118,7 +118,7 @@ class AppErrorDialog extends StatelessWidget {
           child: Text(l10n.okAction),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -167,12 +167,9 @@ String presentErrorText(
   return defaultErrorMessage(context.l10n, text.reason);
 }
 
-/// True while an error dialog is on screen.
-///
-/// A single flag for the whole app on purpose: two errors arriving together
-/// (a save failing and its list reload failing, say) must not put two
-/// dialogs on top of each other.
-bool _errorDialogVisible = false;
+/// Serialize dialogs per navigator. An Expando does not keep a disposed
+/// navigator alive and a replacement navigator has its own independent queue.
+final Expando<Future<void>> _errorDialogTails = Expando<Future<void>>();
 
 /// Opens the central error dialog for [error].
 ///
@@ -187,41 +184,43 @@ Future<void> showAppError(
   if (!context.mounted) return;
   // Nowhere to show it (a screen that is being torn down). Dropping it is
   // better than an exception inside an error handler.
-  if (Navigator.maybeOf(context, rootNavigator: true) == null) return;
-  if (_errorDialogVisible) {
-    // Dropping it is deliberate: the person is already looking at an
-    // explanation, and a queue of identical dialogs is worse than one.
-    _log.warning('A second error arrived while the dialog was open; dropped');
-    return;
-  }
-
-  final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-  final resolved = AppErrorMessageResolver(
-    isArabic: isArabic,
+  final navigator = Navigator.maybeOf(context, rootNavigator: true);
+  if (navigator == null) return;
+  final resolved = const AppErrorMessageResolver(
+    isArabic: true,
   ).resolve(error, statusCode: statusCode);
   final business = resolved.businessMessage;
   final message = business != null && business.trim().isNotEmpty
       ? business
-      : defaultErrorMessage(context.l10n, resolved.reason);
+      : defaultErrorMessage(AppLocalizationsAr(), resolved.reason);
 
-  _errorDialogVisible = true;
-  try {
+  final previous = _errorDialogTails[navigator];
+  final ready = previous == null
+      ? Future<void>.value()
+      // The previous caller still receives its error; do not poison the queue.
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+  final next = ready.then<void>((_) async {
+    if (!navigator.mounted) return;
     await showDialog<void>(
-      context: context,
-      // A tap outside or the back gesture closes it — both are the user's
-      // decision. Nothing closes it on a timer.
-      barrierDismissible: true,
+      context: navigator.context,
+      barrierDismissible: false,
       useRootNavigator: true,
-      builder: (_) =>
-          AppErrorDialog(message: message, severity: resolved.severity),
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AppErrorDialog(message: message, severity: resolved.severity),
+      ),
     );
+  });
+  _errorDialogTails[navigator] = next;
+  try {
+    await next;
   } finally {
-    _errorDialogVisible = false;
+    if (identical(_errorDialogTails[navigator], next)) {
+      _errorDialogTails[navigator] = null;
+    }
   }
 }
 
 /// Convenience for the many call sites that already hold a message string.
 Future<void> showAppErrorMessage(BuildContext context, String message) =>
     showAppError(context, message);
-
-final _log = AppLogger.of('AppErrorDialog');

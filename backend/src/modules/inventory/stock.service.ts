@@ -18,6 +18,7 @@ export class StockService {
   async balances(
     companyId: string,
     filters: { branchId?: string; itemId?: string; onlyInStock?: boolean },
+    mayReadCost = true,
   ) {
     const where: Prisma.StockBalanceWhereInput = { companyId };
     if (filters.branchId) where.branchId = filters.branchId;
@@ -51,8 +52,9 @@ export class StockService {
         branchId: r.branchId,
         branchCode: r.branch.code,
         quantity: quantity.toFixed(MONEY_SCALE),
-        value: value.toFixed(MONEY_SCALE),
-        averageCost: averageCost.toFixed(MONEY_SCALE),
+        // Valuation and average cost are cost figures: redact without cost.read.
+        value: mayReadCost ? value.toFixed(MONEY_SCALE) : null,
+        averageCost: mayReadCost ? averageCost.toFixed(MONEY_SCALE) : null,
       };
     });
 
@@ -126,7 +128,7 @@ export class StockService {
     }));
   }
 
-  async itemLedger(companyId: string, itemId: string) {
+  async itemLedger(companyId: string, itemId: string, mayReadCost = true) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, nameEn: true, nameAr: true, unit: true },
@@ -165,13 +167,14 @@ export class StockService {
           warehouseNameEn: m.warehouse?.nameEn ?? null,
           warehouseNameAr: m.warehouse?.nameAr ?? null,
           quantity: m.quantity.toFixed(MONEY_SCALE),
-          unitCost: m.unitCost.toFixed(MONEY_SCALE),
-          totalCost: m.totalCost.toFixed(MONEY_SCALE),
+          // Ledger money columns reveal unit cost: redact without cost.read.
+          unitCost: mayReadCost ? m.unitCost.toFixed(MONEY_SCALE) : null,
+          totalCost: mayReadCost ? m.totalCost.toFixed(MONEY_SCALE) : null,
           referenceType: m.referenceType,
           referenceNumber: m.referenceNumber,
           notes: m.notes,
           runningQuantity: runningQty.toFixed(MONEY_SCALE),
-          runningValue: runningValue.toFixed(MONEY_SCALE),
+          runningValue: mayReadCost ? runningValue.toFixed(MONEY_SCALE) : null,
         };
       }),
     };

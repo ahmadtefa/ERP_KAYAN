@@ -6,6 +6,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { validateEnvironment } from './common/config/validate-environment';
 import { CompanySettingsModule } from './common/settings/company-settings.module';
 import { AuditModule } from './common/audit/audit.module';
+import { LicensingModule } from './modules/licensing/licensing.module';
+import { LicenseGuard } from './modules/licensing/license.guard';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { WarehouseModule } from './common/warehouse/warehouse.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -36,6 +38,7 @@ import { SearchModule } from './modules/search/search.module';
     // Global so the authentication guard can inject JwtService anywhere.
     JwtModule.register({ global: true }),
     PrismaModule,
+    LicensingModule,
     // Global: every posting path reads the company's policies from here.
     CompanySettingsModule,
     // Global: every module that moves goods asks which warehouse it moved in.
@@ -71,6 +74,9 @@ import { SearchModule } from './modules/search/search.module';
     // is a rule about every route, so it must not depend on which modules
     // happen to be imported. (It used to ride in with AccountingModule.)
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // Last: an expired or suspended licence stops business routes, while the
+    // licence screen, sign-in and the backup routes stay open (see the guard).
+    { provide: APP_GUARD, useClass: LicenseGuard },
   ],
 })
 export class AppModule {}

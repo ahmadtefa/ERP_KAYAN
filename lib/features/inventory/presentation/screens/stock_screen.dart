@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/data_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
@@ -12,17 +12,13 @@ import '../../../../shared/widgets/resizable_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
+import '../providers/stock_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import 'stock_vouchers_screen.dart';
 
-class StockController extends JsonListController {
-  @override
-  String get resourcePath => '/inventory/stock';
-}
-
-final stockListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(StockController.new);
+export '../providers/stock_providers.dart'
+    show stockListProvider, StockController;
 
 /// Stock on hand per item and branch, with the moving average cost the ledger
 /// is carrying.
@@ -31,7 +27,8 @@ final stockListProvider =
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key});
+  const StockScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<StockScreen> createState() => _StockScreenState();
@@ -39,15 +36,73 @@ class StockScreen extends ConsumerStatefulWidget {
 
 class _StockScreenState extends ConsumerState<StockScreen> {
   String _query = '';
+  late final DraftExitGuard _exitGuard;
+  final _exitRelay = DraftExitRelay();
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
+
+  Future<void> _openVouchers() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => StockVouchersScreen(exitRelay: _exitRelay),
+      ),
+    );
+    if (mounted) ref.invalidate(stockListProvider);
+  }
+
+  Future<void> _openCostCenterReport() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const StockCostCenterReportScreen()),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(stockListProvider);
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
 
     return ModuleScaffold(
       title: l10n.stockBalances,
-      actions: const [ListExportActions(list: 'stock')],
+      actions: [
+        IconButton(
+          tooltip: l10n.refresh,
+          icon: const Icon(Icons.refresh),
+          onPressed: () => ref.read(stockListProvider.notifier).reload(),
+        ),
+        OutlinedButton.icon(
+          onPressed: _openVouchers,
+          icon: const Icon(Icons.inventory_2_outlined),
+          label: Text(
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'أذون المخزون'
+                : 'Stock vouchers',
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _openCostCenterReport,
+          icon: const Icon(Icons.account_tree_outlined),
+          label: Text(
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'حركة المخزون حسب مركز التكلفة'
+                : 'Stock by cost center',
+          ),
+        ),
+        const ListExportActions(list: 'stock'),
+      ],
       trailing: SearchField(
         hint: l10n.searchItems,
         onChanged: (value) => setState(() => _query = value.trim()),
@@ -61,7 +116,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
           final visible = _filter(rows);
           return Column(
             children: [
-              _Totals(rows: visible),
+              _Totals(rows: visible, canReadCost: canReadCost),
               Expanded(
                 child: RecordsTable(
                   rows: visible,
@@ -80,16 +135,18 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                       numeric: true,
                       value: (r) => formatQuantity(asString(r['quantity'])),
                     ),
-                    ColumnSpec(
-                      l10n.averageCost,
-                      numeric: true,
-                      value: (r) => formatAmount(asString(r['averageCost'])),
-                    ),
-                    ColumnSpec(
-                      l10n.stockValue,
-                      numeric: true,
-                      value: (r) => formatAmount(asString(r['value'])),
-                    ),
+                    if (canReadCost)
+                      ColumnSpec(
+                        l10n.averageCost,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['averageCost'])),
+                      ),
+                    if (canReadCost)
+                      ColumnSpec(
+                        l10n.stockValue,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['value'])),
+                      ),
                   ],
                 ),
               ),
@@ -131,13 +188,114 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   }
 }
 
+/// Attributes append-only stock movements through their saved source document.
+class StockCostCenterReportScreen extends ConsumerStatefulWidget {
+  const StockCostCenterReportScreen({super.key});
+  @override
+  ConsumerState<StockCostCenterReportScreen> createState() =>
+      _StockCostCenterReportScreenState();
+}
+
+class _StockCostCenterReportScreenState
+    extends ConsumerState<StockCostCenterReportScreen> {
+  late Future<Json> _future;
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<Json> _load() => ref
+      .read(apiClientProvider)
+      .getObject('/inventory/reports/cost-center-movements');
+  void _refresh() => setState(() {
+    _future = _load();
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          arabic ? 'حركة المخزون حسب مركز التكلفة' : 'Stock by cost center',
+        ),
+        actions: [
+          IconButton(
+            tooltip: arabic ? 'تحديث' : 'Refresh',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: FutureBuilder<Json>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return ErrorView(message: snapshot.error!, onRetry: _refresh);
+          }
+          if (!snapshot.hasData) return const SizedBox.shrink();
+          final data = snapshot.data!;
+          final totals = listOf(data['totals']);
+          final movements = listOf(data['items']);
+          if (movements.isEmpty) {
+            return Center(
+              child: Text(
+                arabic ? 'لا توجد حركات مخزنية' : 'No stock movements',
+              ),
+            );
+          }
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              for (final total in totals)
+                Card(
+                  child: ListTile(
+                    title: Text(
+                      text(total, 'costCenterCode').isEmpty
+                          ? (arabic
+                                ? 'حركات قديمة بلا مركز تكلفة'
+                                : 'Legacy movements without a cost center')
+                          : '${text(total, 'costCenterCode')} • ${arabic ? text(total, 'costCenterNameAr', fallback: text(total, 'costCenterNameEn')) : text(total, 'costCenterNameEn')}',
+                    ),
+                    subtitle: Text(
+                      '${arabic ? 'الحركات' : 'Movements'}: ${text(total, 'movementCount')} • ${arabic ? 'داخل' : 'In'}: ${text(total, 'quantityIn')} • ${arabic ? 'خارج' : 'Out'}: ${text(total, 'quantityOut')}'
+                      '${canReadCost ? ' • ${arabic ? 'صافي القيمة' : 'Net value'}: ${text(total, 'netValue')}' : ''}',
+                    ),
+                  ),
+                ),
+              const Divider(),
+              for (final row in movements)
+                ListTile(
+                  title: Text(
+                    '${text(row, 'referenceNumber', fallback: text(row, 'referenceType'))} • ${text(row, 'itemCode')} • ${arabic ? text(row, 'itemNameAr', fallback: text(row, 'itemNameEn')) : text(row, 'itemNameEn')}',
+                  ),
+                  subtitle: Text(
+                    '${text(row, 'movementDate')} • ${text(row, 'direction') == 'IN' ? (arabic ? 'دخول' : 'IN') : (arabic ? 'خروج' : 'OUT')} ${text(row, 'quantity')} ${text(row, 'unit')} • ${text(row, 'costCenterCode', fallback: arabic ? 'بلا مركز' : 'No center')}',
+                  ),
+                  trailing: canReadCost ? Text(text(row, 'value')) : null,
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _Totals extends StatelessWidget {
-  const _Totals({required this.rows});
+  const _Totals({required this.rows, required this.canReadCost});
 
   /// The number of decimals the API sends amounts with.
   static const scale = 4;
 
   final List<Json> rows;
+  final bool canReadCost;
 
   @override
   Widget build(BuildContext context) {
@@ -157,11 +315,13 @@ class _Totals extends StatelessWidget {
             '${l10n.totalQuantity}: ${_show(quantity, scale)}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(width: 24),
-          Text(
-            '${l10n.totalValue}: ${_show(value, scale)}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          if (canReadCost) ...[
+            const SizedBox(width: 24),
+            Text(
+              '${l10n.totalValue}: ${rows.every((row) => RegExp(r'^-?\d+(?:\.\d{1,4})?$').hasMatch(asString(row['value']) ?? '')) ? _show(value, scale) : '—'}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
         ],
       ),
     );
@@ -172,14 +332,18 @@ class _Totals extends StatelessWidget {
     final negative = raw.startsWith('-');
     final parts = (negative ? raw.substring(1) : raw).split('.');
     final fraction = parts.length > 1 ? parts[1] : '';
-    final digits = '${parts.first}${fraction.padRight(scale, '0').substring(0, scale)}';
+    final digits =
+        '${parts.first}${fraction.padRight(scale, '0').substring(0, scale)}';
     final parsed = BigInt.tryParse(digits) ?? BigInt.zero;
     return negative ? -parsed : parsed;
   }
 
   String _show(BigInt value, int scale) {
     final negative = value.isNegative;
-    final digits = (negative ? -value : value).toString().padLeft(scale + 1, '0');
+    final digits = (negative ? -value : value).toString().padLeft(
+      scale + 1,
+      '0',
+    );
     final whole = digits.substring(0, digits.length - scale);
     final fraction = digits.substring(digits.length - scale);
     return '${negative ? '-' : ''}$whole.$fraction';
@@ -225,6 +389,8 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 
@@ -237,9 +403,20 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 24,
             runSpacing: 8,
             children: [
-              _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
-              _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
-              _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
+              _stat(
+                l10n.onHand,
+                formatQuantity(asString(widget.row['quantity'])),
+              ),
+              if (canReadCost)
+                _stat(
+                  l10n.averageCost,
+                  formatAmount(asString(widget.row['averageCost'])),
+                ),
+              if (canReadCost)
+                _stat(
+                  l10n.stockValue,
+                  formatAmount(asString(widget.row['value'])),
+                ),
               _stat(l10n.branch, text(widget.row, 'branchCode')),
             ],
           ),
@@ -307,8 +484,10 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                 if (snapshot.hasError) {
                   final error = snapshot.error!;
                   return ErrorView(
-                    message: error is Failure ? error.message : '$error',
-                    onRetry: () => setState(() => _future = _load()),
+                    message: error,
+                    onRetry: () => setState(() {
+                      _future = _load();
+                    }),
                   );
                 }
                 if (!snapshot.hasData) return const LoadingView();
@@ -346,25 +525,27 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                         numeric: true,
                         value: (r) => formatQuantity(asString(r['quantity'])),
                       ),
-                      ResizableColumn(
-                        l10n.unitPrice,
-                        width: 120,
-                        numeric: true,
-                        value: (r) => formatAmount(asString(r['unitCost'])),
-                      ),
-                      ResizableColumn(
-                        l10n.lineTotal,
-                        width: 120,
-                        numeric: true,
-                        value: (r) => formatAmount(asString(r['totalCost'])),
-                      ),
+                      if (canReadCost)
+                        ResizableColumn(
+                          l10n.unitPrice,
+                          width: 120,
+                          numeric: true,
+                          value: (r) => formatAmount(asString(r['unitCost'])),
+                        ),
+                      if (canReadCost)
+                        ResizableColumn(
+                          l10n.lineTotal,
+                          width: 120,
+                          numeric: true,
+                          value: (r) => formatAmount(asString(r['totalCost'])),
+                        ),
                       ResizableColumn(
                         l10n.runningBalance,
                         width: 190,
                         numeric: true,
-                        value: (r) =>
-                            '${formatQuantity(asString(r['runningQuantity']))} / '
-                            '${formatAmount(asString(r['runningValue']))}',
+                        value: (r) => canReadCost
+                            ? '${formatQuantity(asString(r['runningQuantity']))} / ${formatAmount(asString(r['runningValue']))}'
+                            : formatQuantity(asString(r['runningQuantity'])),
                       ),
                     ],
                   ),

@@ -4,6 +4,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { StockService } from './stock.service';
 
 interface StockQuery {
@@ -20,11 +21,15 @@ export class StockController {
   @Get()
   @RequirePermissions('inventory.stock.read')
   balances(@CurrentUser() user: AuthUser, @Query() query: StockQuery) {
-    return this.service.balances(user.companyId, {
-      branchId: query.branchId,
-      itemId: query.itemId,
-      onlyInStock: query.onlyInStock === 'true',
-    });
+    return this.service.balances(
+      user.companyId,
+      {
+        branchId: query.branchId,
+        itemId: query.itemId,
+        onlyInStock: query.onlyInStock === 'true',
+      },
+      canReadCost(user),
+    );
   }
 
   /// The same balances split by the warehouse the movements name. The
@@ -45,6 +50,6 @@ export class StockController {
   @Get(':itemId/ledger')
   @RequirePermissions('inventory.stock.read')
   ledger(@CurrentUser() user: AuthUser, @Param('itemId') itemId: string) {
-    return this.service.itemLedger(user.companyId, itemId);
+    return this.service.itemLedger(user.companyId, itemId, canReadCost(user));
   }
 }

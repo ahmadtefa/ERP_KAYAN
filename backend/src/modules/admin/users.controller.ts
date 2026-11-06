@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -35,13 +36,18 @@ export class UsersController {
   }
 
   @Post()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateUserDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
     return this.users.create(
       user.companyId,
       user.userId,
       dto,
       user.permissions,
       user.isSuperAdmin,
+      idempotencyKey?.trim() || undefined,
     );
   }
 

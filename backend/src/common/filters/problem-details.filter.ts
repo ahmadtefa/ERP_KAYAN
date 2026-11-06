@@ -30,9 +30,20 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     // what is really a readable business refusal — the period is closed.
     const exceptionText =
       exception instanceof Error ? exception.message : String(exception ?? '');
-    const isClosedPeriodTrigger =
+    const isPrismaDatabaseError =
+      exception instanceof Prisma.PrismaClientKnownRequestError ||
+      exception instanceof Prisma.PrismaClientUnknownRequestError;
+    const isClosedPeriodTrigger = isPrismaDatabaseError && (
       exceptionText.includes('Fiscal period is closed for company') ||
-      exceptionText.includes('kayan_require_open_fiscal_period');
+      exceptionText.includes('kayan_require_open_fiscal_period'));
+
+    // The cash-voucher reconciliation trigger (SQLSTATE 23P01) is a database
+    // backstop for the same claim race the service serialises with row locks:
+    // a voucher already matched to one reconciliation cannot be moved to
+    // another. Surface it as a readable conflict instead of an opaque 500.
+    const isVoucherClaimTrigger = isPrismaDatabaseError && exceptionText.includes(
+      'is already matched to reconciliation',
+    );
 
     const rawStatus =
       typeof exception === 'object' && exception !== null && 'status' in exception
@@ -43,7 +54,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
     const status = isUniqueConstraint
       ? HttpStatus.CONFLICT
-      : isClosedPeriodTrigger
+      : isVoucherClaimTrigger
+        ? HttpStatus.CONFLICT
+        : isClosedPeriodTrigger
         ? HttpStatus.BAD_REQUEST
         : requestTooLarge
         ? HttpStatus.PAYLOAD_TOO_LARGE
@@ -58,12 +71,19 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
+    } else if (isVoucherClaimTrigger) {
+      detail =
+        'One of the selected vouchers is already matched to another bank reconciliation.';
     } else if (isClosedPeriodTrigger) {
       detail =
         'The fiscal period covering this date is closed, so nothing can be posted into it. ' +
         'Use a date in an open period instead.';
     } else if (requestTooLarge) {
       // Keep the bounded-upload explanation above; do not expose parser text.
+    } else if (status === HttpStatus.INTERNAL_SERVER_ERROR && exception instanceof HttpException) {
+      // An explicit HttpException(500) can contain just as much sensitive
+      // detail as any other unexpected exception. Never forward its body.
+      this.logger.error('Unhandled server error (HTTP 500)');
     } else if (exception instanceof HttpException) {
       const body = exception.getResponse();
       if (typeof body === 'string') {
@@ -77,12 +97,28 @@ export class ProblemDetailsFilter implements ExceptionFilter {
               ? (b.message as string[]).join('; ')
               : String(b.message ?? detail);
         if (b.errors) extra = { errors: b.errors };
+        // A machine-readable reason travels with the sentence: the client uses
+        // it to open the right screen (an expired licence is not a permission
+        // problem), and it is safe to show - it names a category, not a secret.
+        if (typeof b.code === 'string' && /^[A-Z0-9_]{3,64}$/.test(b.code)) {
+          extra = { ...extra, code: b.code };
+        }
+        if (b.license && typeof b.license === 'object') {
+          extra = { ...extra, license: b.license };
+        }
       }
     } else {
-      this.logger.error(
-        'Unhandled exception',
-        exception instanceof Error ? exception.stack : String(exception),
-      );
+      // Database/HTTP stacks and arbitrary thrown values may contain query
+      // arguments, connection strings or file contents. Keep only a bounded
+      // diagnostic category/code; never pass the object or stack to Logger.
+      const databaseCode = exception instanceof Prisma.PrismaClientKnownRequestError &&
+        /^P[0-9]{4}$/.test(exception.code) ? exception.code : null;
+      const category = databaseCode ? `Prisma ${databaseCode}`
+        : exception instanceof TypeError ? 'TypeError'
+        : exception instanceof RangeError ? 'RangeError'
+        : exception instanceof SyntaxError ? 'SyntaxError'
+        : 'unclassified';
+      this.logger.error(`Unhandled server error (${category})`);
     }
 
     response.status(status).json({

@@ -10,7 +10,6 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["queryCompiler", "driverAdapters"]
   engineType        = "client"
 }
 
@@ -91,6 +90,8 @@ model Company {
   priceLists     PriceList[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
+
+  userProfilePhotos UserProfilePhoto[]
 
   @@map("companies")
 }
@@ -180,9 +181,23 @@ model User {
   refreshToken RefreshToken[]
   auditLogs    AuditLog[]
   journalEntry JournalEntry[]   @relation("JournalCreatedBy")
+  profilePhoto UserProfilePhoto?
 
   @@index([companyId])
   @@map("users")
+}
+
+model UserProfilePhoto {
+  userId    String   @id @db.Uuid
+  companyId String   @db.Uuid
+  data      Bytes
+  mime      String   @db.VarChar(64)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("user_profile_photos")
 }
 
 model Role {
@@ -480,6 +495,7 @@ model CostCenter {
   budgets         Budget[]         @relation("CostCenterBudgets")
   fixedAssets     FixedAsset[]
   stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
+  stockMovements  StockMovement[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -657,7 +673,7 @@ model CompanySetting {
 
   /// Default VAT rate in percent, used when neither the item nor the line
   /// carries one. 0 means "this company does not charge VAT".
-  taxRate Decimal @default(14) @db.Decimal(9, 4)
+  taxRate Decimal @default(0) @db.Decimal(9, 4)
 
   /// When true, the prices typed on a sales line already include VAT and the
   /// tax is backed out of them instead of being added.
@@ -1015,6 +1031,13 @@ model StockDocument {
   fromWarehouseId String?          @db.Uuid
   toWarehouseId   String?          @db.Uuid
   status         InvoiceStatus     @default(DRAFT)
+  editVersion    Int               @default(0)
+  voucherKind    String?           @db.VarChar(10)
+  counterpartyName String?          @db.VarChar(200)
+  reviewedAt     DateTime?
+  reviewedBy     String?           @db.Uuid
+  approvedAt     DateTime?
+  approvedBy     String?           @db.Uuid
   reason         String?
   notes          String?
 
@@ -1038,11 +1061,26 @@ model StockDocument {
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
+  creationRequests StockDocumentCreationRequest[]
 
   @@unique([companyId, documentNumber])
   @@index([companyId, kind, documentDate])
   @@index([costCenterId])
   @@map("stock_documents")
+}
+
+/// Idempotency records for stock-document creation; legacy clients may omit a key.
+model StockDocumentCreationRequest {
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  requestKey  String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  documentId  String @db.Uuid
+  createdAt   DateTime @default(now())
+  document    StockDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, requestKey])
+  @@map("stock_document_creation_requests")
 }
 
 model StockDocumentLine {
@@ -1054,6 +1092,11 @@ model StockDocumentLine {
   countedQuantity Decimal? @db.Decimal(19, 4)
   notes           String?
   lineNumber      Int
+
+  // ── Multi-unit snapshot (null on legacy rows). `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
 
   document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -1362,6 +1405,9 @@ model StockMovement {
   /// before warehouses existed, or without naming one; the warehouse reports
   /// treat it as the branch's default warehouse.
   warehouseId  String?        @db.Uuid
+  /// Snapshot of the source stock document's analytical dimension. Null is
+  /// valid for legacy movements and for internal warehouse transfers.
+  costCenterId String?        @db.Uuid
   itemId       String         @db.Uuid
   movementDate DateTime       @db.Date
   direction    StockDirection
@@ -1381,10 +1427,12 @@ model StockMovement {
   branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
   item      Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
 
   @@index([companyId, itemId, movementDate])
   @@index([companyId, referenceType, referenceId])
   @@index([companyId, warehouseId, itemId])
+  @@index([companyId, costCenterId, movementDate])
   @@map("stock_movements")
 }
 
@@ -1464,6 +1512,8 @@ model SalesInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   salesOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1490,6 +1540,7 @@ model SalesInvoice {
   /// makes a second conversion impossible even under two simultaneous clicks.
   sourceQuotation Quotation?
 
+  @@unique([companyId, salesOrderId, orderConversionKey], map: "sales_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1499,6 +1550,7 @@ model SalesInvoice {
 model SalesInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1550,6 +1602,21 @@ model SalesInvoiceLine {
   /// historical invoices keep meaning exactly what they meant before.
   costCenterId String? @db.Uuid
 
+  // ── Multi-unit of measure snapshot ──────────────────────────────────────
+  // All three are null on rows written before multi-unit existed. A null row
+  // behaves exactly as before: `quantity` is the entered quantity in the
+  // item's base unit and `unitPrice` is the price of that base unit. On a new
+  // row they record what the user actually chose, frozen at document time so a
+  // later change to the item's unit factor or price never rewrites history.
+  // `quantity` always stays the internal, base-unit quantity used by stock.
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 1 carton).
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  orderLine SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1557,6 +1624,7 @@ model SalesInvoiceLine {
   returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("sales_invoice_lines")
 }
@@ -1602,6 +1670,8 @@ model PurchaseInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   purchaseOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1623,6 +1693,7 @@ model PurchaseInvoice {
   originalInvoice PurchaseInvoice?  @relation("PurchaseReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returns         PurchaseInvoice[] @relation("PurchaseReturns")
 
+  @@unique([companyId, purchaseOrderId, orderConversionKey], map: "purchase_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1632,6 +1703,7 @@ model PurchaseInvoice {
 model PurchaseInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1668,6 +1740,15 @@ model PurchaseInvoiceLine {
   /// cost was incurred for. Optional, and never guessed for old rows.
   costCenterId String? @db.Uuid
 
+  // ── Multi-unit of measure snapshot (null on legacy rows; see SalesInvoiceLine) ──
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 5 cartons).
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  orderLine PurchaseOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1675,6 +1756,7 @@ model PurchaseInvoiceLine {
   returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("purchase_invoice_lines")
 }
@@ -1964,12 +2046,21 @@ model ItemUnit {
   barcode       String?
   salePrice     Decimal? @db.Decimal(19, 4)
   purchasePrice Decimal? @db.Decimal(19, 4)
+  isDefaultSale Boolean  @default(false)
+  isDefaultPurchase Boolean @default(false)
+
+  /// A unit used on a saved document is never hard-deleted: it is deactivated
+  /// instead, so old documents still name a unit that exists. New documents
+  /// reject an inactive unit.
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@unique([itemId, unit])
+  @@index([itemId, isActive])
   @@map("item_units")
 }
 
@@ -2083,6 +2174,12 @@ model PurchaseOrderLine {
 
   notes String?
 
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  invoiceLines PurchaseInvoiceLine[]
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2146,6 +2243,12 @@ model SalesOrderLine {
 
   notes String?
 
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  invoiceLines SalesInvoiceLine[]
   order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2256,4 +2359,117 @@ model Budget {
   @@index([companyId, costCenterId])
   @@index([accountId])
   @@map("budgets")
+}
+
+// ------------------------------------------------------- offline licensing
+//
+// The licence belongs to the installation, not to a company: one machine runs
+// one KAYAN database, and the company rows inside it are the customer's
+// business data. Nothing here is derived from the company name, the tax
+// number or the books - only from the machine id and the signed keys the
+// operator issues with the offline key generator.
+//
+// These tables are deliberately not part of the company JSON backup: a
+// restored backup must not be able to roll the seat counter back. The
+// protected state file beside the database is the watermark, and the restore
+// path re-syncs it after the rows come back (see LicensingService.reconcile).
+
+model LicenseInstallation {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// The identifier the issuing tool wrote into every key it made.
+  licenseId    String    @unique
+  machineId    String
+  /// Free text the operator typed into the issuing tool. Never the company's
+  /// trade name, tax number or anything read from the books.
+  customerRef  String?
+  issuedAt     DateTime
+  startsAt     DateTime
+  /// null means perpetual: no renewal date and no expiry.
+  expiresAt    DateTime?
+  seatLimit    Int
+  /// ACTIVE, or SUSPENDED when a confirmed clock tamper stops the program.
+  status       String    @default("ACTIVE")
+  lastKeyId    String?
+  lastSeenAt   DateTime?
+  clockState   String    @default("OK")
+  clockNote    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("license_installations")
+}
+
+/// Every key this installation has accepted, once.
+///
+/// `keyId` is unique, which is what makes re-entering the same renewal (or the
+/// same seat increase) a no-op instead of a second grant: the insert fails and
+/// the service answers "already applied".
+model LicenseKeyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  keyId       String   @unique
+  licenseId   String
+  type        String
+  payloadJson String   @db.Text
+  /// Original verified signed key. Null on legacy rows that predate this field;
+  /// payloadJson alone is not cryptographic proof and cannot recover a licence.
+  signedKey   String?  @db.Text
+  machineId   String?
+  appliedAt   DateTime @default(now())
+  appliedBy   String?  @db.Uuid
+  ipAddress   String?
+  note        String?
+
+  @@index([licenseId])
+  @@map("license_keys")
+}
+
+/// One row per user account ever created through this installation.
+///
+/// The row survives the user: deleting or deactivating an account does not
+/// give the seat back, which is the whole point of counting here rather than
+/// counting `users`. Existing accounts are inserted by the migration.
+model LicenseSeatUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Null for rows the migration wrote before a licence existed.
+  licenseId      String?
+  userId         String?  @db.Uuid
+  username       String
+  /// SETUP_ADMIN, USER_CREATE or MIGRATION_EXISTING.
+  reason         String
+  /// Prevents a retried request from consuming a second seat.
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([licenseId])
+  @@index([userId])
+  @@map("license_seat_usage")
+}
+
+/// The licence's own history: issued, renewed, seats, transferred, clock
+/// warnings. Append-only from the application's point of view.
+model LicenseEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  licenseId   String?
+  type        String
+  detail      String?  @db.Text
+  occurredAt  DateTime @default(now())
+
+  @@index([licenseId, occurredAt])
+  @@map("license_events")
+}
+
+/// Durable identities for retrying order creation and draft edits.
+/// Legacy order-creation clients may omit a key; draft edits require one.
+model OrderCreationRequest {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @db.Uuid
+  branchId  String @db.Uuid
+  kind      String @db.VarChar(8)
+  requestKey String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  orderId   String @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, branchId, kind, requestKey])
+  @@map("order_creation_requests")
 }
