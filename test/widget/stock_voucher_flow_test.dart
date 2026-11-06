@@ -70,11 +70,12 @@ class _VoucherApi extends ApiClient {
         },
       ];
     }
-    if (path == '/inventory/warehouses')
+    if (path == '/inventory/warehouses') {
       return [
         {'id': 'warehouse', 'code': 'WH', 'nameEn': 'Warehouse'},
       ];
-    if (path == '/accounting/cost-centers')
+    }
+    if (path == '/accounting/cost-centers') {
       return [
         {
           'id': 'center',
@@ -83,6 +84,7 @@ class _VoucherApi extends ApiClient {
           'isActive': true,
         },
       ];
+    }
     return [];
   }
 
@@ -176,7 +178,7 @@ class _BilingualVoucherApi extends _VoucherApi {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path == '/inventory/warehouses')
+    if (path == '/inventory/warehouses') {
       return [
         {
           'id': 'warehouse',
@@ -185,7 +187,8 @@ class _BilingualVoucherApi extends _VoucherApi {
           'nameEn': 'Test warehouse',
         },
       ];
-    if (path == '/accounting/cost-centers')
+    }
+    if (path == '/accounting/cost-centers') {
       return [
         {
           'id': 'center',
@@ -195,7 +198,8 @@ class _BilingualVoucherApi extends _VoucherApi {
           'isActive': true,
         },
       ];
-    if (path == '/inventory/items')
+    }
+    if (path == '/inventory/items') {
       return [
         {
           'id': 'item',
@@ -205,6 +209,7 @@ class _BilingualVoucherApi extends _VoucherApi {
           'unit': 'piece',
         },
       ];
+    }
     return super.getList(path, query: query);
   }
 
@@ -251,8 +256,9 @@ class _EditVoucherApi extends _VoucherApi {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path != '/inventory/stock-documents/document')
+    if (path != '/inventory/stock-documents/document') {
       return super.getObject(path, query: query);
+    }
     return {
       'id': 'document',
       'documentNumber': 'SA-1',
@@ -548,10 +554,12 @@ void main() {
           find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),
           findsNothing,
         );
-        if (target == 'list')
+        if (target == 'list') {
           expect(find.text('No vouchers on this page'), findsOneWidget);
-        if (target == 'detail')
+        }
+        if (target == 'detail') {
           expect(find.textContaining('SA-1'), findsOneWidget);
+        }
         if (target == 'create') expect(find.text('Save draft'), findsOneWidget);
         if (target == 'history') expect(find.text('History'), findsOneWidget);
       },
@@ -629,11 +637,12 @@ void main() {
           find.widgetWithText(TextFormField, 'Quantity in selected unit'),
           '2',
         );
-        if (kind == 'RECEIPT')
+        if (kind == 'RECEIPT') {
           await tester.enterText(
             find.widgetWithText(TextFormField, 'Base unit cost'),
             '7.5',
           );
+        }
         await tester.ensureVisible(find.text('Save draft'));
         await tester.tap(find.text('Save draft'));
         await tester.pumpAndSettle();

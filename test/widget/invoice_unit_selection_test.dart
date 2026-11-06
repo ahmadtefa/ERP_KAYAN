@@ -78,4 +78,44 @@ void main() {
     expect(defaultLineUnit(item, isSales: true), 'carton');
     expect(defaultLineUnit(item, isSales: false), 'box');
   });
+
+  test(
+    'barcode lookup selects the matched unit without guessing its factor',
+    () {
+      final item = scannedItemFromBarcode({
+        'unit': 'carton',
+        'factor': '24.000000',
+        'item': {
+          'id': 'item-1',
+          'unit': 'piece',
+          'salePrice': '100',
+          'units': [
+            {'unit': 'piece', 'factor': '1', 'isActive': true},
+            {'unit': 'carton', 'factor': '24', 'isActive': true},
+          ],
+        },
+      });
+
+      expect(item['_scannedUnitName'], 'carton');
+      expect(defaultLineUnit(item, isSales: true), 'carton');
+      expect(
+        lineUnitsOf(item)
+            .firstWhere((unit) => unit['unit'] == 'carton')['factor'],
+        '24',
+      );
+    },
+  );
+
+  test('barcode lookup rejects responses without a usable item', () {
+    expect(
+      () => scannedItemFromBarcode({'item': null}),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => scannedItemFromBarcode({
+        'item': {'id': ''},
+      }),
+      throwsA(isA<FormatException>()),
+    );
+  });
 }

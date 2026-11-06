@@ -89,12 +89,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final home = find.byKey(const ValueKey('erp-home-shortcut'));
-      await tester.tap(home);
+      expect(find.byKey(const ValueKey('erp-home-shortcut')), findsOneWidget);
+      final sidebarHome = find.byKey(
+        const ValueKey('erp-home-sidebar-shortcut'),
+      );
+      await tester.tap(sidebarHome);
       await tester.pumpAndSettle();
       expect(find.text('Screen ${AppRoutes.salesInvoices}'), findsOneWidget);
       allowLeave = true;
-      await tester.tap(home);
+      await tester.tap(sidebarHome);
       await tester.pumpAndSettle();
       expect(find.text('Screen ${AppRoutes.dashboard}'), findsOneWidget);
       expect(router.routerDelegate.currentConfiguration.matches.length, 1);
@@ -113,7 +116,11 @@ void main() {
           final router = GoRouter(
             initialLocation: AppRoutes.dashboard,
             routes: [
-              for (final path in [AppRoutes.dashboard, AppRoutes.salesInvoices])
+              for (final path in [
+                AppRoutes.dashboard,
+                AppRoutes.salesInvoices,
+                AppRoutes.cash,
+              ])
                 GoRoute(
                   path: path,
                   builder: (context, state) =>
@@ -132,7 +139,7 @@ void main() {
                     username: 'u',
                     fullName: 'u',
                     companyId: 'c',
-                    permissions: ['sales.invoices.read'],
+                    permissions: ['sales.invoices.read', 'cash.vouchers.read'],
                   ),
                 ),
               ],
@@ -150,6 +157,9 @@ void main() {
             await tester.pumpAndSettle();
           }
           final group = find.byKey(const ValueKey('nav-group-sales'));
+          final accountingGroup = find.byKey(
+            const ValueKey('nav-group-accounting'),
+          );
           final invoice = find.widgetWithText(
             ListTile,
             arabic ? 'فواتير البيع' : 'Sales invoices',
@@ -158,11 +168,33 @@ void main() {
             Directionality.of(tester.element(group)),
             arabic ? TextDirection.rtl : TextDirection.ltr,
           );
+          expect(accountingGroup, findsOneWidget);
           await tester.ensureVisible(group);
+          expect(invoice, findsOneWidget);
+          final arrow = find.descendant(
+            of: group,
+            matching: find.byType(AnimatedRotation),
+          );
+          expect(
+            tester.widget<AnimatedRotation>(arrow).turns,
+            arabic ? -0.25 : 0.25,
+          );
+          final routeBeforeToggle =
+              router.routerDelegate.currentConfiguration.uri.path;
+          await tester.tap(accountingGroup);
+          await tester.pumpAndSettle();
+          expect(invoice, findsOneWidget);
+          expect(
+            router.routerDelegate.currentConfiguration.uri.path,
+            routeBeforeToggle,
+          );
+          await tester.tap(accountingGroup);
+          await tester.pumpAndSettle();
           expect(invoice, findsOneWidget);
           await tester.tap(group);
           await tester.pumpAndSettle();
           expect(invoice, findsNothing);
+          expect(tester.widget<AnimatedRotation>(arrow).turns, 0);
           await tester.tap(group);
           await tester.pumpAndSettle();
           expect(invoice, findsOneWidget);
@@ -172,6 +204,7 @@ void main() {
             find.text('Screen ${AppRoutes.salesInvoices}'),
             findsOneWidget,
           );
+          if (mobile) expect(find.byType(Drawer), findsNothing);
           if (mobile) {
             // Opening the drawer again also proves the same group state is used.
             await tester.tap(find.byIcon(Icons.menu_rounded));
@@ -196,4 +229,59 @@ void main() {
       );
     }
   }
+
+  testWidgets(
+    'a directly opened nested sales route selects its parent item and section',
+    (tester) async {
+      tester.view.physicalSize = const Size(1500, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const deepLink = '/sales/invoices/invoice-1/edit';
+      final router = GoRouter(
+        initialLocation: deepLink,
+        routes: [
+          GoRoute(
+            path: deepLink,
+            builder: (context, state) => ErpShell(
+              currentPath: state.matchedLocation,
+              child: const Text('Direct invoice editor'),
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(_Api()),
+            currentUserProvider.overrideWithValue(
+              const AppUser(
+                id: 'u',
+                username: 'u',
+                fullName: 'u',
+                companyId: 'c',
+                permissions: ['sales.invoices.read'],
+              ),
+            ),
+          ],
+          child: MaterialApp.router(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Direct invoice editor'), findsOneWidget);
+      expect(find.widgetWithText(ListTile, 'Sales invoices'), findsOneWidget);
+      expect(find.byKey(const ValueKey('nav-group-sales')), findsOneWidget);
+      expect(
+        tester
+            .widget<ListTile>(find.widgetWithText(ListTile, 'Sales invoices'))
+            .selected,
+        isTrue,
+      );
+    },
+  );
 }

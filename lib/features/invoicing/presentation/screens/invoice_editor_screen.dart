@@ -54,6 +54,10 @@ List<Json> lineUnitsOf(Json? item) {
 
 String defaultLineUnit(Json item, {required bool isSales}) {
   final units = lineUnitsOf(item);
+  final scanned = text(item, '_scannedUnitName');
+  if (scanned.isNotEmpty && units.any((unit) => text(unit, 'unit') == scanned)) {
+    return scanned;
+  }
   final preferredKey = isSales ? 'isDefaultSale' : 'isDefaultPurchase';
   for (final unit in units) {
     if (flag(unit, preferredKey)) return text(unit, 'unit');
@@ -62,6 +66,28 @@ String defaultLineUnit(Json item, {required bool isSales}) {
   return units.any((unit) => text(unit, 'unit') == base)
       ? base
       : (units.isEmpty ? base : text(units.first, 'unit'));
+}
+
+/// Adds the scanned unit to the item returned by the shared barcode lookup.
+/// Keeping this conversion pure makes the sale and purchase input contract
+/// testable without a live API or database.
+Json scannedItemFromBarcode(Json payload) {
+  final rawItem = payload['item'];
+  if (rawItem is! Map) {
+    throw const FormatException('Barcode result has no item');
+  }
+  final item = Map<String, dynamic>.from(rawItem);
+  if (text(item, 'id').isEmpty) {
+    throw const FormatException('Barcode result has no item id');
+  }
+  final scannedUnit = text(payload, 'unit', fallback: text(item, 'unit'));
+  if (scannedUnit.isEmpty) {
+    throw const FormatException('Barcode result has no unit');
+  }
+  if (!lineUnitsOf(item).any((unit) => text(unit, 'unit') == scannedUnit)) {
+    throw const FormatException('Barcode unit is not active for new invoices');
+  }
+  return {...item, '_scannedUnitName': scannedUnit};
 }
 
 /// The unit-specific list price, or the base-unit price converted once into
@@ -115,6 +141,7 @@ class _LineDraft {
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
   String? costCenterId;
+  final TextEditingController barcode = TextEditingController();
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
@@ -144,6 +171,7 @@ class _LineDraft {
   }
 
   void dispose() {
+    barcode.dispose();
     quantity.dispose();
     unitPrice.dispose();
     taxRate.dispose();
@@ -203,6 +231,7 @@ class InvoiceEditorScreen extends ConsumerStatefulWidget {
 
 class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   final _lines = <_LineDraft>[];
+  final Map<String, Json> _scannedItems = {};
   String? _partyId;
   String? _supplierReference;
   String? _notes;
@@ -495,6 +524,29 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     }
   }
 
+  Future<void> _scanBarcode(_LineDraft line, String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty) return;
+    try {
+      final payload = await ref
+          .read(apiClientProvider)
+          .getObject(
+            '/inventory/items/by-barcode/${Uri.encodeComponent(code)}',
+          );
+      final item = scannedItemFromBarcode(payload);
+      if (!mounted || !_lines.contains(line)) return;
+      setState(() {
+        _scannedItems[text(item, 'id')] = item;
+        line.itemId = text(item, 'id');
+        line.unitName = text(item, '_scannedUnitName');
+        line.barcode.clear();
+        _applyItemDefaults(line, item);
+      });
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    }
+  }
+
   Future<void> _save() async {
     final l10n = context.l10n;
     if (_partyId == null) {
@@ -631,6 +683,12 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     // to an inactive centre, and says so.
     final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
+    final itemsById = <String, Json>{
+      for (final item in itemsAsync.value ?? const <Json>[])
+        if (text(item, 'id').isNotEmpty) text(item, 'id'): item,
+      ..._scannedItems,
+    };
+    final invoiceItems = itemsById.values.toList(growable: false);
 
     return PopScope(
       canPop: false,
@@ -794,7 +852,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                     _LinesTable(
                       kind: widget.kind,
                       lines: _lines,
-                      items: itemsAsync.value ?? const [],
+                      items: invoiceItems,
                       costCenters: costCenters,
                       language: language,
                       onChanged: () => setState(() {}),
@@ -802,6 +860,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       onRemove: (index) =>
                           setState(() => _lines.removeAt(index).dispose()),
                       onItemDefaults: _applyItemDefaults,
+                      onBarcodeScan: _scanBarcode,
                     ),
                     const SizedBox(height: 16),
                     _Totals(
@@ -1027,6 +1086,7 @@ class _LinesTable extends StatelessWidget {
     required this.onAdd,
     required this.onRemove,
     required this.onItemDefaults,
+    required this.onBarcodeScan,
   });
 
   final InvoiceKind kind;
@@ -1038,6 +1098,7 @@ class _LinesTable extends StatelessWidget {
   final VoidCallback onAdd;
   final void Function(int index) onRemove;
   final void Function(_LineDraft line, Json item) onItemDefaults;
+  final Future<void> Function(_LineDraft line, String code) onBarcodeScan;
 
   @override
   Widget build(BuildContext context) {
@@ -1059,66 +1120,88 @@ class _LinesTable extends StatelessWidget {
                       children: [
                         Expanded(
                           flex: 3,
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  key: ValueKey(
-                                    'item-choice-${lines[index].itemId}',
-                                  ),
-                                  initialValue: lines[index].itemId,
-                                  isExpanded: true,
-                                  decoration: InputDecoration(
-                                    labelText: kind.isSales
-                                        ? l10n.item
-                                        : l10n.item,
-                                    isDense: true,
-                                    border: const OutlineInputBorder(),
-                                  ),
-                                  items: [
-                                    for (final item in items)
-                                      DropdownMenuItem(
-                                        value: text(item, 'id'),
-                                        child: Text(
-                                          '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: DropdownButtonFormField<String>(
+                                      key: ValueKey(
+                                        'item-choice-${lines[index].itemId}',
                                       ),
-                                  ],
-                                  onChanged: (value) {
-                                    if (lines[index].itemId != value) {
-                                      lines[index].unitName = null;
-                                    }
-                                    lines[index].itemId = value;
-                                    final item = items.firstWhere(
-                                      (element) => text(element, 'id') == value,
-                                      orElse: () => const {},
-                                    );
-                                    if (item.isNotEmpty) {
-                                      onItemDefaults(lines[index], item);
-                                    }
-                                    onChanged();
-                                  },
-                                ),
+                                      initialValue: lines[index].itemId,
+                                      isExpanded: true,
+                                      decoration: InputDecoration(
+                                        labelText: kind.isSales
+                                            ? l10n.item
+                                            : l10n.item,
+                                        isDense: true,
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                      items: [
+                                        for (final item in items)
+                                          DropdownMenuItem(
+                                            value: text(item, 'id'),
+                                            child: Text(
+                                              '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (value) {
+                                        if (lines[index].itemId != value) {
+                                          lines[index].unitName = null;
+                                        }
+                                        lines[index].itemId = value;
+                                        final item = items.firstWhere(
+                                          (element) =>
+                                              text(element, 'id') == value,
+                                          orElse: () => const {},
+                                        );
+                                        if (item.isNotEmpty) {
+                                          onItemDefaults(lines[index], item);
+                                        }
+                                        onChanged();
+                                      },
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: l10n.selectItem,
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.search, size: 18),
+                                    onPressed: () async {
+                                      final picked = await showItemPicker(
+                                        context,
+                                        title: l10n.selectItem,
+                                      );
+                                      if (picked == null) return;
+                                      final itemId = text(picked, 'id');
+                                      if (lines[index].itemId != itemId) {
+                                        lines[index].unitName = null;
+                                      }
+                                      lines[index].itemId = itemId;
+                                      onItemDefaults(lines[index], picked);
+                                      onChanged();
+                                    },
+                                  ),
+                                ],
                               ),
-                              IconButton(
-                                tooltip: l10n.selectItem,
-                                visualDensity: VisualDensity.compact,
-                                icon: const Icon(Icons.search, size: 18),
-                                onPressed: () async {
-                                  final picked = await showItemPicker(
-                                    context,
-                                    title: l10n.selectItem,
-                                  );
-                                  if (picked == null) return;
-                                  final itemId = text(picked, 'id');
-                                  if (lines[index].itemId != itemId) {
-                                    lines[index].unitName = null;
-                                  }
-                                  lines[index].itemId = itemId;
-                                  onItemDefaults(lines[index], picked);
-                                  onChanged();
-                                },
+                              const SizedBox(height: 6),
+                              TextField(
+                                key: ValueKey('invoice-barcode-$index'),
+                                controller: lines[index].barcode,
+                                textInputAction: TextInputAction.search,
+                                onSubmitted: (code) =>
+                                    onBarcodeScan(lines[index], code),
+                                decoration: InputDecoration(
+                                  labelText: language == 'ar'
+                                      ? 'مسح الباركود'
+                                      : 'Scan barcode',
+                                  prefixIcon: const Icon(Icons.qr_code_scanner),
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
                               ),
                             ],
                           ),

@@ -58,18 +58,36 @@ class _NavItem {
 /// The menu is grouped by the job it belongs to, not alphabetically. Groups
 /// with no visible item disappear entirely, so a cashier never sees an empty
 /// "Accounting" heading.
-enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
+enum _NavGroup {
+  overview,
+  accounting,
+  parties,
+  inventory,
+  sales,
+  purchases,
+  insights,
+  administration,
+}
 
 class _CollapsedNav extends Notifier<Set<_NavGroup>> {
   @override
   Set<_NavGroup> build() => const {};
+
   void toggle(_NavGroup group) {
     final next = {...state};
     if (!next.add(group)) next.remove(group);
     state = next;
   }
+
+  void expand(_NavGroup group) {
+    if (!state.contains(group)) return;
+    state = {...state}..remove(group);
+  }
 }
-final _collapsedNavProvider = NotifierProvider<_CollapsedNav, Set<_NavGroup>>(_CollapsedNav.new);
+
+final _collapsedNavProvider = NotifierProvider<_CollapsedNav, Set<_NavGroup>>(
+  _CollapsedNav.new,
+);
 
 /// Each section owns one colour (see [SectionAccents]): the selected entry
 /// is recognisable by its text, icon tile, background and edge indicator
@@ -96,10 +114,16 @@ SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
 /// The navigation model itself changes with the available width; this is not
 /// a phone layout stretched across a monitor.
 class ErpShell extends ConsumerStatefulWidget {
-  const ErpShell({super.key, required this.currentPath, required this.child, this.guardKey});
+  const ErpShell({
+    super.key,
+    required this.currentPath,
+    required this.child,
+    this.guardKey,
+  });
 
   final String currentPath;
   final Widget child;
+
   /// Key for the current route when it registers a draft exit guard.
   final ValueKey<String>? guardKey;
 
@@ -117,13 +141,47 @@ class _ErpShellState extends ConsumerState<ErpShell> {
   @override
   void initState() {
     super.initState();
+    _expandCurrentGroupAfterBuild();
     _revealSelection();
   }
 
   @override
   void didUpdateWidget(covariant ErpShell oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.currentPath != widget.currentPath) _revealSelection();
+    if (oldWidget.currentPath != widget.currentPath) {
+      _expandCurrentGroupAfterBuild();
+      _revealSelection();
+    }
+  }
+
+  void _expandCurrentGroupAfterBuild() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final group = _groupForPath(widget.currentPath);
+      if (group != null) ref.read(_collapsedNavProvider.notifier).expand(group);
+    });
+  }
+
+  static _NavGroup? _groupForPath(String path) {
+    if (_belongsTo(AppRoutes.dashboard, path)) return _NavGroup.overview;
+    if (_belongsTo(AppRoutes.cash, path) || path.startsWith('/accounting/')) {
+      return _NavGroup.accounting;
+    }
+    if (_belongsTo(AppRoutes.customers, path) ||
+        _belongsTo(AppRoutes.suppliers, path)) {
+      return _NavGroup.parties;
+    }
+    if (path.startsWith('/inventory/')) return _NavGroup.inventory;
+    if (path.startsWith('/sales/')) return _NavGroup.sales;
+    if (path.startsWith('/purchases/')) return _NavGroup.purchases;
+    if (_belongsTo(AppRoutes.reports, path)) return _NavGroup.insights;
+    if (path.startsWith('/data/') ||
+        path.startsWith('/settings/') ||
+        _belongsTo(AppRoutes.settings, path) ||
+        _belongsTo(AppRoutes.administration, path)) {
+      return _NavGroup.administration;
+    }
+    return null;
   }
 
   void _revealSelection() {
@@ -135,7 +193,11 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         target,
         alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
       );
-      if (!mounted || !target.mounted || _selectedNavKey.currentContext != target) return;
+      if (!mounted ||
+          !target.mounted ||
+          _selectedNavKey.currentContext != target) {
+        return;
+      }
       await Scrollable.ensureVisible(
         target,
         alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
@@ -156,7 +218,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final isExtended = width >= ErpShell._extendedBreakpoint;
     final items = _navigationItems(context);
     final collapsed = ref.watch(_collapsedNavProvider);
-    void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
+    void toggleGroup(_NavGroup group) =>
+        ref.read(_collapsedNavProvider.notifier).toggle(group);
     final selectedIndex = _selectedIndex(items);
 
     return Scaffold(
@@ -166,8 +229,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           : _ModuleDrawer(
               items: items,
               current: widget.currentPath,
-              collapsed:collapsed,
-              onToggle:toggleGroup,
+              collapsed: collapsed,
+              onToggle: toggleGroup,
             ),
       body: SafeArea(
         bottom: false,
@@ -177,11 +240,12 @@ class _ErpShellState extends ConsumerState<ErpShell> {
               _Sidebar(
                 items: items,
                 selectedPath: items[selectedIndex].path,
+                currentPath: widget.currentPath,
                 selectedKey: _selectedNavKey,
                 extended: isExtended,
                 scrollController: _navScrollController,
-                collapsed:collapsed,
-                onToggle:toggleGroup,
+                collapsed: collapsed,
+                onToggle: toggleGroup,
               ),
             Expanded(
               child: Column(
@@ -221,8 +285,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     for (var index = 0; index < items.length; index += 1) {
       final path = items[index].path;
       final matches =
-          widget.currentPath == path ||
-          widget.currentPath.startsWith('$path/');
+          widget.currentPath == path || widget.currentPath.startsWith('$path/');
       if (matches && path.length > bestLength) {
         bestIndex = index;
         bestLength = path.length;
@@ -328,7 +391,11 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.items,
         Icons.category_outlined,
         l10n.items,
-        permissions: const ['inventory.items.read'],
+        permissions: const [
+          'inventory.items.read',
+          'inventory.items.create',
+          'inventory.items.update',
+        ],
         group: _NavGroup.inventory,
       ),
       _NavItem(
@@ -341,7 +408,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
       _NavItem(
         AppRoutes.salesOrders,
         Icons.playlist_add_check_outlined,
-        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر البيع' : 'Sales orders',
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'أوامر البيع'
+            : 'Sales orders',
         permissions: const ['sales.orders.read'],
         group: _NavGroup.sales,
       ),
@@ -376,7 +445,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
       _NavItem(
         AppRoutes.purchaseOrders,
         Icons.playlist_add_check_outlined,
-        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر الشراء' : 'Purchase orders',
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'أوامر الشراء'
+            : 'Purchase orders',
         permissions: const ['purchases.orders.read'],
         group: _NavGroup.purchases,
       ),
@@ -419,21 +490,21 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.backup,
         Icons.verified_user_outlined,
         l10n.backupTitle,
-        permissions: const ['admin.backup'],
+        permissions: const ['admin.backup', 'admin.backup.restore'],
         group: _NavGroup.administration,
       ),
       _NavItem(
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,
         l10n.administration,
-        permissions: const ['admin.users.manage'],
+        permissions: const ['admin.users.manage', 'admin.roles.manage'],
         group: _NavGroup.administration,
       ),
       _NavItem(
         AppRoutes.companySettings,
         Icons.business_outlined,
         l10n.companySettings,
-        permissions: const ['admin.company.manage'],
+        permissions: const ['admin.company.manage', 'company.profile.manage'],
         group: _NavGroup.administration,
       ),
       _NavItem(
@@ -442,15 +513,19 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         l10n.settings,
         group: _NavGroup.administration,
       ),
+      _NavItem(
+        AppRoutes.licence,
+        Icons.verified_user_outlined,
+        l10n.licence,
+        group: _NavGroup.administration,
+      ),
     ];
     // While the session is still being restored there is no user yet. The
     // router sends a signed-out visitor to the login screen, so the menu is
     // never actually seen in this state; showing everything keeps the previous
     // behaviour instead of flashing an empty rail.
     if (user == null) return items;
-    return items
-        .where((item) => item.allows(user.can))
-        .toList(growable: false);
+    return items.where((item) => item.allows(user.can)).toList(growable: false);
   }
 }
 
@@ -464,6 +539,7 @@ class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.items,
     required this.selectedPath,
+    required this.currentPath,
     required this.selectedKey,
     required this.extended,
     required this.scrollController,
@@ -475,6 +551,7 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String selectedPath;
+  final String currentPath;
   final GlobalKey selectedKey;
   final bool extended;
   final ScrollController scrollController;
@@ -506,6 +583,15 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         children: [
           _SidebarBrand(extended: extended),
+          _SidebarHomeButton(
+            extended: extended,
+            currentPath: currentPath,
+            onPressed: () {
+              if (!_belongsTo(AppRoutes.dashboard, currentPath)) {
+                context.go(AppRoutes.dashboard);
+              }
+            },
+          ),
           Container(height: 1, color: AppColors.sidebarHairline),
           Expanded(
             child: Scrollbar(
@@ -529,7 +615,7 @@ class _Sidebar extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
-                        key:ValueKey('nav-group-${group.name}'),
+                        key: ValueKey('nav-group-${group.name}'),
                         extended: extended,
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
@@ -537,13 +623,21 @@ class _Sidebar extends StatelessWidget {
                         expanded: !collapsed.contains(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (!collapsed.contains(group)) for (final item in groups[group]!)
-                        _NavEntry(
-                          key: item.path == selectedPath ? selectedKey : null,
-                          item: item,
-                          selected: item.path == selectedPath,
-                          extended: extended,
-                        ),
+                      if (!collapsed.contains(group))
+                        for (final item in groups[group]!)
+                          _NavEntry(
+                            key: item.path == selectedPath
+                                ? selectedKey
+                                : null,
+                            item: item,
+                            selected: item.path == selectedPath,
+                            extended: extended,
+                            onNavigate: () {
+                              if (item.path != selectedPath) {
+                                context.go(item.path);
+                              }
+                            },
+                          ),
                     ],
                 ],
               ),
@@ -564,7 +658,8 @@ class _Sidebar extends StatelessWidget {
       _NavGroup.sales => arabic ? 'المبيعات' : 'Sales',
       _NavGroup.purchases => arabic ? 'المشتريات' : 'Purchasing',
       _NavGroup.insights => arabic ? 'التحليل' : 'Insights',
-      _NavGroup.administration => arabic ? 'الإدارة والبيانات' : 'Administration',
+      _NavGroup.administration =>
+        arabic ? 'الإدارة والبيانات' : 'Administration',
     };
   }
 }
@@ -586,7 +681,11 @@ class _SidebarBrand extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
         boxShadow: const [
-          BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
+          BoxShadow(
+            color: Color(0x40000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
         ],
       ),
       child: Image.asset('1.png', fit: BoxFit.contain),
@@ -635,6 +734,80 @@ class _SidebarBrand extends StatelessWidget {
   }
 }
 
+class _SidebarHomeButton extends StatelessWidget {
+  const _SidebarHomeButton({
+    required this.extended,
+    required this.currentPath,
+    required this.onPressed,
+  });
+
+  final bool extended;
+  final String currentPath;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final label = arabic ? 'الرئيسية' : 'Home';
+    final selected = _belongsTo(AppRoutes.dashboard, currentPath);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(extended ? 10 : 8, 2, extended ? 10 : 8, 6),
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: selected
+              ? Colors.white.withValues(alpha: 0.12)
+              : Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: InkWell(
+            key: const ValueKey('erp-home-sidebar-shortcut'),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            onTap: selected ? null : onPressed,
+            child: SizedBox(
+              height: 40,
+              child: extended
+                  ? Row(
+                      children: [
+                        const SizedBox(width: 10),
+                        Icon(
+                          Icons.home_outlined,
+                          size: 19,
+                          color: SectionAccents.overview.darkBase,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: selected
+                                  ? SectionAccents.overview.darkBase
+                                  : AppColors.onSidebar,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
+                    )
+                  : Center(
+                      child: Icon(
+                        Icons.home_outlined,
+                        size: 19,
+                        color: SectionAccents.overview.darkBase,
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _GroupLabel extends StatelessWidget {
   const _GroupLabel({
     super.key,
@@ -656,49 +829,113 @@ class _GroupLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    final action = expanded ? (arabic ? 'طي' : 'Collapse') : (arabic ? 'فتح' : 'Expand');
+    final action = expanded
+        ? (arabic ? 'طي' : 'Collapse')
+        : (arabic ? 'فتح' : 'Expand');
+    final closedArrow = arabic ? Icons.chevron_left : Icons.chevron_right;
+    final arrowTurns = expanded ? (arabic ? -0.25 : 0.25) : 0.0;
     if (!extended) {
-      return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
-        message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
-          padding: EdgeInsets.fromLTRB(10, first ? 8 : 12, 10, 8),
-          child: Container(height: 1, color: AppColors.sidebarHairline),
-        ))));
-    }
-    return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
-      message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
-      child: Row(
-        children: [
-          // The section's colour dot: the same hue its entries light up
-          // with when selected, so the eye groups them before reading.
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              // The sidebar is a dark surface in both themes, so the dot
-              // takes the step mixed for dark surfaces.
-              color: accent.darkBase,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppColors.onSidebarMuted,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
+      return Semantics(
+        button: true,
+        expanded: expanded,
+        label: '$action $label',
+        child: Tooltip(
+          message: '$action $label',
+          child: InkWell(
+            key: ValueKey('nav-toggle-${label.toLowerCase()}'),
+            onTap: onToggle,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(8, first ? 4 : 8, 8, 4),
+              child: SizedBox(
+                height: 30,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 1,
+                      color: AppColors.sidebarHairline,
+                    ),
+                    const SizedBox(width: 3),
+                    AnimatedRotation(
+                      turns: arrowTurns,
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeInOut,
+                      child: Icon(
+                        closedArrow,
+                        size: 15,
+                        color: AppColors.onSidebarMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Container(
+                      width: 18,
+                      height: 1,
+                      color: AppColors.sidebarHairline,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-          if (!expanded) const Icon(Icons.chevron_right, size:14,color:AppColors.onSidebarMuted),
-        ],
+        ),
+      );
+    }
+    return Semantics(
+      button: true,
+      expanded: expanded,
+      label: '$action $label',
+      child: Tooltip(
+        message: '$action $label',
+        child: InkWell(
+          key: ValueKey('nav-toggle-${label.toLowerCase()}'),
+          onTap: onToggle,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
+            child: Row(
+              children: [
+                // The section's colour dot: the same hue its entries light up
+                // with when selected, so the eye groups them before reading.
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    // The sidebar is a dark surface in both themes, so the dot
+                    // takes the step mixed for dark surfaces.
+                    color: accent.darkBase,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    label.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.onSidebarMuted,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: arrowTurns,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeInOut,
+                  child: Icon(
+                    closedArrow,
+                    size: 18,
+                    color: AppColors.onSidebarMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
-    ))));
+    );
   }
 }
 
@@ -708,11 +945,13 @@ class _NavEntry extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.extended,
+    required this.onNavigate,
   });
 
   final _NavItem item;
   final bool selected;
   final bool extended;
+  final VoidCallback onNavigate;
 
   @override
   Widget build(BuildContext context) {
@@ -729,9 +968,7 @@ class _NavEntry extends StatelessWidget {
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: selected
-            ? accentColor
-            : Colors.white.withValues(alpha: 0.08),
+        color: selected ? accentColor : Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppRadii.md),
         boxShadow: selected
             ? [
@@ -776,7 +1013,7 @@ class _NavEntry extends StatelessWidget {
               child: InkWell(
                 borderRadius: BorderRadius.circular(AppRadii.md),
                 hoverColor: Colors.white.withValues(alpha: 0.06),
-                onTap: () => context.go(item.path),
+                onTap: onNavigate,
                 child: SizedBox(
                   height: 44,
                   child: Center(child: iconTile(32, 18)),
@@ -835,7 +1072,7 @@ class _NavEntry extends StatelessWidget {
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
-            onTap: () => context.go(item.path),
+            onTap: onNavigate,
           ),
         ),
       ),
@@ -852,7 +1089,10 @@ class _SidebarFooter extends ConsumerWidget {
     if (user == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final initials = _initials(user.fullName, user.username);
-    final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
+    final photo = ref
+        .watch(userPhotoProvider((companyId: user.companyId, userId: user.id)))
+        .asData
+        ?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
     return Container(
       decoration: const BoxDecoration(
@@ -869,15 +1109,24 @@ class _SidebarFooter extends ConsumerWidget {
               color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
-            child: photo == null ? Text(
-              initials,
-              style: const TextStyle(
-                color: AppColors.onSidebar,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ) : ClipOval(child:Image.memory(photo,width:30,height:30,fit:BoxFit.cover,
-              errorBuilder:(_, _, _) => Text(initials))),
+            child: photo == null
+                ? Text(
+                    initials,
+                    style: const TextStyle(
+                      color: AppColors.onSidebar,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  )
+                : ClipOval(
+                    child: Image.memory(
+                      photo,
+                      width: 30,
+                      height: 30,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Text(initials),
+                    ),
+                  ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -915,8 +1164,10 @@ class _SidebarFooter extends ConsumerWidget {
   static String _initials(String fullName, String username) {
     final source = fullName.trim().isEmpty ? username.trim() : fullName.trim();
     if (source.isEmpty) return '?';
-    final parts =
-        source.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final parts = source
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
     String head(String value) =>
         value.isEmpty ? '' : value.substring(0, 1).toUpperCase();
     if (parts.length >= 2) return head(parts.first) + head(parts[1]);
@@ -946,8 +1197,8 @@ class _TopBar extends StatelessWidget {
     final scheme = theme.colorScheme;
     final accentColor = item.accent.of(scheme.brightness);
     return Container(
-      height: Theme.of(context).appBarTheme.toolbarHeight ??
-          AppSizes.topBarHeight,
+      height:
+          Theme.of(context).appBarTheme.toolbarHeight ?? AppSizes.topBarHeight,
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
@@ -1040,7 +1291,9 @@ class _TopBar extends StatelessWidget {
           ),
           IconButton(
             key: const ValueKey('erp-home-shortcut'),
-            tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'الرئيسية' : 'Home',
+            tooltip: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'الرئيسية'
+                : 'Home',
             icon: const Icon(Icons.home_outlined, size: 20),
             onPressed: () => context.go(AppRoutes.dashboard),
           ),
@@ -1146,7 +1399,10 @@ class _SignOutButtonState extends ConsumerState<_SignOutButton> {
     setState(() => _busy = true);
     try {
       final key = widget.guardKey;
-      if (key != null && !await ref.read(draftExitGuardProvider).canLeave(key)) return;
+      if (key != null &&
+          !await ref.read(draftExitGuardProvider).canLeave(key)) {
+        return;
+      }
       if (!mounted) return;
       await ref.read(authControllerProvider.notifier).signOut();
     } catch (error) {
@@ -1167,7 +1423,12 @@ class _SignOutButtonState extends ConsumerState<_SignOutButton> {
 /// The navigation for narrow windows: the same items, the same permissions,
 /// the same order — inside the standard drawer.
 class _ModuleDrawer extends StatelessWidget {
-  const _ModuleDrawer({required this.items, required this.current, required this.collapsed, required this.onToggle});
+  const _ModuleDrawer({
+    required this.items,
+    required this.current,
+    required this.collapsed,
+    required this.onToggle,
+  });
 
   final Set<_NavGroup> collapsed;
   final ValueChanged<_NavGroup> onToggle;
@@ -1181,6 +1442,12 @@ class _ModuleDrawer extends StatelessWidget {
     for (final item in items) {
       groups.putIfAbsent(item.group, () => []).add(item);
     }
+    void navigate(String path) {
+      final router = GoRouter.of(context);
+      Navigator.of(context).pop();
+      if (!_belongsTo(path, current)) router.go(path);
+    }
+
     return Drawer(
       child: SafeArea(
         child: Column(
@@ -1188,6 +1455,11 @@ class _ModuleDrawer extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(top: 6, bottom: 6),
               child: _SidebarBrand(extended: true),
+            ),
+            _SidebarHomeButton(
+              extended: true,
+              currentPath: current,
+              onPressed: () => navigate(AppRoutes.dashboard),
             ),
             Container(height: 1, color: AppColors.sidebarHairline),
             Expanded(
@@ -1197,7 +1469,7 @@ class _ModuleDrawer extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
-                        key:ValueKey('nav-group-${group.name}'),
+                        key: ValueKey('nav-group-${group.name}'),
                         extended: true,
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
@@ -1205,12 +1477,14 @@ class _ModuleDrawer extends StatelessWidget {
                         expanded: !collapsed.contains(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (!collapsed.contains(group)) for (final item in groups[group]!)
-                        _NavEntry(
-                          item: item,
-                          selected: _belongsTo(item.path, current),
-                          extended: true,
-                        ),
+                      if (!collapsed.contains(group))
+                        for (final item in groups[group]!)
+                          _NavEntry(
+                            item: item,
+                            selected: _belongsTo(item.path, current),
+                            extended: true,
+                            onNavigate: () => navigate(item.path),
+                          ),
                     ],
                 ],
               ),

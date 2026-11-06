@@ -224,15 +224,18 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
             child: FutureBuilder<Json>(
               future: _future,
               builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done)
+                if (snapshot.connectionState != ConnectionState.done) {
                   return const Center(child: CircularProgressIndicator());
-                if (snapshot.hasError)
+                }
+                if (snapshot.hasError) {
                   return _VoucherLoadError(
                     error: snapshot.error!,
                     onRetry: _refresh,
                   );
-                if (!snapshot.hasData)
+                }
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
                 final data = snapshot.data!;
                 final rows = listOf(data['items'])
                     .where((row) => text(row, 'voucherKind').isNotEmpty)
@@ -409,15 +412,18 @@ class _StockVoucherDetailScreenState
         body: FutureBuilder<Json>(
           future: _future,
           builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done)
+            if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
-            if (snapshot.hasError)
+            }
+            if (snapshot.hasError) {
               return _VoucherLoadError(
                 error: snapshot.error!,
                 onRetry: _refresh,
               );
-            if (!snapshot.hasData)
+            }
+            if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
+            }
             final doc = snapshot.data!;
             final status = text(doc, 'status').toLowerCase();
             final version = doc['editVersion'] is int
@@ -581,25 +587,28 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
     // The child FutureBuilder is not mounted while the tile is collapsed.
     // Start the request only when expanding so an early failure is observed.
     onExpansionChanged: (expanded) {
-      if (expanded && _future == null)
+      if (expanded && _future == null) {
         setState(() {
           _future = _load();
         });
+      }
     },
     children: [
       if (_future != null)
         FutureBuilder<List<Json>>(
           future: _future,
           builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done)
+            if (snapshot.connectionState != ConnectionState.done) {
               return const CircularProgressIndicator();
-            if (snapshot.hasError)
+            }
+            if (snapshot.hasError) {
               return _VoucherLoadError(
                 error: snapshot.error!,
                 onRetry: () => setState(() {
                   _future = _load();
                 }),
               );
+            }
             if (!snapshot.hasData) return const CircularProgressIndicator();
             return Column(
               children: [
@@ -752,12 +761,14 @@ class _StockVoucherCreateScreenState
             '/inventory/items/by-barcode/${Uri.encodeComponent(code)}',
           );
       final rawItem = payload['item'];
-      if (rawItem is! Map)
+      if (rawItem is! Map) {
         throw const FormatException('Barcode result has no item');
+      }
       final item = Map<String, dynamic>.from(rawItem);
       final id = text(item, 'id');
-      if (id.isEmpty)
+      if (id.isEmpty) {
         throw const FormatException('Barcode result has no item id');
+      }
       final unit = text(payload, 'unit', fallback: text(item, 'unit'));
       if (!mounted) return;
       setState(() {
@@ -850,17 +861,21 @@ class _StockVoucherCreateScreenState
   void _restore(Map<String, dynamic> request) {
     if (request['method'] != (_editing ? 'PUT' : 'POST') ||
         request['path'] != _path ||
-        request['body'] is! Map)
+        request['body'] is! Map) {
       throw const FormatException('Invalid pending voucher');
+    }
     final body = Map<String, dynamic>.from(request['body'] as Map);
-    if (!_editing && body['voucherKind'] != widget.kind)
+    if (!_editing && body['voucherKind'] != widget.kind) {
       throw const FormatException('Invalid pending voucher kind');
-    if (_editing && body['expectedVersion'] is! int)
+    }
+    if (_editing && body['expectedVersion'] is! int) {
       throw const FormatException('Invalid voucher version');
+    }
     if (_editing) _editVersion = body['expectedVersion'] as int;
     final raw = listOf(body['lines']);
-    if (raw.isEmpty)
+    if (raw.isEmpty) {
       throw const FormatException('Invalid pending voucher lines');
+    }
     final old = List<_VoucherLine>.from(_lines);
     _lines.clear();
     for (final row in raw) {
@@ -956,8 +971,9 @@ class _StockVoucherCreateScreenState
         _pending != null ||
         _store == null ||
         _scope == null ||
-        !(_form.currentState?.validate() ?? false))
+        !(_form.currentState?.validate() ?? false)) {
       return;
+    }
     final body = <String, dynamic>{
       if (!_editing) ...{'kind': 'ADJUSTMENT', 'voucherKind': widget.kind},
       if (_editing) 'expectedVersion': _editVersion,
@@ -1006,18 +1022,21 @@ class _StockVoucherCreateScreenState
     try {
       if (request['method'] != (_editing ? 'PUT' : 'POST') ||
           request['path'] != _path ||
-          request['body'] is! Map)
+          request['body'] is! Map) {
         throw const FormatException('Invalid pending voucher');
+      }
       final body = Map<String, dynamic>.from(request['body'] as Map);
-      if (!_editing && body['voucherKind'] != widget.kind)
+      if (!_editing && body['voucherKind'] != widget.kind) {
         throw const FormatException('Invalid pending voucher kind');
+      }
       final api = ref.read(apiClientProvider);
       final result = _editing
           ? await api.put(_path, body: body)
           : await api.post(_path, body: body);
       final id = text(result, 'id');
-      if (_editing && id != text(widget.initialDocument!, 'id'))
+      if (_editing && id != text(widget.initialDocument!, 'id')) {
         throw const FormatException('Unexpected voucher response');
+      }
       if (id.isEmpty) throw const FormatException('Voucher response has no id');
       await _store!.complete(_scope!);
       if (mounted) {
@@ -1037,8 +1056,9 @@ class _StockVoucherCreateScreenState
         _confirming ||
         _pending == null ||
         _store == null ||
-        _scope == null)
+        _scope == null) {
       return;
+    }
     setState(() => _confirming = true);
     final ok = await confirmAction(
       context,
@@ -1087,8 +1107,9 @@ class _StockVoucherCreateScreenState
         body: FutureBuilder<List<List<Json>>>(
           future: _options,
           builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done)
+            if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
+            }
             if (snapshot.hasError) {
               return ListView(
                 padding: const EdgeInsets.all(20),
@@ -1107,8 +1128,9 @@ class _StockVoucherCreateScreenState
                 ],
               );
             }
-            if (!snapshot.hasData)
+            if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
+            }
             final items = snapshot.data![0],
                 warehouses = snapshot.data![1],
                 centers = snapshot.data![2];

@@ -314,8 +314,9 @@ class _ModeCard extends ConsumerWidget {
             RadioGroup<ImportMode>(
               groupValue: state.mode,
               onChanged: (value) {
-                if (!state.busy)
+                if (!state.busy) {
                   controller.chooseMode(value ?? ImportMode.insert);
+                }
               },
               child: Column(
                 children: [
