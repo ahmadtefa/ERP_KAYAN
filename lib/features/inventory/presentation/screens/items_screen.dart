@@ -29,8 +29,9 @@ class ItemsController extends JsonListController {
   Map<String, dynamic> get resourceQuery => const {'includeInactive': 'true'};
 }
 
-final itemsListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(ItemsController.new);
+final itemsListProvider = AsyncNotifierProvider<JsonListController, List<Json>>(
+  ItemsController.new,
+);
 
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key, this.navigationKey});
@@ -102,14 +103,22 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             kind: FieldKind.decimal,
           ),
         ],
-        FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2),
+        FieldSpec(
+          'notes',
+          l10n.description,
+          kind: FieldKind.multiline,
+          maxLines: 2,
+        ),
       ],
       initial: existing,
       onSubmit: (draft) async {
         final client = ref.read(apiClientProvider);
         try {
           if (isEdit) {
-            await client.patch('/inventory/items/${existing['id']}', body: draft);
+            await client.patch(
+              '/inventory/items/${existing['id']}',
+              body: draft,
+            );
           } else {
             await client.post('/inventory/items', body: draft);
           }
@@ -158,9 +167,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final itemName = text(row, 'nameEn');
     final client = ref.read(apiClientProvider);
     final canManageBarcodes =
-        ref.read(currentUserProvider)?.can('inventory.barcodes.manage') ?? false;
+        ref.read(currentUserProvider)?.can('inventory.barcodes.manage') ??
+        false;
     final canSeeCost =
         ref.read(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
 
     Future<List<Map<String, dynamic>>> loadUnits() async {
       final response = await client.raw.get<Map<String, dynamic>>(
@@ -223,16 +234,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                           isActive
                               ? '${unit['unit'] ?? ''}'
                               : l10n.unitsBarcodesInactiveUnit(
-                                  '${unit['unit'] ?? ''}'),
+                                  '${unit['unit'] ?? ''}',
+                                ),
                           style: isActive
                               ? null
                               : const TextStyle(color: Colors.grey),
                         ),
                         subtitle: Text(
                           l10n.unitsBarcodesFactorBarcode(
-                            '${unit['factor'] ?? ''}',
-                            '${unit['barcode'] ?? '—'}',
-                          ) +
+                                '${unit['factor'] ?? ''}',
+                                '${unit['barcode'] ?? '—'}',
+                              ) +
                               (isActive
                                   ? ''
                                   : '  •  ${l10n.unitsBarcodesHidden}'),
@@ -250,13 +262,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                                 tooltip: l10n.unitsBarcodesGenerateTooltip,
                                 icon: const Icon(Icons.qr_code_2, size: 20),
                                 onPressed: () =>
-                                    Navigator.of(dialogContext).pop('code:$unitId'),
+                                    Navigator.of(dialogContext)
+                                        .pop('code:$unitId'),
                               ),
                             IconButton(
                               tooltip: l10n.unitsBarcodesEditTooltip,
                               icon: const Icon(Icons.edit_outlined, size: 20),
                               onPressed: () =>
-                                  Navigator.of(dialogContext).pop('edit:$unitId'),
+                                  Navigator.of(dialogContext)
+                                      .pop('edit:$unitId'),
                             ),
                             if (!isBase && !isActive)
                               IconButton(
@@ -266,17 +280,23 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                                   size: 20,
                                 ),
                                 onPressed: () =>
-                                    Navigator.of(dialogContext).pop('reactivate:$unitId'),
+                                    Navigator.of(dialogContext)
+                                        .pop('reactivate:$unitId'),
                               ),
                             if (isBase || isActive)
                               IconButton(
                                 tooltip: isBase
                                     ? l10n.unitsBarcodesBaseCannotRemove
                                     : l10n.unitsBarcodesRemoveTooltip,
-                                icon: const Icon(Icons.delete_outline, size: 20),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                ),
                                 onPressed: isBase
                                     ? null
-                                    : () => Navigator.of(dialogContext).pop('delete:$unitId'),
+                                    : () =>
+                                          Navigator.of(dialogContext)
+                                              .pop('delete:$unitId'),
                               ),
                           ],
                         ),
@@ -287,11 +307,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(MaterialLocalizations.of(dialogContext).closeButtonLabel),
+              child: Text(
+                MaterialLocalizations.of(dialogContext).closeButtonLabel,
+              ),
             ),
             OutlinedButton.icon(
-              onPressed: units
-                      .any((unit) => '${unit['barcode'] ?? ''}'.trim().isNotEmpty)
+              onPressed:
+                  units.any(
+                    (unit) => '${unit['barcode'] ?? ''}'.trim().isNotEmpty,
+                  )
                   ? () => Navigator.of(dialogContext).pop('labels')
                   : null,
               icon: const Icon(Icons.print_outlined, size: 18),
@@ -323,11 +347,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            FieldSpec('salePrice', l10n.unitsBarcodesFieldSalePrice,
-                kind: FieldKind.decimal),
+            FieldSpec(
+              'salePrice',
+              l10n.unitsBarcodesFieldSalePrice,
+              kind: FieldKind.decimal,
+            ),
             if (canSeeCost)
-              FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
-                  kind: FieldKind.decimal),
+              FieldSpec(
+                'purchasePrice',
+                l10n.unitsBarcodesFieldPurchasePrice,
+                kind: FieldKind.decimal,
+              ),
           ],
           onSubmit: (draft) => submitUnit(() async {
             await client.post('/inventory/items/$itemId/units', body: draft);
@@ -374,7 +404,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
       if (verb == 'code') {
         try {
-          await client.post('/inventory/items/$itemId/units/$unitId/barcode', body: const {});
+          await client.post(
+            '/inventory/items/$itemId/units/$unitId/barcode',
+            body: const {},
+          );
           await reload();
           if (mounted) showMessage(context, l10n.unitsBarcodesBarcodeGenerated);
         } catch (error) {
@@ -410,16 +443,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           title: l10n.unitsBarcodesRemoveTitle,
           // The server deletes only a unit no document ever used; a used unit
           // is deactivated instead, so past documents keep their unit label.
-          message: l10n.unitsBarcodesRemoveConfirm(
-            '${unit['unit'] ?? ''}',
-          ),
+          message: l10n.unitsBarcodesRemoveConfirm('${unit['unit'] ?? ''}'),
           confirmLabel: l10n.removeLine,
           destructive: true,
         );
         if (!ok || !mounted) return;
         try {
-          final response =
-              await client.delete('/inventory/items/$itemId/units/$unitId');
+          final response = await client.delete(
+            '/inventory/items/$itemId/units/$unitId',
+          );
           await reload();
           if (mounted) {
             final deactivated = response['deactivated'] == true;
@@ -451,6 +483,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             if (canManageBarcodes) 'barcode': unit['barcode'],
             'salePrice': unit['salePrice'],
             if (canSeeCost) 'purchasePrice': unit['purchasePrice'],
+            'isDefaultSale': unit['isDefaultSale'] == true,
+            'isDefaultPurchase': unit['isDefaultPurchase'] == true,
           },
           fields: [
             FieldSpec(
@@ -470,14 +504,33 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            FieldSpec('salePrice', l10n.unitsBarcodesFieldSalePrice,
-                kind: FieldKind.decimal),
+            FieldSpec(
+              'salePrice',
+              l10n.unitsBarcodesFieldSalePrice,
+              kind: FieldKind.decimal,
+            ),
             if (canSeeCost)
-              FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
-                  kind: FieldKind.decimal),
+              FieldSpec(
+                'purchasePrice',
+                l10n.unitsBarcodesFieldPurchasePrice,
+                kind: FieldKind.decimal,
+              ),
+            FieldSpec(
+              'isDefaultSale',
+              isArabic ? 'وحدة البيع الافتراضية' : 'Default sales unit',
+              kind: FieldKind.toggle,
+            ),
+            FieldSpec(
+              'isDefaultPurchase',
+              isArabic ? 'وحدة الشراء الافتراضية' : 'Default purchase unit',
+              kind: FieldKind.toggle,
+            ),
           ],
           onSubmit: (draft) => submitUnit(() async {
-            await client.patch('/inventory/items/$itemId/units/$unitId', body: draft);
+            await client.patch(
+              '/inventory/items/$itemId/units/$unitId',
+              body: draft,
+            );
           }),
         );
         if (values == null || !mounted) return;
@@ -559,7 +612,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           columns: [
-            ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
+            ColumnSpec(
+              l10n.accountCode,
+              value: (r) => text(r, 'code'),
+              emphasise: true,
+            ),
             ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
             ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
             ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),

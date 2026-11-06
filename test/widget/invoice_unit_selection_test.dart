@@ -55,4 +55,27 @@ void main() {
     expect(unitListPrice(item, 'piece', isSales: true), '10');
     expect(unitListPrice(item, 'box', isSales: false), '');
   });
+
+  test('sales and purchase use their own configured default unit', () {
+    final item = <String, dynamic>{
+      'unit': 'piece',
+      'units': <Map<String, dynamic>>[
+        {'unit': 'piece', 'factor': '1', 'isActive': true},
+        {
+          'unit': 'carton',
+          'factor': '12',
+          'isActive': true,
+          'isDefaultSale': true,
+        },
+        {
+          'unit': 'box',
+          'factor': '6',
+          'isActive': true,
+          'isDefaultPurchase': true,
+        },
+      ],
+    };
+    expect(defaultLineUnit(item, isSales: true), 'carton');
+    expect(defaultLineUnit(item, isSales: false), 'box');
+  });
 }

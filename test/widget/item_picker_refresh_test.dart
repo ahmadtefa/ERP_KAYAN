@@ -12,29 +12,147 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'test_harness.dart';
 
 class _MutableItemApi extends ApiClient {
-  _MutableItemApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
-  List<Map<String,dynamic>> rows=[{'id':'old','code':'OLD-1','nameEn':'Old item','unit':'piece','isActive':true}];
+  _MutableItemApi()
+    : super(
+        AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+        FakeTokenStore(),
+      );
+  List<Map<String, dynamic>> rows = [
+    {
+      'id': 'old',
+      'code': 'OLD-1',
+      'nameEn': 'Old item',
+      'unit': 'piece',
+      'isActive': true,
+    },
+  ];
   @override
-  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => rows;
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => rows;
 }
 
 void main() {
-  testWidgets('item picker displays fresh active source after invalidation', (tester) async {
+  testWidgets('item picker displays fresh active source after invalidation', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize=const Size(1400,900); tester.view.devicePixelRatio=1;
-    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
-    final api=_MutableItemApi();
-    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(null)]);
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _MutableItemApi();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(null),
+      ],
+    );
     addTearDown(container.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
-      locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
-      supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemPickerDialog()))));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const Scaffold(body: ItemPickerDialog()),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(find.text('OLD-1'),findsOneWidget);
-    api.rows=[{'id':'old','code':'OLD-1','nameEn':'Old item','unit':'piece','isActive':false},
-      {'id':'new','code':'NEW-2','nameEn':'New item','unit':'piece','isActive':true}];
-    container.invalidate(itemsProvider); await tester.pumpAndSettle();
-    expect(find.text('OLD-1'),findsNothing);
-    expect(find.text('NEW-2'),findsOneWidget);
+    expect(find.text('OLD-1'), findsOneWidget);
+    api.rows = [
+      {
+        'id': 'old',
+        'code': 'OLD-1',
+        'nameEn': 'Old item',
+        'unit': 'piece',
+        'isActive': false,
+      },
+      {
+        'id': 'new',
+        'code': 'NEW-2',
+        'nameEn': 'New item',
+        'unit': 'piece',
+        'isActive': true,
+      },
+    ];
+    container.invalidate(itemsProvider);
+    await tester.pumpAndSettle();
+    expect(find.text('OLD-1'), findsNothing);
+    expect(find.text('NEW-2'), findsOneWidget);
+  });
+
+  testWidgets('submitting a unit barcode selects the scanned unit', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _MutableItemApi()
+      ..rows = [
+        {
+          'id': 'item',
+          'code': 'IT-1',
+          'nameEn': 'Item',
+          'unit': 'piece',
+          'isActive': true,
+          'units': [
+            {'unit': 'piece', 'factor': '1', 'isActive': true},
+            {
+              'unit': 'box',
+              'factor': '12',
+              'barcode': 'BOX-001',
+              'isActive': true,
+            },
+          ],
+        },
+      ];
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(null),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) => Column(
+                  children: [
+                    TextButton(
+                      onPressed: () async {
+                        final result = await showItemPicker(context);
+                        setState(
+                          () => api.rows = [
+                            {'id': result?['_scannedUnitName'] ?? ''},
+                          ],
+                        );
+                      },
+                      child: const Text('Open item picker'),
+                    ),
+                    Text(api.rows.first['id']?.toString() ?? ''),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open item picker'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'BOX-001');
+    await tester.pumpAndSettle();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('box'), findsOneWidget);
   });
 }

@@ -61,14 +61,15 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
     _canSeeStock = user?.can('inventory.stock.read') ?? false;
     if (_canSeeStock) {
       final branchId = widget.branchId ?? user?.branchId;
-      _stock = ref.read(apiClientProvider).getList(
-        '/inventory/stock',
-        query: {'branchId': ?branchId},
-      );
-      _byWarehouse = ref.read(apiClientProvider).getList(
-        '/inventory/stock/by-warehouse',
-        query: {'branchId': ?branchId},
-      );
+      _stock = ref
+          .read(apiClientProvider)
+          .getList('/inventory/stock', query: {'branchId': ?branchId});
+      _byWarehouse = ref
+          .read(apiClientProvider)
+          .getList(
+            '/inventory/stock/by-warehouse',
+            query: {'branchId': ?branchId},
+          );
     }
   }
 
@@ -97,7 +98,23 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
               border: const OutlineInputBorder(),
               isDense: true,
             ),
-            onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+            onChanged: (value) =>
+                setState(() => _query = value.trim().toLowerCase()),
+            onSubmitted: (value) {
+              final code = value.trim().toLowerCase();
+              final rows = items.value ?? const <Json>[];
+              final matches = rows
+                  .where((row) {
+                    return text(row, 'barcode').toLowerCase() == code ||
+                        listOf(row['units']).any(
+                          (unit) => text(unit, 'barcode').toLowerCase() == code,
+                        );
+                  })
+                  .toList(growable: false);
+              if (code.isNotEmpty && matches.length == 1) {
+                Navigator.of(context).pop(_select(matches.single));
+              }
+            },
           ),
           const SizedBox(height: 8),
           Align(
@@ -119,74 +136,89 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                 builder: (context, snapshot) => FutureBuilder<List<Json>>(
                   future: _byWarehouse,
                   builder: (context, warehouseSnapshot) {
-                  final stock = _stockByItem(snapshot.data ?? const []);
-                  final where = _warehousesByItem(
-                    warehouseSnapshot.data ?? const [],
-                  );
-                  return SingleChildScrollView(
-                    child: ResizableTable(
-                      storageKey: 'item-picker',
-                      rows: _filter(rows, language),
-                      onTap: (row) => Navigator.of(context).pop(row),
-                      columns: [
-                        ResizableColumn(
-                          l10n.item,
-                          width: 110,
-                          value: (row) => text(row, 'code'),
-                        ),
-                        ResizableColumn(
-                          language == 'ar' ? 'الاسم' : 'Name',
-                          width: 260,
-                          value: (row) =>
-                              language == 'ar' && text(row, 'nameAr').isNotEmpty
-                                  ? text(row, 'nameAr')
-                                  : text(row, 'nameEn'),
-                        ),
-                        ResizableColumn(
-                          l10n.unit,
-                          width: 90,
-                          value: (row) => text(row, 'unit'),
-                        ),
-                        if (_canSeeStock)
+                    final stock = _stockByItem(snapshot.data ?? const []);
+                    final where = _warehousesByItem(
+                      warehouseSnapshot.data ?? const [],
+                    );
+                    return SingleChildScrollView(
+                      child: ResizableTable(
+                        storageKey: 'item-picker',
+                        rows: _filter(rows, language),
+                        onTap: (row) => Navigator.of(context).pop(_select(row)),
+                        columns: [
                           ResizableColumn(
-                            l10n.availableInBranch,
-                            width: 150,
+                            l10n.item,
+                            width: 110,
+                            value: (row) => text(row, 'code'),
+                          ),
+                          ResizableColumn(
+                            language == 'ar' ? 'الاسم' : 'Name',
+                            width: 260,
+                            value: (row) =>
+                                language == 'ar' &&
+                                    text(row, 'nameAr').isNotEmpty
+                                ? text(row, 'nameAr')
+                                : text(row, 'nameEn'),
+                          ),
+                          ResizableColumn(
+                            l10n.unit,
+                            width: 90,
+                            value: (row) => text(row, 'unit'),
+                          ),
+                          if (_canSeeStock)
+                            ResizableColumn(
+                              l10n.availableInBranch,
+                              width: 150,
+                              numeric: true,
+                              value: (row) {
+                                if (!flag(
+                                  row,
+                                  'isStockTracked',
+                                  fallback: true,
+                                )) {
+                                  return '—';
+                                }
+                                return stock[text(row, 'id')] ?? '0.0000';
+                              },
+                            ),
+                          if (_canSeeStock)
+                            ResizableColumn(
+                              l10n.perWarehouse,
+                              width: 210,
+                              value: (row) {
+                                if (!flag(
+                                  row,
+                                  'isStockTracked',
+                                  fallback: true,
+                                )) {
+                                  return '—';
+                                }
+                                return where[text(row, 'id')] ?? '—';
+                              },
+                            ),
+                          ResizableColumn(
+                            l10n.unitPrice,
+                            width: 130,
                             numeric: true,
-                            value: (row) {
-                              if (!flag(row, 'isStockTracked', fallback: true)) {
-                                return '—';
-                              }
-                              return stock[text(row, 'id')] ?? '0.0000';
-                            },
+                            value: (row) =>
+                                formatAmount(text(row, 'salePrice')),
                           ),
-                        if (_canSeeStock)
-                          ResizableColumn(
-                            l10n.perWarehouse,
-                            width: 210,
-                            value: (row) {
-                              if (!flag(row, 'isStockTracked', fallback: true)) {
-                                return '—';
-                              }
-                              return where[text(row, 'id')] ?? '—';
-                            },
+                        ],
+                        actions: (row) => [
+                          Flexible(
+                            child: TextButton(
+                              onPressed: () =>
+                                  Navigator.of(context).pop(_select(row)),
+                              child: Text(
+                                l10n.selectItem,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
-                        ResizableColumn(
-                          l10n.unitPrice,
-                          width: 130,
-                          numeric: true,
-                          value: (row) => formatAmount(text(row, 'salePrice')),
-                        ),
-                      ],
-                      actions: (row) => [
-                        Flexible(
-                          child: TextButton(
-                            onPressed: () => Navigator.of(context).pop(row),
-                            child: Text(l10n.selectItem, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
+                        ],
+                      ),
+                    );
                   },
                 ),
               ),
@@ -202,14 +234,30 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
         .where((row) => flag(row, 'isActive', fallback: true))
         .toList(growable: false);
     if (_query.isEmpty) return active;
-    return active.where((row) {
-      final name = language == 'ar' && text(row, 'nameAr').isNotEmpty
-          ? text(row, 'nameAr')
-          : text(row, 'nameEn');
-      return text(row, 'code').toLowerCase().contains(_query) ||
-          name.toLowerCase().contains(_query) ||
-          text(row, 'barcode').toLowerCase().contains(_query);
-    }).toList(growable: false);
+    return active
+        .where((row) {
+          final name = language == 'ar' && text(row, 'nameAr').isNotEmpty
+              ? text(row, 'nameAr')
+              : text(row, 'nameEn');
+          return text(row, 'code').toLowerCase().contains(_query) ||
+              name.toLowerCase().contains(_query) ||
+              text(row, 'barcode').toLowerCase().contains(_query) ||
+              listOf(row['units']).any(
+                (unit) => text(unit, 'barcode').toLowerCase().contains(_query),
+              );
+        })
+        .toList(growable: false);
+  }
+
+  Json _select(Json row) {
+    final matchingUnit = listOf(row['units']).where(
+      (unit) =>
+          _query.isNotEmpty && text(unit, 'barcode').toLowerCase() == _query,
+    );
+    final unitName = matchingUnit.isEmpty
+        ? ''
+        : text(matchingUnit.first, 'unit');
+    return {...row, if (unitName.isNotEmpty) '_scannedUnitName': unitName};
   }
 
   /// "WH-1 3 · WH-2 4 · Unassigned 1", in the reader's language. Empty when the

@@ -93,6 +93,8 @@ export class InventoryReportsService {
         purchasePrice: mayReadCost
           ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
           : null,
+        isDefaultSale: unit.isDefaultSale,
+        isDefaultPurchase: unit.isDefaultPurchase,
         isBase: unit.unit === item.unit,
         // Multi-unit: inactive units stay readable on old documents but are
         // refused on new ones (resolveUnitSelection enforces that).
@@ -129,6 +131,10 @@ export class InventoryReportsService {
     });
     if (!unit) throw new NotFoundException('Unit not found');
     const isBase = unit.unit === item.unit;
+    if (!unit.isActive &&
+        (dto.isDefaultSale === true || dto.isDefaultPurchase === true)) {
+      throw new BadRequestException('An inactive unit cannot be a default unit');
+    }
 
     const data: Record<string, unknown> = {};
     if (dto.unit !== undefined) {
@@ -176,7 +182,28 @@ export class InventoryReportsService {
       }
     }
 
-    const updated = await this.prisma.itemUnit.update({ where: { id: unitId }, data });
+    for (const key of ['isDefaultSale', 'isDefaultPurchase'] as const) {
+      if (dto[key] === undefined) continue;
+      if (typeof dto[key] !== 'boolean') {
+        throw new BadRequestException(`${key} must be a boolean`);
+      }
+      data[key] = dto[key];
+    }
+
+    const changesDefault = data.isDefaultSale === true || data.isDefaultPurchase === true;
+    const updated = changesDefault
+      ? await this.prisma.$transaction(async (tx) => {
+      for (const key of ['isDefaultSale', 'isDefaultPurchase'] as const) {
+        if (data[key] === true) {
+          await tx.itemUnit.updateMany({
+            where: { itemId, id: { not: unitId } },
+            data: { [key]: false },
+          });
+        }
+      }
+      return tx.itemUnit.update({ where: { id: unitId }, data });
+      })
+      : await this.prisma.itemUnit.update({ where: { id: unitId }, data });
     await this.audit.record({
       companyId,
       userId,
@@ -225,7 +252,11 @@ export class InventoryReportsService {
     if (await this.unitIsReferenced(itemId, unit.unit)) {
       const updated = await this.prisma.itemUnit.update({
         where: { id: unitId },
-        data: { isActive: false },
+        data: {
+          isActive: false,
+          isDefaultSale: false,
+          isDefaultPurchase: false,
+        },
       });
       await this.audit.record({
         companyId,
@@ -265,7 +296,14 @@ export class InventoryReportsService {
       throw new BadRequestException('The base unit cannot be deactivated.');
     }
     if (!unit.isActive) return this.listUnits(companyId, itemId, mayReadCost);
-    await this.prisma.itemUnit.update({ where: { id: unitId }, data: { isActive: false } });
+    await this.prisma.itemUnit.update({
+      where: { id: unitId },
+      data: {
+        isActive: false,
+        isDefaultSale: false,
+        isDefaultPurchase: false,
+      },
+    });
     await this.audit.record({
       companyId,
       userId,

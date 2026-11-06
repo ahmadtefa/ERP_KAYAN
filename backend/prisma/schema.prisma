@@ -2046,6 +2046,8 @@ model ItemUnit {
   barcode       String?
   salePrice     Decimal? @db.Decimal(19, 4)
   purchasePrice Decimal? @db.Decimal(19, 4)
+  isDefaultSale Boolean  @default(false)
+  isDefaultPurchase Boolean @default(false)
 
   /// A unit used on a saved document is never hard-deleted: it is deactivated
   /// instead, so old documents still name a unit that exists. New documents

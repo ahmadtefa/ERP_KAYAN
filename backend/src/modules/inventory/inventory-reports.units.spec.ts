@@ -14,6 +14,8 @@ const carton = {
   salePrice: null as Prisma.Decimal | null,
   purchasePrice: null as Prisma.Decimal | null,
   isActive: true,
+  isDefaultSale: false,
+  isDefaultPurchase: false,
   createdAt: new Date('2026-10-27T00:00:00.000Z'),
 };
 
@@ -27,7 +29,7 @@ function build(options: {
   unitBarcodeOwner?: { unit: string; item: { code: string } } | null;
   siblingUnit?: { id: string } | null;
 } = {}) {
-  const prisma = {
+  const prisma: any = {
     item: {
       findFirst: jest.fn(async ({ where }: any) =>
         where?.barcode ? options.itemBarcodeOwner ?? null : item,
@@ -48,6 +50,7 @@ function build(options: {
       findMany: jest.fn().mockResolvedValue([carton]),
       create: jest.fn().mockResolvedValue(carton),
       update: jest.fn().mockResolvedValue(carton),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       delete: jest.fn().mockResolvedValue(carton),
     },
     // removeUnit() now checks document snapshots before deleting; these
@@ -58,6 +61,7 @@ function build(options: {
     purchaseOrderLine: { count: jest.fn(async () => 0) },
     salesOrderLine: { count: jest.fn(async () => 0) },
   };
+  prisma.$transaction = jest.fn(async (run: (tx: any) => Promise<any>) => run(prisma));
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const settings = { get: jest.fn() };
   const service = new InventoryReportsService(prisma as any, audit as any, settings as any);
@@ -65,6 +69,25 @@ function build(options: {
 }
 
 describe('InventoryReportsService unit management', () => {
+  it('moves a default sales unit atomically and returns the selected flag', async () => {
+    const { service, prisma } = build();
+    prisma.itemUnit.update.mockResolvedValue({ ...carton, isDefaultSale: true });
+    prisma.itemUnit.findMany.mockResolvedValue([
+      { ...carton, isDefaultSale: true },
+    ]);
+
+    const result = await service.updateUnit('company-1', 'user-1', 'item-1', 'unit-carton', {
+      isDefaultSale: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.itemUnit.updateMany).toHaveBeenCalledWith({
+      where: { itemId: 'item-1', id: { not: 'unit-carton' } },
+      data: { isDefaultSale: false },
+    });
+    expect(result.items[0]).toEqual(expect.objectContaining({ isDefaultSale: true }));
+  });
+
   it('adds a unit with its own factor and reports it back', async () => {
     const { service, prisma } = build();
 

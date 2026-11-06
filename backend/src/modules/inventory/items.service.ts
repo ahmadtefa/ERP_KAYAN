@@ -242,7 +242,7 @@ export class ItemsService {
   }
 
   private unitResponse(
-    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null },
+    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null; isDefaultSale: boolean; isDefaultPurchase: boolean },
     baseUnit: string,
     mayReadCost = true,
   ) {
@@ -257,6 +257,8 @@ export class ItemsService {
       purchasePrice: mayReadCost
         ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
         : null,
+      isDefaultSale: unit.isDefaultSale,
+      isDefaultPurchase: unit.isDefaultPurchase,
       isBase: unit.unit === baseUnit,
     };
   }
@@ -374,6 +376,8 @@ export class ItemsService {
           unit: item.unit,
           factor: new Prisma.Decimal(1),
           isActive: true,
+          isDefaultSale: true,
+          isDefaultPurchase: true,
         },
       });
 
@@ -657,6 +661,8 @@ export class ItemsService {
       barcode: string | null;
       salePrice: Prisma.Decimal | null;
       purchasePrice: Prisma.Decimal | null;
+      isDefaultSale?: boolean;
+      isDefaultPurchase?: boolean;
       isActive?: boolean;
       createdAt?: Date | null;
     }>;
@@ -708,6 +714,8 @@ export class ItemsService {
         unit: item.unit,
         factor: new Prisma.Decimal(1),
         isActive: true,
+        isDefaultSale: true,
+        isDefaultPurchase: true,
       },
     });
   }
@@ -722,6 +730,8 @@ export class ItemsService {
       salePrice: Prisma.Decimal | null;
       purchasePrice: Prisma.Decimal | null;
       isActive?: boolean;
+      isDefaultSale?: boolean;
+      isDefaultPurchase?: boolean;
       createdAt?: Date | null;
     },
     mayReadCost = true,
@@ -744,6 +754,8 @@ export class ItemsService {
       // Pre-multi-unit rows carry no active flag; treat them as active rather
       // than hiding a unit the catalogue always offered.
       isActive: unit.isActive ?? true,
+      isDefaultSale: unit.isDefaultSale ?? false,
+      isDefaultPurchase: unit.isDefaultPurchase ?? false,
       isBase: unit.factor.equals(1),
       createdAt: unit.createdAt ? unit.createdAt.toISOString() : null,
     };

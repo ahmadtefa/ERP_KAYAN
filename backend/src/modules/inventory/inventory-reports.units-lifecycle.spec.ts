@@ -59,7 +59,11 @@ describe('InventoryReportsService multi-unit lifecycle', () => {
     expect(prisma.itemUnit.delete).not.toHaveBeenCalled();
     const update = prisma.itemUnit.update.mock.calls[0][0];
     expect(update.where).toEqual({ id: 'unit-carton' });
-    expect(update.data).toEqual({ isActive: false });
+    expect(update.data).toEqual({
+      isActive: false,
+      isDefaultSale: false,
+      isDefaultPurchase: false,
+    });
     expect((result as { deactivated: boolean }).deactivated).toBe(true);
     // The list payload now exposes the active flag and timestamp.
     expect(result.items[0]).toEqual(
@@ -83,7 +87,11 @@ describe('InventoryReportsService multi-unit lifecycle', () => {
     await service.deactivateUnit('company-1', 'user-1', 'item-1', 'unit-carton');
     expect(prisma.itemUnit.update).toHaveBeenLastCalledWith({
       where: { id: 'unit-carton' },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        isDefaultSale: false,
+        isDefaultPurchase: false,
+      },
     });
 
     await service.reactivateUnit('company-1', 'user-1', 'item-1', 'unit-carton');
