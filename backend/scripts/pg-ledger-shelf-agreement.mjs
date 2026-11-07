@@ -91,6 +91,40 @@ async function disagreements() {
 
 const suffix = randomUUID().slice(0, 8);
 
+// Removes everything this guard created.
+//
+// The guard used to leave its throwaway company behind. That is not only
+// untidy - `companies` carries a partial unique index that allows exactly one
+// live company per installation, so the leftover company made the *next*
+// script in the CI job fail with P2002 on Company_one_active_company_idx.
+// A guard that breaks its neighbours is worse than no guard: it turns an
+// unrelated step red and hides the real result.
+//
+// Deletion order follows the foreign keys child-first. The installation is
+// either the guard's own fresh database or a CI database no other step is
+// using at the same time.
+async function teardown(w) {
+  if (!w?.companyId) return;
+  const queries = [
+    `DELETE FROM stock_movements WHERE "companyId" = $1`,
+    `DELETE FROM warehouse_stock_balances WHERE "companyId" = $1`,
+    `DELETE FROM stock_balances WHERE "companyId" = $1`,
+    `DELETE FROM items WHERE "companyId" = $1`,
+    `DELETE FROM warehouses WHERE "companyId" = $1`,
+    `DELETE FROM branches WHERE "companyId" = $1`,
+    `DELETE FROM companies WHERE id = $1`,
+  ];
+  for (const sql of queries) {
+    try {
+      await prisma.$executeRawUnsafe(sql, w.companyId);
+    } catch (error) {
+      // A table this installation does not have (an older schema) must not
+      // stop the cleanup of the rest, so report and keep going.
+      console.log(`  teardown: skipped ${sql.split(' ')[2]} (${error.message.split('\n')[0]})`);
+    }
+  }
+}
+
 async function world() {
   const companyId = randomUUID();
   const branchId = randomUUID();
@@ -242,6 +276,10 @@ if (process.argv.includes('--audit')) {
   process.exit(failures === 0 ? 0 : 1);
 }
 
+// Declared outside the try block so the finally below can always clean up,
+// even when a check throws halfway through.
+let created = null;
+
 try {
   // ---------------------------------------------------------------- baseline
   console.log('\n[baseline] an untouched database has nothing to disagree about');
@@ -252,6 +290,7 @@ try {
   // ------------------------------------------------- a receipt funds one shelf
   console.log('\n[receipt] goods arriving in one warehouse fund that shelf');
   const w = await world();
+  created = w;
   await receive(w, w.sourceId, 10, '7.5000');
 
   check('the source shelf holds 10 after the receipt', (await shelf(w.sourceId, w.itemId)) === '10.0000',
@@ -323,6 +362,8 @@ try {
   failures += 1;
   console.error('\nHARNESS ERROR', error);
 } finally {
+  // The company this guard made must not outlive it; see teardown().
+  await teardown(created);
   await prisma.$disconnect();
 }
 

@@ -139,8 +139,14 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
             ),
             ColumnSpec(
               _arabic ? 'الانتهاء' : 'Expiry',
-              value: (r) =>
-                  asString(r['expiryDate']).split('T').first,
+              // A batch without an expiry date is normal (many items do not
+              // expire), so the cell shows a dash rather than the word "null"
+              // or a crash on the missing value.
+              value: (r) {
+                final expiry = asString(r['expiryDate']);
+                if (expiry == null || expiry.isEmpty) return '—';
+                return expiry.split('T').first;
+              },
             ),
             ColumnSpec(
               _arabic ? 'الأيام' : 'Days',

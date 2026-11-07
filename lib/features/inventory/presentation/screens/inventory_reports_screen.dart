@@ -40,10 +40,37 @@ final _reportProvider = FutureProvider.family<Json, String>((ref, slug) async {
 
 /// The filter the whole screen shares. Only the keys a report declares are
 /// read from it, so one set of controls serves twenty reports.
-final _reportFilterProvider =
-    StateProvider<Map<String, dynamic>>((ref) => const {});
+/// Riverpod 3 removed `StateProvider`; a `Notifier` is the supported way to
+/// hold a value a widget both reads and writes.
+class _ReportFilter extends Notifier<Map<String, dynamic>> {
+  @override
+  Map<String, dynamic> build() => const {};
 
-final _selectedReportProvider = StateProvider<String?>((ref) => null);
+  void set(String key, dynamic value) {
+    final next = {...state};
+    if (value == null) {
+      next.remove(key);
+    } else {
+      next[key] = value;
+    }
+    state = next;
+  }
+
+  void clear() => state = const {};
+}
+
+final _reportFilterProvider =
+    NotifierProvider<_ReportFilter, Map<String, dynamic>>(_ReportFilter.new);
+
+class _SelectedReport extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? id) => state = id;
+}
+
+final _selectedReportProvider =
+    NotifierProvider<_SelectedReport, String?>(_SelectedReport.new);
 
 class InventoryReportsScreen extends ConsumerStatefulWidget {
   const InventoryReportsScreen({super.key});
@@ -63,11 +90,10 @@ class _InventoryReportsScreenState
       ? text(report, 'titleAr')
       : text(report, 'titleEn');
 
-  List<String> _filters(Json report) {
-    final filters = report['filters'];
-    if (filters is! List) return const [];
-    return filters.whereType<String>().toList(growable: false);
-  }
+  // The catalogue reports the filters each report understands, but this screen
+  // has no filter controls yet: it renders the rows the server returns for the
+  // whole company. A helper that read those keys and was never called would be
+  // the kind of dead code that makes a missing feature look present.
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +131,7 @@ class _InventoryReportsScreenState
                         title: Text(_title(row)),
                         onTap: () => ref
                             .read(_selectedReportProvider.notifier)
-                            .state = text(row, 'slug'),
+                            .select(text(row, 'slug')),
                       ),
                   ],
                 ),

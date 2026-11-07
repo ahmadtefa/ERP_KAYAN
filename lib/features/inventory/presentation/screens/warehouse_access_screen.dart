@@ -21,7 +21,14 @@ final _peopleProvider = FutureProvider<List<Json>>((ref) async {
 });
 
 /// The person whose rights are being edited.
-final _subjectProvider = StateProvider<String?>((ref) => null);
+class _Subject extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? id) => state = id;
+}
+
+final _subjectProvider = NotifierProvider<_Subject, String?>(_Subject.new);
 
 final _accessProvider = FutureProvider.family<Json, String>((ref, userId) async {
   return ref.read(apiClientProvider).get('/inventory/warehouse-access/$userId');
@@ -43,19 +50,6 @@ class WarehouseAccessScreen extends ConsumerWidget {
 
   bool _arabic(BuildContext context) =>
       Localizations.localeOf(context).languageCode == 'ar';
-
-  String _right(BuildContext context, String key) {
-    final arabic = _arabic(context);
-    return switch (key) {
-      'canView' => arabic ? 'عرض' : 'View',
-      'canReceive' => arabic ? 'استلام' : 'Receive',
-      'canIssue' => arabic ? 'صرف' : 'Issue',
-      'canTransfer' => arabic ? 'تحويل' : 'Transfer',
-      'canCount' => arabic ? 'جرد' : 'Count',
-      'canApprove' => arabic ? 'اعتماد' : 'Approve',
-      _ => arabic ? 'رؤية التكلفة' : 'See cost',
-    };
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -138,7 +132,7 @@ class WarehouseAccessScreen extends ConsumerWidget {
                         subtitle: Text(text(person, 'username')),
                         onTap: () => ref
                             .read(_subjectProvider.notifier)
-                            .state = text(person, 'id'),
+                            .select(text(person, 'id')),
                       ),
                   ],
                 ),

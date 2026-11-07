@@ -122,7 +122,7 @@ interface TableSpec {
 /// The order of this list is the order rows are written: everything a row
 /// points at comes before it. Restoring in any other order breaks a foreign
 /// key, which is exactly what a half-restore looks like.
-const TABLES: TableSpec[] = [
+export const TABLES: TableSpec[] = [
   // Insert parents before dependants. Restore deletes this list in reverse,
   // so every foreign-key dependant is removed before its parent.
   {
@@ -137,6 +137,7 @@ const TABLES: TableSpec[] = [
   { model: 'userPermission', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'userRole', scope: 'company' },
   { model: 'userBranch', scope: 'child', parent: 'user', foreignKey: 'userId' },
+  { model: 'userProfilePhoto', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'fiscalPeriod', scope: 'company' },
   {
     model: 'account',
@@ -145,7 +146,12 @@ const TABLES: TableSpec[] = [
     selfReferenceField: 'parentId',
   },
   { model: 'costCenter', scope: 'company' },
+  { model: 'notificationSetting', scope: 'company' },
+  { model: 'budget', scope: 'company' },
   { model: 'companySetting', scope: 'company' },
+  { model: 'printPriceSetting', scope: 'company' },
+  { model: 'quotationTermTemplate', scope: 'company' },
+  { model: 'quotationColumnTemplate', scope: 'company' },
   { model: 'priceList', scope: 'company' },
   { model: 'itemCategory', scope: 'company' },
   { model: 'customer', scope: 'company' },
@@ -153,6 +159,26 @@ const TABLES: TableSpec[] = [
   { model: 'item', scope: 'company' },
   { model: 'itemUnit', scope: 'child', parent: 'item', foreignKey: 'itemId' },
   { model: 'warehouse', scope: 'company' },
+  {
+    // A storage location can hang from another one (aisle > shelf > bin).
+    model: 'storageLocation',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'parentId',
+  },
+  { model: 'itemWarehouseSetting', scope: 'company' },
+  // Batches carry expiry dates and per-lot cost. Dropping them from a backup
+  // would lose the expiry dates a shop needs to sell stock safely, and would
+  // leave every restored movement pointing at a lot that no longer exists.
+  { model: 'itemBatch', scope: 'company' },
+  // The shelf book. `warehouses` cannot be cleared while these rows exist,
+  // which is how a backup made without this table failed to restore at all.
+  { model: 'warehouseStockBalance', scope: 'company' },
+  { model: 'itemCostHistory', scope: 'company' },
+  { model: 'userWarehouseAccess', scope: 'company' },
+  { model: 'stockTakeSession', scope: 'company' },
+  { model: 'stockTakeLine', scope: 'child', parent: 'stockTakeSession', foreignKey: 'sessionId' },
+  { model: 'notification', scope: 'company' },
   { model: 'priceListItem', scope: 'child', parent: 'priceList', foreignKey: 'priceListId' },
   { model: 'stockBalance', scope: 'company' },
   { model: 'stockMovement', scope: 'company' },
@@ -174,6 +200,7 @@ const TABLES: TableSpec[] = [
   },
   { model: 'salesOrder', scope: 'company' },
   { model: 'salesOrderLine', scope: 'child', parent: 'salesOrder', foreignKey: 'orderId' },
+  { model: 'orderCreationRequest', scope: 'company' },
   { model: 'purchaseOrder', scope: 'company' },
   { model: 'purchaseOrderLine', scope: 'child', parent: 'purchaseOrder', foreignKey: 'orderId' },
   {
@@ -206,6 +233,7 @@ const TABLES: TableSpec[] = [
   },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  { model: 'stockDocumentCreationRequest', scope: 'company' },
   // Quotations point at the invoice they became, so they follow sales
   // invoices. The content snapshot is a column on the quotation, so an issued
   // offer survives the round trip exactly as it was sent.
@@ -244,6 +272,7 @@ const TABLES: TableSpec[] = [
   { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
+  { model: 'backupRun', scope: 'company' },
 ];
 
 /// Tables that are deliberately left out, and why. A backup file that silently
