@@ -1,0 +1,116 @@
+name: Flutter verification (analyze and test, reported honestly)
+
+# The project's other Flutter jobs run a bare `flutter analyze`, which in this
+# Flutter version also fails on `info`-level style notes. That means analyze has
+# never passed on this codebase, so "analyze failed" has been hiding the one
+# thing that actually matters: whether the app compiles.
+#
+# This job separates the two. Compilation errors fail it. Style notes are
+# counted and reported, not used to stop the test run. `flutter test` is not
+# allowed to be skipped: if the code does not compile, the run fails here.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Flutter analyze and test on the exact commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python for branded icons
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate platform icons from 1.png
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python scripts/generate_app_icons.py
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # The version every other workflow in this repository pins.
+          flutter-version: '3.47.6'
+          cache: true
+
+      - name: Toolchain versions
+        run: |
+          echo "### Flutter and Dart" >> "$GITHUB_STEP_SUMMARY"
+          flutter --version | tee -a "$GITHUB_STEP_SUMMARY"
+          dart --version | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze, separating compile errors from style notes
+        run: |
+          set +e
+          flutter analyze --no-pub --machine > analyze.json 2>&1
+          code=$?
+          set -e
+          python - <<'PY'
+          import json, os, collections
+          errors, warnings, infos = [], [], []
+          try:
+              for line in open('analyze.json', encoding='utf-8'):
+                  line = line.strip()
+                  if not line.startswith('{'):
+                      continue
+                  try:
+                      d = json.loads(line)
+                  except Exception:
+                      continue
+                  if d.get('type') != 'diagnostic':
+                      continue
+                  sev = d.get('severity', '')
+                  loc = f"{d.get('path','?')}:{d.get('range',{}).get('start',{}).get('line','?')}"
+                  item = f"{loc}  {d.get('code','?')}  {d.get('message','')[:120]}"
+                  (errors if sev == 'ERROR' else warnings if sev == 'WARNING' else infos).append(item)
+          except FileNotFoundError:
+              pass
+
+          out = os.environ['GITHUB_STEP_SUMMARY']
+          with open(out, 'a', encoding='utf-8') as fh:
+              fh.write(f"\n### flutter analyze\n\n")
+              fh.write(f"| severity | count |\n|---|---|\n")
+              fh.write(f"| error | {len(errors)} |\n| warning | {len(warnings)} |\n| info | {len(infos)} |\n")
+              for title, items in (('Errors', errors), ('Warnings', warnings)):
+                  if items:
+                      fh.write(f"\n<details><summary>{title} ({len(items)})</summary>\n\n")
+                      for i in items:
+                          fh.write(f"- `{i}`\n")
+                      fh.write("\n</details>\n")
+          print(f"errors={len(errors)} warnings={len(warnings)} infos={len(infos)}")
+          if errors:
+              print("::error title=Flutter compilation errors::the app does not compile")
+              raise SystemExit(1)
+          print(f"::notice title=No compile errors::{len(warnings)} warnings, {len(infos)} style notes")
+          PY
+
+      - name: Run tests
+        run: |
+          set +e
+          flutter test --reporter expanded > test.log 2>&1
+          code=$?
+          set -e
+          tail -60 test.log
+          echo "exit=$code"
+          echo "### flutter test" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^[0-9]+:[0-9]+ \+[0-9]+" test.log | tail -1 >> "$GITHUB_STEP_SUMMARY" || true
+          exit $code
+
+      - name: Keep the full logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-verify-logs
+          path: |
+            analyze.json
+            test.log
+          if-no-files-found: warn
+          retention-days: 14
