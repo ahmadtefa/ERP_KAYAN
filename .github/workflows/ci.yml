@@ -455,8 +455,17 @@ jobs:
           path: test/screenshots/goldens/*.png
           if-no-files-found: warn
           retention-days: 30
+      # JSON events, not the human transcript: the reporter keeps each failing
+      # test's name and assertion in the annotation, whereas a tail of the
+      # console text loses them behind a few hundred passing tests.
       - name: Run tests
-        run: python scripts/ci-diagnose.py flutter test --reporter expanded
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/flutter-tests.json"
+          if ! flutter test --reporter json > "$log" 2>&1; then
+            node scripts/report-flutter-test-failures.mjs "$log"
+            exit 1
+          fi
       # A failing test's own message sits in the middle of a long log, and the
       # log host is not always reachable. Re-running the one file leaves that
       # message inside the annotated tail.
@@ -509,6 +518,12 @@ jobs:
       - name: Render design screenshots
         run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
       - name: Run tests
-        run: python scripts/ci-diagnose.py flutter test --reporter expanded
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/flutter-tests.json"
+          if ! flutter test --reporter json > "$log" 2>&1; then
+            node scripts/report-flutter-test-failures.mjs "$log"
+            exit 1
+          fi
       - name: Build Linux desktop
         run: flutter build linux --release
