@@ -95,8 +95,15 @@ jobs:
           echo "::notice title=Unit tests::${summary:-summary not captured}"
       - name: Build API
         run: npm run build
+      # `prisma migrate deploy` cannot run here: the pinned WASM schema engine
+      # (prisma 6.19.3) fails against the PostgreSQL 16 catalogs the service
+      # container provides with "Column type 'name' could not be deserialized
+      # from the database" while creating its own _prisma_migrations table.
+      # scripts/pg-apply-migrations.mjs exists for exactly this and is what the
+      # other database checks in this repository already use. The migration SQL
+      # is executed unchanged, so the schema is still the project's own.
       - name: Apply migrations to ephemeral PostgreSQL
-        run: npx prisma migrate deploy
+        run: python ../scripts/ci-diagnose.py node scripts/pg-apply-migrations.mjs
 
       # Licensing is the one subsystem whose real behaviour cannot be shown
       # with a mocked database: the migration has to survive an installation
@@ -332,8 +339,10 @@ jobs:
         run: npm ci
       - name: Generate Prisma Client
         run: npx prisma generate
+      # Same pinned-engine limitation as the backend job above; same
+      # migrations, same SQL, executed through the pg driver instead.
       - name: Apply migrations to a freshly created database
-        run: npx prisma migrate deploy
+        run: python ../scripts/ci-diagnose.py node scripts/pg-apply-migrations.mjs
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Verify quotation migrations are present in the runtime database
