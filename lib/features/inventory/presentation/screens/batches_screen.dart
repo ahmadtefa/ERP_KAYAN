@@ -142,7 +142,7 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
               // `asString` answers null for a missing or empty value, and a
               // lot with no expiry date is a real row in this table.
               value: (r) =>
-                  asString(r['expiryDate'])?.split('T').first ?? '',
+                  asString(r['expiryDate'])?.split('T').first ?? '—',
             ),
             ColumnSpec(
               _arabic ? 'الأيام' : 'Days',

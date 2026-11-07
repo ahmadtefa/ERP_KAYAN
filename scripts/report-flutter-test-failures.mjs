@@ -147,6 +147,20 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The inventory list screens' widget tests use only the synthetic rows
+  // declared inside the test files themselves. Their failures were invisible:
+  // everything arrived as `print` events and only `error` events were kept, so
+  // eighteen failures all reported "Test failed. See exception logs above."
+  if (event.type === 'print' &&
+      /^(?:English reads nameEn, Arabic reads nameAr and mirrors|the header names the module and offers a way back|search narrows by batch number and by item name|search narrows by code and by warehouse|search narrows by number, reason and warehouse|search narrows by number and by raiser|builds its list from the server catalogue, not a local table|without the export grant the button is absent|the person who opened a count cannot approve it|the person who raised a write-off cannot approve it|an approved draft is named waiting for posting, not draft|the header names the module and offers a way back)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual|Which):\s*.{0,200}/)?.[0]?.trim() ??
+      line.match(/test\/(?:widget|features)\/[A-Za-z0-9_\/]+\.dart:\d+:\d+/)?.[0] ??
+      line.match(/^The following [A-Za-z_.]+ (?:was thrown|object was thrown)[^\n]{0,160}/)?.[0] ??
+      line.match(/(?:Bad state: (?:No element|Too many elements)|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No (?:Material|ScaffoldMessenger|Directionality|Overlay|Localizations) widget found|Cannot hit test)[^\n]{0,120}/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1500));
+  }
   if (event.type === 'error') {
     const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);
