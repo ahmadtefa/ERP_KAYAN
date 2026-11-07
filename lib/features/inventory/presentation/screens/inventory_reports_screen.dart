@@ -40,10 +40,25 @@ final _reportProvider = FutureProvider.family<Json, String>((ref, slug) async {
 
 /// The filter the whole screen shares. Only the keys a report declares are
 /// read from it, so one set of controls serves twenty reports.
-final _reportFilterProvider =
-    StateProvider<Map<String, dynamic>>((ref) => const {});
+class _ReportFilter extends Notifier<Map<String, dynamic>> {
+  @override
+  Map<String, dynamic> build() => const {};
 
-final _selectedReportProvider = StateProvider<String?>((ref) => null);
+  void set(Map<String, dynamic> value) => state = value;
+}
+
+final _reportFilterProvider =
+    NotifierProvider<_ReportFilter, Map<String, dynamic>>(_ReportFilter.new);
+
+class _SelectedReport extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String slug) => state = slug;
+}
+
+final _selectedReportProvider =
+    NotifierProvider<_SelectedReport, String?>(_SelectedReport.new);
 
 class InventoryReportsScreen extends ConsumerStatefulWidget {
   const InventoryReportsScreen({super.key});
@@ -105,7 +120,7 @@ class _InventoryReportsScreenState
                         title: Text(_title(row)),
                         onTap: () => ref
                             .read(_selectedReportProvider.notifier)
-                            .state = text(row, 'slug'),
+                            .select(text(row, 'slug')),
                       ),
                   ],
                 ),

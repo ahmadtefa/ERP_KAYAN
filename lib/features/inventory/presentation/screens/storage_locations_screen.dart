@@ -25,7 +25,15 @@ final _warehouseOptionsProvider = FutureProvider<List<Json>>((ref) async {
 
 /// Which warehouse the tree is showing. Null means "the first one", which is
 /// resolved by the screen so a single-warehouse company never sees a choice.
-final _selectedWarehouseProvider = StateProvider<String?>((ref) => null);
+class _SelectedWarehouse extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? id) => state = id;
+}
+
+final _selectedWarehouseProvider =
+    NotifierProvider<_SelectedWarehouse, String?>(_SelectedWarehouse.new);
 
 /// The locations inside the selected warehouse.
 ///
@@ -49,7 +57,7 @@ class StorageLocationsController extends JsonListController {
   String? _warehouseId() {
     final chosen = ref.watch(_selectedWarehouseProvider);
     if (chosen != null) return chosen;
-    final warehouses = ref.watch(_warehouseOptionsProvider).valueOrNull;
+    final warehouses = ref.watch(_warehouseOptionsProvider).value;
     if (warehouses == null || warehouses.isEmpty) return null;
     return text(warehouses.first, 'id');
   }
@@ -143,8 +151,7 @@ class StorageLocationsScreen extends ConsumerWidget {
                     ],
                     onChanged: (value) {
                       if (value == null) return;
-                      ref.read(_selectedWarehouseProvider.notifier).state =
-                          value;
+                      ref.read(_selectedWarehouseProvider.notifier).select(value);
                       ref.invalidate(storageLocationsProvider);
                     },
                   ),
@@ -247,7 +254,7 @@ class StorageLocationsScreen extends ConsumerWidget {
     final arabic = _arabic(context);
     // The screen always resolves a warehouse before the form can be opened,
     // so the fallback here is the same first row the dropdown shows.
-    final options = ref.read(_warehouseOptionsProvider).valueOrNull;
+    final options = ref.read(_warehouseOptionsProvider).value;
     final warehouseId =
         ref.read(_selectedWarehouseProvider) ??
         (options == null || options.isEmpty ? null : text(options.first, 'id'));

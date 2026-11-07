@@ -21,7 +21,14 @@ final _peopleProvider = FutureProvider<List<Json>>((ref) async {
 });
 
 /// The person whose rights are being edited.
-final _subjectProvider = StateProvider<String?>((ref) => null);
+class _Subject extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String id) => state = id;
+}
+
+final _subjectProvider = NotifierProvider<_Subject, String?>(_Subject.new);
 
 final _accessProvider = FutureProvider.family<Json, String>((ref, userId) async {
   return ref.read(apiClientProvider).get('/inventory/warehouse-access/$userId');
@@ -138,7 +145,7 @@ class WarehouseAccessScreen extends ConsumerWidget {
                         subtitle: Text(text(person, 'username')),
                         onTap: () => ref
                             .read(_subjectProvider.notifier)
-                            .state = text(person, 'id'),
+                            .select(text(person, 'id')),
                       ),
                   ],
                 ),
