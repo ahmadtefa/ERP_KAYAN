@@ -151,8 +151,9 @@ class StorageLocationsScreen extends ConsumerWidget {
                     ],
                     onChanged: (value) {
                       if (value == null) return;
-                      ref.read(_selectedWarehouseProvider.notifier).state =
-                          value;
+                      ref
+                          .read(_selectedWarehouseProvider.notifier)
+                          .select(value);
                       ref.invalidate(storageLocationsProvider);
                     },
                   ),
