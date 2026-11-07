@@ -585,10 +585,9 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
     // The child FutureBuilder is not mounted while the tile is collapsed.
     // Start the request only when expanding so an early failure is observed.
     onExpansionChanged: (expanded) {
-      if (expanded && _future == null) {
-          setState(() {
-            _future = _load();
-      }
+      if (expanded && _future == null)
+        setState(() {
+          _future = _load();
         });
     },
     children: [
@@ -596,8 +595,9 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
         FutureBuilder<List<Json>>(
           future: _future,
           builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done)
+            if (snapshot.connectionState != ConnectionState.done) {
               return const CircularProgressIndicator();
+            }
             if (snapshot.hasError)
               return _VoucherLoadError(
                 error: snapshot.error!,

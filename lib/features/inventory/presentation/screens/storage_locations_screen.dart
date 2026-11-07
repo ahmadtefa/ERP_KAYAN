@@ -74,7 +74,7 @@ class StorageLocationsController extends JsonListController {
 
   @override
   Map<String, dynamic> get resourceQuery => {
-    ?'warehouseId': _warehouseId(),
+    'warehouseId': ?_warehouseId(),
   };
 }
 
