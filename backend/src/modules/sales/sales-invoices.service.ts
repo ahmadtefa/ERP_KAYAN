@@ -623,10 +623,7 @@ export class SalesInvoicesService {
       expiry?.mayIssueExpired === true
         ? {
             userId,
-            reason:
-              (expiry.reason ?? '').trim().length >= 3
-                ? (expiry.reason as string).trim()
-                : 'Approved sale of expired stock (no reason supplied on the request)',
+            reason: (expiry.reason ?? '').trim().length >= 3 ? (expiry.reason as string).trim() : '',
           }
         : null;
 

@@ -289,7 +289,10 @@ const vmLacksDynamicImport = !(
         },
         D(5),
       ),
-    ).rejects.toThrow(/الرصيد غير كافٍ|Not enough stock/i);
+      // The sale is refused because expired stock is all that is left, and that
+      // answer is a permission one: 'this needs approval', not 'there is none'.
+      // Both leave the shelf untouched.
+    ).rejects.toThrow(/متوفرة في دفعات منتهية|only available in expired/i);
 
     // Nothing moved: a refused sale leaves every lot exactly as it was.
     expect(await remaining(db, expired)).toBe(50);

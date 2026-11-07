@@ -21,6 +21,7 @@ import { CostCentersService } from '../dist/src/modules/accounting/cost-centers.
 import { DocumentNumberService } from '../dist/src/modules/accounting/document-number.service.js';
 import { FiscalPeriodsService } from '../dist/src/modules/accounting/fiscal-periods.service.js';
 import { PostingService } from '../dist/src/modules/accounting/posting.service.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 import { StockDocumentsService } from '../dist/src/modules/inventory/stock-documents.service.js';
 
 const prisma = new PrismaClient({
@@ -59,6 +60,7 @@ const settings = new CompanySettingsService(prisma, audit);
 const warehouses = new WarehouseService(prisma, audit);
 const stock = new StockDocumentsService(
   prisma, numbers, posting, new AccountMapService(), audit, settings, warehouses, costCenters,
+  new StockLedgerService(),
 );
 
 const branch = await prisma.branch.create({
@@ -80,15 +82,21 @@ for (const [code, type] of [['1104', 'ASSET'], ['5107', 'EXPENSE']]) {
     if (e.code !== 'P2002') throw e;
   });
 }
-await prisma.stockMovement.create({
-  data: {
+// Opening stock through the real ledger, so the shelf the OUT guard checks
+// is funded as well as the branch book. Seeding only stock_balances made
+// every posting fail with "0.0000 available" before the probe could run.
+await prisma.$transaction(async (tx) => {
+  await tx.stockMovement.create({
+    data: {
+      companyId, branchId: branch.id, warehouseId: wA.id, itemId: item.id,
+      movementDate: new Date('2051-01-05'), direction: 'IN', quantity: dec(10),
+      unitCost: dec(7.5), totalCost: dec(75), referenceType: 'SEED',
+    },
+  });
+  await new StockLedgerService().post(tx, {
     companyId, branchId: branch.id, warehouseId: wA.id, itemId: item.id,
-    movementDate: new Date('2051-01-05'), direction: 'IN', quantity: dec(10),
-    unitCost: dec(7.5), totalCost: dec(75), referenceType: 'SEED',
-  },
-});
-await prisma.stockBalance.create({
-  data: { companyId, branchId: branch.id, itemId: item.id, quantity: dec(10), value: dec(75) },
+    quantity: dec(10), value: dec(75),
+  });
 });
 const card = async (wId) => {
   const r = await prisma.$queryRaw`
@@ -117,15 +125,32 @@ const adjustment = await makeDoc('ADJUSTMENT', -5, { toWarehouseId: wB.id });
 await stock.post(companyId, user.id, adjustment.id);
 console.log('after adjustment OUT: A=%s B=%s', await card(wA.id), await card(wB.id));
 
-// 3) reverse the transfer
-await stock.reverse(companyId, user.id, transfer.id);
+// 3) reverse the transfer. B is empty now, so the reversal's OUT leg cannot be
+// served. Either answer is a valid finding for this probe - what matters is
+// that no shelf ends up negative.
+let reversalRefused = null;
+try {
+  await stock.reverse(companyId, user.id, transfer.id);
+} catch (e) {
+  reversalRefused = e;
+}
 const cardA = await card(wA.id);
 const cardB = await card(wB.id);
 const branchBalance = await prisma.stockBalance.findUnique({
   where: { companyId_branchId_itemId: { companyId, branchId: branch.id, itemId: item.id } },
 });
 console.log('after reversal: A=%s B=%s branchBalance=%s', cardA, cardB, Number(branchBalance.quantity));
-console.log(cardB < 0
-  ? 'FINDING: reversal produced a negative per-warehouse card despite allowNegativeStock=false (branch row stays nonnegative)'
-  : 'no negative warehouse card from reversal');
+if (reversalRefused) {
+  console.log('FINDING (safe): the reversal was refused rather than emptying a shelf below zero');
+  console.log('  reason: %s', reversalRefused.message);
+} else {
+  console.log(cardB < 0
+    ? 'FINDING: reversal produced a negative per-warehouse card despite allowNegativeStock=false (branch row stays nonnegative)'
+    : 'no negative warehouse card from reversal');
+}
+const safe = cardA >= 0 && cardB >= 0 && branchBalance && Number(branchBalance.quantity) >= 0;
+console.log(safe
+  ? 'RESULT: every card stayed non-negative'
+  : 'RESULT: A CARD WENT NEGATIVE — investigate');
+process.exitCode = safe ? 0 : 1;
 await prisma.$disconnect();

@@ -45,6 +45,7 @@ import { CostCentersService } from '../dist/src/modules/accounting/cost-centers.
 import { DocumentNumberService } from '../dist/src/modules/accounting/document-number.service.js';
 import { FiscalPeriodsService } from '../dist/src/modules/accounting/fiscal-periods.service.js';
 import { PostingService } from '../dist/src/modules/accounting/posting.service.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 import { StockDocumentsService } from '../dist/src/modules/inventory/stock-documents.service.js';
 
 const DB_URL = process.env.DATABASE_URL;
@@ -119,11 +120,12 @@ async function main() {
   const posting = new PostingService(numbers, periods, costCenters);
   const settings = new CompanySettingsService(prisma, audit);
   const warehouses = new WarehouseService(prisma, audit);
+  const ledger = new StockLedgerService();
   const stock = new StockDocumentsService(
-    prisma, numbers, posting, accounts, audit, settings, warehouses, costCenters,
+    prisma, numbers, posting, accounts, audit, settings, warehouses, costCenters, ledger,
   );
   const failingStock = new HalfFailureStockService(
-    prisma, numbers, posting, accounts, audit, settings, warehouses, costCenters,
+    prisma, numbers, posting, accounts, audit, settings, warehouses, costCenters, ledger,
   );
 
   const setNegativePolicy = async (allow) => {
@@ -189,21 +191,35 @@ async function main() {
       include: { units: true },
     });
 
+    // Opening stock lands in both books, exactly as a receipt does: the
+    // movement the reports sum, and the shelf row every OUT operation checks
+    // against. Writing only the branch book here left the shelf at zero, so a
+    // transfer of 5 out of "20 on hand" was refused with "0.0000 available".
     const seedInto = async (warehouseId, branchId, qty) => {
       if (!qty) return;
-      await prisma.stockMovement.create({
-        data: {
+      await prisma.$transaction(async (tx) => {
+        await tx.stockMovement.create({
+          data: {
+            companyId,
+            branchId,
+            warehouseId,
+            itemId: item.id,
+            movementDate: new Date('2051-01-05T00:00:00.000Z'),
+            direction: 'IN',
+            quantity: dec(qty),
+            unitCost: dec(7.5),
+            totalCost: dec(7.5 * qty),
+            referenceType: 'SEED',
+          },
+        });
+        await new StockLedgerService().post(tx, {
           companyId,
           branchId,
           warehouseId,
           itemId: item.id,
-          movementDate: new Date('2051-01-05T00:00:00.000Z'),
-          direction: 'IN',
           quantity: dec(qty),
-          unitCost: dec(7.5),
-          totalCost: dec(7.5 * qty),
-          referenceType: 'SEED',
-        },
+          value: dec(7.5 * qty),
+        });
       });
     };
     await seedInto(wA.id, branch.id, opts.a ?? 0);
@@ -211,29 +227,8 @@ async function main() {
     if (wC) await seedInto(wC.id, branch.id, opts.c ?? 0);
     if (wD) await seedInto(wD.id, branch2.id, opts.d ?? 0);
 
-    const branchTotal = (opts.a ?? 0) + (opts.b ?? 0) + (opts.c ?? 0);
-    if (branchTotal > 0) {
-      await prisma.stockBalance.create({
-        data: {
-          companyId,
-          branchId: branch.id,
-          itemId: item.id,
-          quantity: dec(branchTotal),
-          value: dec(7.5 * branchTotal),
-        },
-      });
-    }
-    if (branch2 && (opts.d ?? 0) > 0) {
-      await prisma.stockBalance.create({
-        data: {
-          companyId,
-          branchId: branch2.id,
-          itemId: item.id,
-          quantity: dec(opts.d),
-          value: dec(7.5 * opts.d),
-        },
-      });
-    }
+    // The branch books were written by the same ledger posts above, so no
+    // second hand-rolled balance is created here.
     return { branch, branch2, wA, wB, wC, wD, item };
   }
 
@@ -329,7 +324,7 @@ async function main() {
   }
 
   // ============================================================== T2
-  console.log('\n[T2] allowNegativeStock=true keeps the permissive warehouse behaviour');
+  console.log('\n[T2] allowNegativeStock=true still refuses to overdraw a warehouse on a transfer');
   {
     const world = await seedWorld({ a: 0, b: 0, c: 5, thirdWarehouse: true });
     await setNegativePolicy(true);
@@ -349,13 +344,20 @@ async function main() {
       }),
       prisma.stockDocument.findUnique({ where: { id: doc.id } }),
     ]);
-    check('T2 permissive transfer succeeds', err === null, err?.message);
-    check('T2 source warehouse card is allowed to reach -5', cardA === -5, `cardA=${cardA}`);
-    check('T2 destination card +5 and the third warehouse untouched', cardB === 5 && cardC === 5,
-      `cardB=${cardB} cardC=${cardC}`);
+    // Deliberately unchanged policy, restated as a check: a transfer never
+    // overdraws its source warehouse, whatever the company setting says about
+    // other workflows. `allowNegativeStock` still governs workflows that are
+    // allowed to go negative; moving goods between two shelves of the same
+    // company is not one of them, so the empty source is refused and nothing
+    // is written.
+    check('T2 a permissive policy still refuses to overdraw the source shelf',
+      err instanceof BadRequestException, err?.message ?? 'posting was allowed');
+    check('T2 source warehouse card does not go negative', cardA === 0, `cardA=${cardA}`);
+    check('T2 nothing reached the destination and the third warehouse is untouched',
+      cardB === 0 && cardC === 5, `cardB=${cardB} cardC=${cardC}`);
     check('T2 branch stock_balances never goes negative (stays 5)', Number(balance.quantity) === 5,
       balance.quantity.toString());
-    check('T2 permissive document is POSTED', refreshed.status === 'POSTED', refreshed.status);
+    check('T2 refused document stays DRAFT', refreshed.status === 'DRAFT', refreshed.status);
     await setNegativePolicy(false);
   }
 

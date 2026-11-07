@@ -74,17 +74,23 @@ export interface IssueInput {
   /** Chosen lot. Omitted means FEFO chooses, which is the normal case. */
   batchId?: string | null;
   /**
-   * Overrides the item's policy for one issue, with the reason recorded.
+   * Lets this one issue *consider* expired lots, overriding an item policy
+   * that forbids it.
    *
    * Only a caller that has already proved it may approve an expired issue - by
    * checking `inventory.batches.expired.issue` and stamping who did it - passes
    * `true` here. It is never taken straight from a request body: the boolean
    * travels on `IssueInput`, which is constructed by a service, not bound from
    * JSON.
+   *
+   * Opening this gate does not approve anything by itself. Whoever sets it must
+   * also pass `expiredApproval`; the issue is refused otherwise, whatever the
+   * item's `expiredIssueNeedsApproval` says.
    */
   allowExpired?: boolean;
-  /// Who approved selling expired goods, and why. Required whenever
-  /// `allowExpired` is true; the pair is written to the audit log.
+  /// Who approved selling expired goods, and why. Required on every issue that
+  /// actually takes expired stock - every one, with no setting that waives it -
+  /// and written to the audit log with the lots and quantities that left.
   expiredApproval?: { userId: string; reason: string };
   reason?: string | null;
   storageLocationId?: string | null;
@@ -710,36 +716,71 @@ export class BatchesService {
         return this.issueUnbatched(tx, companyId, userId, warehouse, item, quantity, input, today);
       }
 
-      // Selling expired goods needs a named approver and a reason. A caller
-      // cannot open the gate by sending `allowExpired: true` on its own: the
-      // request must also arrive with the approval that the controller wrote
-      // after checking `inventory.batches.expired.issue`. Checked here, in the
-      // one function every issue goes through, so no alternate route - a
-      // transfer, a write-off, a second controller - can bypass it.
-      const allowExpired = input.allowExpired ?? policy.allowExpiredIssue;
-      if (allowExpired && (input.allowExpired ?? false)) {
-        const approval = input.expiredApproval;
-        if (!approval || !approval.userId || (approval.reason ?? '').trim().length < 3) {
+      // Only a recorded approval lets an issue *consider* expired lots.
+      //
+      // The rule used to be written as
+      //
+      //     if (allowExpired && (input.allowExpired ?? false))
+      //
+      // so an item whose own policy allowed expired handling, with no
+      // `allowExpired` on the request, skipped the check entirely: the policy
+      // opened the gate and nothing was ever asked for. An item policy is a
+      // standing decision about how an item is tracked; it is not the record of
+      // a person taking responsibility for selling out-of-date goods on this
+      // document. `expiredIssueNeedsApproval` cannot waive the approval either -
+      // it could only ever add to the requirement, never subtract from it.
+      //
+      // An approval is a complete thing: a person and a reason. The controller
+      // builds it from `inventory.batches.expired.issue` on the authenticated
+      // user, never from the body. Half of one is not one, and a caller that
+      // supplies neither gets the behaviour of a caller that may not touch
+      // expired stock at all.
+      const approval = input.expiredApproval;
+      const approvalRecorded =
+        !!approval && !!approval.userId && (approval.reason ?? '').trim().length >= 3;
+      // An approval lets this issue touch expired stock. An explicit `false` is
+      // still a refusal: a caller that knows it has no such permission must not
+      // be surprised by a lot it never agreed to use.
+      const expiredEligible = approvalRecorded && input.allowExpired !== false;
+
+      const lotsForFefo = lots.map((lot) => ({
+        batchId: lot.id,
+        batchNumber: lot.batchNumber,
+        expiryDate: lot.expiryDate,
+        productionDate: lot.productionDate,
+        unitCost: lot.unitCost,
+        remainingQuantity: lot.remainingQuantity,
+        status: lot.status,
+      }));
+
+      // Expired lots stay out of the running for anyone who cannot approve
+      // them, so a cashier selling an item that happens to have an old lot in
+      // front still gets it out of the fresh stock behind it. Refusing the whole
+      // sale because of stock the caller was never allowed to use would block
+      // the shop over a rule that does not concern it.
+      const selection = selectLotsFefo(lotsForFefo, quantity, {
+        today,
+        allowExpired: expiredEligible,
+        useFefo: policy.useFefo,
+      });
+
+      if (!selection.shortfall.isZero() && !expiredEligible) {
+        // Would the expired stock have covered it? Then the honest answer is
+        // "this needs an approval", not "there is none".
+        const withExpired = selectLotsFefo(lotsForFefo, quantity, {
+          today,
+          allowExpired: true,
+          useFefo: policy.useFefo,
+        });
+        if (withExpired.shortfall.isZero()) {
           throw new ForbiddenException(
-            'صرف صنف منتهي الصلاحية يتطلب اعتمادًا مسجّلًا بصلاحية وسبب. / ' +
-              'Issuing expired stock needs the expiry-issue permission and a recorded reason.',
+            'الكمية المطلوبة متوفرة في دفعات منتهية الصلاحية فقط. صرفها يتطلب اعتمادًا مسجّلًا: ' +
+              'صلاحية صرف المنتهي، واسم المعتمِد، وسبب الصرف. / ' +
+              'The requested quantity is only available in expired lots. Issuing it needs a ' +
+              'recorded approval: the expiry-issue permission, the person who approved it, and a reason.',
           );
         }
       }
-
-      const selection = selectLotsFefo(
-        lots.map((lot) => ({
-          batchId: lot.id,
-          batchNumber: lot.batchNumber,
-          expiryDate: lot.expiryDate,
-          productionDate: lot.productionDate,
-          unitCost: lot.unitCost,
-          remainingQuantity: lot.remainingQuantity,
-          status: lot.status,
-        })),
-        quantity,
-        { today, allowExpired, useFefo: policy.useFefo },
-      );
 
       if (!selection.shortfall.isZero()) {
         const expired = lots.filter(
@@ -748,15 +789,9 @@ export class BatchesService {
         throw new BadRequestException(
           `الرصيد غير كافٍ في الدفعات المتاحة: ينقص ${selection.shortfall.toFixed(MONEY_SCALE)}. / ` +
             `Not enough stock in the available lots: ${selection.shortfall.toFixed(MONEY_SCALE)} short.` +
-            (expired > 0 && !allowExpired
+            (expired > 0
               ? ` (${expired} lot(s) exist but have expired; issuing them needs permission.)`
               : ''),
-        );
-      }
-
-      if (!selection.expiredQuantity.isZero() && policy.expiredIssueNeedsApproval) {
-        throw new ForbiddenException(
-          'صرف كمية منتهية يتطلب اعتمادًا. / Issuing an expired lot needs approval, and no approval was recorded.',
         );
       }
 

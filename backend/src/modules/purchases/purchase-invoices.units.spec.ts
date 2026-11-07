@@ -146,6 +146,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
     })),
   };
   const warehouses = { resolve: jest.fn(async () => 'warehouse-1') };
+  const ledger = { post: jest.fn(async () => undefined) };
   const prices = { resolvePrice: jest.fn(async () => null) };
   const audit = { record: jest.fn(async () => undefined), recordRequired: jest.fn(async () => undefined) };
 
@@ -156,10 +157,11 @@ function makeService(itemOverrides: Record<string, any> = {}) {
     accounts as never,
     settings as never,
     warehouses as never,
+    ledger as never,
     prices as never,
     audit as never,
   );
-  return { service, prisma, tx, prices };
+  return { service, prisma, tx, prices, ledger };
 }
 
 describe('Purchase multi-unit — milk scenario', () => {
@@ -242,7 +244,7 @@ describe('Purchase multi-unit — milk scenario', () => {
   });
 
   it('posting receives 50 pieces at a weighted unit cost of 7.50 each', async () => {
-    const { service, prisma, tx } = makeService();
+    const { service, prisma, tx, ledger } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {
       invoiceDate: '2026-10-27',
       supplierId: SUPPLIER,
@@ -262,9 +264,19 @@ describe('Purchase multi-unit — milk scenario', () => {
     // 375 / 50 = 7.5 per base piece — average-cost valuation stays correct.
     expect(movement.unitCost.toFixed(4)).toBe('7.5000');
     expect(movement.totalCost.toFixed(4)).toBe('375.0000');
-    const upsert = (tx.stockBalance.upsert.mock.calls as any[])[0][0];
-    expect(upsert.update.quantity.increment.toFixed(4)).toBe('50.0000');
-    expect(upsert.update.value.increment.toFixed(4)).toBe('375.0000');
+
+    // The receipt must reach the shelf book, not only the branch book. Posting
+    // through the shared ledger is what writes both levels; the hand-written
+    // stock_balances upsert that used to be here left warehouse_stock_balances
+    // empty, so the next transfer out of the shelf was refused with
+    // "0.0000 available" while the warehouse report showed 50 in it.
+    expect(tx.stockBalance.upsert).not.toHaveBeenCalled();
+    expect(ledger.post).toHaveBeenCalledTimes(1);
+    const posted = (ledger.post as jest.Mock).mock.calls[0][1];
+    expect(posted.quantity.toFixed(4)).toBe('50.0000');
+    expect(posted.value.toFixed(4)).toBe('375.0000');
+    // The warehouse the goods arrived in, so the shelf row can be written.
+    expect(posted.warehouseId).toBe('warehouse-1');
   });
 });
 

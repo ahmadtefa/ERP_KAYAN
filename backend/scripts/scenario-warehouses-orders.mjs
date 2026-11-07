@@ -404,7 +404,10 @@ async function main() {
   await must('the order is approved', `/purchases/orders/${po.id}/approve`, { method: 'POST' });
   const partial = await must('part of the order becomes a draft invoice', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
-    json: { lines: [{ orderLineId: po.lines[0].id, quantity: '3.0000' }] },
+    json: {
+      idempotencyKey: `scenario-partial-${stamp}`,
+      lines: [{ orderLineId: po.lines[0].id, quantity: '3.0000' }],
+    },
   });
   if (!partial) { process.exitCode = 1; return; }
 
@@ -429,11 +432,22 @@ async function main() {
 
   await mustRefuse('an order cannot be invoiced for more than is outstanding', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
-    json: { lines: [{ orderLineId: po.lines[0].id, quantity: '99.0000' }] },
+    json: {
+      idempotencyKey: `scenario-over-${stamp}`,
+      lines: [{ orderLineId: po.lines[0].id, quantity: '99.0000' }],
+    },
   });
 
   const rest = await must('the rest of the order can be invoiced later', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
+    json: {
+      idempotencyKey: `scenario-rest-${stamp}`,
+      // What is still outstanding: 2 left on the first line, all 5 of the second.
+      lines: [
+        { orderLineId: po.lines[0].id, quantity: '2.0000' },
+        { orderLineId: po.lines[1].id, quantity: '5.0000' },
+      ],
+    },
   });
   check(
     'the order is fulfilled once everything on it has been invoiced',
@@ -442,6 +456,7 @@ async function main() {
   );
   await mustRefuse('a fully invoiced order refuses another invoice', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
+    json: { idempotencyKey: `scenario-again-${stamp}` },
   });
 
   const purchaseFromOrder = partial.invoice?.id;
@@ -474,12 +489,17 @@ async function main() {
   await mustRefuse(
     'an unapproved sales order refuses to be invoiced',
     `/sales/orders/${so.id}/invoice`,
-    { method: 'POST' },
+    { method: 'POST', json: { idempotencyKey: `scenario-unapproved-${stamp}` } },
   );
 
   await must('the sales order is approved', `/sales/orders/${so.id}/approve`, { method: 'POST' });
   const soInvoiced = await must('the approved sales order becomes a draft invoice', `/sales/orders/${so.id}/invoice`, {
     method: 'POST',
+    json: {
+      idempotencyKey: `scenario-sales-${stamp}`,
+      // The order asked for 2; invoice all of it.
+      lines: so.lines.map((line) => ({ orderLineId: line.id, quantity: '2.0000' })),
+    },
   });
   check(
     'the sales order is fulfilled and linked to its invoice',
@@ -507,6 +527,7 @@ async function main() {
   });
   await mustRefuse('a cancelled order refuses to be invoiced', `/purchases/orders/${cancellable.id}/invoice`, {
     method: 'POST',
+    json: { idempotencyKey: `scenario-cancelled-${stamp}` },
   });
 
   // ─────────────────────────────────────────────────── permissions hold

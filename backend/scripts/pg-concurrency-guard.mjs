@@ -30,6 +30,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { BadRequestException } from '@nestjs/common';
 
 import { WarehouseService } from '../dist/src/common/warehouse/warehouse.service.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 import { StockDocumentsService } from '../dist/src/modules/inventory/stock-documents.service.js';
 
 const DB_URL = process.env.DATABASE_URL;
@@ -70,6 +71,12 @@ function makeService(prisma, warehouses) {
     { get: async () => ({ allowNegativeStock: false }) },
     warehouses,
     { assertPostable: () => undefined },
+    // The real ledger, not a stub. The posting path asks it for the source
+    // shelf's own average cost and then writes both books through it; a
+    // missing ledger here is what made every iteration fail with
+    // "Cannot read properties of undefined (reading 'position')" instead of
+    // exercising the lock the test exists to prove.
+    new StockLedgerService(),
   );
 }
 
@@ -109,22 +116,35 @@ async function seed(prisma, companyId, n) {
   await prisma.item.create({
     data: { id: itemId, companyId, code: `MILK-${suffix}`, nameEn: 'Milk', nameAr: 'لبن', unit: 'piece' },
   });
-  await prisma.stockBalance.create({
-    data: { companyId, branchId, itemId, quantity: new Prisma.Decimal(10), value: new Prisma.Decimal(75) },
-  });
-  await prisma.stockMovement.create({
-    data: {
+  // The opening 10 must land in BOTH books, exactly as a real receipt does.
+  // Writing only `stock_balances` here used to leave the shelf empty while the
+  // movement said 10, so every posting was refused with "0.0000 available" and
+  // the test never reached the lock it exists to prove. Seeding through the
+  // same ledger a purchase uses keeps the fixture faithful to production.
+  const seedLedger = new StockLedgerService();
+  await prisma.$transaction(async (tx) => {
+    await tx.stockMovement.create({
+      data: {
+        companyId,
+        branchId,
+        warehouseId: wSrc,
+        itemId,
+        movementDate: new Date('2026-10-01'),
+        direction: 'IN',
+        quantity: new Prisma.Decimal(10),
+        unitCost: new Prisma.Decimal(7.5),
+        totalCost: new Prisma.Decimal(75),
+        referenceType: 'SEED',
+      },
+    });
+    await seedLedger.post(tx, {
       companyId,
       branchId,
       warehouseId: wSrc,
       itemId,
-      movementDate: new Date('2026-10-01'),
-      direction: 'IN',
       quantity: new Prisma.Decimal(10),
-      unitCost: new Prisma.Decimal(7.5),
-      totalCost: new Prisma.Decimal(75),
-      referenceType: 'SEED',
-    },
+      value: new Prisma.Decimal(75),
+    });
   });
 
   const docBase = {

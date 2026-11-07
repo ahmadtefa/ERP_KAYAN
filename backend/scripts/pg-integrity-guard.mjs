@@ -34,6 +34,7 @@ import { CostCentersService } from '../dist/src/modules/accounting/cost-centers.
 import { DocumentNumberService } from '../dist/src/modules/accounting/document-number.service.js';
 import { FiscalPeriodsService } from '../dist/src/modules/accounting/fiscal-periods.service.js';
 import { PostingService } from '../dist/src/modules/accounting/posting.service.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 import { StockDocumentsService } from '../dist/src/modules/inventory/stock-documents.service.js';
 import { BankReconciliationService } from '../dist/src/modules/cash/bank-reconciliation.service.js';
 
@@ -91,6 +92,7 @@ async function main() {
   const warehouses = new WarehouseService(prisma, audit);
   const stock = new StockDocumentsService(
     prisma, numbers, posting, accounts, audit, settings, warehouses, costCenters,
+    new StockLedgerService(),
   );
 
   // ------------------------------------------------------------- seed world
@@ -134,15 +136,22 @@ async function main() {
       status: 'OPEN',
     },
   });
-  await prisma.stockBalance.create({
-    data: { companyId, branchId: branch.id, itemId: item.id, quantity: dec(10), value: dec(75) },
-  });
-  await prisma.stockMovement.create({
-    data: {
+  // Opening stock through the real ledger: both the branch book and the
+  // shelf row the OUT guard checks. A hand-written branch balance alone left
+  // the shelf at zero, so every transfer was refused with "0.0000 available"
+  // and this harness never reached the invariants it exists to check.
+  await prisma.$transaction(async (tx) => {
+    await tx.stockMovement.create({
+      data: {
+        companyId, branchId: branch.id, warehouseId: wSrc.id, itemId: item.id,
+        movementDate: new Date('2051-01-05T00:00:00.000Z'), direction: 'IN',
+        quantity: dec(10), unitCost: dec(7.5), totalCost: dec(75), referenceType: 'SEED',
+      },
+    });
+    await new StockLedgerService().post(tx, {
       companyId, branchId: branch.id, warehouseId: wSrc.id, itemId: item.id,
-      movementDate: new Date('2051-01-05T00:00:00.000Z'), direction: 'IN',
-      quantity: dec(10), unitCost: dec(7.5), totalCost: dec(75), referenceType: 'SEED',
-    },
+      quantity: dec(10), value: dec(75),
+    });
   });
 
   async function makeDocument(kind, line, extra = {}) {

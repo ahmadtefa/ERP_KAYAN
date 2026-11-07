@@ -15,6 +15,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { historicalOrderUnit, orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
@@ -96,6 +97,7 @@ export class PurchaseInvoicesService {
     private readonly accounts: AccountMapService,
     private readonly settings: CompanySettingsService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
   ) {}
@@ -711,25 +713,21 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: costTotal },
-          },
+        // The branch book and the shelf book are moved by the one ledger every
+        // other stock-writing path uses. Writing `stock_balances` by hand here
+        // - which is what this code used to do - left `warehouse_stock_balances`
+        // without a row, so a purchase put 10 on the branch and 0 on the shelf.
+        // Every later transfer or sale out of that shelf was then refused with
+        // "0.0000 available" while the warehouse report said 10. The ledger
+        // writes both levels in the same transaction, so the two can no longer
+        // disagree.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: costTotal,
         });
       }
 
@@ -876,6 +874,22 @@ export class PurchaseInvoicesService {
           );
         }
 
+        // The shelf must be able to give the goods back, not just the branch.
+        // A purchase reversed after its stock was moved to another warehouse
+        // would otherwise take the branch to zero while driving this shelf
+        // negative. The same guard the transfer and sale paths use answers
+        // here, and it locks the warehouse row so a concurrent transfer
+        // cannot pass the check at the same time.
+        await this.warehouses.assertWarehouseAvailable({
+          tx,
+          companyId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          allowNegative: false,
+          reference: invoice.invoiceNumber,
+        });
+
         await tx.stockMovement.create({
           data: {
             companyId,
@@ -895,18 +909,15 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
-          },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: inventoryCostTotal },
-          },
+        // Same ledger as the receipt, in the opposite direction, so the shelf
+        // book is decremented by exactly the amount the receipt incremented it.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity.negated(),
+          value: inventoryCostTotal.negated(),
         });
       }
 

@@ -70,6 +70,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      # `npm ci` restores node_modules from the lockfile, which overwrites the
+      # adapter patch that keeps `prisma migrate status` and the client's
+      # driver-adapter path working: @prisma/adapter-pg 6.19.3 omits PostgreSQL
+      # type `name` (OID 19) from fieldToColumnType(), so reading current_schema()
+      # throws "Column type 'name' could not be deserialized". The script is
+      # idempotent and exits non-zero if the expected shape is not found, so a
+      # future adapter upgrade cannot silently skip the repair.
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Validate Prisma schema
@@ -95,8 +104,17 @@ jobs:
           echo "::notice title=Unit tests::${summary:-summary not captured}"
       - name: Build API
         run: npm run build
+      # `prisma migrate deploy` cannot run this project's migrations: Prisma
+      # 6.19.3's WASM schema engine splits PL/pgSQL dollar-quoted bodies at
+      # their internal semicolons, so the seven migrations that define
+      # triggers die with `syntax error at or near "this"`. The native engine
+      # cannot be used either - this project disables the engine download so
+      # installs work offline. scripts/apply-migrations.mjs applies the same
+      # files, in the same order, recording them in the same
+      # _prisma_migrations table with the same SHA-256 checksums, so a database
+      # it migrates is reported as up to date by `prisma migrate status`.
       - name: Apply migrations to ephemeral PostgreSQL
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
 
       # Licensing is the one subsystem whose real behaviour cannot be shown
       # with a mocked database: the migration has to survive an installation
@@ -104,6 +122,15 @@ jobs:
       # simultaneous creations must produce exactly one account, and an old
       # backup must not hand seats back. The script creates throwaway
       # databases on the same server and drives the compiled service.
+      # Every stock write must go through StockLedgerService, which writes
+      # stock_movements; warehouse_stock_balances is its cached projection. The
+      # two are only ever changed inside one transaction, so on a consistent
+      # database SUM(IN - OUT) per (warehouse, item, location) always equals the
+      # stored balance. This reconciles the whole installation with a FULL OUTER
+      # JOIN so a shelf that was written without a movement - a silent cost or
+      # quantity change - fails the build instead of being found by an accountant.
+      - name: Prove the stock ledger and the shelf balances never disagree
+        run: node scripts/pg-ledger-shelf-agreement.mjs
       - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
         env:
           KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
@@ -330,10 +357,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
+      # See the note on the equivalent step above: the project applies its own
+      # migration files because Prisma's WASM schema engine mis-splits
+      # dollar-quoted function bodies.
       - name: Apply migrations to a freshly created database
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Verify quotation migrations are present in the runtime database

@@ -106,6 +106,7 @@ function makeService() {
   const accounts = {};
   const settings = { get: jest.fn(async () => ({ maxDiscountPercent: '100.0000', taxRate: '14.0000' })) };
   const warehouses = {};
+  const ledger = { post: jest.fn(async () => undefined) };
   const prices = { resolvePrice: jest.fn() };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new PurchaseInvoicesService(
@@ -115,6 +116,7 @@ function makeService() {
     accounts as never,
     settings as never,
     warehouses as never,
+    ledger as never,
     prices as never,
     audit as never,
   );
