@@ -126,17 +126,16 @@ class PageHeader extends StatelessWidget {
                 // Every action is laid out inside a Wrap, which breaks between
                 // its children when room runs short. A single action that is
                 // itself a Row - a segmented filter beside a search field, as
-                // the inventory lists pass - cannot break, so it must not be
-                // squeezed below its own width: Flexible allowed exactly that
-                // and the toolbar overflowed by 154 pixels. The title block
-                // stays Expanded, so a long title yields the room instead.
-                Flexible(
-                  child: Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    widthFactor: 1,
-                    child: actionWrap,
-                  ),
-                ),
+                // the inventory lists pass - cannot break at all, so it must
+                // not be squeezed below its own width.
+                //
+                // Flexible could not promise that: it is a flex child, so it
+                // shared the line equally with the Expanded title and had its
+                // width capped at half the header, which is how the Arabic
+                // batches screen overflowed by 154 pixels. Left inflexible, the
+                // toolbar is measured first at its natural width and the title
+                // - which is only ever two short lines - takes what is left.
+                actionWrap,
               ],
             );
           }

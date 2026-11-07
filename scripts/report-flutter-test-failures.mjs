@@ -161,6 +161,15 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1500));
   }
+  // Stock-document list tests: synthetic rows declared in the test file.
+  if (event.type === 'print' && /^(?:a document with no destination shows only where it left|search narrows by number and by raiser|statuses read as words)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual|Which):\s*.{0,200}/)?.[0]?.trim() ??
+      line.match(/test\/widget\/stock_documents_screen_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/^The following [A-Za-z_.]+ (?:was thrown|object was thrown)[^\n]{0,160}/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1500));
+  }
   if (event.type === 'error') {
     const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);
