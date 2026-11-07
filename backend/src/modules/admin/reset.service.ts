@@ -455,6 +455,119 @@ export class ResetService {
             return count;
           });
 
+          // The inventory tables added with batches, shelf balances and
+          // storage locations. They point at items, warehouses and branches,
+          // so they must be cleared first: without these steps the reset
+          // aborted with P2003 on the first warehouse it tried to delete.
+          await step('stockTakeLine', async () => {
+            const { count } = await tx.stockTakeLine.deleteMany({
+              where: { session: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('stockTakeSession', async () => {
+            const { count } = await tx.stockTakeSession.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemCostHistory', async () => {
+            const { count } = await tx.itemCostHistory.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('warehouseStockBalance', async () => {
+            const { count } = await tx.warehouseStockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemBatch', async () => {
+            const { count } = await tx.itemBatch.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemWarehouseSetting', async () => {
+            const { count } = await tx.itemWarehouseSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userWarehouseAccess', async () => {
+            const { count } = await tx.userWarehouseAccess.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('storageLocation', async () => {
+            const { count } = await tx.storageLocation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notification', async () => {
+            const { count } = await tx.notification.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notificationSetting', async () => {
+            const { count } = await tx.notificationSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('printPriceSetting', async () => {
+            const { count } = await tx.printPriceSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('budget', async () => {
+            const { count } = await tx.budget.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('quotationTermTemplate', async () => {
+            const { count } = await tx.quotationTermTemplate.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('quotationColumnTemplate', async () => {
+            const { count } = await tx.quotationColumnTemplate.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('stockDocumentCreationRequest', async () => {
+            const { count } = await tx.stockDocumentCreationRequest.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('orderCreationRequest', async () => {
+            const { count } = await tx.orderCreationRequest.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('backupRun', async () => {
+            const { count } = await tx.backupRun.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userProfilePhoto', async () => {
+            const { count } = await tx.userProfilePhoto.deleteMany({
+              where: { user: { companyId: me.companyId } },
+            });
+            return count;
+          });
+
           await step('stockMovements', async () => {
             const { count } = await tx.stockMovement.deleteMany({
               where: { companyId: me.companyId },

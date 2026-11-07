@@ -45,6 +45,14 @@ const PASSWORD = process.env.ADMIN_PASSWORD ?? 'Admin@12345';
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://postgres@127.0.0.1:55432/kayan';
 
+/// The VAT rate every figure below is computed with.
+///
+/// An invoice line that omits its rate is charged at 0 - deliberately, so that
+/// a tax document never carries a rate the server guessed. The company setting
+/// drives quotations, not invoices. Stating the rate here is therefore what
+/// makes the arithmetic a check of the ledger rather than of a default.
+const TAX = '14';
+
 const results = [];
 let token = '';
 let refreshToken = '';
@@ -322,7 +330,7 @@ async function main() {
       invoiceDate: today,
       supplierId: supplier.id,
       supplierReference: `REF-${stamp}`,
-      lines: [{ itemId: itemA.id, quantity: '10', unitPrice: '100' }],
+      lines: [{ itemId: itemA.id, quantity: '10', unitPrice: '100', taxRate: TAX }],
     },
   });
   if (!purchase) return false;
@@ -354,7 +362,7 @@ async function main() {
       invoiceDate: today,
       dueDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '4', unitPrice: '150' }],
+      lines: [{ itemId: itemA.id, quantity: '4', unitPrice: '150', taxRate: TAX }],
     },
   });
   if (!sale) return false;
@@ -540,7 +548,7 @@ async function main() {
       invoiceDate: today,
       dueDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10' }],
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10', taxRate: TAX }],
     },
   });
   // Creating a voucher against a draft invoice is allowed on purpose: the
@@ -1023,7 +1031,7 @@ async function main() {
     json: {
       invoiceDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemB.id, quantity: '5', unitPrice: '30' }],
+      lines: [{ itemId: itemB.id, quantity: '5', unitPrice: '30', taxRate: TAX }],
     },
   });
   if (oversell) {
@@ -1043,7 +1051,7 @@ async function main() {
     json: {
       invoiceDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '150' }],
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '150', taxRate: TAX }],
     },
   });
   if (draft) {
@@ -1132,7 +1140,7 @@ async function main() {
       json: {
         invoiceDate: today,
         customerId: customer.id,
-        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150', taxRate: TAX }],
       },
     }),
     must('create the second competing sale invoice', '/sales/invoices', {
@@ -1140,7 +1148,7 @@ async function main() {
       json: {
         invoiceDate: today,
         customerId: customer.id,
-        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150', taxRate: TAX }],
       },
     }),
   ]);

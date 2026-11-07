@@ -688,8 +688,17 @@ model AssetDepreciation {
 model CompanySetting {
   companyId String @id @db.Uuid
 
-  /// Default VAT rate in percent, used when neither the item nor the line
-  /// carries one. 0 means "this company does not charge VAT".
+  /// Default VAT rate in percent, in force when a document does not state one.
+  ///
+  /// Sales and purchase invoices do **not** inherit this: a line that omits
+  /// the rate is charged at 0, deliberately, because a rate the server guessed
+  /// would appear on a tax document that nobody chose (see
+  /// `sales-invoices.service.spec.ts` / `purchase-invoices.service.spec.ts`,
+  /// "line tax defaults", and the invoice form, which sends an explicit "0"
+  /// so that blank and omitted never mean the same thing). Quotations do use
+  /// it, which is why `quotations.service.ts` reads it.
+  ///
+  /// 0 means "this company does not charge VAT".
   taxRate Decimal @default(0) @db.Decimal(9, 4)
 
   /// When true, the prices typed on a sales line already include VAT and the
