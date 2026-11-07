@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/inventory/presentation/screens/write_offs_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:erp_kayan/shared/widgets/records_table.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -162,6 +163,16 @@ const _signer = [
   'inventory.writeoff.post',
 ];
 
+/// The text as it appears in a table row.
+///
+/// `find.text` also matches `EditableText`, so a search box containing "WO-001"
+/// makes `find.text('WO-001')` match twice: once in the box and once in the
+/// row. Excluding the field makes the assertion say what it means.
+Finder _inRows(String text) => find.descendant(
+  of: find.byType(RecordsTable),
+  matching: find.text(text),
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -223,9 +234,10 @@ void main() {
     tester,
   ) async {
     await pump(tester, _WriteOffsApi());
-    // WO-001 is untouched; WO-002 carries an approval stamp.
-    expect(find.text('Draft'), findsOneWidget);
-    expect(find.text('Awaiting posting'), findsOneWidget);
+    // WO-001 is untouched; WO-002 carries an approval stamp. WO-003 is also
+    // an unsigned draft, so "Draft" is the label on two rows, not one.
+    expect(_inRows('Draft'), findsNWidgets(2));
+    expect(_inRows('Awaiting posting'), findsOneWidget);
   });
 
   testWidgets('an approver is offered Approve only on unsigned drafts', (
@@ -248,7 +260,10 @@ void main() {
       'You raised this document, so you cannot approve it',
     );
     expect(tooltip, findsOneWidget);
-    final button = tester.widget<IconButton>(tooltip);
+    // byTooltip finds the Tooltip wrapper, not the IconButton inside it.
+    final button = tester.widget<IconButton>(
+      find.descendant(of: tooltip, matching: find.byType(IconButton)),
+    );
     expect(button.onPressed, isNull);
   });
 
@@ -313,8 +328,9 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'WO-001');
     await tester.pumpAndSettle();
-    expect(find.text('WO-001'), findsOneWidget);
-    expect(find.text('WO-002'), findsNothing);
+    // The query is itself EditableText, which find.text matches.
+    expect(_inRows('WO-001'), findsOneWidget);
+    expect(_inRows('WO-002'), findsNothing);
   });
 
   testWidgets('a failed list shows the error view with a retry', (tester) async {

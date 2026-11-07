@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_takes_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:erp_kayan/shared/widgets/records_table.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -114,6 +115,17 @@ const _approver = [
   'inventory.stocktake.post',
 ];
 
+/// The text as it appears in a table row.
+///
+/// `find.text` also matches `EditableText` (Flutter's finders.dart says so
+/// explicitly), so a search box containing "LOT-B" makes `find.text('LOT-B')`
+/// match twice: once in the box and once in the row. Excluding the field
+/// makes the assertion say what it means.
+Finder _inRows(String text) => find.descendant(
+  of: find.byType(RecordsTable),
+  matching: find.text(text),
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -191,8 +203,12 @@ void main() {
       find.byTooltip('You opened this count, so you cannot approve it'),
       findsOneWidget,
     );
+    // byTooltip finds the Tooltip wrapper, not the IconButton inside it.
     final button = tester.widget<IconButton>(
-      find.byTooltip('You opened this count, so you cannot approve it'),
+      find.descendant(
+        of: find.byTooltip('You opened this count, so you cannot approve it'),
+        matching: find.byType(IconButton),
+      ),
     );
     expect(button.onPressed, isNull);
   });
@@ -255,8 +271,10 @@ void main() {
     await pump(tester, _StockTakesApi());
     await tester.enterText(find.byType(TextField).first, 'ST-002');
     await tester.pumpAndSettle();
-    expect(find.text('ST-002'), findsOneWidget);
-    expect(find.text('ST-001'), findsNothing);
+    // `find.text` also matches EditableText, so the query itself would count
+    // as a second copy of the code. The row is what this asserts.
+    expect(_inRows('ST-002'), findsOneWidget);
+    expect(_inRows('ST-001'), findsNothing);
   });
 
   testWidgets('a failed list shows the error view with a retry', (

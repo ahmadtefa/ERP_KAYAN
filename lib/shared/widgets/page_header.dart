@@ -52,7 +52,11 @@ class PageHeader extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 3),
                   child: Text(
-                    eyebrow!.toUpperCase(),
+                    // Rendered as given: the module labels are already
+                    // written the way they should read ("Inventory").
+                    // Upper-casing mangled them and, for the Arabic labels,
+                    // had no effect at all.
+                    eyebrow!,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                       letterSpacing: 1.1,

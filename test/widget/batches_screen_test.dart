@@ -4,6 +4,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/inventory/presentation/screens/batches_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:erp_kayan/shared/widgets/records_table.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -122,6 +123,16 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+/// The text as it appears in a table row.
+///
+/// `find.text` also matches `EditableText` (Flutter's finders.dart says so
+/// explicitly), so a search box containing "LOT-B" makes `find.text('LOT-B')`
+/// match twice: once in the box and once in the row. Excluding the field
+/// makes the assertion say what it means.
+Finder _inRows(String text) => find.descendant(
+  of: find.byType(RecordsTable),
+  matching: find.text(text),
+);
 
   testWidgets('lists lots with remaining quantity, cost and value', (
     tester,
@@ -194,13 +205,15 @@ void main() {
     await pump(tester, _BatchesApi());
     await tester.enterText(find.byType(TextField).first, 'LOT-B');
     await tester.pumpAndSettle();
-    expect(find.text('LOT-B'), findsOneWidget);
-    expect(find.text('LOT-A'), findsNothing);
+    // `find.text` also matches EditableText, so the query itself would count
+    // as a second copy of the batch number. The row is what this asserts.
+    expect(_inRows('LOT-B'), findsOneWidget);
+    expect(_inRows('LOT-A'), findsNothing);
 
     await tester.enterText(find.byType(TextField).first, 'Screws');
     await tester.pumpAndSettle();
-    expect(find.text('LOT-C'), findsOneWidget);
-    expect(find.text('LOT-B'), findsNothing);
+    expect(_inRows('LOT-C'), findsOneWidget);
+    expect(_inRows('LOT-B'), findsNothing);
   });
 
   testWidgets('a lot with no expiry date shows a dash, not a crash', (

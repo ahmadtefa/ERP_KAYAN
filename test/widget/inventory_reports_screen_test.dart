@@ -127,7 +127,10 @@ void main() {
     tester,
   ) async {
     await pump(tester, _ReportsApi());
-    expect(find.text('Balance by warehouse'), findsOneWidget);
+    // The catalogue on the left and the result pane on the right both name
+    // the chosen report, so the title legitimately appears twice: once as the
+    // list entry and once as the heading of the report it opened.
+    expect(find.text('Balance by warehouse'), findsNWidgets(2));
     expect(find.text('Expiring soon'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -178,7 +181,7 @@ void main() {
       _ReportsApi(),
       permissions: const ['inventory.stock.read'],
     );
-    expect(find.text('Balance by warehouse'), findsOneWidget);
+    expect(find.text('Balance by warehouse'), findsWidgets);
     expect(find.text('Export CSV'), findsNothing);
   });
 
