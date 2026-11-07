@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/inventory/presentation/screens/item_thresholds_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:erp_kayan/shared/widgets/records_table.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -76,6 +77,15 @@ class _ThresholdsApi extends ApiClient {
     return const {};
   }
 }
+
+/// The text as it appears in a table row.
+///
+/// `find.text` also matches `EditableText`, so a search box containing "Glue"
+/// makes `find.text('Glue')` match twice: once in the box and once in the row.
+Finder _inRows(String text) => find.descendant(
+  of: find.byType(RecordsTable),
+  matching: find.text(text),
+);
 
 void main() {
   Future<void> pump(
@@ -158,8 +168,8 @@ void main() {
     await pump(tester, _ThresholdsApi());
     await tester.enterText(find.byType(TextField).first, 'Glue');
     await tester.pumpAndSettle();
-    expect(find.text('Glue'), findsOneWidget);
-    expect(find.text('Cable'), findsNothing);
+    expect(_inRows('Glue'), findsOneWidget);
+    expect(_inRows('Cable'), findsNothing);
   });
 
   testWidgets('editing puts the thresholds to the warehouse/item pair', (

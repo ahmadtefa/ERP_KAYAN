@@ -203,9 +203,11 @@ void main() {
       find.byTooltip('You opened this count, so you cannot approve it'),
       findsOneWidget,
     );
-    // byTooltip finds the Tooltip wrapper, not the IconButton inside it.
+    // byTooltip finds the Tooltip; IconButton builds that tooltip as its own
+    // child (icon_button.dart: `result = Tooltip(message: tooltip, child: ...)`),
+    // so the button is the ancestor of the tooltip, not its descendant.
     final button = tester.widget<IconButton>(
-      find.descendant(
+      find.ancestor(
         of: find.byTooltip('You opened this count, so you cannot approve it'),
         matching: find.byType(IconButton),
       ),

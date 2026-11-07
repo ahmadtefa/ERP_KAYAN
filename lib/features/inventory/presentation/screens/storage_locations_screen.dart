@@ -107,11 +107,16 @@ class StorageLocationsScreen extends ConsumerWidget {
         ref.watch(currentUserProvider)?.can('inventory.warehouses.manage') ??
         false;
     final selected = ref.watch(_selectedWarehouseProvider);
+    // A location belongs to a warehouse, so with none yet there is nothing to
+    // add one to. The button used to stay visible here and do nothing when
+    // pressed, because the form cannot open without a warehouse to put the
+    // location in; the empty state already says to create a warehouse first.
+    final hasWarehouse = (warehouses.value ?? const <Json>[]).isNotEmpty;
 
     return ModuleScaffold(
       title: arabic ? 'مواقع التخزين' : 'Storage locations',
       eyebrow: arabic ? 'المخزون' : 'Inventory',
-      trailing: canManage
+      trailing: canManage && hasWarehouse
           ? FilledButton.icon(
               onPressed: () => _openForm(context, ref, null),
               icon: const Icon(Icons.add_rounded, size: 18),

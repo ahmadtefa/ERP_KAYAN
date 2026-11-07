@@ -123,7 +123,20 @@ class PageHeader extends StatelessWidget {
               children: [
                 Expanded(child: titleBlock),
                 const SizedBox(width: AppSpacing.lg),
-                Flexible(child: actionWrap),
+                // Every action is laid out inside a Wrap, which breaks between
+                // its children when room runs short. A single action that is
+                // itself a Row - a segmented filter beside a search field, as
+                // the inventory lists pass - cannot break, so it must not be
+                // squeezed below its own width: Flexible allowed exactly that
+                // and the toolbar overflowed by 154 pixels. The title block
+                // stays Expanded, so a long title yields the room instead.
+                Flexible(
+                  child: Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    widthFactor: 1,
+                    child: actionWrap,
+                  ),
+                ),
               ],
             );
           }

@@ -4,6 +4,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_documents_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:erp_kayan/shared/widgets/records_table.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -103,6 +104,16 @@ class _DocumentsApi extends ApiClient {
     ];
   }
 }
+
+/// The text as it appears in a table row.
+///
+/// `find.text` also matches `EditableText`, so a search box containing "OPN-001"
+/// makes `find.text('OPN-001')` match twice: once in the box and once in the
+/// row. Excluding the field makes the assertion say what it means.
+Finder _inRows(String text) => find.descendant(
+  of: find.byType(RecordsTable),
+  matching: find.text(text),
+);
 
 void main() {
   Future<void> pump(
@@ -223,12 +234,12 @@ void main() {
     await pump(tester, _DocumentsApi());
     await tester.enterText(find.byType(TextField).first, 'OPN-001');
     await tester.pumpAndSettle();
-    expect(find.text('OPN-001'), findsOneWidget);
-    expect(find.text('ADJ-001'), findsNothing);
+    expect(_inRows('OPN-001'), findsOneWidget);
+    expect(_inRows('ADJ-001'), findsNothing);
 
     await tester.enterText(find.byType(TextField).first, 'sara');
     await tester.pumpAndSettle();
-    expect(find.text('ADJ-001'), findsOneWidget);
+    expect(_inRows('ADJ-001'), findsOneWidget);
   });
 
   testWidgets('a failed list shows the error view with a retry', (tester) async {

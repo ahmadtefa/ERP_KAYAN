@@ -260,9 +260,11 @@ void main() {
       'You raised this document, so you cannot approve it',
     );
     expect(tooltip, findsOneWidget);
-    // byTooltip finds the Tooltip wrapper, not the IconButton inside it.
+    // byTooltip finds the Tooltip; IconButton builds that tooltip as its own
+    // child (icon_button.dart: `result = Tooltip(message: tooltip, child: ...)`),
+    // so the button is the ancestor of the tooltip, not its descendant.
     final button = tester.widget<IconButton>(
-      find.descendant(of: tooltip, matching: find.byType(IconButton)),
+      find.ancestor(of: tooltip, matching: find.byType(IconButton)),
     );
     expect(button.onPressed, isNull);
   });
