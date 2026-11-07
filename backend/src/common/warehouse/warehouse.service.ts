@@ -654,6 +654,13 @@ export class WarehouseService {
     if (allowNegative || !warehouseId) return;
     await this.lockForPosting(tx, companyId, warehouseId);
     const available = await this.availableQuantity(tx, companyId, warehouseId, itemId);
+    // DIAG (temporary)
+    const _d = await tx.$queryRaw(Prisma.sql`
+      SELECT "warehouseId"::text AS wid, direction::text AS dir, quantity::text AS q
+        FROM stock_movements
+       WHERE "companyId" = ${companyId}::uuid AND "itemId" = ${itemId}::uuid`);
+    console.log('DIAG assert wh=', warehouseId, 'available=', available.toFixed(4),
+      'movements=', JSON.stringify(_d));
     if (available.lessThan(quantity)) {
       throw new BadRequestException(
         `Not enough stock in the selected warehouse: ${available.toFixed(MONEY_SCALE)} available, ` +

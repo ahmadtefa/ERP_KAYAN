@@ -221,7 +221,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           (row) =>
               text(row, 'documentNumber').toLowerCase().contains(needle) ||
               text(row, 'createdByName').toLowerCase().contains(needle) ||
-              _movement(row).toLowerCase().contains(needle),
+              (_movement(row) ?? '').toLowerCase().contains(needle),
         )
         .toList(growable: false);
   }
