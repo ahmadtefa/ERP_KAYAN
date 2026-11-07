@@ -628,6 +628,13 @@ export class WarehouseService {
          AND "warehouseId" = ${warehouseId}::uuid
          AND "itemId" = ${itemId}::uuid
     `);
+    // DIAGTMP
+    const _raw = await tx.$queryRaw(Prisma.sql`
+      SELECT direction::text AS d, quantity::text AS q, "warehouseId"::text AS w
+        FROM stock_movements
+       WHERE "companyId" = ${companyId}::uuid AND "itemId" = ${itemId}::uuid`);
+    console.log('DIAGTMP available wh=', warehouseId, 'sum=', String(rows[0]?.quantity),
+      'rows=', JSON.stringify(_raw));
     return new Prisma.Decimal(rows[0]?.quantity ?? 0);
   }
 
