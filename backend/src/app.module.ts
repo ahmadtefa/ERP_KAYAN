@@ -10,6 +10,7 @@ import { LicensingModule } from './modules/licensing/licensing.module';
 import { LicenseGuard } from './modules/licensing/license.guard';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { WarehouseModule } from './common/warehouse/warehouse.module';
+import { PrintSettingsModule } from './common/print/print-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
@@ -43,6 +44,7 @@ import { SearchModule } from './modules/search/search.module';
     CompanySettingsModule,
     // Global: every module that moves goods asks which warehouse it moved in.
     WarehouseModule,
+    PrintSettingsModule,
     AuditModule,
     MaintenanceModule,
     AuthModule,

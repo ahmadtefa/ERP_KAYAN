@@ -18,6 +18,9 @@ import {
 } from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
+import { batchPolicyOf } from '../../common/warehouse/batch-policy';
+import { BatchesService } from '../inventory/batches.service';
 import { historicalOrderUnit, orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
@@ -88,6 +91,8 @@ export class SalesInvoicesService {
     private readonly warehouses: WarehouseService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    private readonly batches: BatchesService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
@@ -601,7 +606,30 @@ export class SalesInvoicesService {
     return { id, cancelled: true };
   }
 
-  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
+  /// Posts a draft invoice, issuing its goods from the lots they live in.
+  ///
+  /// `expiry` is what the controller resolved from the caller's permissions, not
+  /// anything the request body said. When it is absent a sale simply may not
+  /// touch an expired lot: the engine skips those and answers with how many
+  /// short the invoice is.
+  async post(
+    companyId: string,
+    userId: string,
+    id: string,
+    mayReadCost = true,
+    expiry?: { mayIssueExpired: boolean; reason?: string | null },
+  ) {
+    const expiredApproval =
+      expiry?.mayIssueExpired === true
+        ? {
+            userId,
+            reason:
+              (expiry.reason ?? '').trim().length >= 3
+                ? (expiry.reason as string).trim()
+                : 'Approved sale of expired stock (no reason supplied on the request)',
+          }
+        : null;
+
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { status: true },
@@ -663,7 +691,18 @@ export class SalesInvoicesService {
         });
       }
 
-      // ---- stock issue, valued at the weighted average cost
+      // ---- stock issue
+      //
+      // The goods leave the lots they actually live in, not an abstract
+      // branch balance. Issuing through the lot engine is what makes FEFO
+      // real: it picks the nearest expiry first, skips expired lots unless an
+      // approval travels with the request, walks on to the next lot when one
+      // cannot cover the line, and writes one stock movement per lot so every
+      // quantity sold can be traced back to where it came from.
+      //
+      // An item that keeps no lots still issues exactly as before. The engine
+      // detects that itself and takes the weighted average off the shelf, so
+      // the two paths cannot drift apart.
       let costOfGoods = new Prisma.Decimal(0);
       const costByLine = new Map<string, { unitCost: Prisma.Decimal; costTotal: Prisma.Decimal }>();
 
@@ -672,11 +711,28 @@ export class SalesInvoicesService {
 
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, nameEn: true, unit: true, isStockTracked: true },
+          select: {
+            id: true,
+            code: true,
+            nameEn: true,
+            nameAr: true,
+            unit: true,
+            isStockTracked: true,
+            requiresBatch: true,
+            requiresProductionDate: true,
+            requiresExpiryDate: true,
+            useFefo: true,
+            allowExpiredIssue: true,
+            expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
 
+        // The branch balance is still checked first, because it is the figure
+        // the invoice's own cost is computed from and the one a reader sees on
+        // the customer's screen. The lot engine then proves the goods exist in
+        // this particular warehouse and takes them from named lots.
         const lockedBalances = await tx.$queryRaw<
           Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
         >(Prisma.sql`
@@ -701,61 +757,61 @@ export class SalesInvoicesService {
           );
         }
 
-        // The branch balance above can hide that the goods are not in the
-        // warehouse this invoice actually issues from. Sales never allow
-        // negative stock, so enforce the warehouse-level rule unconditionally.
-        await this.warehouses.assertWarehouseAvailable({
+        // A lot-controlled item cannot be sold from a branch that has no shelf
+        // for it: there would be nothing to point at when somebody asks which
+        // batch the customer received.
+        if (batchPolicyOf(item).requiresBatch && !warehouseId) {
+          throw new BadRequestException(
+            `الصنف ${item.code} يتطلب دفعة ولا يوجد مخزن للفرع. / ` +
+              `Item ${item.code} is lot-controlled, and this branch has no warehouse to issue it from.`,
+          );
+        }
+
+        const issued = await this.batches.issueTx(
           tx,
           companyId,
-          warehouseId,
-          itemId: item.id,
-          quantity: line.quantity,
-          allowNegative: false,
-          reference: invoice.invoiceNumber,
-        });
-
-        const unitCost = qtyOnHand.isZero()
-          ? new Prisma.Decimal(0)
-          : valueOnHand.div(qtyOnHand).toDecimalPlaces(MONEY_SCALE);
-        const costTotal = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
-
-        costOfGoods = costOfGoods.plus(costTotal);
-        costByLine.set(line.id, { unitCost, costTotal });
-
-        await tx.stockMovement.create({
-          data: {
-            companyId,
+          userId,
+          {
+            warehouse: warehouseId ? { id: warehouseId, branchId: invoice.branchId } : null,
+            branchId: invoice.branchId,
+            item,
+          },
+          {
             branchId: invoice.branchId,
             warehouseId,
             itemId: item.id,
-            movementDate: invoice.invoiceDate,
-            direction: StockDirection.OUT,
             quantity: line.quantity,
-            unitCost,
-            totalCost: costTotal,
             referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
             referenceNumber: invoice.invoiceNumber,
-            createdBy: userId,
+            documentDate: invoice.invoiceDate.toISOString().slice(0, 10),
+            // A sale never sells expired stock on the strength of a boolean in
+            // a request. The approval is built here, from the permission the
+            // controller checked, and stamped with the person who holds it.
+            ...(expiredApproval
+              ? { allowExpired: true, expiredApproval }
+              : {}),
+            movementUnits:
+              line.unitName && line.unitQuantity && line.unitFactor
+                ? {
+                    enteredUnit: line.unitName,
+                    enteredQuantity: line.unitQuantity,
+                    unitFactor: line.unitFactor,
+                    baseUnitName: item.unit,
+                  }
+                : undefined,
           },
-        });
+          line.quantity,
+        );
 
-        // The balance was locked and verified above. Never upsert an OUT
-        // movement with a negative create quantity: PostgreSQL checks the
-        // nonnegative constraint before resolving ON CONFLICT.
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: costTotal },
-          },
-        });
+        // The engine already moved the branch and shelf books. Sales still owns
+        // the invoice's cost, so it is read back from what was issued - one
+        // number per line, whatever number of lots that line left from.
+        const unitCost = new Prisma.Decimal(issued.unitCost);
+        const costTotal = new Prisma.Decimal(issued.value);
+
+        costOfGoods = costOfGoods.plus(costTotal);
+        costByLine.set(line.id, { unitCost, costTotal });
       }
 
       // The cost of each line is frozen onto the invoice, so the gross profit
@@ -916,6 +972,15 @@ export class SalesInvoicesService {
         });
       }
 
+      // The goods go back where they came from - not into "the warehouse" as
+      // an average, and never into a different lot. Each OUT movement the
+      // posting wrote names its lot, so the reversal walks those same rows and
+      // returns the exact quantity to the exact lot. A lot that the sale had
+      // emptied was closed by the issue; it is reopened here, because the sale
+      // is being undone and refusing to reopen would silently lose the stock.
+      //
+      // If the invoice left a lot, there is nothing to reopen: an item that
+      // keeps no lots is put back on the shelf book the way it always was.
       for (const line of invoice.lines) {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
@@ -925,46 +990,134 @@ export class SalesInvoicesService {
         if (!item) throw new BadRequestException('A sales invoice item no longer exists');
         if (!item.isStockTracked) continue;
 
-        await tx.stockMovement.create({
-          data: {
+        // What this invoice actually took, lot by lot. Read from the movements
+        // rather than recomputed: the movements are the record of the sale, and
+        // FEFO decided them at posting time with information that may no longer
+        // exist (a lot could have been closed since).
+        const consumed = await tx.stockMovement.findMany({
+          where: {
             companyId,
-            branchId: invoice.branchId,
-            warehouseId,
             itemId: line.itemId,
-            movementDate: new Date(),
-            direction: StockDirection.IN,
-            quantity: line.quantity,
-            unitCost: line.unitCost,
-            totalCost: line.costTotal,
-            referenceType: 'SALES_INVOICE_REVERSAL',
+            direction: StockDirection.OUT,
+            referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
-            referenceNumber: invoice.invoiceNumber,
-            notes: `Reversal of ${invoice.invoiceNumber}`,
-            createdBy: userId,
           },
+          select: { batchId: true, quantity: true, unitCost: true, totalCost: true },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
+        const lotRows = consumed.filter((row) => row.batchId !== null);
+        const unbatchedQuantity = consumed
+          .filter((row) => row.batchId === null)
+          .reduce((sum, row) => sum.plus(row.quantity), new Prisma.Decimal(0));
+        const lotQuantity = lotRows.reduce(
+          (sum, row) => sum.plus(row.quantity),
+          new Prisma.Decimal(0),
+        );
+
+        // A posted invoice that took goods from lots must give them back to
+        // those lots. If the historical movements are missing and the item is
+        // lot-controlled, a blind shelf credit would invent stock that no lot
+        // owns - refuse instead of hiding the discrepancy.
+        if (lotRows.length === 0 && consumed.length === 0 && line.quantity.greaterThan(0)) {
+          const policy = batchPolicyOf(
+            await tx.item.findFirst({
+              where: { id: line.itemId, companyId, deletedAt: null },
+              select: { requiresBatch: true },
+            }),
+          );
+          if (policy.requiresBatch) {
+            throw new BadRequestException(
+              'لا يمكن عكس فاتورة صنف يتطلب دفعة دون حركات دفعات مسجّلة. / ' +
+                'A lot-controlled invoice cannot be reversed: its original lot movements are missing.',
+            );
+          }
+        }
+
+        for (const row of lotRows) {
+          // Conditional reopen: fail loudly if the lot has vanished rather than
+          // crediting stock to a lot nobody can name.
+          const restored = await tx.itemBatch.updateMany({
+            where: { id: row.batchId as string, companyId },
+            data: {
+              remainingQuantity: { increment: row.quantity },
+              // Only a CLOSED lot is reopened. A lot that was written off or
+              // quarantined after the sale keeps that status; the quantity
+              // still returns, because the sale is being undone.
+              ...(await (async () => {
+                const current = await tx.itemBatch.findFirst({
+                  where: { id: row.batchId as string, companyId },
+                  select: { status: true },
+                });
+                return current?.status === 'CLOSED' ? { status: 'OPEN' as const } : {};
+              })()),
+              updatedBy: userId,
+            },
+          });
+          if (restored.count !== 1) {
+            throw new BadRequestException(
+              'دفعة أصلية لم تعد موجودة؛ لا يمكن إعادة الكمية. / ' +
+                'An original lot no longer exists, so its quantity cannot be given back.',
+            );
+          }
+
+          await tx.stockMovement.create({
+            data: {
               companyId,
               branchId: invoice.branchId,
+              warehouseId,
               itemId: line.itemId,
+              batchId: row.batchId,
+              movementDate: new Date(),
+              direction: StockDirection.IN,
+              quantity: row.quantity,
+              unitCost: row.unitCost,
+              totalCost: row.totalCost,
+              referenceType: 'SALES_INVOICE_REVERSAL',
+              referenceId: invoice.id,
+              referenceNumber: invoice.invoiceNumber,
+              notes: `Reversal of ${invoice.invoiceNumber}`,
+              createdBy: userId,
             },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity,
-            value: line.costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.costTotal },
-          },
+          });
+        }
+
+        // Whatever was not taken from a named lot goes back on the branch book
+        // with no lot attached, which is exactly how it left.
+        const backfill = lotRows.length > 0 ? new Prisma.Decimal(0) : line.quantity;
+        if (backfill.greaterThan(0)) {
+          await tx.stockMovement.create({
+            data: {
+              companyId,
+              branchId: invoice.branchId,
+              warehouseId,
+              itemId: line.itemId,
+              movementDate: new Date(),
+              direction: StockDirection.IN,
+              quantity: backfill,
+              unitCost: line.unitCost,
+              totalCost: line.costTotal,
+              referenceType: 'SALES_INVOICE_REVERSAL',
+              referenceId: invoice.id,
+              referenceNumber: invoice.invoiceNumber,
+              notes: `Reversal of ${invoice.invoiceNumber}`,
+              createdBy: userId,
+            },
+          });
+        }
+
+        // The branch and shelf books are moved once for the whole line, by the
+        // same ledger the issue used - not once per lot. Doing it per lot would
+        // round each slice and leave a fils behind on every reversal.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          value: line.costTotal,
         });
       }
+
 
       // One reversal path for the whole system: it claims the original,
       // refuses a closed period with a readable message (instead of the

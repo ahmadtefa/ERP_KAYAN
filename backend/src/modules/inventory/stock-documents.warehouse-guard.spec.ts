@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+import { fakeLedger } from '../../testing/stock-ledger.fake';
+
 import { BadRequestException } from '@nestjs/common';
 import {
   InvoiceStatus,
@@ -125,6 +127,15 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
         isActive: true,
         code: 'WH',
       })),
+    },
+    // These cases carry no lots: the goods move as plain quantity, which is the
+    // path a warehouse without lot control takes.
+    itemBatch: {
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async () => ({ id: 'lot-new' })),
+      update: jest.fn(async () => ({})),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     stockMovement: {
       create: movementCreate,
@@ -267,7 +278,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     settings as never,
     warehouses,
     { assertPostable: jest.fn() } as never,
-  );
+    fakeLedger() as never);
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'doc-1' } as never);
 
   return {

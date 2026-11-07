@@ -41,6 +41,12 @@ export interface PostingRequest {
     | 'FIXED_ASSET'
     | 'ASSET_DEPRECIATION'
     | 'ASSET_DISPOSAL'
+    /// A lot written off or destroyed: the value leaves stock for the
+    /// inventory-difference account, with the reason on the entry.
+    | 'INVENTORY_WRITE_OFF'
+    /// A lot moved between two warehouses. Value does not change overall;
+    /// the entry exists so both shelves' cards reconcile.
+    | 'BATCH_TRANSFER'
     | 'MANUAL';
   sourceId: string;
   sourceNumber: string;

@@ -82,7 +82,9 @@ describe('cost redaction - sales invoices', () => {
         {} as never,
         {} as never,
         {} as never,
-      ),
+          {} as never,
+          {} as never,
+        ),
     };
   }
 
@@ -195,7 +197,13 @@ describe('sales invoice write responses honour cost permission', () => {
     controller.reverse(principal,'i');
     expect(service.create).toHaveBeenLastCalledWith('c','b','u',dto,undefined,false);
     expect(service.updateDraft).toHaveBeenLastCalledWith('c','b','u','i',dto,false);
-    expect(service.post).toHaveBeenLastCalledWith('c','u','i',false);
+    // Posting now also carries what the caller is allowed to do about expired
+    // stock. It is derived from their permissions in the controller, never from
+    // the request body - here the principal has neither, so both are false.
+    expect(service.post).toHaveBeenLastCalledWith('c','u','i',false,{
+      mayIssueExpired: false,
+      reason: null,
+    });
     expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',false);
     const allowed = {...principal,permissions:['inventory.cost.read']};
     controller.create(allowed,dto);
@@ -204,7 +212,10 @@ describe('sales invoice write responses honour cost permission', () => {
     controller.reverse(allowed,'i');
     expect(service.create).toHaveBeenLastCalledWith('c','b','u',dto,undefined,true);
     expect(service.updateDraft).toHaveBeenLastCalledWith('c','b','u','i',dto,true);
-    expect(service.post).toHaveBeenLastCalledWith('c','u','i',true);
+    expect(service.post).toHaveBeenLastCalledWith('c','u','i',true,{
+      mayIssueExpired: false,
+      reason: null,
+    });
     expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',true);
   });
 });

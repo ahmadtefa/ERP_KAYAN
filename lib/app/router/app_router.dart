@@ -19,6 +19,15 @@ import '../../features/data/presentation/screens/backup_screen.dart';
 import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
+import '../../features/inventory/presentation/screens/warehouses_screen.dart';
+import '../../features/inventory/presentation/screens/batches_screen.dart';
+import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
+import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
+import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
+import '../../features/inventory/presentation/screens/write_offs_screen.dart';
+import '../../features/inventory/presentation/screens/stock_documents_screen.dart';
+import '../../features/inventory/presentation/screens/inventory_reports_screen.dart';
+import '../../features/inventory/presentation/screens/warehouse_access_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/licensing/presentation/screens/licence_screen.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
@@ -78,6 +87,19 @@ class AppRoutes {
   static const companySettings = '/settings/company';
   static const settings = '/settings';
   static const licence = '/settings/licence';
+
+  // Inventory sub-screens. The routes are declared here so the navigation and
+  // the screens can be added one at a time; a path is only registered in the
+  // router once its screen exists, so none of these is reachable yet.
+  static const warehouses = '/inventory/warehouses';
+  static const batches = '/inventory/batches';
+  static const storageLocations = '/inventory/locations';
+  static const itemThresholds = '/inventory/thresholds';
+  static const stockTakes = '/inventory/stock-takes';
+  static const writeOffs = '/inventory/write-offs';
+  static const warehouseAccess = '/inventory/warehouse-access';
+  static const inventoryReports = '/inventory/reports';
+  static const stockDocuments = '/inventory/documents';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -202,7 +224,25 @@ final routerProvider = Provider<GoRouter>((ref) {
                       ? OrdersScreen(kind:InvoiceKind.purchase,navigationKey:state.pageKey)
                       : route.path == AppRoutes.stock
                         ? StockScreen(navigationKey:state.pageKey)
-                        : route.child),
+                        : route.path == AppRoutes.warehouses
+                          ? WarehousesScreen()
+                          : route.path == AppRoutes.batches
+                            ? BatchesScreen()
+                            : route.path == AppRoutes.storageLocations
+                              ? StorageLocationsScreen()
+                              : route.path == AppRoutes.itemThresholds
+                                ? ItemThresholdsScreen()
+                                : route.path == AppRoutes.stockTakes
+                                  ? StockTakesScreen()
+                                  : route.path == AppRoutes.writeOffs
+                                    ? WriteOffsScreen()
+                                    : route.path == AppRoutes.stockDocuments
+                                      ? StockDocumentsScreen()
+                                      : route.path == AppRoutes.inventoryReports
+                                        ? InventoryReportsScreen()
+                                        : route.path == AppRoutes.warehouseAccess
+                                          ? WarehouseAccessScreen()
+                                          : route.child),
         ),
     ],
   );
@@ -211,6 +251,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 const _guardedShellPaths = <String>{
   AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
+  AppRoutes.warehouses,
+  AppRoutes.batches,
+  AppRoutes.storageLocations,
+  AppRoutes.itemThresholds,
+  AppRoutes.stockTakes,
+  AppRoutes.writeOffs,
+  AppRoutes.stockDocuments,
+  AppRoutes.inventoryReports,
+  AppRoutes.warehouseAccess,
 };
 
 /// Every authenticated screen, in the order the navigation shows them.
@@ -231,6 +280,15 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.items, child: ItemsScreen()),
   (path: AppRoutes.stock, child: StockScreen()),
+  (path: AppRoutes.warehouses, child: WarehousesScreen()),
+  (path: AppRoutes.batches, child: BatchesScreen()),
+  (path: AppRoutes.storageLocations, child: StorageLocationsScreen()),
+  (path: AppRoutes.itemThresholds, child: ItemThresholdsScreen()),
+  (path: AppRoutes.stockTakes, child: StockTakesScreen()),
+  (path: AppRoutes.writeOffs, child: WriteOffsScreen()),
+  (path: AppRoutes.stockDocuments, child: StockDocumentsScreen()),
+  (path: AppRoutes.inventoryReports, child: InventoryReportsScreen()),
+  (path: AppRoutes.warehouseAccess, child: WarehouseAccessScreen()),
   (path: AppRoutes.salesOrders, child: OrdersScreen(kind: InvoiceKind.sales)),
   (path: AppRoutes.purchaseOrders, child: OrdersScreen(kind: InvoiceKind.purchase)),
   (

@@ -27,7 +27,21 @@ export interface ItemUnitLike {
   isActive: boolean;
   salePrice?: Prisma.Decimal | null;
   purchasePrice?: Prisma.Decimal | null;
+  /// A short label for printed columns. Falls back to the unit name.
+  abbreviation?: string | null;
+  /// Whole units only when false. Absent means "allowed", which is what every
+  /// unit written before this rule existed meant.
+  allowFraction?: boolean | null;
+  /// Where the unit may be chosen. Absent means both, again for compatibility.
+  usedInSales?: boolean | null;
+  usedInPurchases?: boolean | null;
+  sortOrder?: number | null;
 }
+
+/// Which document is asking. A unit can be a purchase unit only: the supplier
+/// sells cartons while the shop sells bottles. Stock movements are neither -
+/// goods leave and enter in whatever unit the storekeeper counted in.
+export type UnitPurpose = 'sale' | 'purchase' | 'stock';
 
 /**
  * The three columns frozen onto a document line. `null` for every field marks
@@ -132,6 +146,9 @@ export function resolveUnitSelection(input: {
   enteredQuantity: Prisma.Decimal;
   baseUnitName: string;
   units: ItemUnitLike[];
+  /// Which document is asking. Omitted means "any document", which is what
+  /// every caller written before unit usage flags existed meant.
+  purpose?: UnitPurpose;
 }): ResolvedUnit {
   const { lineLabel, enteredQuantity, baseUnitName, units } = input;
   const requestedName = normaliseLabel(input.requestedUnitName);
@@ -181,6 +198,13 @@ export function resolveUnitSelection(input: {
     throw new BadRequestException(
       `${lineLabel}: unit "${row.unit}" is inactive and cannot be used on a new document`,
     );
+  }
+
+  // A unit that is enabled only for sales or only for purchases may still be
+  // refused for the other purpose (a purchase unit on a sales line).
+  if (input.purpose) {
+    const problem = unitUsageProblem(row, input.purpose);
+    if (problem) throw new BadRequestException(`${lineLabel}: ${problem}`);
   }
 
   const factor = parseFactor(row.factor, `${lineLabel} unit factor`);
@@ -240,4 +264,93 @@ export function displayQuantity(line: {
   quantity: Prisma.Decimal;
 }): Prisma.Decimal {
   return line.unitQuantity ?? line.quantity;
+}
+
+/// True when the quantity has a fraction of a unit in it. Used by the
+/// whole-units rule, and by nothing else: a factor may be fractional, a price
+/// always is.
+export function hasFraction(value: Prisma.Decimal): boolean {
+  return !value.equals(value.truncated());
+}
+
+/// The reason a unit cannot be used here, or null when it can.
+export function unitUsageProblem(
+  row: ItemUnitLike,
+  purpose: UnitPurpose,
+): string | null {
+  if (purpose === 'sale' && row.usedInSales === false) {
+    return `unit "${row.unit}" is not a selling unit for this item`;
+  }
+  if (purpose === 'purchase' && row.usedInPurchases === false) {
+    return `unit "${row.unit}" is not a purchasing unit for this item`;
+  }
+  return null;
+}
+
+/// Compose a base quantity into the item's units, largest pack first, so two
+/// screens never disagree about what is on the shelf.
+export function composeQuantity(
+  baseQuantity: Prisma.Decimal,
+  units: ItemUnitLike[],
+  baseUnitName: string,
+): { text: string; parts: Array<{ unit: string; quantity: string }> } {
+  const negative = baseQuantity.isNegative();
+  let remaining = baseQuantity.abs();
+  const usable = units
+    .filter((row) => row.isActive !== false)
+    .map((row) => ({
+      unit: row.unit,
+      factor: new Prisma.Decimal(row.factor).toDecimalPlaces(FACTOR_SCALE),
+    }))
+    .filter((row) => row.factor.greaterThan(0))
+    .sort((left, right) => right.factor.comparedTo(left.factor));
+
+  const parts: Array<{ unit: string; quantity: string }> = [];
+  for (const row of usable) {
+    if (row.factor.lessThanOrEqualTo(1)) continue;
+    const count = remaining.div(row.factor).truncated();
+    if (count.lessThanOrEqualTo(0)) continue;
+    parts.push({ unit: row.unit, quantity: count.toFixed(0) });
+    remaining = remaining.minus(count.mul(row.factor)).toDecimalPlaces(QUANTITY_SCALE);
+  }
+
+  const remainder = remaining.toDecimalPlaces(QUANTITY_SCALE);
+  if (!remainder.isZero() || parts.length === 0) {
+    parts.push({ unit: baseUnitName, quantity: trimZeros(remainder) });
+  }
+
+  const pieces = parts.map((part) => `${part.quantity} ${part.unit}`);
+  return {
+    text: negative ? `-${pieces.join(' - ')}` : pieces.join(' + '),
+    parts: negative
+      ? parts.map((part) => ({ ...part, quantity: `-${part.quantity}` }))
+      : parts,
+  };
+}
+
+/// Quantity text without a tail of zeros: "400", not "400.0000", but "0.5"
+/// keeps its half.
+export function trimZeros(value: Prisma.Decimal): string {
+  const fixed = value.toFixed(QUANTITY_SCALE);
+  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
+}
+
+/// The unit a movement was written in, as the snapshot the ledger keeps.
+export function movementUnitSnapshot(input: {
+  enteredUnit?: string | null;
+  enteredQuantity?: Prisma.Decimal | null;
+  unitFactor?: Prisma.Decimal | null;
+  baseUnitName: string;
+  baseQuantity: Prisma.Decimal;
+}): { enteredUnit: string; enteredQuantity: Prisma.Decimal; unitFactor: Prisma.Decimal } {
+  const unit = String(input.enteredUnit ?? '').trim() || String(input.baseUnitName ?? '').trim() || 'unit';
+  const factor =
+    input.unitFactor !== null && input.unitFactor !== undefined
+      ? new Prisma.Decimal(input.unitFactor).toDecimalPlaces(FACTOR_SCALE)
+      : new Prisma.Decimal(1);
+  const entered =
+    input.enteredQuantity !== null && input.enteredQuantity !== undefined
+      ? new Prisma.Decimal(input.enteredQuantity).toDecimalPlaces(QUANTITY_SCALE)
+      : input.baseQuantity;
+  return { enteredUnit: unit, enteredQuantity: entered, unitFactor: factor };
 }

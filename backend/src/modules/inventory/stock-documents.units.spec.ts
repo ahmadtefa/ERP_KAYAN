@@ -43,8 +43,7 @@ function makeService(item: any = milkItem) {
     { recordRequired: jest.fn(async () => undefined) } as never,
     { get: jest.fn() } as never,
     {} as never,
-    { assertPostable: jest.fn() } as never,
-  );
+    { assertPostable: jest.fn() } as never, {} as never);
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'doc-1' } as never);
   return { service, tx };
 }

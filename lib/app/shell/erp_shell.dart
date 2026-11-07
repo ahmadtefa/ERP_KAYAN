@@ -338,6 +338,106 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
+      // The twenty reports the inventory module can answer, read from the
+      // server's own catalogue so the two lists cannot drift apart.
+      _NavItem(
+        AppRoutes.inventoryReports,
+        Icons.insights_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'تقارير المخزون'
+            : 'Inventory reports',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Everything that is not a voucher. The voucher list is its own screen
+      // and is left exactly as it is.
+      _NavItem(
+        AppRoutes.stockDocuments,
+        Icons.description_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'مستندات المخزون'
+            : 'Stock documents',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Where the stock above is actually kept. Reading the list needs the
+      // warehouses grant, which is a different question from reading stock.
+      _NavItem(
+        AppRoutes.warehouses,
+        Icons.warehouse_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'المستودعات'
+            : 'Warehouses',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // The reorder numbers behind the reorder report. Reading them is the
+      // warehouse grant, which is what the backend checks on this route -
+      // there is no inventory.thresholds.read in the catalogue.
+      _NavItem(
+        AppRoutes.itemThresholds,
+        Icons.rule_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'حدود الأصناف'
+            : 'Item thresholds',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // The lots behind the stock. Reading them is its own grant: a person can
+      // be allowed to see quantities without seeing what each lot cost.
+      _NavItem(
+        AppRoutes.batches,
+        Icons.qr_code_scanner_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الدفعات'
+            : 'Batches',
+        permissions: const ['inventory.batches.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Where inside the warehouse the goods are. The backend serves these
+      // under the warehouse grants, so no new permission is invented here.
+      _NavItem(
+        AppRoutes.storageLocations,
+        Icons.grid_view_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'مواقع التخزين'
+            : 'Storage locations',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Counting, and the approval that makes a difference real.
+      _NavItem(
+        AppRoutes.stockTakes,
+        Icons.fact_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الجرد'
+            : 'Stock takes',
+        permissions: const ['inventory.stocktake.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Losses with their own number, their own approval and their own
+      // journal: a stock document of kind WRITE_OFF, not a mystery adjustment.
+      _NavItem(
+        AppRoutes.writeOffs,
+        Icons.delete_forever_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الإعدام'
+            : 'Write-offs',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Who may enter which shelf. Reading it and changing it are two grants,
+      // and the entry needs only the first: the screen says which is missing
+      // rather than hiding itself from someone allowed to look.
+      _NavItem(
+        AppRoutes.warehouseAccess,
+        Icons.key_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'صلاحيات المستودعات'
+            : 'Warehouse access',
+        permissions: const ['inventory.warehouse.access.read'],
+        group: _NavGroup.inventory,
+      ),
       _NavItem(
         AppRoutes.salesOrders,
         Icons.playlist_add_check_outlined,

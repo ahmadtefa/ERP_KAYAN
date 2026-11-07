@@ -1,17 +1,20 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { parseUnitRows, planUnitChanges, ParsedUnitRow } from './unit-input';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
-import { defaultUnitPrice } from '../../common/units/unit-math';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
-import { isValidEan13, randomInternalBarcode } from './barcode';
+import { isValidEan13, randomInternalBarcode, toBaseQuantity } from './barcode';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -24,6 +27,7 @@ export class ItemsService {
     private readonly accounts: AccountMapService,
     private readonly posting: PostingService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
@@ -94,7 +98,6 @@ export class ItemsService {
         unit: item.unit,
         factor: '1.000000',
         quantityPerScan: '1.0000',
-        quantityPerScanFitsLedgerScale: true,
         salePrice: item.salePrice.toFixed(MONEY_SCALE),
         purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
         item: this.toResponse(item, mayReadCost),
@@ -113,20 +116,17 @@ export class ItemsService {
     }
 
     const owner = unit.item;
-    const factor = new Prisma.Decimal(unit.factor);
-    const quantityPerScanFitsLedgerScale = factor.equals(factor.toDecimalPlaces(MONEY_SCALE));
     return {
       matched: 'unit' as const,
       unit: unit.unit,
       factor: unit.factor.toFixed(6),
-      // Keep a lookup usable even when a single unit needs more precision than
-      // the ledger supports. Never present a rounded amount as the exact base
-      // quantity: stock-changing paths must still enforce exact conversion.
-      quantityPerScan: factor.toFixed(quantityPerScanFitsLedgerScale ? MONEY_SCALE : 6),
-      quantityPerScanFitsLedgerScale,
-      salePrice: defaultUnitPrice('sale', unit, owner.salePrice).toFixed(MONEY_SCALE),
+      // A scan of a unit barcode is one of that unit, expressed in the base
+      // unit the stock ledger keeps.
+      quantityPerScan: toBaseQuantity(1, unit.factor).toFixed(MONEY_SCALE),
+      salePrice:
+        unit.salePrice?.toFixed(MONEY_SCALE) ?? owner.salePrice.toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
-        ? defaultUnitPrice('purchase', unit, owner.purchasePrice).toFixed(MONEY_SCALE)
+        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? owner.purchasePrice.toFixed(MONEY_SCALE)
         : null,
       item: this.toResponse(owner, mayReadCost),
       units: owner.units.map((row) =>
@@ -242,7 +242,7 @@ export class ItemsService {
   }
 
   private unitResponse(
-    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null; isDefaultSale: boolean; isDefaultPurchase: boolean },
+    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null },
     baseUnit: string,
     mayReadCost = true,
   ) {
@@ -257,8 +257,6 @@ export class ItemsService {
       purchasePrice: mayReadCost
         ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
         : null,
-      isDefaultSale: unit.isDefaultSale,
-      isDefaultPurchase: unit.isDefaultPurchase,
       isBase: unit.unit === baseUnit,
     };
   }
@@ -269,10 +267,30 @@ export class ItemsService {
     body: object,
     branchId: string | null = null,
     mayReadCost = true,
+    mayManageBarcodes = true,
   ) {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
+
+    // The form sends the base unit and every packing unit together. They are
+    // validated before anything is written, so a bad factor cannot leave an
+    // item behind with half a catalogue.
+    //
+    // When the caller names no base unit but the units list carries exactly
+    // one factor-1 row, that row *is* the base unit: the person said "عبوة = 1"
+    // and meant it, and inventing a second base called "unit" would be wrong.
+    let baseUnit = String(dto.unit ?? '').trim();
+    if (baseUnit === '' && Array.isArray(dto.units)) {
+      const factorOne = dto.units.filter(
+        (row: Record<string, unknown>) => String(row?.factor ?? '').trim() === '1',
+      );
+      if (factorOne.length === 1) {
+        baseUnit = String((factorOne[0] as Record<string, unknown>).unit ?? '').trim();
+      }
+    }
+    if (baseUnit === '') baseUnit = 'unit';
+    const unitRows = parseUnitRows(dto.units, baseUnit);
 
     const existing = await this.prisma.item.findFirst({
       where: { companyId, code },
@@ -352,7 +370,7 @@ export class ItemsService {
           code,
           nameEn: dto.nameEn as string,
           nameAr: dto.nameAr as string,
-          unit: (dto.unit as string) ?? 'unit',
+          unit: baseUnit,
           barcode,
           salePrice: this.money(dto.salePrice, 'salePrice'),
           purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
@@ -370,16 +388,28 @@ export class ItemsService {
       // Every item has exactly one factor-1 row anchoring its base unit, so
       // document resolution always has a base to convert against. Created
       // inside the same transaction as the item itself.
-      await tx.itemUnit.create({
-        data: {
+      //
+      // When the form carried the packing table, the planner owns the whole
+      // catalogue instead - it knows the base row must exist *once*, and two
+      // paths writing it is how an item ends up with two base units.
+      if (unitRows === null) {
+        await tx.itemUnit.create({
+          data: {
+            itemId: item.id,
+            unit: item.unit,
+            factor: new Prisma.Decimal(1),
+            isActive: true,
+          },
+        });
+      } else {
+        await this.applyUnitRows(tx, {
+          companyId,
           itemId: item.id,
-          unit: item.unit,
-          factor: new Prisma.Decimal(1),
-          isActive: true,
-          isDefaultSale: true,
-          isDefaultPurchase: true,
-        },
-      });
+          baseUnit: item.unit,
+          rows: unitRows,
+          mayManageBarcodes,
+        });
+      }
 
       if (wantsOpeningStock) {
         const total = openingQuantity!
@@ -405,6 +435,12 @@ export class ItemsService {
             movementDate: asOf,
             direction: StockDirection.IN,
             quantity: openingQuantity!,
+            // Opening stock is counted in the item's base unit, which is the
+            // unit the create form asks for; say so on the movement.
+            ...movementUnitSnapshot({
+              baseUnitName: item.unit,
+              baseQuantity: openingQuantity!,
+            }),
             unitCost: openingUnitCost!,
             totalCost: total,
             referenceType: 'ITEM_OPENING_STOCK',
@@ -414,25 +450,13 @@ export class ItemsService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: branchId!,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: branchId!,
-            itemId: item.id,
-            quantity: openingQuantity!,
-            value: total,
-          },
-          update: {
-            quantity: { increment: openingQuantity! },
-            value: { increment: total },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: branchId!,
+          warehouseId,
+          itemId: item.id,
+          quantity: openingQuantity!,
+          value: total,
         });
 
         await this.posting.post(tx, {
@@ -485,6 +509,7 @@ export class ItemsService {
     id: string,
     body: object,
     mayReadCost = true,
+    mayManageBarcodes = true,
   ) {
     const dto = body as Record<string, any>;
     const before = await this.prisma.item.findFirst({
@@ -492,14 +517,28 @@ export class ItemsService {
     });
     if (!before) throw new NotFoundException('Item not found');
 
-    // The stock ledger and legacy documents use the original base unit.
-    // Renaming it would reinterpret existing quantities, even if another
-    // transaction posts concurrently. A future conversion needs a migration.
-    if (dto.unit !== undefined) {
-      if (typeof dto.unit !== 'string' || dto.unit.trim() !== before.unit.trim()) {
-        throw new BadRequestException('The base unit cannot be changed after item creation');
-      }
-      dto.unit = before.unit;
+    // Which unit the item will be based on after this save. The units table
+    // can rename the base row in place, so the answer is not just `dto.unit`:
+    // it is whichever row the form kept as the factor-1 row.
+    const existingUnits = await this.prisma.itemUnit.findMany({
+      where: { itemId: id },
+      select: { id: true, unit: true, factor: true, isActive: true, barcode: true },
+    });
+    const currentBaseRow =
+      existingUnits.find((row) => row.factor.equals(1)) ?? null;
+    const nextBaseUnit = this.resolveBaseUnitName({
+      requested: dto.unit,
+      rows: Array.isArray(dto.units) ? dto.units : undefined,
+      currentBase: before.unit,
+      currentBaseRowId: currentBaseRow?.id ?? null,
+    });
+
+    // Renaming the base unit changes what every stored quantity means: 5 was
+    // five cartons, now it would read as five bottles. Refused once the item
+    // has any history, with a message that says so and offers the way out.
+    const changingBaseUnit = nextBaseUnit !== before.unit;
+    if (changingBaseUnit) {
+      await this.assertBaseUnitMayChange(companyId, id, before.unit, nextBaseUnit);
     }
 
     if (dto.barcode !== undefined) {
@@ -522,9 +561,10 @@ export class ItemsService {
     }
 
     const data: Prisma.ItemUpdateInput = { updatedBy: userId };
-    for (const key of ['nameEn', 'nameAr', 'unit', 'barcode', 'notes', 'isActive', 'isStockTracked'] as const) {
+    for (const key of ['nameEn', 'nameAr', 'barcode', 'notes', 'isActive', 'isStockTracked'] as const) {
       if (dto[key] !== undefined) (data as any)[key] = dto[key];
     }
+    if (nextBaseUnit !== before.unit) data.unit = nextBaseUnit;
     if (dto.countryOfOrigin !== undefined) {
       data.countryOfOrigin = String(dto.countryOfOrigin).trim() || null;
     }
@@ -538,8 +578,36 @@ export class ItemsService {
       data.category = dto.categoryId ? { connect: { id: String(dto.categoryId) } } : { disconnect: true };
     }
 
-    const updated = await this.prisma.item.update({ where: { id }, data });
-
+    // One transaction for the item and its whole unit catalogue: a save that
+    // adds a carton and fails on a bad barcode must leave neither behind.
+    const unitRows = parseUnitRows(dto.units, nextBaseUnit);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const item = await tx.item.update({ where: { id }, data });
+      if (unitRows !== null) {
+        await this.applyUnitRows(tx, {
+          companyId,
+          itemId: id,
+          baseUnit: nextBaseUnit,
+          rows: unitRows,
+          mayManageBarcodes,
+        });
+      } else if (item.unit !== before.unit) {
+        // The client changed the base unit name without sending the unit
+        // list: keep the factor-1 row's label aligned either way. The row is
+        // the one already read above, so this can never add a second base.
+        if (currentBaseRow) {
+          await tx.itemUnit.update({
+            where: { id: currentBaseRow.id },
+            data: { unit: item.unit },
+          });
+        } else {
+          await tx.itemUnit.create({
+            data: { itemId: id, unit: item.unit, factor: new Prisma.Decimal(1), isActive: true },
+          });
+        }
+      }
+      return item;
+    });
 
     await this.audit.record({
       companyId,
@@ -661,8 +729,6 @@ export class ItemsService {
       barcode: string | null;
       salePrice: Prisma.Decimal | null;
       purchasePrice: Prisma.Decimal | null;
-      isDefaultSale?: boolean;
-      isDefaultPurchase?: boolean;
       isActive?: boolean;
       createdAt?: Date | null;
     }>;
@@ -698,6 +764,296 @@ export class ItemsService {
 
 
   /**
+   * Refuses a base-unit rename that would re-interpret stock already recorded.
+   *
+   * The stored quantity has no unit of its own: it is "how many base units".
+   * Renaming the base turns the same 5 into five of something else, in every
+   * document and every report, without touching a single number. So it is
+   * refused as soon as the item has any history - a movement, a non-zero
+   * balance, or a saved document line - and the message names the way out:
+   * add a packing unit instead, or correct the stock through a counted
+   * adjustment that the ledger can be read against.
+   */
+  private async assertBaseUnitMayChange(
+    companyId: string,
+    itemId: string,
+    fromUnit: string,
+    toUnit: string,
+  ) {
+    const zero = new Prisma.Decimal(0);
+    const [movements, balance, stockLines, salesLines, purchaseLines] =
+      await Promise.all([
+        this.prisma.stockMovement.count({ where: { companyId, itemId } }),
+        this.prisma.stockBalance.findFirst({
+          where: {
+            companyId,
+            itemId,
+            OR: [{ quantity: { not: zero } }, { value: { not: zero } }],
+          },
+          // stock_balances is keyed by (company, branch, item): there is no
+          // surrogate id, and finding the row at all is the answer.
+          select: { quantity: true },
+        }),
+        this.prisma.stockDocumentLine.count({ where: { itemId } }),
+        this.prisma.salesInvoiceLine.count({ where: { itemId } }),
+        this.prisma.purchaseInvoiceLine.count({ where: { itemId } }),
+      ]);
+
+    const history =
+      movements + (balance ? 1 : 0) + stockLines + salesLines + purchaseLines;
+    if (history === 0) return;
+
+    throw new BadRequestException(
+      `لا يمكن تغيير وحدة الأساس للصنف من "${fromUnit}" إلى "${toUnit}" لأنه مسجّل عليه ` +
+        `${movements} حركة مخزنية و${stockLines + salesLines + purchaseLines} سطرًا في مستندات` +
+        `${balance ? ' ورصيد قائم' : ''}. تغيير الوحدة سيعيد تفسير الكميات القديمة دون أن تتغيّر أرقامها. ` +
+        'أضف وحدة تعبئة جديدة بدلًا من ذلك، أو صحّح الكميات بتسوية جرد مرحّلة. / ' +
+        'The base unit of an item with recorded stock cannot be renamed: it would re-read existing ' +
+        'quantities in a different unit. Add a packing unit instead, or correct the stock with a posted count.',
+    );
+  }
+
+  /**
+   * Which unit the item will be based on after this save.
+   *
+   * The item form edits the base row inside the units table, so the base name
+   * can arrive as `unit` (old clients, quick edit) or as a row (the new form).
+   * Reading the row keeps the two paths saying the same thing instead of
+   * letting `item.unit` and the factor-1 row drift apart.
+   */
+  private resolveBaseUnitName(options: {
+    requested: unknown;
+    rows: Array<Record<string, unknown>> | undefined;
+    currentBase: string;
+    currentBaseRowId: string | null;
+  }): string {
+    const text = (value: unknown) => String(value ?? '').trim();
+    const requested = text(options.requested);
+    if (requested !== '') return requested;
+
+    const rows = options.rows;
+    if (!rows || rows.length === 0) return options.currentBase;
+
+    const currentKey = options.currentBase.trim().toLowerCase();
+
+    // The row carrying the stored base row's id is that row, even when it was
+    // renamed - the form edits it in place rather than adding a twin.
+    if (options.currentBaseRowId) {
+      const byId = rows.find(
+        (row) => text(row.id) === options.currentBaseRowId,
+      );
+      if (byId && text(byId.unit) !== '') return text(byId.unit);
+    }
+
+    const byName = rows.find((row) => text(row.unit).toLowerCase() === currentKey);
+    if (byName) return text(byName.unit);
+
+    // A single row that declares itself the base by its factor of 1.
+    const factorOne = rows.filter((row) => {
+      const raw = text(row.factor);
+      if (raw === '') return false;
+      try {
+        return new Prisma.Decimal(raw).equals(1);
+      } catch {
+        return false;
+      }
+    });
+    if (factorOne.length === 1 && text(factorOne[0].unit) !== '') {
+      return text(factorOne[0].unit);
+    }
+
+    // No row claims the base: the item keeps the one it had, and the planner
+    // adds or renames the factor-1 row to match.
+    return options.currentBase;
+  }
+
+  /**
+   * Writes the unit catalogue a form sent: new rows, edited rows, and the rows
+   * that disappeared switched off (never deleted, so old documents keep a unit
+   * that exists). Runs inside the caller's transaction.
+   */
+  private async applyUnitRows(
+    tx: Prisma.TransactionClient,
+    options: {
+      companyId: string;
+      itemId: string;
+      baseUnit: string;
+      rows: ParsedUnitRow[];
+      mayManageBarcodes: boolean;
+    },
+  ) {
+    const existing = await tx.itemUnit.findMany({
+      where: { itemId: options.itemId },
+      select: {
+        id: true,
+        unit: true,
+        factor: true,
+        isActive: true,
+        barcode: true,
+      },
+    });
+    const plan = planUnitChanges({
+      baseUnit: options.baseUnit,
+      rows: options.rows,
+      existing,
+    });
+    if (!plan) return;
+
+    const storedBarcode = new Map(
+      existing.map((row) => [row.id, (row.barcode ?? '').trim()]),
+    );
+    if (options.mayManageBarcodes) {
+      await this.assertUnitBarcodesFree(tx, options.companyId, options.itemId, [
+        ...plan.creates,
+        ...plan.updates.map((entry) => entry.row),
+      ]);
+    } else {
+      // Without the barcode grant the form may still be saved, as long as it
+      // leaves the codes where they are: silently dropping a new code would
+      // look saved and scan as nothing.
+      const repointed = [
+        ...plan.creates.filter((row) => (row.barcode ?? '').trim() !== ''),
+        ...plan.updates.filter(
+          (entry) =>
+            (entry.row.barcode ?? '').trim() !== (storedBarcode.get(entry.id) ?? ''),
+        ),
+      ];
+      if (repointed.length > 0) {
+        throw new ForbiddenException(
+          'ليس لديك صلاحية تعديل أكواد باركود الوحدات. / Missing permission: inventory.barcodes.manage',
+        );
+      }
+    }
+
+    for (const entry of plan.updates) {
+      await tx.itemUnit.update({
+        where: { id: entry.id },
+        data: this.unitWriteData(entry.row, options.mayManageBarcodes, false),
+      });
+    }
+    for (const row of plan.creates) {
+      await tx.itemUnit.create({
+        data: {
+          itemId: options.itemId,
+          ...this.unitWriteData(row, options.mayManageBarcodes, true),
+        },
+      });
+    }
+    // A rename carries the row's barcode and prices with it: only the label
+    // changes, because those describe the same physical pack.
+    if (plan.baseRename) {
+      await tx.itemUnit.update({
+        where: { id: plan.baseRename.id },
+        data: { unit: plan.baseRename.unit },
+      });
+    }
+    if (plan.createBase) {
+      await tx.itemUnit.create({
+        data: {
+          itemId: options.itemId,
+          unit: options.baseUnit,
+          factor: new Prisma.Decimal(1),
+          isActive: true,
+        },
+      });
+    }
+    if (plan.deactivateIds.length > 0) {
+      await tx.itemUnit.updateMany({
+        where: { id: { in: plan.deactivateIds } },
+        data: { isActive: false },
+      });
+    }
+  }
+
+  /// The columns to write for one unit row.
+  ///
+  /// A field the caller did not send is left as it is: a role shown no
+  /// purchase prices would otherwise erase them on every save. A new row gets
+  /// every column, because there is nothing there to preserve.
+  private unitWriteData(
+    row: ParsedUnitRow,
+    mayManageBarcodes: boolean,
+    isCreate: boolean,
+  ) {
+    const write = (provided: boolean) => isCreate || provided;
+    return {
+      unit: row.unit,
+      factor: row.factor,
+      ...(write(row.abbreviationProvided) ? { abbreviation: row.abbreviation } : {}),
+      // A role without the barcode grant edits units but never repoints a
+      // code that labels are printed from and scanners read.
+      ...(mayManageBarcodes && write(row.barcodeProvided)
+        ? { barcode: row.barcode }
+        : {}),
+      ...(write(row.salePriceProvided) ? { salePrice: row.salePrice } : {}),
+      ...(write(row.purchasePriceProvided)
+        ? { purchasePrice: row.purchasePrice }
+        : {}),
+      ...(write(row.allowFractionProvided)
+        ? { allowFraction: row.allowFraction }
+        : {}),
+      ...(write(row.usageProvided)
+        ? { usedInSales: row.usedInSales, usedInPurchases: row.usedInPurchases }
+        : {}),
+      ...(write(row.sortOrderProvided) ? { sortOrder: row.sortOrder } : {}),
+      isActive: true,
+    };
+  }
+
+  /**
+   * A barcode identifies one thing in the company. A code already used by
+   * another item, or by another unit of this item, is refused before writing.
+   */
+  private async assertUnitBarcodesFree(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    itemId: string,
+    rows: ParsedUnitRow[],
+  ) {
+    const codes = rows
+      .map((row) => row.barcode)
+      .filter((code): code is string => typeof code === 'string' && code !== '');
+    if (codes.length === 0) return;
+
+    const seen = new Set<string>();
+    for (const code of codes) {
+      if (seen.has(code)) {
+        throw new ConflictException(
+          `الباركود ${code} مكرر داخل الصنف. / Barcode ${code} is used twice on this item.`,
+        );
+      }
+      seen.add(code);
+    }
+
+    const [unitClash, itemClash] = await Promise.all([
+      tx.itemUnit.findFirst({
+        where: {
+          barcode: { in: codes },
+          itemId: { not: itemId },
+          item: { companyId },
+        },
+        include: { item: { select: { code: true } } },
+      }),
+      tx.item.findFirst({
+        where: { companyId, barcode: { in: codes }, id: { not: itemId } },
+        select: { code: true, barcode: true },
+      }),
+    ]);
+    if (unitClash) {
+      throw new ConflictException(
+        `الباركود ${unitClash.barcode} مستخدم في وحدة "${unitClash.unit}" بالصنف ${unitClash.item.code}. / ` +
+          `Barcode ${unitClash.barcode} is already assigned to unit ${unitClash.unit} of item ${unitClash.item.code}`,
+      );
+    }
+    if (itemClash) {
+      throw new ConflictException(
+        `الباركود ${itemClash.barcode} مستخدم في الصنف ${itemClash.code}. / ` +
+          `Barcode ${itemClash.barcode} is already assigned to item ${itemClash.code}`,
+      );
+    }
+  }
+
+  /**
    * Guarantees the factor-1 base row exists. Items created before multi-unit
    * have no ItemUnit rows; this backfills the base unit the first time it is
    * needed without touching any document data.
@@ -714,8 +1070,6 @@ export class ItemsService {
         unit: item.unit,
         factor: new Prisma.Decimal(1),
         isActive: true,
-        isDefaultSale: true,
-        isDefaultPurchase: true,
       },
     });
   }
@@ -730,9 +1084,12 @@ export class ItemsService {
       salePrice: Prisma.Decimal | null;
       purchasePrice: Prisma.Decimal | null;
       isActive?: boolean;
-      isDefaultSale?: boolean;
-      isDefaultPurchase?: boolean;
       createdAt?: Date | null;
+      abbreviation?: string | null;
+      allowFraction?: boolean;
+      usedInSales?: boolean;
+      usedInPurchases?: boolean;
+      sortOrder?: number;
     },
     mayReadCost = true,
   ) {
@@ -754,9 +1111,14 @@ export class ItemsService {
       // Pre-multi-unit rows carry no active flag; treat them as active rather
       // than hiding a unit the catalogue always offered.
       isActive: unit.isActive ?? true,
-      isDefaultSale: unit.isDefaultSale ?? false,
-      isDefaultPurchase: unit.isDefaultPurchase ?? false,
       isBase: unit.factor.equals(1),
+      // The rest of what a unit now carries. Defaults repeat the column
+      // defaults so a row read before this migration cannot turn a unit off.
+      abbreviation: unit.abbreviation ?? null,
+      allowFraction: unit.allowFraction ?? true,
+      usedInSales: unit.usedInSales ?? true,
+      usedInPurchases: unit.usedInPurchases ?? true,
+      sortOrder: unit.sortOrder ?? 0,
       createdAt: unit.createdAt ? unit.createdAt.toISOString() : null,
     };
   }

@@ -77,8 +77,7 @@ describe('cost redaction - items and item units', () => {
       { record: jest.fn() } as never,
       { resolve: jest.fn() } as never,
       { post: jest.fn() } as never,
-      { resolve: jest.fn() } as never,
-    );
+      { resolve: jest.fn() } as never, {} as never);
     return { service, prisma };
   }
 
@@ -125,8 +124,7 @@ describe('cost redaction - items and item units', () => {
       { record: jest.fn() } as never,
       { resolve: jest.fn() } as never,
       { post: jest.fn() } as never,
-      { resolve: jest.fn() } as never,
-    );
+      { resolve: jest.fn() } as never, {} as never);
     const redacted = await service.findByBarcode(
       'company-1',
       '6221000000028',
@@ -288,8 +286,7 @@ describe('cost redaction - stock and valuation reads', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
-    );
+      {} as never, {} as never);
     const redacted = await service.findOne('c1', 'doc-1', NO_COST);
     expect(redacted.lines[0].unitCost).toBeNull();
     expect(redacted.lines[0].quantity).toBe('2.0000');

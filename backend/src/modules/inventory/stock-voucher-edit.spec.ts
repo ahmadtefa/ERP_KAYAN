@@ -19,7 +19,7 @@ function harness() {
     item:{findFirst:jest.fn().mockResolvedValue({id:'item',isStockTracked:true,unit:'piece',units:[{unit:'box',factor:D('5'),isActive:false}]})}};
   const prisma = {$transaction:jest.fn(async (fn:(arg:typeof tx)=>Promise<void>) => fn(tx))};
   const audit = {recordRequired:jest.fn()};
-  const service = new StockDocumentsService(prisma as never,{} as never,{} as never,{} as never,audit as never,{} as never,{} as never,{assertPostable:jest.fn()} as never);
+  const service = new StockDocumentsService(prisma as never,{} as never,{} as never,{} as never,audit as never,{} as never,{} as never,{assertPostable:jest.fn()} as never, {} as never);
   jest.spyOn(service,'findOne').mockResolvedValue({id:'doc'} as never);
   return {tx,service,audit,original};
 }

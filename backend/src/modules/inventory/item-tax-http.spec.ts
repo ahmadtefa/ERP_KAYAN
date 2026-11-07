@@ -11,11 +11,12 @@ let saved = {id:'item',companyId:'company',code:'I-1',nameEn:'Item',nameAr:'صن
   isStockTracked:true,isActive:true,categoryId:null,notes:null,createdAt:new Date()};
 const tx={item:{create:jest.fn(async ({data}:{data:Record<string,unknown>}) => {
   saved={...saved,...data} as typeof saved; return saved;
-})},itemUnit:{create:jest.fn()}};
-const prisma={item:{findFirst:jest.fn(async ({where}:{where:{id?:string}}) => where.id ? saved : null),
+}),update:jest.fn(async ({data}:{data:Record<string,unknown>}) => { saved={...saved,...data} as typeof saved; return saved; })},itemUnit:{create:jest.fn()}};
+const prisma={
+  itemUnit: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },item:{findFirst:jest.fn(async ({where}:{where:{id?:string}}) => where.id ? saved : null),
   update:jest.fn(async ({data}:{data:Record<string,unknown>}) => { saved={...saved,...data} as typeof saved; return saved; })},
   $transaction:jest.fn(async (callback:(client:typeof tx)=>Promise<unknown>) => callback(tx))};
-const service=new ItemsService(prisma as never,{record:jest.fn()} as never,{} as never,{} as never,{} as never);
+const service=new ItemsService(prisma as never,{record:jest.fn()} as never,{} as never,{} as never,{} as never, {} as never);
 @Module({controllers:[ItemsController],providers:[{provide:ItemsService,useValue:service}]}) class Fixture {}
 
 describe('item blank tax HTTP DTO', () => {

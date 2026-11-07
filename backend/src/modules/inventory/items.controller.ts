@@ -41,6 +41,7 @@ export class ItemsController {
       dto,
       user.branchId,
       canReadCost(user),
+      this.mayManageBarcodes(user),
     );
   }
 
@@ -66,6 +67,7 @@ export class ItemsController {
       id,
       dto,
       canReadCost(user),
+      this.mayManageBarcodes(user),
     );
   }
 

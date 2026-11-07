@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,8 +9,32 @@ import { Prisma } from '@prisma/client';
 
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { composeQuantity, trimZeros } from '../units/unit-math';
 
 const MONEY_SCALE = 4;
+
+/// Which branches this caller may see warehouses in.
+/// `null` means the account is company-wide: no restriction at all.
+export type WarehouseScope = string[] | null;
+
+/**
+ * Turns the caller's branch assignment into a scope.
+ *
+ * A person assigned to branches sees only those branches' shelves; a
+ * company-wide account (no assignment at all) sees the company. The rule is
+ * in one place so the list, the detail, the balances and the write paths
+ * cannot drift apart.
+ */
+export function warehouseScopeOf(user: {
+  branchId?: string | null;
+  branchIds?: string[] | null;
+}): WarehouseScope {
+  const assigned = (user.branchIds ?? []).filter(
+    (id): id is string => typeof id === 'string' && id !== '',
+  );
+  if (assigned.length > 0) return assigned;
+  return user.branchId ? [user.branchId] : null;
+}
 
 /**
  * The places inside a branch where goods sit.
@@ -35,10 +60,15 @@ export class WarehouseService {
   async findAll(
     companyId: string,
     query: { branchId?: string; includeInactive?: boolean } = {},
+    scope: WarehouseScope = null,
   ) {
     const where: Prisma.WarehouseWhereInput = { companyId, deletedAt: null };
     if (!query.includeInactive) where.isActive = true;
     if (query.branchId) where.branchId = query.branchId;
+    // Outside a person's branches there is nothing to show, and saying so by
+    // returning an empty list is honest: the shelf exists, they do not work
+    // there.
+    if (scope !== null) where.branchId = { in: scope };
 
     const items = await this.prisma.warehouse.findMany({
       where,
@@ -49,20 +79,40 @@ export class WarehouseService {
     return { items: items.map((row) => this.toResponse(row)), total: items.length };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, scope: WarehouseScope = null) {
+    const where: Prisma.WarehouseWhereInput = { id, companyId, deletedAt: null };
+    if (scope !== null) where.branchId = { in: scope };
     const row = await this.prisma.warehouse.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where,
       include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },
     });
+    // A warehouse outside the caller's branches is reported as missing rather
+    // than forbidden: it is not theirs to know about.
     if (!row) throw new NotFoundException('Warehouse not found');
     return this.toResponse(row);
   }
 
-  async create(companyId: string, userId: string, dto: Record<string, unknown>) {
+  /// Refuses a branch the caller is not assigned to before writing anything.
+  private assertInScope(scope: WarehouseScope, branchId: string) {
+    if (scope === null) return;
+    if (!scope.includes(branchId)) {
+      throw new ForbiddenException(
+        'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.',
+      );
+    }
+  }
+
+  async create(
+    companyId: string,
+    userId: string,
+    dto: Record<string, unknown>,
+    scope: WarehouseScope = null,
+  ) {
     const code = this.text(dto.code, 'code');
     const nameEn = this.text(dto.nameEn, 'nameEn');
     const nameAr = this.text(dto.nameAr, 'nameAr');
     const branchId = await this.branch(companyId, this.text(dto.branchId, 'branchId'));
+    this.assertInScope(scope, branchId);
 
     const existing = await this.prisma.warehouse.findFirst({
       where: { companyId, code },
@@ -113,11 +163,24 @@ export class WarehouseService {
     return this.findOne(companyId, created.id);
   }
 
-  async update(companyId: string, userId: string, id: string, dto: Record<string, unknown>) {
+  async update(
+    companyId: string,
+    userId: string,
+    id: string,
+    dto: Record<string, unknown>,
+    scope: WarehouseScope = null,
+  ) {
     const before = await this.prisma.warehouse.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Warehouse not found');
+    this.assertInScope(scope, before.branchId);
+    if (dto.branchId !== undefined) {
+      this.assertInScope(
+        scope,
+        await this.branch(companyId, this.text(dto.branchId, 'branchId')),
+      );
+    }
 
     const data: Prisma.WarehouseUpdateInput = {};
     if (dto.nameEn !== undefined) data.nameEn = this.text(dto.nameEn, 'nameEn');
@@ -172,11 +235,17 @@ export class WarehouseService {
     return this.findOne(companyId, id);
   }
 
-  async deactivate(companyId: string, userId: string, id: string) {
+  async deactivate(
+    companyId: string,
+    userId: string,
+    id: string,
+    scope: WarehouseScope = null,
+  ) {
     const before = await this.prisma.warehouse.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Warehouse not found');
+    this.assertInScope(scope, before.branchId);
     if (before.isDefault) {
       throw new BadRequestException(
         'The default warehouse of a branch cannot be deactivated; make another one the default first',
@@ -195,6 +264,236 @@ export class WarehouseService {
     });
 
     return this.findOne(companyId, id);
+  }
+
+  /// Puts a warehouse back into service. Reactivating never changes which
+  /// warehouse of the branch is the default: that is a separate, explicit
+  /// decision, and silently moving it would change where tomorrow's postings
+  /// land.
+  async reactivate(
+    companyId: string,
+    userId: string,
+    id: string,
+    scope: WarehouseScope = null,
+  ) {
+    const before = await this.prisma.warehouse.findFirst({
+      where: { id, companyId, deletedAt: null },
+    });
+    if (!before) throw new NotFoundException('Warehouse not found');
+    this.assertInScope(scope, before.branchId);
+
+    await this.prisma.warehouse.update({ where: { id }, data: { isActive: true } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'REACTIVATE',
+      entity: 'warehouses',
+      entityId: id,
+      before: { isActive: before.isActive },
+      after: { isActive: true },
+    });
+
+    return this.findOne(companyId, id, scope);
+  }
+
+  /**
+   * What every warehouse holds, item by item, with the packing breakdown.
+   *
+   * The per-warehouse figure comes from `stock_movements`, the same IN-minus-
+   * OUT formula the branch balance uses, so the branch total is the sum of
+   * its warehouses by construction rather than by a second, disagreeing
+   * query. `stock_balances` has no warehouse dimension and is deliberately not
+   * used here.
+   *
+   * The quantity is the stored base-unit number (correct, and unreadable);
+   * `breakdown` beside it is the same number rendered in the item's own units
+   * (5 كراتين + 4 عبوات) without changing what is stored.
+   */
+  async balanceReport(
+    companyId: string,
+    query: {
+      branchId?: string;
+      warehouseId?: string;
+      itemId?: string;
+      q?: string;
+      includeZero?: boolean;
+      asOf?: string;
+    } = {},
+    scope: WarehouseScope = null,
+    mayReadCost = true,
+  ) {
+    const asOf = query.asOf
+      ? new Date(`${query.asOf.slice(0, 10)}T23:59:59.999Z`)
+      : new Date();
+    const search = (query.q ?? '').trim();
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        warehouseId: string;
+        warehouseCode: string;
+        warehouseNameEn: string;
+        warehouseNameAr: string;
+        branchId: string;
+        branchCode: string;
+        branchNameEn: string;
+        branchNameAr: string;
+        itemId: string;
+        itemCode: string;
+        itemNameEn: string;
+        itemNameAr: string;
+        unit: string;
+        quantity: Prisma.Decimal;
+        value: Prisma.Decimal;
+      }>
+    >(Prisma.sql`
+      SELECT w.id AS "warehouseId", w.code AS "warehouseCode",
+             w."nameEn" AS "warehouseNameEn", w."nameAr" AS "warehouseNameAr",
+             b.id AS "branchId", b.code AS "branchCode",
+             b."nameEn" AS "branchNameEn", b."nameAr" AS "branchNameAr",
+             i.id AS "itemId", i.code AS "itemCode",
+             i."nameEn" AS "itemNameEn", i."nameAr" AS "itemNameAr",
+             i.unit,
+             COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m.quantity ELSE -m.quantity END), 0) AS quantity,
+             COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m."totalCost" ELSE -m."totalCost" END), 0) AS value
+        FROM stock_movements m
+        JOIN items i ON i.id = m."itemId"
+        JOIN warehouses w ON w.id = m."warehouseId"
+        JOIN branches b ON b.id = w."branchId"
+       WHERE m."companyId" = ${companyId}::uuid
+         AND w."deletedAt" IS NULL
+         AND m."movementDate" <= ${asOf}::date
+         ${query.warehouseId ? Prisma.sql`AND w.id = ${query.warehouseId}::uuid` : Prisma.empty}
+         ${query.branchId ? Prisma.sql`AND w."branchId" = ${query.branchId}::uuid` : Prisma.empty}
+         ${scope !== null ? Prisma.sql`AND w."branchId" = ANY(${scope}::uuid[])` : Prisma.empty}
+         ${query.itemId ? Prisma.sql`AND m."itemId" = ${query.itemId}::uuid` : Prisma.empty}
+         ${search ? Prisma.sql`AND (i.code ILIKE ${'%' + search + '%'} OR i."nameAr" ILIKE ${'%' + search + '%'} OR i."nameEn" ILIKE ${'%' + search + '%'})` : Prisma.empty}
+       GROUP BY w.id, w.code, w."nameEn", w."nameAr", b.id, b.code, b."nameEn", b."nameAr",
+                i.id, i.code, i."nameEn", i."nameAr", i.unit
+      HAVING ${query.includeZero ? Prisma.sql`TRUE` : Prisma.sql`
+        COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m.quantity ELSE -m.quantity END), 0) <> 0
+        OR COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m."totalCost" ELSE -m."totalCost" END), 0) <> 0`}
+       ORDER BY b.code, w.code, i.code
+    `);
+
+    // The units of every item in the page, in one read, so the breakdown in
+    // the report is the catalogue the item screen shows - not a guess.
+    const itemIds = [...new Set(rows.map((row) => row.itemId))];
+    const units = itemIds.length
+      ? await this.prisma.itemUnit.findMany({
+          where: { itemId: { in: itemIds }, isActive: true },
+          select: { id: true, itemId: true, unit: true, factor: true },
+        })
+      : [];
+    const unitsByItem = new Map<
+      string,
+      Array<{ id: string; unit: string; factor: Prisma.Decimal; isActive: boolean }>
+    >();
+    for (const row of units) {
+      const list = unitsByItem.get(row.itemId) ?? [];
+      list.push({
+        id: row.id,
+        unit: row.unit,
+        factor: new Prisma.Decimal(row.factor),
+        isActive: true,
+      });
+      unitsByItem.set(row.itemId, list);
+    }
+
+    const items = rows.map((row) => {
+      const quantity = new Prisma.Decimal(row.quantity);
+      const value = new Prisma.Decimal(row.value);
+      const breakdown = composeQuantity(
+        quantity,
+        unitsByItem.get(row.itemId) ?? [],
+        row.unit,
+      );
+      return {
+        warehouseId: row.warehouseId,
+        warehouseCode: row.warehouseCode,
+        warehouseNameEn: row.warehouseNameEn,
+        warehouseNameAr: row.warehouseNameAr,
+        branchId: row.branchId,
+        branchCode: row.branchCode,
+        branchNameEn: row.branchNameEn,
+        branchNameAr: row.branchNameAr,
+        itemId: row.itemId,
+        itemCode: row.itemCode,
+        itemNameEn: row.itemNameEn,
+        itemNameAr: row.itemNameAr,
+        unit: row.unit,
+        quantity: quantity.toFixed(MONEY_SCALE),
+        quantityText: trimZeros(quantity),
+        breakdown,
+        // A cost is a cost: absent, not zero, when the caller may not see it.
+        value: mayReadCost ? value.toFixed(MONEY_SCALE) : null,
+        averageCost: mayReadCost
+          ? quantity.isZero()
+            ? null
+            : value.div(quantity).toFixed(MONEY_SCALE)
+          : null,
+      };
+    });
+
+    // The item's total across the warehouses in this page: the number a
+    // branch manager expects to equal the branch balance.
+    const byItem = new Map<
+      string,
+      { itemId: string; quantity: Prisma.Decimal; value: Prisma.Decimal; warehouses: number }
+    >();
+    for (const row of items) {
+      const entry = byItem.get(row.itemId) ?? {
+        itemId: row.itemId,
+        quantity: new Prisma.Decimal(0),
+        value: new Prisma.Decimal(0),
+        warehouses: 0,
+      };
+      entry.quantity = entry.quantity.plus(row.quantity);
+      entry.value = entry.value.plus(row.value ?? 0);
+      entry.warehouses += 1;
+      byItem.set(row.itemId, entry);
+    }
+
+    const byWarehouse = new Map<
+      string,
+      { warehouseId: string; warehouseCode: string; value: Prisma.Decimal; items: number }
+    >();
+    for (const row of items) {
+      const entry = byWarehouse.get(row.warehouseId) ?? {
+        warehouseId: row.warehouseId,
+        warehouseCode: row.warehouseCode,
+        value: new Prisma.Decimal(0),
+        items: 0,
+      };
+      entry.value = entry.value.plus(row.value ?? 0);
+      entry.items += 1;
+      byWarehouse.set(row.warehouseId, entry);
+    }
+
+    return {
+      asOf: asOf.toISOString().slice(0, 10),
+      rows: items,
+      itemTotals: [...byItem.values()].map((entry) => ({
+        itemId: entry.itemId,
+        quantity: entry.quantity.toFixed(MONEY_SCALE),
+        quantityText: trimZeros(entry.quantity),
+        value: mayReadCost ? entry.value.toFixed(MONEY_SCALE) : null,
+        warehouses: entry.warehouses,
+      })),
+      warehouseTotals: [...byWarehouse.values()].map((entry) => ({
+        warehouseId: entry.warehouseId,
+        warehouseCode: entry.warehouseCode,
+        value: mayReadCost ? entry.value.toFixed(MONEY_SCALE) : null,
+        items: entry.items,
+      })),
+      totals: {
+        value: mayReadCost
+          ? items
+              .reduce((sum, row) => sum.plus(row.value ?? 0), new Prisma.Decimal(0))
+              .toFixed(MONEY_SCALE)
+          : null,
+        rows: items.length,
+      },
+    };
   }
 
   /**
@@ -368,9 +667,15 @@ export class WarehouseService {
     companyId: string,
     warehouseId: string,
     query: { asOf?: string; itemId?: string } = {},
+    scope: WarehouseScope = null,
   ) {
     const warehouse = await this.prisma.warehouse.findFirst({
-      where: { id: warehouseId, companyId, deletedAt: null },
+      where: {
+        id: warehouseId,
+        companyId,
+        deletedAt: null,
+        ...(scope !== null ? { branchId: { in: scope } } : {}),
+      },
       include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },
     });
     if (!warehouse) throw new NotFoundException('Warehouse not found');

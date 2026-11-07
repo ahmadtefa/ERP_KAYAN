@@ -55,10 +55,26 @@ export class SalesInvoicesController {
     return this.service.cancelDraft(user.companyId, user.branchId, user.userId, id);
   }
 
+  /// Posting issues the goods from real lots in FEFO order.
+  ///
+  /// `reason` is the justification recorded when - and only when - the caller
+  /// may sign for expired stock. The permission is read from the authenticated
+  /// user here and never from the body: sending `allowExpired: true` to this
+  /// route does nothing on its own.
   @Post(':id/post')
   @RequirePermissions('sales.invoices.post')
-  post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id, canReadCost(user));
+  post(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body?: { expiredIssueReason?: string } | undefined,
+  ) {
+    const mayIssueExpired =
+      user.isSuperAdmin ||
+      (user.permissions ?? []).includes('inventory.batches.expired.issue');
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user), {
+      mayIssueExpired,
+      reason: body?.expiredIssueReason ?? null,
+    });
   }
 
   @Post(':id/reverse')

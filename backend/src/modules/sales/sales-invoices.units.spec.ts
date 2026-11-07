@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 
 import { SalesInvoicesService } from './sales-invoices.service';
+import { fakeBatches, fakeLedger } from '../../testing/fake-batches-issue';
 import { historicalOrderUnit } from '../../common/units/order-conversion-unit';
 
 const D = (v: string | number) => new Prisma.Decimal(v);
@@ -94,6 +95,8 @@ function makeService(itemOverride: any = milkItem) {
     warehouses as never,
     prices as never,
     audit as never,
+    fakeBatches({ onHand: { quantity: 50, value: 375 } }) as never,
+    fakeLedger() as never,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'invoice-1' } as never);
 

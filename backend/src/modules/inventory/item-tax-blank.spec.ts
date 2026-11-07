@@ -8,9 +8,10 @@ const base = {id:'item',companyId:'company',code:'SYN',nameEn:'Item',nameAr:'ØµÙ
 function harness() {
   const create=jest.fn(async ({data}:{data:Record<string,unknown>}) => ({...base,...data}));
   const update=jest.fn(async ({data}:{data:Record<string,unknown>}) => ({...base,...data}));
-  const tx={item:{create},itemUnit:{create:jest.fn()}};
-  const prisma={item:{findFirst:jest.fn(),update},$transaction:jest.fn(async (fn:(client:typeof tx)=>Promise<unknown>) => fn(tx))};
-  const service=new ItemsService(prisma as never,{record:jest.fn()} as never,{} as never,{} as never,{} as never);
+  const tx={item:{create,update},itemUnit:{create:jest.fn()}};
+  const prisma={
+  itemUnit: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },item:{findFirst:jest.fn(),update},$transaction:jest.fn(async (fn:(client:typeof tx)=>Promise<unknown>) => fn(tx))};
+  const service=new ItemsService(prisma as never,{record:jest.fn()} as never,{} as never,{} as never,{} as never, {} as never);
   return {service,prisma,create,update};
 }
 describe('item blank tax', () => {

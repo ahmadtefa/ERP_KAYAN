@@ -28,10 +28,16 @@
  *    exercised here (covered only by Jest unit tests with mocks).
  *
  * Run:
+ *   npm ci
+ *   npx prisma generate
  *   npm run build
- *   npm i --no-save @electric-sql/pglite@0.5.13
  *   node scripts/pglite-integration-guard.mjs
  * Exit code 0 only if every check passes.
+ *
+ * `@electric-sql/pglite` is a declared devDependency (pinned, not a caret), so
+ * a clean `npm ci` installs exactly the engine this harness was proven against.
+ * Before that it had to be installed by hand with `--no-save`, which meant the
+ * harness did not actually run on a fresh machine.
  */
 import { readdirSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

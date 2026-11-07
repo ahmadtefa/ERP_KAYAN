@@ -6,7 +6,7 @@ describe('stock voucher search scope', () => {
     const count = jest.fn(async (_args:{where:unknown}) => 0);
     const prisma = { stockDocument:{findMany,count}, $transaction: async (queries:unknown[]) => Promise.all(queries) };
     const service = new StockDocumentsService(prisma as never,{} as never,{} as never,{} as never,
-      {} as never,{} as never,{} as never,{} as never);
+      {} as never,{} as never,{} as never,{} as never, {} as never);
     await service.findAll('company',{branchId:'branch',voucherOnly:true,q:'  Department  '});
     expect(findMany.mock.calls[0][0].where).toEqual({companyId:'company',deletedAt:null,branchId:'branch',voucherKind:{not:null},OR:[
       {documentNumber:{contains:'Department',mode:'insensitive'}},
