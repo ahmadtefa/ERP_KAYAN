@@ -239,6 +239,13 @@ async function main() {
   );
 
   // ─────────────────────────────────────── a transfer between two warehouses
+  // DIAGNOSTIC (temporary): what the server is actually being told.
+  console.log('DIAG warehouseB.id =', warehouseB.id, '| code', codeB);
+  console.log('DIAG warehouseA.id =', warehouseA.id, '| code', codeA);
+  console.log('DIAG inB row =', JSON.stringify(rowB));
+  const _whB = await must('DIAG source warehouse stock', `/inventory/warehouses/${warehouseB.id}/stock`);
+  console.log('DIAG source stock rows =', JSON.stringify((_whB?.rows ?? []).map((r) => [r.code, r.quantity])));
+
   const transfer = await must('a transfer can move stock between two warehouses', '/inventory/stock-documents', {
     method: 'POST',
     json: {
