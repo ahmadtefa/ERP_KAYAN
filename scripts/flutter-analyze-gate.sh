@@ -18,6 +18,11 @@ out="${1:-analyze.json}"
 flutter analyze --no-pub --machine > "$out" 2>&1
 raw=$?
 
+echo "--- analyze exit=$raw, bytes=$(wc -c < "$out"), lines=$(wc -l < "$out") ---"
+echo "--- first 12 lines of raw output ---"
+head -12 "$out"
+echo "--- lines starting with { : $(grep -c '^{' "$out" || true) ---"
+
 python - "$out" <<'PY'
 import json, os, sys, collections
 
