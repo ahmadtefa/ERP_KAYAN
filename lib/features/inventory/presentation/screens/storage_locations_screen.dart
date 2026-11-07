@@ -74,7 +74,7 @@ class StorageLocationsController extends JsonListController {
 
   @override
   Map<String, dynamic> get resourceQuery => {
-    if (_warehouseId() case final id?) 'warehouseId': id,
+    ?'warehouseId': _warehouseId(),
   };
 }
 
@@ -268,7 +268,7 @@ class StorageLocationsScreen extends ConsumerWidget {
           ? (arabic ? 'موقع جديد' : 'New location')
           : (arabic ? 'تعديل الموقع' : 'Edit location'),
       submitLabel: arabic ? 'حفظ' : 'Save',
-      initial: row == null ? {'warehouseId': warehouseId} : row,
+      initial: row ?? {'warehouseId': warehouseId},
       fields: [
         FieldSpec(
           'code',

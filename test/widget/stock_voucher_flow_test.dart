@@ -251,8 +251,9 @@ class _EditVoucherApi extends _VoucherApi {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path != '/inventory/stock-documents/document')
+    if (path != '/inventory/stock-documents/document') {
       return super.getObject(path, query: query);
+    }
     return {
       'id': 'document',
       'documentNumber': 'SA-1',
@@ -548,10 +549,12 @@ void main() {
           find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),
           findsNothing,
         );
-        if (target == 'list')
+        if (target == 'list') {
           expect(find.text('No vouchers on this page'), findsOneWidget);
-        if (target == 'detail')
+        }
+        if (target == 'detail') {
           expect(find.textContaining('SA-1'), findsOneWidget);
+        }
         if (target == 'create') expect(find.text('Save draft'), findsOneWidget);
         if (target == 'history') expect(find.text('History'), findsOneWidget);
       },
