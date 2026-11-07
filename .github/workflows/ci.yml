@@ -440,8 +440,8 @@ jobs:
           cache: true
       - name: Install Flutter dependencies
         run: flutter pub get
-      - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+      - name: Analyze (compile errors fail; style notes are reported)
+        run: bash scripts/flutter-analyze-gate.sh
       # Renders real screens (shell + dashboard, customers, sales) to PNG so
       # a design change can be inspected visually from the run's artifacts.
       # These are screenshot generators: baselines are regenerated here, so
@@ -501,8 +501,8 @@ jobs:
         run: flutter config --enable-linux-desktop
       - name: Install Flutter dependencies
         run: flutter pub get
-      - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+      - name: Analyze (compile errors fail; style notes are reported)
+        run: bash scripts/flutter-analyze-gate.sh
       # Same screenshot generation as the web job: baselines are produced in
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).
