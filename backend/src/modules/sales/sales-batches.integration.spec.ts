@@ -289,7 +289,10 @@ const vmLacksDynamicImport = !(
         },
         D(5),
       ),
-    ).rejects.toThrow(/الرصيد غير كافٍ|Not enough stock/i);
+      // The sale is refused because expired stock is all that is left, and that
+      // answer is a permission one: 'this needs approval', not 'there is none'.
+      // Both leave the shelf untouched.
+    ).rejects.toThrow(/متوفرة في دفعات منتهية|only available in expired/i);
 
     // Nothing moved: a refused sale leaves every lot exactly as it was.
     expect(await remaining(db, expired)).toBe(50);
@@ -418,6 +421,59 @@ const vmLacksDynamicImport = !(
     expect(await remaining(db, expired)).toBe(15);
     expect(Number(result.expiredQuantity)).toBe(5);
     expect(result.lots[0].expired).toBe(true);
+  });
+
+  it('records the unit snapshot on the movement when a line is sold in a non-base unit', async () => {
+    const lot = await seedLot(db, 'L-BOX', 1000, '2027-06-01', 5);
+    await seedShelf(db, 1000, 5000);
+
+    const { service } = serviceWith(db);
+    const referenceId = '88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+    // "2 cartons of 500" is 1,000 base units: the ledger moves the base
+    // quantity, while the movement keeps what the cashier actually typed.
+    // This is the path that was untested - and therefore the one where a
+    // missing `stock_movements.enteredUnit` column reached production.
+    await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      { warehouse: { id: WAREHOUSE, branchId: BRANCH }, branchId: BRANCH, item: batchPolicyItem },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        quantity: D(1000),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-8',
+        movementUnits: {
+          enteredUnit: 'carton',
+          enteredQuantity: D(2),
+          unitFactor: D(500),
+          baseUnitName: 'piece',
+        },
+      },
+      D(1000),
+    );
+
+    const rows = await db.query<{
+      enteredUnit: string | null;
+      enteredQuantity: string | null;
+      unitFactor: string | null;
+      quantity: string;
+    }>(
+      `SELECT "enteredUnit", "enteredQuantity"::text, "unitFactor"::text, quantity::text
+         FROM stock_movements WHERE "referenceId"=$1`,
+      [referenceId],
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].enteredUnit).toBe('carton');
+    expect(Number(rows.rows[0].enteredQuantity)).toBe(2);
+    expect(Number(rows.rows[0].unitFactor)).toBe(500);
+    // The ledger still moved base units, so the lot and the shelf agree.
+    expect(Number(rows.rows[0].quantity)).toBe(1000);
+    expect(await remaining(db, lot)).toBe(0);
   });
 
   it('cannot hand out more than a lot holds, even if the request asks twice', async () => {

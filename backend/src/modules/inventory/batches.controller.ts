@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -40,7 +40,10 @@ class IssueDto implements IssueInput {
   @IsString() itemId!: string;
   @IsNumber() quantity!: number;
   @IsOptional() @IsString() batchId?: string | null;
-  @IsOptional() allowExpired?: boolean;
+  /// Never trusted on its own. The controller recomputes the real approval
+  /// from the caller's permissions and overwrites whatever arrived here; a
+  /// body that sets it to true without the permission changes nothing.
+  @IsOptional() @IsBoolean() allowExpired?: boolean;
   @IsOptional() @IsString() reason?: string | null;
   @IsOptional() @IsString() storageLocationId?: string | null;
   @IsOptional() @IsString() referenceType?: string;
@@ -157,7 +160,34 @@ export class BatchesController {
   @RequirePermissions('inventory.batches.issue')
   issue(@CurrentUser() user: AuthUser, @Body() dto: IssueDto) {
     assertWarehouseAccess(user, dto.warehouseId, 'issue');
-    return this.service.issue(user.companyId, user.userId, dto, warehouseScopeOf(user));
+    // The approval is built here, from the permission on the authenticated
+    // user - never from the request body. A caller without
+    // `inventory.batches.expired.issue` cannot obtain it by sending
+    // `allowExpired: true`; the flag is overwritten with what the token says.
+    const mayIssueExpired =
+      user.isSuperAdmin ||
+      (user.permissions ?? []).includes('inventory.batches.expired.issue');
+    const reason = (dto.reason ?? '').trim();
+    return this.service.issue(
+      user.companyId,
+      user.userId,
+      {
+        ...dto,
+        ...(mayIssueExpired
+          ? {
+              allowExpired: true,
+              expiredApproval: {
+                userId: user.userId,
+                reason:
+                  reason.length >= 3
+                    ? reason
+                    : 'Approved issue of expired stock (no reason supplied on the request)',
+              },
+            }
+          : { allowExpired: false, expiredApproval: undefined }),
+      },
+      warehouseScopeOf(user),
+    );
   }
 
   @Post('write-off')

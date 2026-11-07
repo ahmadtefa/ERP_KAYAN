@@ -9,6 +9,7 @@ import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import 'stock_vouchers_screen.dart' show StockVoucherDetailScreen;
 
 /// Every stock document that is not a voucher: adjustments, transfers,
 /// counts, opening balances and write-offs.
@@ -96,6 +97,17 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     return '$from → $to';
   }
 
+  Future<void> _open(String id) async {
+    if (id.isEmpty) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => StockVoucherDetailScreen(id: id)),
+    );
+    if (!mounted) return;
+    // A document can be posted, reversed or edited from its detail view, so the
+    // list behind it may be stale by the time we come back.
+    ref.invalidate(stockDocumentsProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -139,6 +151,12 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             : 'No stock documents.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
+          // The detail view is the same one the vouchers list opens: a stock
+          // document is a stock document, and re-implementing it here would
+          // mean two screens drifting apart on status, approvals and lines.
+          // Without this the list was a dead end - the document number, its
+          // kind and its status were visible but nothing could be opened.
+          onTap: (row) => _open(text(row, 'id')),
           columns: [
             ColumnSpec(
               _arabic ? 'الرقم' : 'Number',

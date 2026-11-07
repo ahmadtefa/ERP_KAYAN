@@ -31,6 +31,7 @@ import { BadRequestException } from '@nestjs/common';
 
 import { WarehouseService } from '../dist/src/common/warehouse/warehouse.service.js';
 import { StockDocumentsService } from '../dist/src/modules/inventory/stock-documents.service.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 
 const DB_URL = process.env.DATABASE_URL;
 if (!DB_URL) throw new Error('DATABASE_URL is required');
@@ -69,7 +70,15 @@ function makeService(prisma, warehouses) {
     { record: async () => undefined },
     { get: async () => ({ allowNegativeStock: false }) },
     warehouses,
+    // CostCentersService: only assertPostable is reached by a transfer.
     { assertPostable: () => undefined },
+    // StockLedgerService: post() asks it for the source shelf's moving average
+    // (this.ledger.position). It became the 9th constructor argument after this
+    // guard was first written; without it every posting died inside the
+    // transaction with "Cannot read properties of undefined (reading 'position')"
+    // and the guard reported the service's own TypeError instead of testing
+    // concurrency at all.
+    new StockLedgerService(),
   );
 }
 
@@ -111,6 +120,15 @@ async function seed(prisma, companyId, n) {
   });
   await prisma.stockBalance.create({
     data: { companyId, branchId, itemId, quantity: new Prisma.Decimal(10), value: new Prisma.Decimal(75) },
+  });
+  // The source shelf's own book. The warehouse guard reads
+  // `warehouse_stock_balances` (not the branch figure) and refuses a posting
+  // that would take a shelf below zero, so a branch-level balance alone leaves
+  // the source warehouse reporting 0 and every transfer rejected as "not enough
+  // stock in the selected warehouse". Both books are seeded with the same 10
+  // units so the transfer below is a real movement, not an overdraft.
+  await prisma.warehouseStockBalance.create({
+    data: { companyId, branchId, warehouseId: wSrc, itemId, quantity: new Prisma.Decimal(10), value: new Prisma.Decimal(75) },
   });
   await prisma.stockMovement.create({
     data: {

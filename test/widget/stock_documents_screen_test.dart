@@ -68,6 +68,18 @@ class _DocumentsApi extends ApiClient {
     };
   }
 
+  /// The id of every document the screen opened, in order.
+  final opened = <String>[];
+
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    opened.add(path);
+    return _row(id: 'd-1', number: 'ADJ-001', kind: 'adjustment', status: 'posted');
+  }
+
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {
@@ -137,6 +149,24 @@ void main() {
     expect(find.text('Adjustment'), findsWidgets);
     expect(find.text('Transfer'), findsWidgets);
     expect(find.text('ADJUSTMENT'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('opening a document leads somewhere, instead of being a dead end', (
+    tester,
+  ) async {
+    final api = _DocumentsApi();
+    await pump(tester, api);
+
+    // Before this was wired the row had no tap target at all: the document
+    // number, kind and status were on screen and nothing could be opened, so
+    // the lifecycle (approve / post / reverse) the server offers was
+    // unreachable from this list.
+    await tester.tap(find.text('ADJ-001'));
+    await tester.pumpAndSettle();
+
+    expect(api.opened, isNotEmpty);
+    expect(api.opened.first, contains('d-1'));
     expect(tester.takeException(), isNull);
   });
 

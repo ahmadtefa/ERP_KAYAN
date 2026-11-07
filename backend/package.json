@@ -14,7 +14,7 @@
     "db:prepare": "node scripts/prepare-database.mjs",
     "seed": "ts-node prisma/seed.ts",
     "test": "jest",
-    "test:lots": "NODE_OPTIONS=--experimental-vm-modules jest src/modules/sales/sales-batches.integration.spec.ts src/modules/sales/sales-invoice-posting.integration.spec.ts",
+    "test:lots": "NODE_OPTIONS=--experimental-vm-modules jest src/modules/sales/sales-batches.integration.spec.ts src/modules/sales/sales-invoice-posting.integration.spec.ts src/modules/inventory/expired-issue-policy.integration.spec.ts src/modules/inventory/migration-schema-parity.integration.spec.ts",
     "test:integration:pg": "node scripts/pglite-integration-guard.mjs",
     "lint": "eslint \"src/**/*.ts\"",
     "seed:permissions": "ts-node prisma/seed-permissions.ts",
