@@ -1334,7 +1334,6 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const prices = new PriceListsService(prisma,audit);
     const posting = new PostingService(numbers,periods,costCenters);
     const map = new AccountMapService();
-    const ledger = new StockLedgerService();
     const batches = new BatchesService(prisma,warehouses,posting,map,numbers,audit,ledger);
     const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger);
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
