@@ -119,7 +119,7 @@ export class StockTakesController {
   @Post(':id/post')
   @RequirePermissions('inventory.stocktake.post')
   async post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertTakeAccess(user, id, 'count');
+    await this.assertTakeAccess(user, id, 'approve');
     return this.service.post(user.companyId, user.userId, id, warehouseScopeOf(user));
   }
 

@@ -140,13 +140,23 @@ export class BatchesController {
   @Get(':id/trace')
   @RequirePermissions('inventory.batches.read')
   trace(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.trace(user.companyId, id);
+    return this.service.trace(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    );
   }
 
   @Get(':id')
   @RequirePermissions('inventory.batches.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    );
   }
 
   @Post('receive')

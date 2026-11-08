@@ -233,9 +233,25 @@ export class BatchesService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(
+    companyId: string,
+    id: string,
+    scope: WarehouseScope = null,
+    grants: Array<{ warehouseId: string; canView: boolean }> | null = null,
+  ) {
+    const visibleWarehouseIds = grants
+      ?.filter((grant) => grant.canView)
+      .map((grant) => grant.warehouseId);
     const row = await this.prisma.itemBatch.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(scope !== null ? { warehouse: { branchId: { in: scope } } } : {}),
+        ...(visibleWarehouseIds !== undefined
+          ? { warehouseId: { in: visibleWarehouseIds } }
+          : {}),
+      },
       include: {
         item: { select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } },
         warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
@@ -265,8 +281,13 @@ export class BatchesService {
   /// purchase that brought the lot in, every shelf it sat on, every document
   /// that took some out, and - through the reference ids - the customer it
   /// went to.
-  async trace(companyId: string, id: string) {
-    const lot = await this.findOne(companyId, id);
+  async trace(
+    companyId: string,
+    id: string,
+    scope: WarehouseScope = null,
+    grants: Array<{ warehouseId: string; canView: boolean }> | null = null,
+  ) {
+    const lot = await this.findOne(companyId, id, scope, grants);
     const movements = lot.movements;
     const references = movements
       .filter((row) => row.referenceType)
