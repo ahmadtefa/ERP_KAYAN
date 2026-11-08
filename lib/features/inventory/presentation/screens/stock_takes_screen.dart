@@ -145,17 +145,27 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
     final actions = <Widget>[];
 
     if (canApprove && (status == 'COUNTING' || status == 'REVIEW')) {
-      actions.add(
-        IconButton(
-          tooltip: openedByMe
-              ? (_arabic
-                    ? 'فتحت هذا الجرد، فلا يمكنك اعتماده'
-                    : 'You opened this count, so you cannot approve it')
-              : (_arabic ? 'اعتماد' : 'Approve'),
-          icon: const Icon(Icons.verified_outlined),
-          onPressed: openedByMe ? null : () => _approve(row),
-        ),
-      );
+      if (openedByMe) {
+        actions.add(
+          Tooltip(
+            message: _arabic
+                ? 'فتحت هذا الجرد، فلا يمكنك اعتماده'
+                : 'You opened this count, so you cannot approve it',
+            child: const IconButton(
+              icon: Icon(Icons.verified_outlined),
+              onPressed: null,
+            ),
+          ),
+        );
+      } else {
+        actions.add(
+          IconButton(
+            tooltip: _arabic ? 'اعتماد' : 'Approve',
+            icon: const Icon(Icons.verified_outlined),
+            onPressed: () => _approve(row),
+          ),
+        );
+      }
     }
 
     if (canPost && status == 'APPROVED') {
