@@ -2181,7 +2181,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const instrumented = new PostingClass(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const instrumented = kind === 'sales'
+        ? new SalesInvoicesService(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(wrappedPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingPost = instrumented.post(company,user,draft.id);
       try {
         await waitForBarrier(readBarrier,pendingPost);
