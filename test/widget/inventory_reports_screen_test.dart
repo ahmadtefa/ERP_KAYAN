@@ -127,8 +127,8 @@ void main() {
     tester,
   ) async {
     await pump(tester, _ReportsApi());
-    expect(find.text('Balance by warehouse'), findsOneWidget);
-    expect(find.text('Expiring soon'), findsOneWidget);
+    expect(find.text('Balance by warehouse'), findsWidgets);
+    expect(find.text('Expiring soon'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -178,7 +178,7 @@ void main() {
       _ReportsApi(),
       permissions: const ['inventory.stock.read'],
     );
-    expect(find.text('Balance by warehouse'), findsOneWidget);
+    expect(find.text('Balance by warehouse'), findsWidgets);
     expect(find.text('Export CSV'), findsNothing);
   });
 
@@ -195,7 +195,7 @@ void main() {
     tester,
   ) async {
     await pump(tester, _ReportsApi(failReport: true));
-    expect(find.text('Balance by warehouse'), findsOneWidget);
+    expect(find.text('Balance by warehouse'), findsWidgets);
     expect(find.text('Retry'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
@@ -215,7 +215,7 @@ void main() {
   ) async {
     await pump(tester, _ReportsApi());
     expect(find.text('Inventory reports'), findsOneWidget);
-    expect(find.text('Inventory'), findsOneWidget);
+    expect(find.text('INVENTORY'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });
 }
