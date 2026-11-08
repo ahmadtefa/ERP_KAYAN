@@ -57,6 +57,18 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // Inventory screen fixtures use only checked-in synthetic warehouses,
+  // documents and permission grants. Capture fixed assertions and source
+  // positions so failures are diagnosable without printing arbitrary payloads.
+  if (event.type === 'print' && /^(?:search narrows by number and by raiser|a document with no destination shows only where it left|search narrows by number, reason and warehouse|the person who raised a write-off cannot approve it|an approved draft is named waiting for posting, not draft|the header carries the inventory eyebrow and a back control|the header names the module and offers a way back|a company with no warehouses is told what to do first|without the export grant the button is absent|builds its list from the server catalogue, not a local table)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/[a-z_]+_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No ScaffoldMessenger widget found|No Material widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   // The voucher load-retry tests contain only checked-in synthetic data.
   // Report assertion counts, source locations and fixed framework diagnostics,
   // never arbitrary exception text or request payloads.
@@ -164,7 +176,7 @@ for (const line of lines) {
     else errors.unshift(message);
   }
 }
-const message = (errors.length ? errors.slice(0, 12).join(' | ') : lines.slice(-35).join(' | '))
+const message = (errors.length ? errors.slice(0, 30).join(' | ') : lines.slice(-35).join(' | '))
   .replace(/postgres(?:ql)?:\/\/[^\s'"@]*@/gi, 'postgresql://[redacted]@')
   .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[redacted private key]')
   .replace(/(?:Bearer\s+)[A-Za-z0-9._~-]+/gi, 'Bearer [redacted]')

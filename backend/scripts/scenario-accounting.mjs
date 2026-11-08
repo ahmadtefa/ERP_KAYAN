@@ -29,10 +29,14 @@
  *  13. prove the audit log cannot be edited or deleted, even with SQL
  *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
- *  16. take a full backup, verify it, restore it into a scratch database, and
- *      check the restored data is really there
- *  17. when explicitly enabled for an ephemeral database, verify the guarded
- *      reset, its verified safety backup, and first-run setup status afterward
+ *  16. prove that a PostgreSQL dump is never advertised as a complete
+ *      installation backup: complete full backup and full restore stay
+ *      fail-closed until external files and the device-bound licence are
+ *      recoverable too, while the explicit database archive is still
+ *      reachable by hand and says what it leaves out
+ *  17. verify the portable company JSON backup round-trips, and when explicitly
+ *      enabled for an ephemeral database, verify the guarded reset, its
+ *      verified safety backup, and first-run setup status afterward
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
@@ -1327,19 +1331,42 @@ async function main() {
   // ─────────────────────────────────────────────── 17. backup and restore
   const capabilities = await api('/backup/full/capabilities');
   if (capabilities.data?.available) {
+    // Nothing on this machine may claim a complete backup exists while the
+    // external files and the licence are not part of it. The capability
+    // report is the machine's own statement of that, and it is what the
+    // settings screen shows the operator.
+    check(
+      'the machine reports complete full backup and restore as unsupported',
+      capabilities.data?.fullBackupSupported === false &&
+        capabilities.data?.fullRestoreSupported === false,
+      `backup=${capabilities.data?.fullBackupSupported}, restore=${capabilities.data?.fullRestoreSupported}`,
+    );
+
     // The scheduled path, run once on demand: this is the same code the timer
-    // calls, so proving it here proves the schedule.
+    // calls, so proving it here proves the schedule. A schedule that cannot
+    // complete must say so in words the operator reads, not pretend success.
     const scheduled = await api('/backup/schedule/run', { method: 'POST' });
     const scheduledRun = (scheduled.data ?? [])[0];
     check(
-      'the scheduled backup runs, and reports what it wrote',
-      scheduled.status < 300 && Boolean(scheduledRun?.fileName),
+      'the scheduled full-backup attempt is visibly marked incomplete, never successful',
+      scheduled.status < 300 &&
+        scheduledRun?.status === 'FAILED' &&
+        String(scheduledRun?.message ?? '').includes('فشل اكتمال النسخة') &&
+        String(scheduledRun?.message ?? '').includes('الملفات') &&
+        String(scheduledRun?.message ?? '').includes('الترخيص'),
       `${scheduledRun?.fileName} — ${scheduledRun?.status}: ${scheduledRun?.message}`,
     );
+    // The incomplete attempt still has to appear in the history the operator
+    // reads; hiding a failure is the same defect as faking a success.
+    const scheduleHistory = await api('/backup/schedule/history');
     check(
-      'every scheduled backup is recorded in the history an operator reads',
-      (await api('/backup/schedule/history')).data?.length >= 1,
-      `${(await api('/backup/schedule/history')).data?.length ?? 0} recorded runs`,
+      'the incomplete scheduled attempt remains visible in backup history',
+      (scheduleHistory.data ?? []).some((row) =>
+        row.kind === 'SCHEDULED' &&
+        row.status === 'FAILED' &&
+        row.fileName === scheduledRun?.fileName,
+      ),
+      `${scheduleHistory.data?.length ?? 0} recorded runs`,
     );
 
     // The complete backup, which would also have to carry external files and
@@ -1382,15 +1409,16 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
-    // A destructive full restore is guarded shut on purpose: the controller
-    // refuses it until database, files, licence recovery and interruption
-    // safety are proven, and no environment switch can open it. Asserting that
-    // guard is the honest check - a scenario that demanded a 2xx here would be
-    // demanding the guard be removed.
+    // A destructive full restore is guarded shut on purpose: CompleteRestore
+    // UnavailableGuard refuses it before the multipart body is even read, and
+    // no environment switch can open it. Asserting that guard is the honest
+    // check - a scenario that demanded a 2xx here would be demanding the guard
+    // be removed. The response carries the machine-readable code, so assert
+    // the code rather than a generic HTTP title.
     check(
-      'a full restore stays refused until recovery and interruption safety are proven',
-      restored.status === 503 && restored.data?.title === 'SERVICE_UNAVAILABLE',
-      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 200)}`,
+      'full restore remains blocked until complete restore and licence recovery are proven',
+      restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+      `status ${restored.status}, code ${restored.data?.code ?? '?'}: ${JSON.stringify(restored.data).slice(0, 200)}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(

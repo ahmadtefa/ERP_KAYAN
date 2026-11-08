@@ -61,6 +61,10 @@ const NOT_PER_COMPANY_DATA: Record<string, string> = {
   company: 'the installation row; a backup restores a company, it does not replace it',
   // Global catalogues owned by the application, not by a company.
   permission: 'the application permission catalogue, recreated by the seed on every install',
+  // Installation-local bookkeeping. Backup history describes files that sit on
+  // this machine's disk, not portable company business data: restoring it into
+  // another installation would describe files that are not there.
+  backupRun: 'backup history describes files on this installation, not portable company data',
   // Secrets. A backup file is a downloaded JSON document; it must never carry
   // refresh tokens or licence keys that could be replayed.
   refreshToken: 'live session secrets must never leave the database',
@@ -113,7 +117,6 @@ describe('the company backup covers every table that belongs to a company', () =
       'quotationTermTemplate',
       'quotationColumnTemplate',
       'budget',
-      'backupRun',
       'stockDocumentCreationRequest',
       'orderCreationRequest',
       'userProfilePhoto',

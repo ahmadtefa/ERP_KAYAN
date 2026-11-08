@@ -862,7 +862,7 @@ class _StockVoucherCreateScreenState
     if (request['method'] != (_editing ? 'PUT' : 'POST') ||
         request['path'] != _path ||
         request['body'] is! Map) {
-        throw const FormatException('Invalid pending voucher');
+      throw const FormatException('Invalid pending voucher');
     }
     final body = Map<String, dynamic>.from(request['body'] as Map);
     if (!_editing && body['voucherKind'] != widget.kind) {
@@ -972,7 +972,7 @@ class _StockVoucherCreateScreenState
         _store == null ||
         _scope == null ||
         !(_form.currentState?.validate() ?? false)) {
-        return;
+      return;
     }
     final body = <String, dynamic>{
       if (!_editing) ...{'kind': 'ADJUSTMENT', 'voucherKind': widget.kind},
@@ -1023,7 +1023,7 @@ class _StockVoucherCreateScreenState
       if (request['method'] != (_editing ? 'PUT' : 'POST') ||
           request['path'] != _path ||
           request['body'] is! Map) {
-          throw const FormatException('Invalid pending voucher');
+        throw const FormatException('Invalid pending voucher');
       }
       final body = Map<String, dynamic>.from(request['body'] as Map);
       if (!_editing && body['voucherKind'] != widget.kind) {
@@ -1057,7 +1057,7 @@ class _StockVoucherCreateScreenState
         _pending == null ||
         _store == null ||
         _scope == null) {
-        return;
+      return;
     }
     setState(() => _confirming = true);
     final ok = await confirmAction(

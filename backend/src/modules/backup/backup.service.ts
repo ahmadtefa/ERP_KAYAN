@@ -272,7 +272,6 @@ export const TABLES: TableSpec[] = [
   { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
-  { model: 'backupRun', scope: 'company' },
 ];
 
 /// Tables that are deliberately left out, and why. A backup file that silently
@@ -280,6 +279,7 @@ export const TABLES: TableSpec[] = [
 export const OMITTED: Record<string, string> = {
   permission: 'the list of permissions is part of the program, not of the data',
   refreshToken: 'sign-in sessions should not come back to life when a backup is restored',
+  backupRun: 'backup history describes files on this installation, not portable company business data',
 };
 
 @Injectable()
