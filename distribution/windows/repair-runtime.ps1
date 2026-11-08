@@ -190,7 +190,13 @@ try {
   $backendDir = Join-Path $PSScriptRoot 'backend'
   $nodeExe = Join-Path $backendDir 'node\node.exe'
   $prepareScript = Join-Path $backendDir 'scripts\prepare-database.mjs'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $prepareScript)) {
+  $mainJs = Join-Path $backendDir 'dist\src\main.js'
+  foreach ($requiredRuntimeFile in @($nodeExe, $prepareScript, $mainJs)) {
+    if (-not (Test-Path -LiteralPath $requiredRuntimeFile -PathType Leaf)) {
+      throw ("Repair cannot verify the runtime because a required installed file is missing: " + $requiredRuntimeFile + ". Reinstall from the complete KAYAN Setup package; company data will remain untouched.")
+    }
+  }
+  {
     $prepOut = Join-Path $env:TEMP ('kayan-repair-prep-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     $prepErr = Join-Path $env:TEMP ('kayan-repair-prep-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     try {
@@ -212,8 +218,7 @@ try {
   # afterwards. An empty database answering needsSetup=true is a PASS:
   # the runtime, the database and the server all work, and first-run
   # setup belongs to the program window, not to this script.
-  $mainJs = Join-Path $backendDir 'dist\src\main.js'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $mainJs)) {
+  {
     $probePort = $null
     foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
       $listener = $null
