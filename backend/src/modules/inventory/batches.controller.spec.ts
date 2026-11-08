@@ -4,7 +4,7 @@ import { BatchesController } from './batches.controller';
 describe('batch warehouse access', () => {
   const service = {
     list: jest.fn(),
-    expiryReport: jest.fn(),
+    expiryReport: jest.fn(async () => ({})),
     findOne: jest.fn(),
     trace: jest.fn(),
     receive: jest.fn(),
