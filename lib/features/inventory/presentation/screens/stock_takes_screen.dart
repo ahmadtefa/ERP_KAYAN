@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/network/api_client.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
