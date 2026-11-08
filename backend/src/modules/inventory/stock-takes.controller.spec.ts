@@ -27,6 +27,7 @@ describe('stock take warehouse access', () => {
       branchId: 'branch-1',
       branchIds: ['branch-1'],
       isSuperAdmin: false,
+      permissions: [],
       warehouseAccess: [
         {
           warehouseId: 'warehouse-a',
