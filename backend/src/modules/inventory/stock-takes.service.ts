@@ -255,7 +255,12 @@ export class StockTakesService {
 
       for (const itemId of missingItemIds) {
         const item = await tx.item.findFirst({
-          where: { id: itemId, companyId, deletedAt: null, isStockTracked: true },
+          where: {
+            id: itemId,
+            companyId,
+            deletedAt: null,
+            ...(!partial ? { isStockTracked: true } : {}),
+          },
           select: { id: true },
         });
         if (!item) throw new BadRequestException('A counted item does not exist');
