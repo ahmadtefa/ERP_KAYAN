@@ -55,9 +55,18 @@ export class StorageLocationsService {
     companyId: string,
     query: { warehouseId?: string; parentId?: string | null } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const where: Prisma.StorageLocationWhereInput = { companyId, deletedAt: null };
-    if (query.warehouseId) where.warehouseId = query.warehouseId;
+    if (warehouseIds !== undefined || query.warehouseId) {
+      where.warehouseId = {
+        in: warehouseIds === undefined
+          ? [query.warehouseId!]
+          : query.warehouseId
+            ? warehouseIds.filter((id) => id === query.warehouseId)
+            : warehouseIds,
+      };
+    }
     if (query.parentId === null) where.parentId = null;
     else if (query.parentId) where.parentId = query.parentId;
     if (scope !== null) where.branchId = { in: scope };
@@ -82,7 +91,15 @@ export class StorageLocationsService {
   }
 
   /// The whole tree for one warehouse, ready for a picker or a label sheet.
-  async tree(companyId: string, warehouseId: string, scope: WarehouseScope = null) {
+  async tree(
+    companyId: string,
+    warehouseId: string,
+    scope: WarehouseScope = null,
+    warehouseIds?: string[],
+  ) {
+    if (warehouseIds !== undefined && !warehouseIds.includes(warehouseId)) {
+      throw new ForbiddenException('You cannot view locations in this warehouse');
+    }
     const rows = await this.prisma.storageLocation.findMany({
       where: { companyId, warehouseId, deletedAt: null },
       orderBy: [{ kind: 'asc' }, { code: 'asc' }],
@@ -108,8 +125,17 @@ export class StorageLocationsService {
     return { warehouseId, items: build(null) };
   }
 
-  async create(companyId: string, userId: string, input: LocationInput, scope: WarehouseScope) {
+  async create(
+    companyId: string,
+    userId: string,
+    input: LocationInput,
+    scope: WarehouseScope,
+    warehouseIds?: string[],
+  ) {
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
+    if (warehouseIds !== undefined && !warehouseIds.includes(warehouse.id)) {
+      throw new ForbiddenException('You cannot manage locations in this warehouse');
+    }
     const kind = (input.kind ?? 'BIN').toUpperCase() as LocationKind;
     if (!LOCATION_KINDS.includes(kind)) {
       throw new BadRequestException(
@@ -182,11 +208,15 @@ export class StorageLocationsService {
     id: string,
     input: Partial<LocationInput>,
     scope: WarehouseScope,
+    warehouseIds?: string[],
   ) {
     const existing = await this.prisma.storageLocation.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!existing) throw new NotFoundException('Storage location not found');
+    if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
+      throw new ForbiddenException('You cannot manage locations in this warehouse');
+    }
     if (scope !== null && !scope.includes(existing.branchId)) {
       throw new ForbiddenException('This location belongs to another branch');
     }
@@ -272,11 +302,20 @@ export class StorageLocationsService {
   /// Deleting a bin that still holds goods would lose the answer to "where is
   /// it?", so the caller is told what is in the way rather than the row being
   /// hidden and the stock becoming unfindable.
-  async remove(companyId: string, userId: string, id: string, scope: WarehouseScope) {
+  async remove(
+    companyId: string,
+    userId: string,
+    id: string,
+    scope: WarehouseScope,
+    warehouseIds?: string[],
+  ) {
     const existing = await this.prisma.storageLocation.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!existing) throw new NotFoundException('Storage location not found');
+    if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
+      throw new ForbiddenException('You cannot manage locations in this warehouse');
+    }
     if (scope !== null && !scope.includes(existing.branchId)) {
       throw new ForbiddenException('This location belongs to another branch');
     }
@@ -337,6 +376,7 @@ export class StorageLocationsService {
       reason?: string | null;
     },
     scope: WarehouseScope,
+    warehouseIds?: string[],
   ) {
     if (input.fromLocationId === input.toLocationId) {
       throw new BadRequestException(
@@ -368,6 +408,9 @@ export class StorageLocationsService {
     }
     if (scope !== null && !scope.includes(from.branchId)) {
       throw new ForbiddenException('This location belongs to another branch');
+    }
+    if (warehouseIds !== undefined && !warehouseIds.includes(from.warehouseId)) {
+      throw new ForbiddenException('You cannot move stock in this warehouse');
     }
 
     const item = await this.prisma.item.findFirst({

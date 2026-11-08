@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { LocationInput, StorageLocationsService } from './storage-locations.service';
 
@@ -50,36 +51,69 @@ export class StorageLocationsController {
         parentId: query.rootsOnly === 'true' ? null : query.parentId,
       },
       warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
     );
   }
 
   @Get('tree/:warehouseId')
   @RequirePermissions('inventory.warehouses.read')
   tree(@CurrentUser() user: AuthUser, @Param('warehouseId') warehouseId: string) {
-    return this.service.tree(user.companyId, warehouseId, warehouseScopeOf(user));
+    assertWarehouseAccess(user, warehouseId, 'view');
+    return this.service.tree(
+      user.companyId,
+      warehouseId,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Post()
   @RequirePermissions('inventory.warehouses.manage')
   create(@CurrentUser() user: AuthUser, @Body() dto: LocationDto) {
-    return this.service.create(user.companyId, user.userId, dto, warehouseScopeOf(user));
+    assertWarehouseAccess(user, dto.warehouseId, 'view');
+    return this.service.create(
+      user.companyId,
+      user.userId,
+      dto,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Post('move-stock')
   @RequirePermissions('inventory.stock.adjust')
   moveStock(@CurrentUser() user: AuthUser, @Body() dto: MoveStockDto) {
-    return this.service.move(user.companyId, user.userId, dto, warehouseScopeOf(user));
+    return this.service.move(
+      user.companyId,
+      user.userId,
+      dto,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Patch(':id')
   @RequirePermissions('inventory.warehouses.manage')
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Partial<LocationDto>) {
-    return this.service.update(user.companyId, user.userId, id, dto, warehouseScopeOf(user));
+    return this.service.update(
+      user.companyId,
+      user.userId,
+      id,
+      dto,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Delete(':id')
   @RequirePermissions('inventory.warehouses.manage')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.remove(user.companyId, user.userId, id, warehouseScopeOf(user));
+    return this.service.remove(
+      user.companyId,
+      user.userId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 }
