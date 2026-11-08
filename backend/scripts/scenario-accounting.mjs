@@ -1603,6 +1603,26 @@ async function main() {
       administratorAfterSetup.status === 201 && Boolean(administratorAfterSetup.data?.accessToken),
       `status ${administratorAfterSetup.status}`,
     );
+
+    // Everything from here acts as the administrator setup just confirmed.
+    // The reset revoked the token this run started with, and so did the new
+    // account row, so the old one must not be reused.
+    token = administratorAfterSetup.data?.accessToken ?? token;
+
+    // Setup leaves a fresh company on its own defaults, and a new company
+    // charges no VAT until an operator says what its rate is. The reset threw
+    // away the 14% this run set at the start, so it has to be set again before
+    // any figure below is read - otherwise every later total is quietly
+    // computed at zero and every assertion about it fails for one reason.
+    const policyAfterSetup = await api('/accounting/settings', {
+      method: 'PATCH',
+      json: { taxRate: TAX, allowNegativeStock: false },
+    });
+    check(
+      'the company policy is set again on the company that setup recreated',
+      policyAfterSetup.status === 200 && String(policyAfterSetup.data?.taxRate) === TAX,
+      `status ${policyAfterSetup.status}, tax ${policyAfterSetup.data?.taxRate}`,
+    );
   } else {
     skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
   }
