@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-vali
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import {
   assertTransferAccess,
   assertWarehouseAccess,
@@ -134,12 +135,32 @@ export class BatchesController {
       days?: string;
     },
   ) {
+    const grants = grantsOf(user);
+    const visibleGrants = grants?.filter((grant) =>
+      query.warehouseId
+        ? grant.warehouseId === query.warehouseId && grant.canView
+        : grant.canView,
+    );
+    const mayReadCosts =
+      canReadCost(user) && (grants === null || (visibleGrants ?? []).every((grant) => grant.canSeeCost));
     return this.service.expiryReport(
       user.companyId,
       query,
       warehouseScopeOf(user),
-      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
-    );
+      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    ).then((report) => {
+      if (mayReadCosts) return report;
+      const hideCosts = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(hideCosts);
+        if (value === null || typeof value !== 'object') return value;
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => key !== 'unitCost' && key !== 'value' && key !== 'atRisk')
+            .map(([key, child]) => [key, hideCosts(child)]),
+        );
+      };
+      return hideCosts(report);
+    });
   }
 
   @Get(':id/trace')

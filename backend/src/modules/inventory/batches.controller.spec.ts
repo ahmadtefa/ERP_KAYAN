@@ -44,6 +44,33 @@ describe('batch warehouse access', () => {
     );
   });
 
+  it('redacts expiry values when global or warehouse cost visibility is missing', async () => {
+    service.expiryReport.mockResolvedValueOnce({
+      atRisk: '125.0000',
+      buckets: { EXPIRED: { count: 1, quantity: '2.0000', value: '125.0000' } },
+      items: [{ quantity: '2.0000', unitCost: '62.5000', value: '125.0000' }],
+    });
+    const result = await controller.expiryReport(
+      user([
+        {
+          warehouseId: 'warehouse-visible',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+      ]),
+      { warehouseId: 'warehouse-visible' },
+    ) as any;
+
+    expect(result.atRisk).toBeUndefined();
+    expect(result.buckets.EXPIRED).toEqual({ count: 1, quantity: '2.0000' });
+    expect(result.items[0]).toEqual({ quantity: '2.0000' });
+  });
+
   it('passes an empty allow-list when configured grants expose no warehouses', () => {
     controller.expiryReport(
       user([{ warehouseId: 'warehouse-hidden', canView: false }]),
