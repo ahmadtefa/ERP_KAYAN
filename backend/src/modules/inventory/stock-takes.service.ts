@@ -371,8 +371,10 @@ export class StockTakesService {
         `This count was already approved (status: ${session.status}). / تم اعتماد هذا الجرد مسبقًا.`,
       );
     }
-    if (!['COUNTING', 'REVIEW'].includes(session.status)) {
-      throw new BadRequestException(`This session cannot be approved (status: ${session.status}).`);
+    if (session.status !== 'REVIEW') {
+      throw new BadRequestException(
+        `A count can be approved only after every line is counted and submitted for review (status: ${session.status}).`,
+      );
     }
     if (session.createdBy && session.createdBy === userId) {
       throw new BadRequestException(

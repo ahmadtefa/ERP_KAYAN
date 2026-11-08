@@ -469,6 +469,25 @@ describe('stock takes', () => {
     ).rejects.toThrow(/can no longer be counted/i);
   });
 
+  it('cannot approve a counting session before all lines are submitted for review', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') },
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('4'), value: D('40') },
+        ],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+
+    await expect(
+      harness.service.approve(COMPANY, APPROVER, harness.state.sessions[0].id),
+    ).rejects.toThrow(/only after every line is counted/i);
+    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    expect(harness.tx.stockTakeSession.updateMany).not.toHaveBeenCalled();
+  });
+
   it('will not let the person who counted approve their own difference', async () => {
     const harness = withWarehouse(
       makeHarness({ balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('1'), value: D('1') }] }),
