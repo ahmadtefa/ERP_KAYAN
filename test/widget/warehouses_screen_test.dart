@@ -235,7 +235,7 @@ void main() {
     tester,
   ) async {
     await pump(tester, _WarehousesApi());
-    expect(find.text('Inventory'), findsOneWidget);
+    expect(find.text('INVENTORY'), findsOneWidget);
     expect(find.text('Warehouses'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });

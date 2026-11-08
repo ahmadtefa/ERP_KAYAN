@@ -71,3 +71,14 @@ test('Windows PowerShell preflight compares installed keys without Get-FileHash'
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('repair never reports success when Node, database preparer, or API entry point is missing', async () => {
+  const source = await readFile(new URL('../distribution/windows/repair-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(source, /\$nodeExe = Join-Path \$backendDir 'node\\node\.exe'/);
+  assert.match(source, /\$prepareScript = Join-Path \$backendDir 'scripts\\prepare-database\.mjs'/);
+  assert.match(source, /\$mainJs = Join-Path \$backendDir 'dist\\src\\main\.js'/);
+  assert.match(source, /foreach \(\$requiredRuntimeFile in @\(\$nodeExe, \$prepareScript, \$mainJs\)\)/);
+  assert.match(source, /Repair cannot verify the runtime because a required installed file is missing/);
+  assert.doesNotMatch(source, /if \(\(Test-Path -LiteralPath \$nodeExe\) -and \(Test-Path -LiteralPath \$prepareScript\)\)/);
+  assert.doesNotMatch(source, /if \(\(Test-Path -LiteralPath \$nodeExe\) -and \(Test-Path -LiteralPath \$mainJs\)\)/);
+});

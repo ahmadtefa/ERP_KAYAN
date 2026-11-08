@@ -227,11 +227,12 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
                 if (snapshot.connectionState != ConnectionState.done) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                if (snapshot.hasError)
+                if (snapshot.hasError) {
                   return _VoucherLoadError(
                     error: snapshot.error!,
                     onRetry: _refresh,
                   );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -414,11 +415,12 @@ class _StockVoucherDetailScreenState
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snapshot.hasError)
+            if (snapshot.hasError) {
               return _VoucherLoadError(
                 error: snapshot.error!,
                 onRetry: _refresh,
               );
+            }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -585,10 +587,11 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
     // The child FutureBuilder is not mounted while the tile is collapsed.
     // Start the request only when expanding so an early failure is observed.
     onExpansionChanged: (expanded) {
-      if (expanded && _future == null)
+      if (expanded && _future == null) {
         setState(() {
           _future = _load();
         });
+      }
     },
     children: [
       if (_future != null)
@@ -598,13 +601,14 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
             if (snapshot.connectionState != ConnectionState.done) {
               return const CircularProgressIndicator();
             }
-            if (snapshot.hasError)
+            if (snapshot.hasError) {
               return _VoucherLoadError(
                 error: snapshot.error!,
                 onRetry: () => setState(() {
                   _future = _load();
                 }),
               );
+            }
             if (!snapshot.hasData) return const CircularProgressIndicator();
             return Column(
               children: [
@@ -857,8 +861,9 @@ class _StockVoucherCreateScreenState
   void _restore(Map<String, dynamic> request) {
     if (request['method'] != (_editing ? 'PUT' : 'POST') ||
         request['path'] != _path ||
-        request['body'] is! Map)
+        request['body'] is! Map) {
       throw const FormatException('Invalid pending voucher');
+    }
     final body = Map<String, dynamic>.from(request['body'] as Map);
     if (!_editing && body['voucherKind'] != widget.kind) {
       throw const FormatException('Invalid pending voucher kind');
@@ -966,8 +971,9 @@ class _StockVoucherCreateScreenState
         _pending != null ||
         _store == null ||
         _scope == null ||
-        !(_form.currentState?.validate() ?? false))
+        !(_form.currentState?.validate() ?? false)) {
       return;
+    }
     final body = <String, dynamic>{
       if (!_editing) ...{'kind': 'ADJUSTMENT', 'voucherKind': widget.kind},
       if (_editing) 'expectedVersion': _editVersion,
@@ -1016,8 +1022,9 @@ class _StockVoucherCreateScreenState
     try {
       if (request['method'] != (_editing ? 'PUT' : 'POST') ||
           request['path'] != _path ||
-          request['body'] is! Map)
+          request['body'] is! Map) {
         throw const FormatException('Invalid pending voucher');
+      }
       final body = Map<String, dynamic>.from(request['body'] as Map);
       if (!_editing && body['voucherKind'] != widget.kind) {
         throw const FormatException('Invalid pending voucher kind');
@@ -1049,8 +1056,9 @@ class _StockVoucherCreateScreenState
         _confirming ||
         _pending == null ||
         _store == null ||
-        _scope == null)
+        _scope == null) {
       return;
+    }
     setState(() => _confirming = true);
     final ok = await confirmAction(
       context,

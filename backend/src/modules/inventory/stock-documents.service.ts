@@ -321,23 +321,18 @@ export class StockDocumentsService {
       : optionsArg;
     const targetBranch = dto.branchId ?? dto.toBranchId ?? branchId;
     if (!targetBranch) throw new BadRequestException('The signed-in user is not assigned to a branch');
-    const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
+    const idempotencyKey = String(options.idempotencyKey ?? dto.idempotencyKey ?? '').trim() || null;
+    const identity = idempotencyKey
+      ? orderCreationIdentity({ ...dto, idempotencyKey } as unknown as Record<string, unknown>)
+      : null;
     const voucherKind = dto.voucherKind === undefined ? null : String(dto.voucherKind).toUpperCase();
     if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
     if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
     if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
     if (voucherKind === 'RECEIPT' && !mayReadCost) throw new ForbiddenException('Receipt vouchers require inventory.cost.read');
 
-    // Column-level idempotency: a retry of the same request finds the first
-    // document instead of booking a second one (write-offs, transfers).
-    const idempotencyKey = String(options.idempotencyKey ?? dto.idempotencyKey ?? '').trim() || null;
-    if (idempotencyKey) {
-      const existing = await this.prisma.stockDocument.findFirst({
-        where: { companyId, idempotencyKey },
-        select: { id: true },
-      });
-      if (existing) return this.findOne(companyId, existing.id, mayReadCost, voucherBranchIdOf(branchId));
-    }
+    // The request fingerprint is the authority for retries. A document key
+    // alone is not enough: reusing it with a different payload must conflict.
 
       const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
       if (!Object.values(StockDocumentKind).includes(kind)) {
@@ -381,6 +376,18 @@ export class StockDocumentsService {
         if (previous.length) {
           if (previous[0].requestHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
           return { id: previous[0].documentId };
+        }
+        // Older rows may have the document key but predate the request-hash
+        // table. We cannot prove that a retry has the same body, so fail closed
+        // rather than silently returning or duplicating an unknown request.
+        const legacy = await tx.stockDocument.findFirst({
+          where: { companyId, idempotencyKey },
+          select: { id: true },
+        });
+        if (legacy) {
+          throw new ConflictException(
+            'The idempotency key belongs to a document without a request fingerprint; use a new key.',
+          );
         }
       }
       const branchModel = (tx as { branch?: typeof this.prisma.branch }).branch ?? this.prisma.branch;

@@ -92,6 +92,10 @@ class _DocumentsApi extends ApiClient {
   }
 }
 
+Finder tableText(String value) => find.byWidgetPredicate(
+  (widget) => widget is Text && widget.data == value,
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -193,12 +197,12 @@ void main() {
     await pump(tester, _DocumentsApi());
     await tester.enterText(find.byType(TextField).first, 'OPN-001');
     await tester.pumpAndSettle();
-    expect(find.text('OPN-001'), findsOneWidget);
-    expect(find.text('ADJ-001'), findsNothing);
+    expect(tableText('OPN-001'), findsOneWidget);
+    expect(tableText('ADJ-001'), findsNothing);
 
     await tester.enterText(find.byType(TextField).first, 'sara');
     await tester.pumpAndSettle();
-    expect(find.text('ADJ-001'), findsOneWidget);
+    expect(tableText('ADJ-001'), findsOneWidget);
   });
 
   testWidgets('a failed list shows the error view with a retry', (tester) async {

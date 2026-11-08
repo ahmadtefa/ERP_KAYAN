@@ -417,34 +417,67 @@ export class StockTakesService {
     }
 
     try {
-      const document = await this.documents.create(
-        companyId,
-        session.branchId,
-        userId,
-        {
-          kind: StockDocumentKind.ADJUSTMENT,
-          branchId: session.branchId,
-          toWarehouseId: session.warehouseId ?? undefined,
-          documentDate: new Date().toISOString().slice(0, 10),
-          reason: `Stock-take ${session.code}`,
-          notes: session.notes ?? undefined,
-          lines: variances.map((line) => ({
-            itemId: line.itemId,
-            quantity: Number(line.varianceQuantity),
-            unitCost: Number(line.unitCost),
-            batchId: line.batchId ?? undefined,
-            notes: line.notes ?? `Stock-take ${session.code}`,
-          })),
-        },
-        { idempotencyKey: `stock-take:${session.id}` } as never,
-      );
-      const posted = await this.documents.post(companyId, userId, document.id);
+      const idempotencyKey = `stock-take:${session.id}`;
+      const lines = variances.map((line) => ({
+        itemId: line.itemId,
+        quantity: Number(line.varianceQuantity),
+        unitCost: Number(line.unitCost),
+        batchId: line.batchId ?? undefined,
+        notes: line.notes ?? `Stock-take ${session.code}`,
+      }));
+      // Reuse the session's own document after an interrupted attempt. The
+      // session UUID is a server-generated key; do not rebuild a new request
+      // whose date (or other presentation fields) could change on a later day.
+      const existing = await this.prisma.stockDocument.findFirst({
+        where: { companyId, branchId: session.branchId, idempotencyKey, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      let document: { id: string };
+      if (existing) {
+        const sameLines = existing.lines.length === lines.length && existing.lines.every((saved, index) => {
+          const expected = lines[index];
+          return saved.itemId === expected.itemId &&
+            saved.quantity.equals(expected.quantity) &&
+            saved.unitCost.equals(expected.unitCost) &&
+            (saved.batchId ?? null) === (expected.batchId ?? null);
+        });
+        if (
+          existing.kind !== StockDocumentKind.ADJUSTMENT ||
+          existing.toWarehouseId !== (session.warehouseId ?? null) ||
+          !['DRAFT', 'POSTED'].includes(existing.status) ||
+          (existing.stockTakeSessionId !== null && existing.stockTakeSessionId !== session.id) ||
+          !sameLines
+        ) {
+          throw new ConflictException('The existing stock-take document does not match this approved count.');
+        }
+        document = { id: existing.id };
+      } else {
+        document = await this.documents.create(
+          companyId,
+          session.branchId,
+          userId,
+          {
+            kind: StockDocumentKind.ADJUSTMENT,
+            branchId: session.branchId,
+            toWarehouseId: session.warehouseId ?? undefined,
+            // Freeze the date to the count's snapshot, not the retry's day.
+            documentDate: (session.frozenAt ?? session.createdAt).toISOString().slice(0, 10),
+            reason: `Stock-take ${session.code}`,
+            notes: session.notes ?? undefined,
+            lines,
+          },
+          { idempotencyKey } as never,
+        );
+      }
+      const posted = existing?.status === 'POSTED'
+        ? { journalEntryId: existing.journalEntryId }
+        : await this.documents.post(companyId, userId, document.id);
 
       await this.prisma.stockTakeSession.update({
         where: { id: session.id },
         data: {
           documentId: document.id,
-          journalEntryId: (posted as { journalEntryId?: string | null }).journalEntryId ?? null,
+          journalEntryId: posted.journalEntryId ?? null,
         },
       });
       // The document carries the link both ways: a reader who opens the

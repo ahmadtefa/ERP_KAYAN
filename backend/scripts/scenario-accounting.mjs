@@ -29,10 +29,11 @@
  *  13. prove the audit log cannot be edited or deleted, even with SQL
  *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
- *  16. take a full backup, verify it, restore it into a scratch database, and
- *      check the restored data is really there
- *  17. when explicitly enabled for an ephemeral database, verify the guarded
- *      reset, its verified safety backup, and first-run setup status afterward
+ *  16. verify that a database-only archive is never advertised as a complete
+ *      installation backup, and that full backup/restore remain fail-closed
+ *      until external files and the device-bound licence are recoverable too
+ *  17. verify the portable company JSON backup, restore it, and when explicitly
+ *      enabled on an ephemeral database, verify guarded reset and first-run setup
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
@@ -1327,58 +1328,58 @@ async function main() {
   // ─────────────────────────────────────────────── 17. backup and restore
   const capabilities = await api('/backup/full/capabilities');
   if (capabilities.data?.available) {
-    // The scheduled path, run once on demand: this is the same code the timer
-    // calls, so proving it here proves the schedule.
+    // A PostgreSQL dump alone is not a complete installation backup: it
+    // does not carry external files or the device-bound licence. Until the
+    // combined recovery path is independently proven, both manual full backup
+    // and full restore must remain explicitly unavailable.
+    check(
+      'the machine reports complete full backup and restore as unsupported',
+      capabilities.data?.fullBackupSupported === false &&
+        capabilities.data?.fullRestoreSupported === false,
+      `backup=${capabilities.data?.fullBackupSupported}, restore=${capabilities.data?.fullRestoreSupported}`,
+    );
     const scheduled = await api('/backup/schedule/run', { method: 'POST' });
     const scheduledRun = (scheduled.data ?? [])[0];
     check(
-      'the scheduled backup runs, and reports what it wrote',
-      scheduled.status < 300 && Boolean(scheduledRun?.fileName),
+      'the scheduled full-backup attempt is visibly marked incomplete, never successful',
+      scheduled.status < 300 &&
+        scheduledRun?.status === 'FAILED' &&
+        String(scheduledRun?.message ?? '').includes('فشل اكتمال النسخة') &&
+        String(scheduledRun?.message ?? '').includes('الملفات') &&
+        String(scheduledRun?.message ?? '').includes('الترخيص'),
       `${scheduledRun?.fileName} — ${scheduledRun?.status}: ${scheduledRun?.message}`,
     );
+    const history = await api('/backup/schedule/history');
     check(
-      'every scheduled backup is recorded in the history an operator reads',
-      (await api('/backup/schedule/history')).data?.length >= 1,
-      `${(await api('/backup/schedule/history')).data?.length ?? 0} recorded runs`,
+      'the incomplete scheduled attempt remains visible in backup history',
+      (history.data ?? []).some((row) =>
+        row.kind === 'SCHEDULED' &&
+        row.status === 'FAILED' &&
+        row.fileName === scheduledRun?.fileName,
+      ),
+      `${history.data?.length ?? 0} recorded runs`,
     );
 
-    const backup = await api('/backup/full', { method: 'POST' });
-    const file = backup.data?.file ?? backup.data;
+    const manualFull = await api('/backup/full', { method: 'POST' });
     check(
-      'a full backup of the database can be taken by hand as well',
-      backup.status < 300 && Boolean(file?.name),
-      `${file?.name} (${file?.sizeBytes ?? '?'} bytes, ${backup.data?.durationMs ?? '?'} ms)`,
+      'manual full backup fails closed until database, files and licence recovery are proven together',
+      manualFull.status === 503 && manualFull.data?.code === 'FULL_BACKUP_INCOMPLETE',
+      `status ${manualFull.status}, code ${manualFull.data?.code}`,
     );
-    const name = scheduledRun?.fileName ?? file?.name;
-    const listed = await api('/backup/full');
-    const listedItems = Array.isArray(listed.data) ? listed.data : (listed.data?.items ?? []);
-    check(
-      'the backups are listed in the backup folder on the server',
-      listedItems.some((row) => row.name === name),
-      `${listedItems.length} backups on the server, newest ${listedItems[0]?.name}`,
-    );
-
-    const verified = await api(`/backup/full/${encodeURIComponent(name)}/verify`, { method: 'POST' });
-    check(
-      'the backup can be read back, which is what makes it a backup',
-      verified.status < 300 && Number(verified.data?.entries ?? 0) > 0,
-      `status ${verified.status}, ${verified.data?.entries ?? '?'} objects inside`,
-    );
-
-    const restored = await api('/backup/full/restore', {
+    const blockedRestore = await api('/backup/full/restore', {
       method: 'POST',
-      json: { fileName: name, confirm: true },
+      json: { fileName: scheduledRun?.fileName ?? 'unavailable.dump', confirm: true },
     });
     check(
-      'the backup can be restored, and the restore reports what it put back',
-      restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
-      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 400)}`,
+      'full restore remains blocked until complete restore and licence recovery are proven',
+      blockedRestore.status === 503 && blockedRestore.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+      `status ${blockedRestore.status}, code ${blockedRestore.data?.code}`,
     );
-    const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
+    const afterBlockedRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
-      'after the restore the data is still there, including what this run created',
-      (afterRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
-      `${afterRestore.data?.items?.length ?? 0} matching customers after the restore`,
+      'a blocked full restore leaves current business data untouched',
+      (afterBlockedRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
+      `${afterBlockedRestore.data?.items?.length ?? 0} matching customers after the blocked restore`,
     );
     const companyJson = await api('/backup/download');
     const companyBackup = companyJson.data;

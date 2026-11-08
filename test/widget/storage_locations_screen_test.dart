@@ -259,7 +259,7 @@ void main() {
   ) async {
     await pump(tester, _LocationsApi());
     expect(find.text('Storage locations'), findsOneWidget);
-    expect(find.text('Inventory'), findsOneWidget);
+    expect(find.text('INVENTORY'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });
 }

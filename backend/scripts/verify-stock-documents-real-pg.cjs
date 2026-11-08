@@ -31,6 +31,8 @@ const { PostingService } = require('../src/modules/accounting/posting.service');
 const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
 const { JournalEntriesController } = require('../src/modules/accounting/journal-entries.controller');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
+const { StockLedgerService } = require('../src/common/warehouse/stock-ledger.service');
+const { BatchesService } = require('../src/modules/inventory/batches.service');
 const { ItemsService } = require('../src/modules/inventory/items.service');
 const { ItemsController } = require('../src/modules/inventory/items.controller');
 const { InventoryReportsController } = require('../src/modules/inventory/inventory-reports.controller');
@@ -351,9 +353,10 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const costCenters = new CostCentersService(prisma, audit);
     const numbers = new DocumentNumberService();
     const periods = new FiscalPeriodsService(prisma, audit);
+    const ledger = new StockLedgerService();
     const service = new StockDocumentsService(prisma, numbers,
       new PostingService(numbers, periods, costCenters), new AccountMapService(), audit,
-      new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters);
+      new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters, ledger);
     const date = '2026-10-28';
     // Date clear semantics on the real service and isolated PostgreSQL. This
     // centre is separate from the centre used by stock posting below.
@@ -1175,7 +1178,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
         return typeof value === 'function' ? value.bind(target) : value;
       }});
       const guarded = new StockDocumentsService(wrappedPrisma,service.numbers,service.posting,service.accounts,
-        service.audit,service.settings,service.warehouses,service.costCenters);
+        service.audit,service.settings,service.warehouses,service.costCenters,service.ledger);
       const pending = guarded.post(company,user,doc.id,true,branch,expectedVersion,expectedVersion !== undefined);
       try { await waitForBarrier(barrier,pending); } catch (error) { resume(); throw error; }
       return {pending,resume};
@@ -1331,8 +1334,12 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const prices = new PriceListsService(prisma,audit);
     const posting = new PostingService(numbers,periods,costCenters);
     const map = new AccountMapService();
-    const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
-    const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
+    const batches = new BatchesService(prisma,warehouses,posting,map,numbers,audit,ledger);
+    const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger);
+    // Keep the fixture's runtime wiring explicit as this service gains
+    // inventory dependencies; the production Nest module injects these.
+    Object.assign(si, { batches, ledger });
+    const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
     await require('./verify-quotation-conversion-real-pg.cjs')({prisma,numbers,settings,invoices:si,audit,company,branch,user,customer:customer.id,date});
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
@@ -2062,8 +2069,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const CancelClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
-      const delayedCancel = new CancelClass(cancelPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const delayedCancel = kind === 'sales'
+        ? new SalesInvoicesService(cancelPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(cancelPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingCancel = delayedCancel.cancelDraft(company,branch,user,raceInvoice.invoice.id);
       try {
         await waitForBarrier(cancelReadBarrier,pendingCancel);
@@ -2173,8 +2181,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const PostingClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
-      const instrumented = new PostingClass(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const instrumented = kind === 'sales'
+        ? new SalesInvoicesService(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(wrappedPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingPost = instrumented.post(company,user,draft.id);
       try {
         await waitForBarrier(readBarrier,pendingPost);
@@ -2205,7 +2214,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const delayedEditor = new PostingClass(editPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const delayedEditor = kind === 'sales'
+        ? new SalesInvoicesService(editPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(editPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingEdit = delayedEditor.updateDraft(company,branch,user,cancelTarget.id,{...dto,
         lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
       try {

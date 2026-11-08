@@ -111,7 +111,7 @@ class StorageLocationsScreen extends ConsumerWidget {
     return ModuleScaffold(
       title: arabic ? 'مواقع التخزين' : 'Storage locations',
       eyebrow: arabic ? 'المخزون' : 'Inventory',
-      trailing: canManage
+      trailing: canManage && (warehouses.value?.isNotEmpty ?? false)
           ? FilledButton.icon(
               onPressed: () => _openForm(context, ref, null),
               icon: const Icon(Icons.add_rounded, size: 18),
