@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../core/network/api_client.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 
@@ -15,11 +14,9 @@ class WarehouseBalanceDialog extends ConsumerStatefulWidget {
   const WarehouseBalanceDialog({
     super.key,
     required this.warehouseId,
-    required this.warehouseName,
   });
 
   final String warehouseId;
-  final String warehouseName;
 
   @override
   ConsumerState<WarehouseBalanceDialog> createState() =>
