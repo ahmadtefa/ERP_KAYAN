@@ -164,6 +164,15 @@ async function main() {
     method: 'PATCH',
     json: { taxRate: '14', allowNegativeStock: false },
   });
+  // Read it straight back: this run computes every figure below by hand from
+  // a 14% rate, so a patch that did not land has to say so here rather than
+  // surface as a dozen unrelated arithmetic differences later.
+  const policy = await api('/accounting/settings');
+  check(
+    'the 14% rate reads back before any figure depends on it',
+    policy.status === 200 && Number(policy.data?.taxRate) === 14,
+    `status ${policy.status}, tax ${policy.data?.taxRate}`,
+  );
 
   const chartResponse = await api('/accounting/chart-of-accounts');
   chart = chartResponse.data?.items ?? [];
