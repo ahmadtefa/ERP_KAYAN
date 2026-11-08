@@ -99,7 +99,7 @@ export class WarehousesController {
   /** What this warehouse holds today, or on a given date. */
   @Get(':id/stock')
   @RequirePermissions('inventory.warehouses.read')
-  stock(
+  async stock(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Query() query: { asOf?: string; itemId?: string },
