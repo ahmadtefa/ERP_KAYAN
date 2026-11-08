@@ -55,6 +55,13 @@ describe('inventory report warehouse and cost access', () => {
     expect(service.run).not.toHaveBeenCalled();
   });
 
+  it('blocks document reports until their multi-warehouse filters enforce grants', async () => {
+    await expect(
+      controller.run(user(), 'transfers', { warehouseId: 'warehouse-a' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(service.run).not.toHaveBeenCalled();
+  });
+
   it('rejects a report for a warehouse the caller cannot see', async () => {
     await expect(
       controller.run(user(), 'valuation-by-warehouse', { warehouseId: 'warehouse-hidden' }),
