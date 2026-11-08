@@ -2765,6 +2765,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get unitsBarcodesTooltip => 'الوحدات والباركود';
 
   @override
+  String get itemPicture => 'صورة الصنف';
+
+  @override
   String barcodeLabelsTitle(Object itemName) {
     return 'طباعة ملصقات الباركود — $itemName';
   }

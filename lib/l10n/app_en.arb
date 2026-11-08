@@ -879,6 +879,7 @@
   "unitsBarcodesFactorEditHelper": "The saved factor is used when this unit is scanned or counted.",
   "unitsBarcodesUpdated": "Unit updated.",
   "unitsBarcodesTooltip": "Units & barcodes",
+  "itemPicture": "Item picture",
   "barcodeLabelsTitle": "Print barcode labels — {itemName}",
   "barcodeLabelsInactiveUnit": "{unitName} (inactive)",
   "barcodeLabelsBarcode": "Barcode: {barcode}",

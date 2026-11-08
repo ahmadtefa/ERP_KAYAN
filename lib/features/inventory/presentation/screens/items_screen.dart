@@ -19,6 +19,7 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../widgets/barcode_labels_dialog.dart';
+import '../widgets/item_picture.dart';
 import 'stock_screen.dart' show stockListProvider;
 
 class ItemsController extends JsonListController {
@@ -153,6 +154,34 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// The item's picture, on its own screen: an upload is not a form field.
+  Future<void> _openPicture(Json row) async {
+    final id = asString(row['id']);
+    if (id.isEmpty) return;
+    final name = asString(row['nameEn']);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: Text(context.l10n.itemPicture)),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                ItemPictureEditor(itemId: id),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    // The row may now show a picture, so the list is reloaded rather than
+    // left claiming the item has none.
+    if (mounted) ref.read(itemsListProvider.notifier).reload();
   }
 
   /// Units, packs and cartons for one item, each with its own code.
@@ -647,6 +676,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
           ],
           actions: (row) => [
+            IconButton(
+              // The picture is edited on its own screen because changing it
+              // uploads a file, which the plain field sheet cannot do.
+              tooltip: l10n.itemPicture,
+              icon: const Icon(Icons.image_outlined, size: 20),
+              onPressed: _busy ? null : () => _openPicture(row),
+            ),
             IconButton(
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),

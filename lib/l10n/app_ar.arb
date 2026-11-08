@@ -876,6 +876,7 @@
   "unitsBarcodesFactorEditHelper": "يُستخدم المعامل المحفوظ عند مسح هذه الوحدة أو جردها.",
   "unitsBarcodesUpdated": "تم تحديث الوحدة.",
   "unitsBarcodesTooltip": "الوحدات والباركود",
+  "itemPicture": "صورة الصنف",
   "barcodeLabelsTitle": "طباعة ملصقات الباركود — {itemName}",
   "barcodeLabelsInactiveUnit": "{unitName} (غير نشطة)",
   "barcodeLabelsBarcode": "الباركود: {barcode}",

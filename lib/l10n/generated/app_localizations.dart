@@ -5345,6 +5345,12 @@ abstract class AppLocalizations {
   /// **'Units & barcodes'**
   String get unitsBarcodesTooltip;
 
+  /// No description provided for @itemPicture.
+  ///
+  /// In en, this message translates to:
+  /// **'Item picture'**
+  String get itemPicture;
+
   /// No description provided for @barcodeLabelsTitle.
   ///
   /// In en, this message translates to:

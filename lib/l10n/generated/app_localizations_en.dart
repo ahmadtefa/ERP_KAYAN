@@ -2787,6 +2787,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get unitsBarcodesTooltip => 'Units & barcodes';
 
   @override
+  String get itemPicture => 'Item picture';
+
+  @override
   String barcodeLabelsTitle(Object itemName) {
     return 'Print barcode labels — $itemName';
   }
