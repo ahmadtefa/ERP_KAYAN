@@ -71,16 +71,22 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
     return ModuleScaffold(
       title: _arabic ? 'المستودعات' : 'Warehouses',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
+      // MainAxisSize.min and a flexible search keep this toolbar inside the
+      // header's Flexible: a plain Row there overflowed once a third button
+      // joined it.
       trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
             tooltip: _arabic ? 'تحديث' : 'Refresh',
             onPressed: () => ref.read(warehousesListProvider.notifier).reload(),
             icon: const Icon(Icons.refresh),
           ),
-          SearchField(
-            hint: _arabic ? 'بحث في المستودعات' : 'Search warehouses',
-            onChanged: (value) => setState(() => _query = value.trim()),
+          Flexible(
+            child: SearchField(
+              hint: _arabic ? 'بحث في المستودعات' : 'Search warehouses',
+              onChanged: (value) => setState(() => _query = value.trim()),
+            ),
           ),
           const SizedBox(width: 12),
           // Reading what is on the shelves is a read grant, not a manage one:
