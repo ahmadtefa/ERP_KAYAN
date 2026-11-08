@@ -195,7 +195,7 @@ void main() {
     expect(find.byTooltip('Deactivate'), findsWidgets);
   });
 
-  testWidgets('a read-only grant hides create and row actions', (
+  testWidgets('a read-only grant keeps balance viewing but hides management actions', (
     tester,
   ) async {
     await pump(
@@ -207,6 +207,7 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'New warehouse'), findsNothing);
     expect(find.byTooltip('Edit'), findsNothing);
     expect(find.byTooltip('Deactivate'), findsNothing);
+    expect(find.byTooltip('Warehouse balances'), findsNWidgets(2));
   });
 
   testWidgets('warehouse balance dialog reads the API rows and scopes request', (
