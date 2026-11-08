@@ -76,7 +76,13 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
     return ModuleScaffold(
       title: _arabic ? 'الدفعات' : 'Batches',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
-      trailing: Row(
+      // A Wrap, not a Row: the header already wraps its tools, but a Row
+      // cannot be broken by the parent Wrap, so the Arabic labels of the
+      // segmented control pushed the search box past the edge.
+      trailing: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           SegmentedButton<BatchFilter>(
             segments: [
@@ -97,7 +103,6 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
             onSelectionChanged: (value) =>
                 setState(() => _filter = value.first),
           ),
-          const SizedBox(width: 12),
           SearchField(
             hint: _arabic ? 'بحث في الدفعات' : 'Search batches',
             onChanged: (value) => setState(() => _query = value.trim()),

@@ -111,7 +111,10 @@ class StorageLocationsScreen extends ConsumerWidget {
     return ModuleScaffold(
       title: arabic ? 'مواقع التخزين' : 'Storage locations',
       eyebrow: arabic ? 'المخزون' : 'Inventory',
-      trailing: canManage
+      // A location belongs to a warehouse, so offering to create one before
+      // any warehouse exists leads straight into a form that cannot be saved.
+      // The empty body already says to create a warehouse first.
+      trailing: canManage && (warehouses.value?.isNotEmpty ?? false)
           ? FilledButton.icon(
               onPressed: () => _openForm(context, ref, null),
               icon: const Icon(Icons.add_rounded, size: 18),

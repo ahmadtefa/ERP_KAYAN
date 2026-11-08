@@ -17,11 +17,13 @@ from collections import deque
 
 lines = deque(maxlen=300)
 # A failing test's own message, kept even after the tail window moves past it.
-failures = deque(maxlen=40)
+failures = deque(maxlen=120)
+context = 0
 FAILURE_MARKERS = re.compile(
     r'\[E\]|EXCEPTION CAUGHT BY|^The following .* was thrown|'
     r'Test failed\. See exception logs above|^\s*Expected:|^\s*Actual:|'
-    r'Which: .*|^\s*test/.*\.dart:\d+:\d+|^════'
+    r'Which: .*|^\s*test/.*\.dart:\d+:\d+|^════|'
+    r'overflowed by|^The relevant error-causing widget was|^\s*Row|^\s*Column'
 )
 command = [shutil.which(sys.argv[1]) or sys.argv[1], *sys.argv[2:]]
 if sys.platform == 'win32' and command[0].lower().endswith(('.bat', '.cmd')):
@@ -35,6 +37,12 @@ for line in process.stdout:
     lines.append(stripped)
     if FAILURE_MARKERS.search(stripped):
         failures.append(stripped)
+        context = 6
+    elif context:
+        # The line that names the failure usually follows its header; keep a
+        # short window so "A RenderFlex overflowed by 42 pixels" survives.
+        failures.append(stripped)
+        context -= 1
 code = process.wait()
 if code:
     # GitHub truncates individual annotation messages; split rather than lose
