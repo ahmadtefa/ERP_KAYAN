@@ -48,9 +48,17 @@ final itemsListProvider = AsyncNotifierProvider<JsonListController, List<Json>>(
 final itemThumbnailsProvider =
     FutureProvider.family<Map<String, Uint8List>, String>((ref, key) async {
   if (key.isEmpty) return const {};
-  return ItemImageDataSource(ref.watch(apiClientProvider)).thumbnails(
-    key.split(','),
-  );
+  try {
+    return await ItemImageDataSource(
+      ref.watch(apiClientProvider),
+    ).thumbnails(key.split(','));
+  } on Object {
+    // A picture is decoration. If the endpoint is unreachable - an older
+    // server, a restricted account, a dropped connection - the catalogue
+    // still lists every item, just without thumbnails. Letting this escape
+    // would take the whole screen down over a 32-pixel square.
+    return const {};
+  }
 });
 
 /// The provider key for a page of ids.
