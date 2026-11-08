@@ -883,7 +883,19 @@ export class ResetService {
       const name = `kayan-backup-${companyCode || 'company'}-${stamp}.json`;
       const filePath = join(dir, name);
 
-      const content = Buffer.from(JSON.stringify(backupData, null, 2), 'utf8');
+      // Prisma hands back JS BigInt for wide integer columns. Plain
+      // JSON.stringify throws on those, which aborted the safety backup and
+      // therefore the whole reset. Serialise them as exact decimal strings so
+      // no precision is lost on the way back in.
+      const content = Buffer.from(
+        JSON.stringify(
+          backupData,
+          (_key, value: unknown) =>
+            typeof value === 'bigint' ? value.toString() : value,
+          2,
+        ),
+        'utf8',
+      );
       await writeFile(filePath, content, { mode: 0o600 });
 
       // Verify the file was written and can be read back cleanly

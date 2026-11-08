@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { TABLES } from './backup.service';
+import { OMITTED, TABLES } from './backup.service';
 
 /**
  * A company backup that omits a table is not a smaller backup - it is a
@@ -134,6 +134,20 @@ describe('the company backup covers every table that belongs to a company', () =
       expect(parentAt).toBeDefined();
       expect(childAt).toBeGreaterThan(parentAt as number);
     }
+  });
+
+
+  it('never lists a table it also declares omitted', () => {
+    // `backupRun` was in both lists: the file carried the rows while the
+    // OMITTED map said they were left out. Whichever list is right, saying
+    // both is a file that contradicts its own manifest - so the two must not
+    // overlap. (It belongs in TABLES: the reset safety backup needs it, and
+    // `backupRun.sizeBytes` is the schema's only BigInt, which is why the
+    // safety backup has to serialise BigInt explicitly.)
+    const contradictions = TABLES.filter((spec) => spec.model in OMITTED).map(
+      (spec) => spec.model,
+    );
+    expect(contradictions).toEqual([]);
   });
 
   it('does not carry secrets', () => {

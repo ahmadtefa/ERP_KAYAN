@@ -277,10 +277,9 @@ export const TABLES: TableSpec[] = [
 
 /// Tables that are deliberately left out, and why. A backup file that silently
 /// omits something is worse than one that says what it omits.
-const OMITTED: Record<string, string> = {
+export const OMITTED: Record<string, string> = {
   permission: 'the list of permissions is part of the program, not of the data',
   refreshToken: 'sign-in sessions should not come back to life when a backup is restored',
-  backupRun: 'backup history describes files on this installation, not portable company business data',
 };
 
 @Injectable()
