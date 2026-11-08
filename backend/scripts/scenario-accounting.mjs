@@ -29,10 +29,11 @@
  *  13. prove the audit log cannot be edited or deleted, even with SQL
  *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
- *  16. take a full backup, verify it, restore it into a scratch database, and
- *      check the restored data is really there
- *  17. when explicitly enabled for an ephemeral database, verify the guarded
- *      reset, its verified safety backup, and first-run setup status afterward
+ *  16. verify that a database-only archive is never advertised as a complete
+ *      installation backup, and that full backup/restore remain fail-closed
+ *      until external files and the device-bound licence are recoverable too
+ *  17. verify the portable company JSON backup, restore it, and when explicitly
+ *      enabled on an ephemeral database, verify guarded reset and first-run setup
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
