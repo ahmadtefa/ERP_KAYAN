@@ -8,10 +8,17 @@ import { deployMigrations, prismaCliAvailable } from './migrate-deploy.mjs';
 function isolatedBackend() {
   return mkdtempSync(join(tmpdir(), 'kayan-migration-check-'));
 }
-function fakeCli(root, script) {
+
+function fakeCli(root) {
   const path = join(root, 'node_modules', 'prisma', 'build');
   mkdirSync(path, { recursive: true });
-  writeFileSync(join(path, 'index.js'), script, { flag: 'wx' });
+  writeFileSync(join(path, 'index.js'), '// packaged CLI marker\n', { flag: 'wx' });
+}
+
+function fakeMigrator(root, script) {
+  const path = join(root, 'scripts');
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, 'apply-migrations.mjs'), script, { flag: 'wx' });
 }
 
 test('missing packaged Prisma CLI fails instead of reporting migrations current', async () => {
@@ -20,12 +27,22 @@ test('missing packaged Prisma CLI fails instead of reporting migrations current'
   assert.equal(await deployMigrations(root), 1);
 });
 
-test('invokes migrate deploy and preserves success and failure exit codes', async () => {
+test('missing packaged migrator fails closed even when the Prisma CLI exists', async () => {
+  const root = isolatedBackend();
+  fakeCli(root);
+  assert.equal(prismaCliAvailable(root), true);
+  assert.equal(await deployMigrations(root), 1);
+});
+
+test('runs the packaged apply-migrations script and preserves success and failure exit codes', async () => {
   const ok = isolatedBackend();
-  fakeCli(ok, "if (process.argv.slice(2).join(' ') !== 'migrate deploy') process.exit(42);\n");
+  fakeCli(ok);
+  fakeMigrator(ok, "if (process.argv.length !== 3) process.exit(42);\n");
   assert.equal(prismaCliAvailable(ok), true);
   assert.equal(await deployMigrations(ok), 0);
+
   const fail = isolatedBackend();
-  fakeCli(fail, 'process.exit(7);\n');
+  fakeCli(fail);
+  fakeMigrator(fail, 'process.exit(7);\n');
   assert.equal(await deployMigrations(fail), 7);
 });
