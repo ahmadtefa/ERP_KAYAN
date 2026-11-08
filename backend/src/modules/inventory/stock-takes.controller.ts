@@ -13,7 +13,7 @@ import {
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
+import { assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockTakesService } from './stock-takes.service';
 
@@ -65,13 +65,14 @@ export class StockTakesController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
     );
   }
 
   @Get(':id')
   @RequirePermissions('inventory.stocktake.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, warehouseScopeOf(user));
+    return this.assertTakeAccess(user, id, 'view');
   }
 
   @Post()
@@ -92,10 +93,11 @@ export class StockTakesController {
   private async assertTakeAccess(
     user: AuthUser,
     id: string,
-    action: 'count' | 'approve',
-  ): Promise<void> {
+    action: 'view' | 'count' | 'approve',
+  ): Promise<unknown> {
     const take = await this.service.findOne(user.companyId, id, warehouseScopeOf(user));
     assertWarehouseAccess(user, (take as { warehouseId?: string } | null)?.warehouseId, action);
+    return take;
   }
 
   @Post(':id/count')
@@ -130,12 +132,14 @@ export class StockTakesController {
     @Param('id') id: string,
     @Body() dto: { reason?: string },
   ) {
-    return this.service.cancel(
-      user.companyId,
-      user.userId,
-      id,
-      dto?.reason,
-      warehouseScopeOf(user),
+    return this.assertTakeAccess(user, id, 'count').then(() =>
+      this.service.cancel(
+        user.companyId,
+        user.userId,
+        id,
+        dto?.reason,
+        warehouseScopeOf(user),
+      ),
     );
   }
 }

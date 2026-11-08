@@ -37,12 +37,14 @@ export class StockTakesService {
     companyId: string,
     query: { status?: string; warehouseId?: string; page?: number; pageSize?: number } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
     const where: Prisma.StockTakeSessionWhereInput = {
       companyId,
       ...(scope !== null ? { branchId: { in: scope } } : {}),
+      ...(warehouseIds !== undefined ? { warehouseId: { in: warehouseIds } } : {}),
       ...(query.status ? { status: query.status.toUpperCase() } : {}),
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
     };
