@@ -65,6 +65,24 @@ describe('stock take warehouse access', () => {
     );
   });
 
+  it('redacts frozen unit costs and variance values without warehouse cost access', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'take-cost',
+      warehouseId: 'warehouse-a',
+      lines: [
+        { id: 'line-1', unitCost: '12.5000', varianceValue: '25.0000', varianceQuantity: '2.0000' },
+      ],
+    });
+    const result = await controller.findOne(
+      user({ canView: true }),
+      'take-cost',
+    ) as any;
+    expect(result.lines[0]).toEqual({
+      id: 'line-1',
+      varianceQuantity: '2.0000',
+    });
+  });
+
   it('requires the warehouse count grant before cancelling a session', async () => {
     await expect(
       controller.cancel(user({ canView: true, canCount: false }), 'take-1', {}),
