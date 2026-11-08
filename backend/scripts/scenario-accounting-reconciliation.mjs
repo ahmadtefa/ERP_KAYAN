@@ -37,6 +37,9 @@ const PASSWORD = process.env.ADMIN_PASSWORD ?? 'Admin@12345';
 const results = [];
 let token = '';
 const stamp = String(Date.now()).slice(-6);
+// Line tax is explicit on purpose: a line that carries no rate is charged
+// nothing, so a scenario that hand-computes 14% has to state it.
+const VAT = '14';
 const YEAR_FROM = '2024-01-01';
 const YEAR_TO = '2024-12-31';
 const today = new Date().toISOString().slice(0, 10);
@@ -404,7 +407,7 @@ async function main() {
     json: {
       invoiceDate: '2024-02-01',
       supplierId: supplier.id,
-      lines: [{ itemId: item.id, quantity: '10', unitPrice: '100' }],
+      lines: [{ itemId: item.id, quantity: '10', unitPrice: '100', taxRate: VAT }],
     },
   });
   if (!purchase) return false;
@@ -436,7 +439,7 @@ async function main() {
       invoiceDate: '2024-03-01',
       dueDate: '2024-03-31',
       customerId: customer.id,
-      lines: [{ itemId: item.id, quantity: '4', unitPrice: '150' }],
+      lines: [{ itemId: item.id, quantity: '4', unitPrice: '150', taxRate: VAT }],
     },
   });
   if (!sale) return false;
@@ -1276,7 +1279,7 @@ async function main() {
     json: {
       invoiceDate: '2025-02-05',
       supplierId: supplier.id,
-      lines: [{ itemId: item.id, quantity: '2', unitPrice: '100' }],
+      lines: [{ itemId: item.id, quantity: '2', unitPrice: '100', taxRate: VAT }],
     },
   });
   if (purchaseToReverse) {
