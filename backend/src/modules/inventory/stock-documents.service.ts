@@ -976,14 +976,6 @@ export class StockDocumentsService {
             document.fromWarehouseId,
           )
         : toWarehouseId;
-      // DIAGTMP
-      console.log('DIAGTMP doc', document.documentNumber,
-        'kind', document.kind,
-        'fromBranchId', document.fromBranchId,
-        'branchId', document.branchId,
-        'fromWarehouseId(raw)', document.fromWarehouseId,
-        'toWarehouseId(raw)', document.toWarehouseId,
-        '=> from', fromWarehouseId, 'to', toWarehouseId);
 
       const journalLines: Array<{
         accountId: string;
