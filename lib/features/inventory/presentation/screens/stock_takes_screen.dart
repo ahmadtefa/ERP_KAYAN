@@ -566,7 +566,7 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     final status = text(_session, 'status').toUpperCase();
     final lines = listOf(_session['lines']);
     final openedByMe = text(_session, 'createdBy') == widget.userId;
-    final editable = widget.canCount && status == 'REVIEW';
+    final editable = widget.canCount && (status == 'COUNTING' || status == 'REVIEW');
     return AlertDialog(
       title: Text('${text(_session, 'code')} — ${_t('تفاصيل الجرد', 'Stock take details')}'),
       content: SizedBox(
@@ -623,7 +623,7 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
           FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('اعتماد', 'Approve'))),
         if (widget.canPost && status == 'APPROVED')
           FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('ترحيل', 'Post'))),
-        if (widget.canCancel && status == 'REVIEW')
+        if (widget.canCancel && (status == 'COUNTING' || status == 'REVIEW'))
           OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('إلغاء الجرد', 'Cancel count'))),
         if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
         TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),

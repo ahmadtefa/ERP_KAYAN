@@ -366,6 +366,21 @@ void main() {
     });
   });
 
+  testWidgets('does not offer approval while a stock take is still being counted', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      _StockTakesApi(),
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.approve',
+      ],
+    );
+    expect(find.byTooltip('Approve'), findsNothing);
+    expect(find.text('Counting'), findsNWidgets(2));
+  });
+
   testWidgets('Arabic reads the Arabic warehouse name and mirrors', (
     tester,
   ) async {

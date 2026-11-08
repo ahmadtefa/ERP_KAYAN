@@ -383,7 +383,7 @@ export class StockTakesService {
     }
 
     const claimed = await this.prisma.stockTakeSession.updateMany({
-      where: { id: session.id, companyId, status: { in: ['COUNTING', 'REVIEW'] } },
+      where: { id: session.id, companyId, status: 'REVIEW' },
       data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: userId },
     });
     if (claimed.count !== 1) {
