@@ -71,3 +71,22 @@ test('Windows PowerShell preflight compares installed keys without Get-FileHash'
     await rm(base, { recursive: true, force: true });
   }
 });
+
+// Ported from 89884f1/4b3e75a on the repair branch. Repair must never report
+// success when the files it verifies are missing -- the 3dc6b84 defect was
+// exactly a repair that skipped its checks and still said "repaired". The
+// assertions are adapted to this branch's fix, which throws on a missing file
+// instead of rewriting the guards, so the same guarantee is checked here as
+// well as in scripts/windows-repair-semantics.test.mjs.
+test('repair never reports success when Node, database preparer, or API entry point is missing', async () => {
+  const source = await readFile(new URL('../distribution/windows/repair-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(source, /\$nodeExe = Join-Path \$backendDir 'node\\node\.exe'/);
+  assert.match(source, /\$prepareScript = Join-Path \$backendDir 'scripts\\prepare-database\.mjs'/);
+  assert.match(source, /\$mainJs = Join-Path \$backendDir 'dist\\src\\main\.js'/);
+  assert.match(source, /foreach \(\$requiredRuntimeFile in @\(\$nodeExe, \$prepareScript, \$mainJs\)\)/);
+  assert.match(source, /Repair cannot verify the runtime because a required installed file is missing/);
+  // The precondition must throw, so a missing file can never fall through to
+  // the success marker.
+  assert.match(source, /if \(-not \(Test-Path -LiteralPath \$requiredRuntimeFile -PathType Leaf\)\) \{\s*\n\s*throw/);
+  assert.doesNotMatch(source, /^\s*\{\s*$/m, 'a bare script block would silently never run');
+});
