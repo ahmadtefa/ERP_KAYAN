@@ -135,8 +135,27 @@ async function main() {
     { cwd: backendRoot, env: { ...process.env, DATABASE_URL: targetUrl } },
   );
   const migratedTables = Number((migrateOut + migrateErr).match(/(\d+) public tables/)?.[1] ?? 0);
-  check('real project migrations applied to the empty target (64 tables)', migratedTables === 64,
-    `tables=${migratedTables}`);
+  // Compared against the source rather than a hard-coded number: the table
+  // count grows with every migration, and pinning it here only made this check
+  // fail the day someone added one.
+  const sourceTables = Number(
+    (await source.$queryRaw`SELECT count(*)::int n FROM information_schema.tables WHERE table_schema = 'public'`)[0].n,
+  );
+  check(
+    `real project migrations applied to the empty target (${sourceTables} tables)`,
+    migratedTables === sourceTables,
+    `tables=${migratedTables}`,
+  );
+
+  // A freshly migrated database is the state an installer leaves behind: the
+  // schema plus the permission catalogue, which is part of the program rather
+  // than of the data. Restore remaps every role grant onto that catalogue by
+  // code, so without this step it has nothing to map onto.
+  await execFileAsync(
+    process.execPath,
+    ['-r', 'ts-node/register/transpile-only', join(backendRoot, 'prisma', 'seed-permissions.ts')],
+    { cwd: backendRoot, env: { ...process.env, DATABASE_URL: targetUrl } },
+  );
 
   const target = makeClient(targetUrl, 'guard-bk-tgt');
   // The target needs the company identity row; restore refuses foreign companies.
@@ -169,6 +188,8 @@ async function main() {
 
   // --------------------------------------------- 5. table-by-table comparison
   console.log('\n[5] compare every public table between source and restored databases');
+  // Installation-level state, deliberately outside the company backup file.
+  const INSTALLATION_TABLES = new Set(['license_seat_usage', 'licenses']);
   const tableNames = (await target.$queryRaw`
     SELECT table_name::text AS table_name FROM information_schema.tables
      WHERE table_schema='public' AND table_type='BASE TABLE'
@@ -185,6 +206,12 @@ async function main() {
     // The restore is self-auditing by design: it appends an AUDIT_PURGED row
     // and a RESTORE/RESTORE_REPLACE row. Every other table must match exactly.
     if (t === 'audit_logs') continue;
+    // Licence bookkeeping describes this installation, not the company's
+    // books: BackupService.OMITTED leaves it out on purpose and the restore
+    // re-asserts the licence afterwards. Asserting it round-trips would be
+    // asserting that a company backup carries a licence key, which is exactly
+    // what it must not do.
+    if (INSTALLATION_TABLES.has(t)) continue;
     if (num(s[0].n) !== num(d[0].n)) mismatches.push(`${t}: src=${s[0].n} tgt=${d[0].n}`);
   }
   check(`all ${compared - 1} business tables hold identical row counts`, mismatches.length === 0,
@@ -237,8 +264,14 @@ async function main() {
   check('restored reconciliations keep the same count and difference totals',
     recDiff[0][0].d === recDiff[1][0].d && recDiff[0][0].n === recDiff[1][0].n,
     `src=${recDiff[0][0].n}/${recDiff[0][0].d} tgt=${recDiff[1][0].n}/${recDiff[1][0].d}`);
-  const closedPeriods = await target.fiscalPeriod.count({ where: { status: 'CLOSED' } });
-  check('closed fiscal periods kept their CLOSED state through restore', closedPeriods > 0,
+  // Only meaningful when the source actually held a closed period. A seed-only
+  // database has none, and asserting `> 0` there failed the check for a reason
+  // that had nothing to do with restore.
+  const sourceClosed = await source.fiscalPeriod.count({
+    where: { companyId, status: 'CLOSED' },
+  });
+  const closedPeriods = await target.fiscalPeriod.count({ where: { companyId, status: 'CLOSED' } });
+  check(`closed fiscal periods kept their CLOSED state through restore (source had ${sourceClosed})`, closedPeriods === sourceClosed,
     `closed=${closedPeriods}`);
   // The append-only audit trigger must exist in the target schema too.
   const trigger = await target.$queryRaw`
