@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
-import { BackupFile, BackupService } from './backup.service';
+import { BackupFile, BackupService, TABLES } from './backup.service';
 
 // The seat reservation is the only licensing call these specs reach;
 // its own behaviour is covered by licensing.service.spec.ts.
@@ -145,6 +145,22 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     purge = new AuditPurgeService();
     service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
+  });
+
+  describe('company backup portability', () => {
+    test('does not serialize installation-local backup history into a company archive', async () => {
+      const findMany = jest.fn(async () => [{ id: 'local-run', sizeBytes: BigInt(4096) }]);
+      prismaMock.backupRun = { findMany };
+
+      const backup = await service.create(COMPANY_ID);
+      const inspected = await service.inspect(backup, COMPANY_ID);
+
+      expect(TABLES.some((table) => table.model === 'backupRun')).toBe(false);
+      expect(findMany).not.toHaveBeenCalled();
+      expect(backup.tables).not.toHaveProperty('backupRun');
+      expect(inspected.omitted).toHaveProperty('backupRun');
+      expect(() => JSON.stringify(backup)).not.toThrow();
+    });
   });
 
   describe('Validation & Format checks', () => {
