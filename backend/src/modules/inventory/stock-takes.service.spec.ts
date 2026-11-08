@@ -274,6 +274,23 @@ describe('stock takes', () => {
     );
   });
 
+  it('does not let a requested warehouse override the caller warehouse grants', async () => {
+    const harness = makeHarness();
+
+    await harness.service.list(
+      COMPANY,
+      { warehouseId: 'warehouse-hidden' },
+      null,
+      ['warehouse-visible'],
+    );
+
+    expect(harness.prisma.stockTakeSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ warehouseId: { in: [] } }),
+      }),
+    );
+  });
+
   it('freezes lots per lot and the rest per item, at the shelf\u2019s own average', async () => {
     const harness = withWarehouse(
       makeHarness({
