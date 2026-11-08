@@ -40,9 +40,9 @@ if code:
     # GitHub truncates individual annotation messages; split rather than lose
     # the actual exception behind dependency or progress output. Failures come
     # first so they survive truncation.
-    captured = '\n'.join(failures)
-    tail = '\n'.join(lines)
-    message = f'--- failure lines ---\n{captured}\n--- tail ---\n{tail}'[-27000:]
+    captured = '\n'.join(failures)[-12000:]
+    tail = '\n'.join(lines)[-15000:]
+    message = f'--- failure lines ---\n{captured}\n--- tail ---\n{tail}'
     chunks = [message[index:index + 3000] for index in range(0, len(message), 3000)]
     for index, chunk in enumerate(chunks, start=1):
         for raw, escaped in [('%', '%25'), ('\r', '%0D'), ('\n', '%0A')]:
