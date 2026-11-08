@@ -185,7 +185,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
       title: _arabic ? 'أرصدة ' + _name(row) : _name(row) + ' balances',
       icon: Icons.account_balance_wallet_outlined,
       initialSize: const Size(1000, 640),
-      child: WarehouseBalanceDialog(warehouseId: id, warehouseName: _name(row)),
+      child: WarehouseBalanceDialog(warehouseId: id),
     );
   }
 
