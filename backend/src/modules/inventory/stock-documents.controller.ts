@@ -52,7 +52,15 @@ export class StockDocumentsController {
   ) {
     const kind = String(body.kind ?? '').toUpperCase();
     if (kind === 'WRITE_OFF') {
-      assertWarehouseAccess(user, body.toWarehouseId as string, 'approve');
+      assertWarehouseAccess(user, body.toWarehouseId as string, 'issue');
+    }
+    const voucherKind = String(body.voucherKind ?? '').toUpperCase();
+    if (voucherKind === 'RECEIPT' || voucherKind === 'ISSUE') {
+      assertWarehouseAccess(
+        user,
+        body.toWarehouseId as string,
+        voucherKind === 'RECEIPT' ? 'receive' : 'issue',
+      );
     }
     // A transfer leaves one shelf and arrives at another, so it is checked on
     // both ends: being trusted with only the source is not a transfer.
@@ -73,13 +81,20 @@ export class StockDocumentsController {
 
   @Put(':id/voucher-draft')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.adjust')
-  updateVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+  async updateVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    const document = await this.assertDocumentAccess(user, id, 'view');
+    assertWarehouseAccess(
+      user,
+      document.toWarehouseId ?? '',
+      document.voucherKind === 'RECEIPT' ? 'receive' : 'issue',
+    );
     return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, canReadCost(user));
   }
 
   @Post(':id/review')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
-  review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+  async review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    await this.assertDocumentAccess(user, id, 'approve');
     return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user), this.voucherVersion(body));
   }
 
@@ -87,7 +102,8 @@ export class StockDocumentsController {
   /// :id/write-off/approve instead.
   @Post(':id/approve')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.approve')
-  approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+  async approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    await this.assertDocumentAccess(user, id, 'approve');
     return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user), this.voucherVersion(body));
   }
 
@@ -99,7 +115,7 @@ export class StockDocumentsController {
   private async assertDocumentAccess(
     user: AuthUser,
     id: string,
-    action: WarehouseAction,
+    action: WarehouseAction | 'post',
   ) {
     const document = (await this.service.findOne(
       user.companyId,
@@ -118,7 +134,17 @@ export class StockDocumentsController {
       return document;
     }
     const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';
-    assertWarehouseAccess(user, warehouseId, action);
+    const requiredAction: WarehouseAction =
+      action !== 'post'
+        ? action
+        : kind === 'WRITE_OFF'
+          ? 'issue'
+          : document?.voucherKind === 'RECEIPT'
+            ? 'receive'
+            : document?.voucherKind === 'ISSUE'
+              ? 'issue'
+              : 'approve';
+    assertWarehouseAccess(user, warehouseId, requiredAction);
     return document;
   }
 
