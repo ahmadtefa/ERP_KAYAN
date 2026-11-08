@@ -141,6 +141,36 @@ describe('the stock document list names its warehouses and its people', () => {
     expect(include?.toWarehouse).toBeDefined();
   });
 
+  it('requires both ends of a transfer to be visible in a restricted warehouse list', async () => {
+    const { service, prisma } = build();
+
+    await service.findAll(COMPANY, {}, null, ['wh-front']);
+
+    const where = prisma.stockDocument.findMany.mock.calls[0][0].where as any;
+    const warehouseFilter = (where.AND as any[]).find((entry) => entry.OR)?.OR;
+    expect(warehouseFilter).toEqual([
+      { fromWarehouseId: null, toWarehouseId: null },
+      { fromWarehouseId: null, toWarehouseId: { in: ['wh-front'] } },
+      { fromWarehouseId: { in: ['wh-front'] }, toWarehouseId: null },
+      { fromWarehouseId: { in: ['wh-front'] }, toWarehouseId: { in: ['wh-front'] } },
+    ]);
+  });
+
+  it('returns no warehouse-linked documents when the user has no visible warehouses', async () => {
+    const { service, prisma } = build();
+
+    await service.findAll(COMPANY, {}, null, []);
+
+    const where = prisma.stockDocument.findMany.mock.calls[0][0].where as any;
+    const warehouseFilter = (where.AND as any[]).find((entry) => entry.OR)?.OR;
+    expect(warehouseFilter).toEqual([
+      { fromWarehouseId: null, toWarehouseId: null },
+      { fromWarehouseId: null, toWarehouseId: { in: [] } },
+      { fromWarehouseId: { in: [] }, toWarehouseId: null },
+      { fromWarehouseId: { in: [] }, toWarehouseId: { in: [] } },
+    ]);
+  });
+
   it('keeps a document that names no warehouse readable', async () => {
     const { service } = build(
       document({ fromWarehouseId: null, toWarehouseId: null, fromWarehouse: null, toWarehouse: null }),
