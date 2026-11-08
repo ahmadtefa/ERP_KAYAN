@@ -5,10 +5,35 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/item_picker_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+
+/// One line being typed into a new stock document.
+///
+/// The quantity is a text controller because it is typed, not chosen; the
+/// chosen unit (a carton rather than the base piece) travels with it so the
+/// server records the factor it converted with.
+class _DraftLine {
+  _DraftLine({
+    required this.itemId,
+    required this.itemLabel,
+    required this.baseUnit,
+  }) : quantity = TextEditingController(text: '1');
+
+  final String itemId;
+  final String itemLabel;
+  final String baseUnit;
+  final TextEditingController quantity;
+
+  /// The packing unit counted in. Empty means the item's own base unit.
+  String? unitName;
+
+  void dispose() => quantity.dispose();
+}
 
 /// Every stock document that is not a voucher: adjustments, transfers,
 /// counts, opening balances and write-offs.
@@ -33,7 +58,17 @@ class StockDocumentsController extends JsonListController {
 
 /// The kinds this screen lists. Write-off is included because it is a stock
 /// document; it also has its own screen, which is where it is approved.
-const _kinds = ['ADJUSTMENT', 'TRANSFER', 'COUNT', 'OPENING', 'WRITE_OFF'];
+/// The kinds this screen can create.
+///
+/// WRITE_OFF is deliberately absent: a write-off needs a reason and an
+/// approver who is not its author, so it has its own screen (write_offs_screen)
+/// rather than being one more choice in a count dialog. The filter above still
+/// lists existing write-offs, because they are stock documents.
+const _creatableKinds = ['ADJUSTMENT', 'TRANSFER', 'COUNT', 'OPENING'];
+
+/// Every kind this screen lists. Write-off is included because it is a stock
+/// document; it is created and approved on its own screen.
+const _kinds = [..._creatableKinds, 'WRITE_OFF'];
 
 class StockDocumentsScreen extends ConsumerStatefulWidget {
   const StockDocumentsScreen({super.key});
@@ -100,12 +135,22 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(stockDocumentsProvider);
+    final canAdjust =
+        ref.watch(currentUserProvider)?.can('inventory.stock.adjust') ?? false;
 
     return ModuleScaffold(
       title: _arabic ? 'مستندات المخزون' : 'Stock documents',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
       trailing: Row(
         children: [
+          if (canAdjust) ...[
+            FilledButton.icon(
+              onPressed: _createDocument,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(_arabic ? 'مستند جديد' : 'New document'),
+            ),
+            const SizedBox(width: 12),
+          ],
           DropdownButton<String?>(
             value: _kind,
             isDense: true,
@@ -181,6 +226,341 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         ),
       ),
     );
+  }
+
+  /// Count, transfer or adjust stock from the program itself.
+  ///
+  /// The document is created here and posted afterwards, on the same screen:
+  /// counting the shelf and writing the stock off are two separate jobs, and
+  /// the ledger must only move when somebody decides it should. Every line
+  /// carries the unit it was counted in, so a shelf counted in cartons and a
+  /// ledger kept in pieces never drift apart.
+  Future<void> _createDocument() async {
+    var kind = 'COUNT';
+    String? fromWarehouseId;
+    String? toWarehouseId;
+    final date = DateTime.now().toIso8601String().substring(0, 10);
+    final notes = TextEditingController();
+    final lines = <_DraftLine>[];
+    String? error;
+    var saving = false;
+
+    List<Json> warehouses;
+    try {
+      warehouses = await ref
+          .read(apiClientProvider)
+          .getList('/inventory/warehouses');
+    } catch (_) {
+      warehouses = const [];
+    }
+    if (!mounted) return;
+    if (warehouses.isEmpty) {
+      showMessage(
+        context,
+        _arabic
+            ? 'لا يوجد مخزن معرّف لهذا الفرع.'
+            : 'This branch has no warehouse defined.',
+        error: true,
+      );
+      return;
+    }
+
+    // The branch's default store is the common case; a transfer needs two.
+    final defaultWarehouse = warehouses.firstWhere(
+      (row) => row['isDefault'] == true,
+      orElse: () => warehouses.first,
+    );
+    toWarehouseId = text(defaultWarehouse, 'id');
+    fromWarehouseId = text(defaultWarehouse, 'id');
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            Future<void> addLine() async {
+              final item = await showItemPicker(context);
+              if (item == null || !mounted) return;
+              setDialogState(
+                () => lines.add(
+                  _DraftLine(
+                    itemId: text(item, 'id'),
+                    itemLabel:
+                        '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                    baseUnit: text(item, 'unit'),
+                  ),
+                ),
+              );
+            }
+
+            Future<void> submit() async {
+              if (lines.isEmpty) {
+                setDialogState(
+                  () => error = _arabic
+                      ? 'أضف سطرًا واحدًا على الأقل.'
+                      : 'Add at least one line.',
+                );
+                return;
+              }
+              setDialogState(() {
+                saving = true;
+                error = null;
+              });
+              final navigator = Navigator.of(dialogContext);
+              var closed = false;
+              try {
+                final body = <String, dynamic>{
+                  'kind': kind,
+                  'documentDate': date,
+                  if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim(),
+                  if (kind == 'TRANSFER') ...{
+                    'fromWarehouseId': fromWarehouseId,
+                    'toWarehouseId': toWarehouseId,
+                  } else
+                    'toWarehouseId': toWarehouseId,
+                  'lines': [
+                    for (final line in lines)
+                      {
+                        'itemId': line.itemId,
+                        'quantity': line.quantity.text.trim(),
+                        if ((line.unitName ?? '').isNotEmpty)
+                          'unitName': line.unitName,
+                        if (kind == 'COUNT')
+                          'countedQuantity': line.quantity.text.trim(),
+                      },
+                  ],
+                };
+                await ref
+                    .read(apiClientProvider)
+                    .post('/inventory/stock-documents', body: body);
+                if (!mounted) return;
+                closed = true;
+                navigator.pop();
+                showMessage(
+                  context,
+                  _arabic
+                      ? 'تم إنشاء المستند. رحّله ليؤثر في الأرصدة.'
+                      : 'The document was created. Post it to affect the balances.',
+                );
+                await ref.read(stockDocumentsProvider.notifier).reload();
+              } catch (failure) {
+                if (!closed && dialogContext.mounted) {
+                  setDialogState(() => error = '$failure');
+                }
+              } finally {
+                if (!closed && dialogContext.mounted) {
+                  setDialogState(() => saving = false);
+                }
+              }
+            }
+
+            return AlertDialog(
+              title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
+              content: SizedBox(
+                width: 720,
+                height: 480,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 210,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: kind,
+                            decoration: InputDecoration(
+                              labelText: _arabic ? 'نوع المستند' : 'Kind',
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final entry in _creatableKinds)
+                                DropdownMenuItem(
+                                  value: entry,
+                                  child: Text(_kindLabel(entry)),
+                                ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                setDialogState(() => kind = value);
+                              }
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 200,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: fromWarehouseId,
+                            decoration: InputDecoration(
+                              labelText: kind == 'TRANSFER'
+                                  ? (_arabic ? 'من مخزن' : 'From store')
+                                  : (_arabic ? 'المخزن' : 'Store'),
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final warehouse in warehouses)
+                                DropdownMenuItem(
+                                  value: text(warehouse, 'id'),
+                                  child: Text(
+                                    _arabic
+                                        ? text(warehouse, 'nameAr')
+                                        : text(warehouse, 'nameEn'),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (value) => setDialogState(() {
+                              if (kind == 'TRANSFER') {
+                                fromWarehouseId = value;
+                              } else {
+                                toWarehouseId = value;
+                                fromWarehouseId = value;
+                              }
+                            }),
+                          ),
+                        ),
+                        if (kind == 'TRANSFER')
+                          SizedBox(
+                            width: 200,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: toWarehouseId,
+                              decoration: InputDecoration(
+                                labelText: _arabic ? 'إلى مخزن' : 'To store',
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: [
+                                for (final warehouse in warehouses)
+                                  DropdownMenuItem(
+                                    value: text(warehouse, 'id'),
+                                    child: Text(
+                                      _arabic
+                                          ? text(warehouse, 'nameAr')
+                                          : text(warehouse, 'nameEn'),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) =>
+                                  setDialogState(() => toWarehouseId = value),
+                            ),
+                          ),
+                        TextButton.icon(
+                          onPressed: addLine,
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: Text(_arabic ? 'إضافة سطر' : 'Add line'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: lines.isEmpty
+                          ? Center(
+                              child: Text(
+                                _arabic
+                                    ? 'لا توجد سطور بعد.'
+                                    : 'No lines yet.',
+                              ),
+                            )
+                          : ListView.separated(
+                              itemCount: lines.length,
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final line = lines[index];
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(line.itemLabel),
+                                  subtitle: Text(
+                                    _arabic
+                                        ? 'الوحدة الأساسية: ${line.baseUnit}'
+                                        : 'Base unit: ${line.baseUnit}',
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 110,
+                                        child: TextField(
+                                          controller: line.quantity,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: InputDecoration(
+                                            labelText: _arabic
+                                                ? 'الكمية'
+                                                : 'Quantity',
+                                            isDense: true,
+                                            border: const OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip:
+                                            _arabic ? 'حذف' : 'Remove line',
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          size: 20,
+                                        ),
+                                        onPressed: () => setDialogState(() {
+                                          lines.removeAt(index).dispose();
+                                        }),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: notes,
+                      decoration: InputDecoration(
+                        labelText: _arabic ? 'ملاحظات' : 'Notes',
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: saving ? null : () => Navigator.of(dialogContext).pop(),
+                  child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+                ),
+                FilledButton(
+                  onPressed: saving ? null : submit,
+                  child: Text(
+                    saving
+                        ? (_arabic ? 'جارٍ الحفظ…' : 'Saving…')
+                        : (_arabic ? 'إنشاء' : 'Create'),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      for (final line in lines) {
+        line.dispose();
+      }
+      notes.dispose();
+    }
   }
 
   List<Json> _visible(List<Json> rows) {

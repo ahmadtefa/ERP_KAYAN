@@ -24,6 +24,51 @@ class _WarehousesApi extends ApiClient {
   final posts = <String>[];
   final patches = <(String, Object?)>[];
 
+  /// Every balance query the screen asked for, so a test can prove the dialog
+  /// reads the real endpoint rather than rendering local rows.
+  final balanceQueries = <Map<String, dynamic>?>[];
+
+  /// The shape `WarehouseService.balanceReport` really returns: the list is
+  /// called `rows`, and each row is one warehouse/item pair.
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (path != '/inventory/warehouses/balance') {
+      throw StateError('UNEXPECTED_GET $path');
+    }
+    balanceQueries.add(query);
+    return {
+      'asOf': '2026-11-08',
+      'rows': [
+        {
+          'warehouseId': 'wh-1',
+          'warehouseCode': 'MAIN',
+          'warehouseNameEn': 'Main store',
+          'warehouseNameAr': 'المخزن الرئيسي',
+          'branchId': 'br-1',
+          'branchCode': 'HQ',
+          'branchNameEn': 'Head office',
+          'branchNameAr': 'المركز الرئيسي',
+          'itemId': 'it-1',
+          'itemCode': 'IT-1',
+          'itemNameEn': 'Sugar',
+          'itemNameAr': 'سكر',
+          'unit': 'piece',
+          'quantity': '12.0000',
+          'quantityText': '12',
+          'breakdown': [],
+          'value': '120.0000',
+          'averageCost': '10.0000',
+        },
+      ],
+      'itemTotals': [],
+      'warehouseTotals': [],
+      'totals': {'value': '120.0000'},
+    };
+  }
+
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {
@@ -249,5 +294,43 @@ void main() {
     // one for a switched-off row and success for a live one.
     expect(AppTone.neutral, isNotNull);
     expect(tester.takeException(), isNull);
+  });
+  // The "where is it" question. The stock screen answers "how much do we have
+  // anywhere"; this answers which shelf, which is what a picker needs.
+  testWidgets('balances asks the real endpoint and shows the shelf rows', (
+    tester,
+  ) async {
+    final api = _WarehousesApi();
+    await pump(
+      tester,
+      api,
+      permissions: const ['inventory.warehouses.read'],
+    );
+
+    expect(find.text('Balances'), findsOneWidget);
+    await tester.tap(find.text('Balances'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Warehouse balances'), findsOneWidget);
+    expect(api.balanceQueries, hasLength(1));
+    // The row the server returned is on screen: warehouse, item and the
+    // server's own trimmed quantity, not a locally formatted one.
+    expect(find.text('Main store'), findsWidgets);
+    expect(find.text('IT-1'), findsOneWidget);
+    expect(find.text('12'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('balances is offered with the read grant, not only manage', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      _WarehousesApi(),
+      permissions: const ['inventory.warehouses.read'],
+    );
+    // Reading a shelf does not require the right to change it.
+    expect(find.text('Balances'), findsOneWidget);
+    expect(find.text('New warehouse'), findsNothing);
   });
 }

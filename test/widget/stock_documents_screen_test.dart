@@ -1,5 +1,6 @@
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_documents_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -19,6 +20,7 @@ class _DocumentsApi extends ApiClient {
       );
 
   bool failList;
+  bool noWarehouses = false;
   final queries = <Map<String, dynamic>?>[];
 
   Map<String, dynamic> _row({
@@ -69,11 +71,37 @@ class _DocumentsApi extends ApiClient {
     };
   }
 
+  /// Every POST body the screen sent, so a test can prove what was created
+  /// rather than only that a button existed.
+  final posts = <Map<String, dynamic>>[];
+
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    // Answered before `queries` is recorded on purpose: `queries` is the list
+    // of stock-document reads, and the existing test asserts queries.first is
+    // the documents query. A warehouse lookup is not a document read.
+    if (path == '/inventory/warehouses') {
+      if (noWarehouses) return const [];
+      return [
+        {
+          'id': 'wh-main',
+          'code': 'MAIN',
+          'nameEn': 'Main store',
+          'nameAr': 'المخزن الرئيسي',
+          'isDefault': true,
+        },
+        {
+          'id': 'wh-b2',
+          'code': 'BR2',
+          'nameEn': 'Second store',
+          'nameAr': 'المخزن الثاني',
+          'isDefault': false,
+        },
+      ];
+    }
     queries.add(query);
     if (failList) throw StateError('DOCUMENT_LIST_FAILED');
     return [
@@ -90,6 +118,19 @@ class _DocumentsApi extends ApiClient {
       _row(id: 'd-4', number: 'WO-001', kind: 'write_off', status: 'draft'),
     ];
   }
+
+  @override
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Object? body,
+    String? idempotencyKey,
+  }) async {
+    posts.add({
+      'path': path,
+      if (body is Map) ...Map<String, dynamic>.from(body),
+    });
+    return {'id': 'new-document'};
+  }
 }
 
 Finder tableText(String value) => find.byWidgetPredicate(
@@ -101,6 +142,7 @@ void main() {
     WidgetTester tester,
     _DocumentsApi api, {
     Locale locale = const Locale('en'),
+    AppUser? user,
   }) async {
     tester.view.physicalSize = const Size(1800, 1000);
     tester.view.devicePixelRatio = 1;
@@ -108,7 +150,10 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [apiClientProvider.overrideWithValue(api)],
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          if (user != null) currentUserProvider.overrideWithValue(user),
+        ],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -220,5 +265,90 @@ void main() {
       Directionality.of(tester.element(find.text('تسوية').first)),
       TextDirection.rtl,
     );
+  });
+  // The document flow the reference build has and this branch had lost:
+  // counting, transferring and adjusting stock from the program itself.
+  testWidgets('offers new-document only to an account that may adjust stock', (
+    tester,
+  ) async {
+    await pump(tester, _DocumentsApi());
+    expect(find.text('New document'), findsNothing);
+
+    await pump(
+      tester,
+      _DocumentsApi(),
+      user: const AppUser(
+        id: 'u1',
+        username: 'u1',
+        fullName: 'Store clerk',
+        companyId: 'c1',
+        permissions: ['inventory.stock.read'],
+      ),
+    );
+    expect(find.text('New document'), findsNothing);
+
+    await pump(
+      tester,
+      _DocumentsApi(),
+      user: const AppUser(
+        id: 'u2',
+        username: 'u2',
+        fullName: 'Store manager',
+        companyId: 'c1',
+        permissions: ['inventory.stock.read', 'inventory.stock.adjust'],
+      ),
+    );
+    expect(find.text('New document'), findsOneWidget);
+  });
+
+  testWidgets('creates a stock document with the kind and warehouse chosen', (
+    tester,
+  ) async {
+    final api = _DocumentsApi();
+    await pump(
+      tester,
+      api,
+      user: const AppUser(
+        id: 'u2',
+        username: 'u2',
+        fullName: 'Store manager',
+        companyId: 'c1',
+        permissions: ['inventory.stock.adjust'],
+      ),
+    );
+
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New stock document'), findsOneWidget);
+    // Nothing is posted until a line exists, so the dialog must say so rather
+    // than sending an empty document the server would reject.
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add at least one line.'), findsOneWidget);
+    expect(api.posts, isEmpty);
+  });
+
+  testWidgets('says why it cannot create when the branch has no warehouse', (
+    tester,
+  ) async {
+    final api = _DocumentsApi()..noWarehouses = true;
+    await pump(
+      tester,
+      api,
+      user: const AppUser(
+        id: 'u2',
+        username: 'u2',
+        fullName: 'Store manager',
+        companyId: 'c1',
+        permissions: ['inventory.stock.adjust'],
+      ),
+    );
+
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+    expect(find.text('New stock document'), findsNothing);
+    expect(find.text('This branch has no warehouse defined.'), findsOneWidget);
+    expect(api.posts, isEmpty);
   });
 }
