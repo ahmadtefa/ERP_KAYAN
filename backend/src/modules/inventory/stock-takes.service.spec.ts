@@ -446,7 +446,7 @@ describe('stock takes', () => {
     expect(harness.state.lines[1].countedQuantity).toBeNull();
   });
 
-  it('finishing moves the session to review, and a second count on a closed session is refused', async () => {
+  it('finishing locks the count against further edits while it awaits review', async () => {
     const harness = withWarehouse(
       makeHarness({
         balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') }],
@@ -463,10 +463,10 @@ describe('stock takes', () => {
     });
     expect(harness.state.sessions[0].status).toBe('REVIEW');
 
-    harness.state.sessions[0].status = 'POSTED';
     await expect(
       harness.service.record(COMPANY, COUNTER, sessionId, { lines: [{ lineId, countedQuantity: 9 }] }),
-    ).rejects.toThrow(/can no longer be counted/i);
+    ).rejects.toThrow(/no longer open for counting/i);
+    expect(harness.state.sessions[0].status).toBe('REVIEW');
   });
 
   it('cannot approve a counting session before all lines are submitted for review', async () => {

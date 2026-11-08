@@ -566,7 +566,7 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     final status = text(_session, 'status').toUpperCase();
     final lines = listOf(_session['lines']);
     final openedByMe = text(_session, 'createdBy') == widget.userId;
-    final editable = widget.canCount && (status == 'COUNTING' || status == 'REVIEW');
+    final editable = widget.canCount && status == 'COUNTING';
     return AlertDialog(
       title: Text('${text(_session, 'code')} — ${_t('تفاصيل الجرد', 'Stock take details')}'),
       content: SizedBox(

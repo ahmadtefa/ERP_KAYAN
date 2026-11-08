@@ -293,9 +293,9 @@ export class StockTakesService {
       select: { id: true, status: true, warehouseId: true },
     });
     if (!session) throw new NotFoundException('Stock-take session not found');
-    if (!['COUNTING', 'REVIEW'].includes(session.status)) {
+    if (session.status !== 'COUNTING') {
       throw new BadRequestException(
-        `This session can no longer be counted (status: ${session.status}).`,
+        `This session is no longer open for counting (status: ${session.status}).`,
       );
     }
     if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
