@@ -459,8 +459,13 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     setState(() => _busy = true);
     try {
       final result = await widget.api.post('/inventory/stock-takes/${text(_session, 'id')}/$suffix', body: body);
-      if (result.isNotEmpty && result.containsKey('lines')) _session = result;
-      else _session = await widget.api.getObject('/inventory/stock-takes/${text(_session, 'id')}');
+      if (result.isNotEmpty && result.containsKey('lines')) {
+        _session = result;
+      } else {
+        _session = await widget.api.getObject(
+          '/inventory/stock-takes/${text(_session, 'id')}',
+        );
+      }
       await widget.onChanged();
       if (mounted) {
         setState(() {});
@@ -576,10 +581,25 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Wrap(spacing: 8, runSpacing: 8, children: [
-              Chip(label: Text(_t('المستودع', 'Warehouse') + ': ${_ar ? text(_session, 'warehouseNameAr', fallback: text(_session, 'warehouseNameEn')) : text(_session, 'warehouseNameEn', fallback: text(_session, 'warehouseNameAr'))}')),
-              Chip(label: Text(_t('الحالة', 'Status') + ': ${text(_session, 'status')}')),
-              Chip(label: Text(_t('البنود', 'Lines') + ': ${lines.length}')),
-              Chip(label: Text(_t('الفروق', 'Variances') + ': ${text(_session, 'varianceCount', fallback: '0')}')),
+              Chip(
+                label: Text(
+                  "${_t('المستودع', 'Warehouse')}: "
+                  "${_ar ? text(_session, 'warehouseNameAr', fallback: text(_session, 'warehouseNameEn')) : text(_session, 'warehouseNameEn', fallback: text(_session, 'warehouseNameAr'))}",
+                ),
+              ),
+              Chip(
+                label: Text(
+                  "${_t('الحالة', 'Status')}: ${text(_session, 'status')}",
+                ),
+              ),
+              Chip(
+                label: Text("${_t('البنود', 'Lines')}: ${lines.length}"),
+              ),
+              Chip(
+                label: Text(
+                  "${_t('الفروق', 'Variances')}: ${text(_session, 'varianceCount', fallback: '0')}",
+                ),
+              ),
             ]),
             const SizedBox(height: 8),
             Expanded(

@@ -201,7 +201,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
     showDataDialog<void>(
       context,
       storageKey: 'warehouse-balances-$id',
-      title: _arabic ? 'أرصدة ' + _name(row) : _name(row) + ' balances',
+      title: _arabic ? 'أرصدة ${_name(row)}' : '${_name(row)} balances',
       icon: Icons.account_balance_wallet_outlined,
       initialSize: const Size(1000, 640),
       child: WarehouseBalanceDialog(warehouseId: id),
