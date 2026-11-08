@@ -236,24 +236,32 @@ export class StockTakesService {
         });
       }
 
-      // A partial count of an item that is not in stock still needs a line:
-      // counting nothing and finding ten boxes is the difference that matters.
-      if (partial) {
-        const seen = new Set<string>([
-          ...lots.map((lot) => lot.itemId),
-          ...balances.map((balance) => balance.itemId),
-        ]);
-        for (const itemId of itemIds) {
-          if (seen.has(itemId)) continue;
-          const item = await tx.item.findFirst({
-            where: { id: itemId, companyId, deletedAt: null },
-            select: { id: true },
-          });
-          if (!item) throw new BadRequestException('A counted item does not exist');
-          await tx.stockTakeLine.create({
-            data: { sessionId: session.id, itemId, systemQuantity: 0, unitCost: 0 },
-          });
-        }
+      // Every stock-tracked item belongs in a FULL count, including items
+      // whose current shelf balance is zero. Otherwise a count cannot record
+      // newly found goods for an item the system believes is out of stock.
+      // PARTIAL counts use the explicitly selected catalogue entries instead.
+      const seen = new Set<string>([
+        ...lots.map((lot) => lot.itemId),
+        ...balances.map((balance) => balance.itemId),
+      ]);
+      const missingItemIds = partial
+        ? itemIds.filter((itemId) => !seen.has(itemId))
+        : (
+            await tx.item.findMany({
+              where: { companyId, deletedAt: null, isStockTracked: true },
+              select: { id: true },
+            })
+          ).map((item) => item.id).filter((itemId) => !seen.has(itemId));
+
+      for (const itemId of missingItemIds) {
+        const item = await tx.item.findFirst({
+          where: { id: itemId, companyId, deletedAt: null, isStockTracked: true },
+          select: { id: true },
+        });
+        if (!item) throw new BadRequestException('A counted item does not exist');
+        await tx.stockTakeLine.create({
+          data: { sessionId: session.id, itemId, systemQuantity: 0, unitCost: 0 },
+        });
       }
 
       return { id: session.id, code };

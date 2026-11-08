@@ -48,8 +48,8 @@ describe('stock takes', () => {
       sessions: [] as Session[],
       lines: [] as Line[],
       items: [
-        { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', companyId: COMPANY, deletedAt: null },
-        { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', companyId: COMPANY, deletedAt: null },
+        { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
+        { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
       ] as Session[],
       lots: (seed.lots ?? []) as Session[],
       balances: (seed.balances ?? []) as Session[],
@@ -163,6 +163,7 @@ describe('stock takes', () => {
       },
       item: {
         findFirst: jest.fn(async ({ where }: any) => state.items.find((item) => matches(item, where)) ?? null),
+        findMany: jest.fn(async ({ where }: any) => state.items.filter((item) => matches(item, where))),
       },
       stockDocument: {
         findFirst: jest.fn(async ({ where }: any) =>
@@ -352,6 +353,18 @@ describe('stock takes', () => {
       harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE, scope: 'PARTIAL', itemIds: [] }),
     ).rejects.toThrow(/must name the items/i);
     expect(harness.state.sessions).toHaveLength(0);
+  });
+
+  it('includes every zero-balance stock-tracked item in a full count', async () => {
+    const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
+
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+
+    expect(harness.state.lines.map((line) => line.itemId).sort()).toEqual([
+      'item-milk',
+      'item-plug',
+    ]);
+    expect(harness.state.lines.every((line) => line.systemQuantity.isZero())).toBe(true);
   });
 
   it('gives a partial count a line even for an item that holds nothing', async () => {
