@@ -71,6 +71,34 @@ describe('batch warehouse access', () => {
     expect(result.items[0]).toEqual({ quantity: '2.0000' });
   });
 
+  it('redacts lot and movement costs when the warehouse grant hides cost', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'batch-1',
+      warehouseId: 'warehouse-visible',
+      unitCost: '5.0000',
+      movements: [
+        {
+          id: 'movement-1',
+          warehouseId: 'warehouse-visible',
+          unitCost: '5.0000',
+          totalCost: '10.0000',
+          quantity: '2.0000',
+        },
+      ],
+    });
+    const result = await controller.findOne(
+      user([{ warehouseId: 'warehouse-visible', canView: true, canSeeCost: false }]),
+      'batch-1',
+    ) as any;
+
+    expect(result.unitCost).toBeUndefined();
+    expect(result.movements[0]).toEqual({
+      id: 'movement-1',
+      warehouseId: 'warehouse-visible',
+      quantity: '2.0000',
+    });
+  });
+
   it('passes an empty allow-list when configured grants expose no warehouses', () => {
     controller.expiryReport(
       user([{ warehouseId: 'warehouse-hidden', canView: false }]),
