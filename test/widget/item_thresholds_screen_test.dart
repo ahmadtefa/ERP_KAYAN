@@ -77,6 +77,10 @@ class _ThresholdsApi extends ApiClient {
   }
 }
 
+Finder tableText(String value) => find.byWidgetPredicate(
+  (widget) => widget is Text && widget.data == value,
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -158,8 +162,8 @@ void main() {
     await pump(tester, _ThresholdsApi());
     await tester.enterText(find.byType(TextField).first, 'Glue');
     await tester.pumpAndSettle();
-    expect(find.text('Glue'), findsOneWidget);
-    expect(find.text('Cable'), findsNothing);
+    expect(tableText('Glue'), findsOneWidget);
+    expect(tableText('Cable'), findsNothing);
   });
 
   testWidgets('editing puts the thresholds to the warehouse/item pair', (
@@ -223,7 +227,7 @@ void main() {
   ) async {
     await pump(tester, _ThresholdsApi());
     expect(find.text('Item thresholds'), findsOneWidget);
-    expect(find.text('Inventory'), findsOneWidget);
+    expect(find.text('INVENTORY'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });
 }
