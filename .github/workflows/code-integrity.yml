@@ -81,6 +81,22 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
+      - name: Parse every bundled Windows PowerShell script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -LiteralPath 'distribution/windows' -Filter '*.ps1' -File -Recurse)
+          if ($files.Count -eq 0) { throw 'No Windows PowerShell runtime scripts were found.' }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $detail = ($errors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join '; '
+              throw "PowerShell syntax error in $($file.FullName): $detail"
+            }
+          }
+          Write-Host "PowerShell parser passed for $($files.Count) bundled scripts."
       - name: Build Windows application (not Setup)
         run: flutter build windows --release --no-pub
       - name: Verify output exists and record its hash
