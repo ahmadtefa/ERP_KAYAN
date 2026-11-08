@@ -6,6 +6,7 @@ import { StockDocumentsController } from './stock-documents.controller';
 describe('stock document warehouse access', () => {
   const service = {
     findAll: jest.fn(),
+    create: jest.fn(),
     findOne: jest.fn(),
     updateVoucher: jest.fn(),
     transitionVoucher: jest.fn(),
@@ -89,6 +90,34 @@ describe('stock document warehouse access', () => {
     }), 'doc-visible');
 
     expect(result).toMatchObject({ id: 'doc-visible' });
+  });
+
+  it('requires warehouse cost visibility to create a receipt voucher', () => {
+    expect(() =>
+      controller.create(
+        user({
+          permissions: ['inventory.stock.adjust', 'inventory.cost.read'],
+          warehouseAccess: [
+            {
+              warehouseId: 'warehouse-visible',
+              canView: true,
+              canReceive: true,
+              canIssue: false,
+              canTransfer: false,
+              canCount: false,
+              canApprove: false,
+              canSeeCost: false,
+            },
+          ],
+        }),
+        {
+          kind: 'ADJUSTMENT',
+          voucherKind: 'RECEIPT',
+          toWarehouseId: 'warehouse-visible',
+        },
+      ),
+    ).toThrow(ForbiddenException);
+    expect(service.create).not.toHaveBeenCalled();
   });
 
   it('refuses a transfer detail if either warehouse is outside the user grants', async () => {

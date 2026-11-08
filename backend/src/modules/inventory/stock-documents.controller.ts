@@ -62,6 +62,9 @@ export class StockDocumentsController {
         body.toWarehouseId as string,
         voucherKind === 'RECEIPT' ? 'receive' : 'issue',
       );
+      if (voucherKind === 'RECEIPT') {
+        assertWarehouseAccess(user, body.toWarehouseId as string, 'cost');
+      }
     }
     // A transfer leaves one shelf and arrives at another, so it is checked on
     // both ends: being trusted with only the source is not a transfer.
