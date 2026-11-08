@@ -227,11 +227,12 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
                 if (snapshot.connectionState != ConnectionState.done) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                if (snapshot.hasError)
-                  return _VoucherLoadError(
-                    error: snapshot.error!,
-                    onRetry: _refresh,
-                  );
+                if (snapshot.hasError) {
+                    return _VoucherLoadError(
+                      error: snapshot.error!,
+                      onRetry: _refresh,
+                    );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -414,11 +415,12 @@ class _StockVoucherDetailScreenState
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snapshot.hasError)
-              return _VoucherLoadError(
-                error: snapshot.error!,
-                onRetry: _refresh,
-              );
+            if (snapshot.hasError) {
+                return _VoucherLoadError(
+                  error: snapshot.error!,
+                  onRetry: _refresh,
+                );
+            }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -493,57 +495,58 @@ class _StockVoucherDetailScreenState
                         can('inventory.warehouses.read') &&
                         (text(doc, 'voucherKind') != 'RECEIPT' ||
                             can('inventory.cost.read')) &&
-                        doc['editVersion'] is int)
-                      OutlinedButton(
-                        onPressed: _busy || _confirming
-                            ? null
-                            : () => _edit(doc),
-                        child: Text(
-                          _label(context, 'تعديل المسودة', 'Edit draft'),
+                        doc['editVersion'] is int) {
+                        OutlinedButton(
+                          onPressed: _busy || _confirming
+                              ? null
+                              : () => _edit(doc),
+                          child: Text(
+                            _label(context, 'تعديل المسودة', 'Edit draft'),
+                          ),
                         ),
-                      ),
-                    if (status == 'draft' &&
-                        version != null &&
-                        !reviewed &&
-                        can('inventory.stock.review'))
-                      OutlinedButton(
-                        onPressed: _busy || _confirming
-                            ? null
-                            : () => _action('review', version),
-                        child: Text(_label(context, 'مراجعة', 'Review')),
-                      ),
-                    if (status == 'draft' &&
-                        version != null &&
-                        reviewed &&
-                        !approved &&
-                        can('inventory.stock.approve'))
-                      OutlinedButton(
-                        onPressed: _busy || _confirming
-                            ? null
-                            : () => _action('approve', version),
-                        child: Text(_label(context, 'اعتماد', 'Approve')),
-                      ),
-                    if (status == 'draft' &&
-                        version != null &&
-                        approved &&
-                        can('inventory.stock.adjust'))
-                      FilledButton(
-                        onPressed: _busy || _confirming
-                            ? null
-                            : () => _action('post', version),
-                        child: Text(_label(context, 'ترحيل', 'Post')),
-                      ),
-                    if (status == 'posted' && can('inventory.stock.adjust'))
-                      OutlinedButton(
-                        onPressed: _busy || _confirming
-                            ? null
-                            : () => _action('reverse', version),
-                        child: Text(_label(context, 'عكس', 'Reverse')),
-                      ),
-                  ],
-                ),
-              ],
-            );
+                      if (status == 'draft' &&
+                          version != null &&
+                          !reviewed &&
+                          can('inventory.stock.review'))
+                        OutlinedButton(
+                          onPressed: _busy || _confirming
+                              ? null
+                              : () => _action('review', version),
+                          child: Text(_label(context, 'مراجعة', 'Review')),
+                        ),
+                      if (status == 'draft' &&
+                          version != null &&
+                          reviewed &&
+                          !approved &&
+                          can('inventory.stock.approve'))
+                        OutlinedButton(
+                          onPressed: _busy || _confirming
+                              ? null
+                              : () => _action('approve', version),
+                          child: Text(_label(context, 'اعتماد', 'Approve')),
+                        ),
+                      if (status == 'draft' &&
+                          version != null &&
+                          approved &&
+                          can('inventory.stock.adjust'))
+                        FilledButton(
+                          onPressed: _busy || _confirming
+                              ? null
+                              : () => _action('post', version),
+                          child: Text(_label(context, 'ترحيل', 'Post')),
+                        ),
+                      if (status == 'posted' && can('inventory.stock.adjust'))
+                        OutlinedButton(
+                          onPressed: _busy || _confirming
+                              ? null
+                              : () => _action('reverse', version),
+                          child: Text(_label(context, 'عكس', 'Reverse')),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+                    }
           },
         ),
       ),
@@ -585,10 +588,11 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
     // The child FutureBuilder is not mounted while the tile is collapsed.
     // Start the request only when expanding so an early failure is observed.
     onExpansionChanged: (expanded) {
-      if (expanded && _future == null)
-        setState(() {
-          _future = _load();
-        });
+      if (expanded && _future == null) {
+          setState(() {
+            _future = _load();
+          });
+      }
     },
     children: [
       if (_future != null)
@@ -598,13 +602,14 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
             if (snapshot.connectionState != ConnectionState.done) {
               return const CircularProgressIndicator();
             }
-            if (snapshot.hasError)
-              return _VoucherLoadError(
-                error: snapshot.error!,
-                onRetry: () => setState(() {
-                  _future = _load();
-                }),
-              );
+            if (snapshot.hasError) {
+                return _VoucherLoadError(
+                  error: snapshot.error!,
+                  onRetry: () => setState(() {
+                    _future = _load();
+                  }),
+                );
+            }
             if (!snapshot.hasData) return const CircularProgressIndicator();
             return Column(
               children: [
@@ -857,8 +862,9 @@ class _StockVoucherCreateScreenState
   void _restore(Map<String, dynamic> request) {
     if (request['method'] != (_editing ? 'PUT' : 'POST') ||
         request['path'] != _path ||
-        request['body'] is! Map)
-      throw const FormatException('Invalid pending voucher');
+        request['body'] is! Map) {
+        throw const FormatException('Invalid pending voucher');
+    }
     final body = Map<String, dynamic>.from(request['body'] as Map);
     if (!_editing && body['voucherKind'] != widget.kind) {
       throw const FormatException('Invalid pending voucher kind');
@@ -966,8 +972,9 @@ class _StockVoucherCreateScreenState
         _pending != null ||
         _store == null ||
         _scope == null ||
-        !(_form.currentState?.validate() ?? false))
-      return;
+        !(_form.currentState?.validate() ?? false)) {
+        return;
+    }
     final body = <String, dynamic>{
       if (!_editing) ...{'kind': 'ADJUSTMENT', 'voucherKind': widget.kind},
       if (_editing) 'expectedVersion': _editVersion,
@@ -1016,8 +1023,9 @@ class _StockVoucherCreateScreenState
     try {
       if (request['method'] != (_editing ? 'PUT' : 'POST') ||
           request['path'] != _path ||
-          request['body'] is! Map)
-        throw const FormatException('Invalid pending voucher');
+          request['body'] is! Map) {
+          throw const FormatException('Invalid pending voucher');
+      }
       final body = Map<String, dynamic>.from(request['body'] as Map);
       if (!_editing && body['voucherKind'] != widget.kind) {
         throw const FormatException('Invalid pending voucher kind');
@@ -1049,8 +1057,9 @@ class _StockVoucherCreateScreenState
         _confirming ||
         _pending == null ||
         _store == null ||
-        _scope == null)
-      return;
+        _scope == null) {
+        return;
+    }
     setState(() => _confirming = true);
     final ok = await confirmAction(
       context,
@@ -1131,158 +1140,62 @@ class _StockVoucherCreateScreenState
               children: [
                 if (_editing &&
                     (widget.initialDocument!['reviewedAt'] != null ||
-                        widget.initialDocument!['approvedAt'] != null))
-                  Text(
-                    _label(
-                      context,
-                      'حفظ التعديلات يلغي المراجعة والاعتماد ويتطلب إعادة تنفيذهما.',
-                      'Saving changes clears review and approval; both must be repeated.',
-                    ),
-                  ),
-                if (_pending != null)
-                  Card(
-                    child: ListTile(
-                      title: Text(
-                        _label(
-                          context,
-                          'طلب الإذن غير محسوم؛ أعد المحاولة بنفس الطلب',
-                          'Voucher request is unresolved; retry the same request',
-                        ),
+                        widget.initialDocument!['approvedAt'] != null)) {
+                    Text(
+                      _label(
+                        context,
+                        'حفظ التعديلات يلغي المراجعة والاعتماد ويتطلب إعادة تنفيذهما.',
+                        'Saving changes clears review and approval; both must be repeated.',
                       ),
-                      trailing: Wrap(
-                        spacing: 8,
-                        children: [
-                          FilledButton(
-                            onPressed: _busy ? null : () => _send(_pending!),
-                            child: Text(
-                              _label(context, 'إعادة المحاولة', 'Retry'),
-                            ),
+                    ),
+                  if (_pending != null)
+                    Card(
+                      child: ListTile(
+                        title: Text(
+                          _label(
+                            context,
+                            'طلب الإذن غير محسوم؛ أعد المحاولة بنفس الطلب',
+                            'Voucher request is unresolved; retry the same request',
                           ),
-                          if (_editing)
-                            TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : _discardPendingAndReload,
+                        ),
+                        trailing: Wrap(
+                          spacing: 8,
+                          children: [
+                            FilledButton(
+                              onPressed: _busy ? null : () => _send(_pending!),
                               child: Text(
-                                _label(context, 'إعادة التحميل', 'Reload'),
+                                _label(context, 'إعادة المحاولة', 'Retry'),
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                  ),
-                Form(
-                  key: _form,
-                  child: IgnorePointer(
-                    ignoring: disabled,
-                    child: Column(
-                      children: [
-                        DropdownButtonFormField<String>(
-                          initialValue:
-                              warehouses.any((x) => text(x, 'id') == _warehouse)
-                              ? _warehouse
-                              : null,
-                          decoration: InputDecoration(
-                            labelText: _label(context, 'المخزن', 'Warehouse'),
-                          ),
-                          items: [
-                            for (final row in warehouses)
-                              DropdownMenuItem(
-                                value: text(row, 'id'),
+                            if (_editing)
+                              TextButton(
+                                onPressed: _busy
+                                    ? null
+                                    : _discardPendingAndReload,
                                 child: Text(
-                                  '${text(row, 'code')} • ${_localizedName(context, row)}',
+                                  _label(context, 'إعادة التحميل', 'Reload'),
                                 ),
                               ),
                           ],
-                          onChanged: (v) {
-                            setState(() => _warehouse = v);
-                            _changed();
-                          },
-                          validator: (v) => v == null
-                              ? _label(context, 'مطلوب', 'Required')
-                              : null,
                         ),
-                        TextFormField(
-                          controller: _date,
-                          onChanged: (_) => _changed(),
-                          decoration: InputDecoration(
-                            labelText: _label(
-                              context,
-                              'التاريخ YYYY-MM-DD',
-                              'Date YYYY-MM-DD',
-                            ),
-                          ),
-                          validator: (value) {
-                            final raw = (value ?? '').trim();
-                            final date = DateTime.tryParse(raw);
-                            return RegExp(r'^\d{4}-\d{2}-\d{2}$')
-                                        .hasMatch(raw) &&
-                                    date != null &&
-                                    date.toIso8601String().startsWith(raw)
-                                ? null
-                                : _label(
-                                    context,
-                                    'تاريخ غير صالح',
-                                    'Invalid date',
-                                  );
-                          },
-                        ),
-                        TextFormField(
-                          controller: _party,
-                          onChanged: (_) => _changed(),
-                          decoration: InputDecoration(
-                            labelText: _label(context, 'الجهة', 'Counterparty'),
-                          ),
-                          validator: (v) =>
-                              (v ?? '').trim().isEmpty ||
-                                  (v ?? '').trim().length > 200
-                              ? _label(
-                                  context,
-                                  'مطلوب (حتى 200 حرف)',
-                                  'Required (up to 200 characters)',
-                                )
-                              : null,
-                        ),
-                        TextFormField(
-                          controller: _reason,
-                          onChanged: (_) => _changed(),
-                          decoration: InputDecoration(
-                            labelText: _label(context, 'السبب', 'Reason'),
-                          ),
-                          validator: (v) => (v ?? '').trim().isEmpty
-                              ? _label(context, 'مطلوب', 'Required')
-                              : null,
-                        ),
-                        if (widget.kind == 'ISSUE' || centers.isNotEmpty)
+                      ),
+                    ),
+                  Form(
+                    key: _form,
+                    child: IgnorePointer(
+                      ignoring: disabled,
+                      child: Column(
+                        children: [
                           DropdownButtonFormField<String>(
-                            initialValue: _center,
+                            initialValue:
+                                warehouses.any((x) => text(x, 'id') == _warehouse)
+                                ? _warehouse
+                                : null,
                             decoration: InputDecoration(
-                              labelText: widget.kind == 'ISSUE'
-                                  ? _label(
-                                      context,
-                                      'مركز التكلفة (مطلوب)',
-                                      'Cost center (required)',
-                                    )
-                                  : _label(
-                                      context,
-                                      'مركز التكلفة (اختياري)',
-                                      'Cost center (optional)',
-                                    ),
+                              labelText: _label(context, 'المخزن', 'Warehouse'),
                             ),
                             items: [
-                              if (_center != null &&
-                                  !centers.any((x) => text(x, 'id') == _center))
-                                DropdownMenuItem(
-                                  value: _center,
-                                  child: Text(
-                                    _label(
-                                      context,
-                                      'مركز التكلفة المحفوظ',
-                                      'Saved cost center',
-                                    ),
-                                  ),
-                                ),
-                              for (final row in centers)
+                              for (final row in warehouses)
                                 DropdownMenuItem(
                                   value: text(row, 'id'),
                                   child: Text(
@@ -1291,293 +1204,390 @@ class _StockVoucherCreateScreenState
                                 ),
                             ],
                             onChanged: (v) {
-                              setState(() => _center = v);
+                              setState(() => _warehouse = v);
                               _changed();
                             },
-                            validator: (_) =>
-                                widget.kind == 'ISSUE' && _center == null
+                            validator: (v) => v == null
                                 ? _label(context, 'مطلوب', 'Required')
                                 : null,
                           ),
-                        if (widget.kind == 'ISSUE' && centers.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              _label(
+                          TextFormField(
+                            controller: _date,
+                            onChanged: (_) => _changed(),
+                            decoration: InputDecoration(
+                              labelText: _label(
                                 context,
-                                'لا توجد مراكز تكلفة نشطة متاحة للصرف.',
-                                'No active cost centres are available for stock issues.',
+                                'التاريخ YYYY-MM-DD',
+                                'Date YYYY-MM-DD',
                               ),
                             ),
+                            validator: (value) {
+                              final raw = (value ?? '').trim();
+                              final date = DateTime.tryParse(raw);
+                              return RegExp(r'^\d{4}-\d{2}-\d{2}$')
+                                          .hasMatch(raw) &&
+                                      date != null &&
+                                      date.toIso8601String().startsWith(raw)
+                                  ? null
+                                  : _label(
+                                      context,
+                                      'تاريخ غير صالح',
+                                      'Invalid date',
+                                    );
+                            },
                           ),
-                        if (_moreCenters)
-                          TextButton(
-                            onPressed: _loadingMore
-                                ? null
-                                : () => _loadMore(snapshot.data!, items: false),
-                            child: Text(
-                              _label(
-                                context,
-                                'تحميل المزيد من مراكز التكلفة',
-                                'Load more cost centers',
-                              ),
+                          TextFormField(
+                            controller: _party,
+                            onChanged: (_) => _changed(),
+                            decoration: InputDecoration(
+                              labelText: _label(context, 'الجهة', 'Counterparty'),
                             ),
-                          ),
-                        TextFormField(
-                          controller: _notes,
-                          onChanged: (_) => _changed(),
-                          decoration: InputDecoration(
-                            labelText: _label(context, 'ملاحظات', 'Notes'),
-                          ),
-                        ),
-                        for (final line in _lines)
-                          Builder(
-                            key: ObjectKey(line),
-                            builder: (context) {
-                              final item = items
-                                  .where(
-                                    (row) => text(row, 'id') == line.itemId,
+                            validator: (v) =>
+                                (v ?? '').trim().isEmpty ||
+                                    (v ?? '').trim().length > 200
+                                ? _label(
+                                    context,
+                                    'مطلوب (حتى 200 حرف)',
+                                    'Required (up to 200 characters)',
                                   )
-                                  .firstOrNull;
-                              final rawUnits = item?['units'];
-                              final units =
-                                  (rawUnits is List && rawUnits.isNotEmpty
-                                          ? rawUnits.cast<Json>().where(
-                                              (unit) => flag(
-                                                unit,
-                                                'isActive',
-                                                fallback: true,
-                                              ),
-                                            )
-                                          : lineUnitsOf(item))
-                                      .where(
-                                        (unit) => text(unit, 'unit').isNotEmpty,
+                                : null,
+                          ),
+                          TextFormField(
+                            controller: _reason,
+                            onChanged: (_) => _changed(),
+                            decoration: InputDecoration(
+                              labelText: _label(context, 'السبب', 'Reason'),
+                            ),
+                            validator: (v) => (v ?? '').trim().isEmpty
+                                ? _label(context, 'مطلوب', 'Required')
+                                : null,
+                          ),
+                          if (widget.kind == 'ISSUE' || centers.isNotEmpty)
+                            DropdownButtonFormField<String>(
+                              initialValue: _center,
+                              decoration: InputDecoration(
+                                labelText: widget.kind == 'ISSUE'
+                                    ? _label(
+                                        context,
+                                        'مركز التكلفة (مطلوب)',
+                                        'Cost center (required)',
                                       )
-                                      .toList();
-                              // An unchanged saved line retains its frozen unit, even if the
-                              // catalogue later disabled it. New selections remain active-only.
-                              if (line.id != null &&
-                                  line.itemId == line.originalItemId &&
-                                  line.unitName != null &&
-                                  line.unitName == line.originalUnitName &&
-                                  !units.any(
-                                    (unit) =>
-                                        text(unit, 'unit') == line.unitName,
-                                  )) {
-                                units.add({'unit': line.unitName});
-                              }
-                              return Card(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    children: [
-                                      TextFormField(
-                                        controller: line.barcode,
-                                        decoration: InputDecoration(
-                                          labelText: _label(
-                                            context,
-                                            'مسح باركود الصنف أو الوحدة',
-                                            'Scan item or unit barcode',
-                                          ),
-                                        ),
-                                        onFieldSubmitted: (value) =>
-                                            _scanBarcode(
-                                              line,
-                                              value,
-                                              snapshot.data![0],
-                                            ),
+                                    : _label(
+                                        context,
+                                        'مركز التكلفة (اختياري)',
+                                        'Cost center (optional)',
                                       ),
-                                      DropdownButtonFormField<String>(
-                                        initialValue:
-                                            items.any(
-                                              (x) =>
-                                                  text(x, 'id') == line.itemId,
-                                            )
-                                            ? line.itemId
-                                            : null,
-                                        decoration: InputDecoration(
-                                          labelText: _label(
-                                            context,
-                                            'الصنف',
-                                            'Item',
+                              ),
+                              items: [
+                                if (_center != null &&
+                                    !centers.any((x) => text(x, 'id') == _center))
+                                  DropdownMenuItem(
+                                    value: _center,
+                                    child: Text(
+                                      _label(
+                                        context,
+                                        'مركز التكلفة المحفوظ',
+                                        'Saved cost center',
+                                      ),
+                                    ),
+                                  ),
+                                for (final row in centers)
+                                  DropdownMenuItem(
+                                    value: text(row, 'id'),
+                                    child: Text(
+                                      '${text(row, 'code')} • ${_localizedName(context, row)}',
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                setState(() => _center = v);
+                                _changed();
+                              },
+                              validator: (_) =>
+                                  widget.kind == 'ISSUE' && _center == null
+                                  ? _label(context, 'مطلوب', 'Required')
+                                  : null,
+                            ),
+                          if (widget.kind == 'ISSUE' && centers.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                _label(
+                                  context,
+                                  'لا توجد مراكز تكلفة نشطة متاحة للصرف.',
+                                  'No active cost centres are available for stock issues.',
+                                ),
+                              ),
+                            ),
+                          if (_moreCenters)
+                            TextButton(
+                              onPressed: _loadingMore
+                                  ? null
+                                  : () => _loadMore(snapshot.data!, items: false),
+                              child: Text(
+                                _label(
+                                  context,
+                                  'تحميل المزيد من مراكز التكلفة',
+                                  'Load more cost centers',
+                                ),
+                              ),
+                            ),
+                          TextFormField(
+                            controller: _notes,
+                            onChanged: (_) => _changed(),
+                            decoration: InputDecoration(
+                              labelText: _label(context, 'ملاحظات', 'Notes'),
+                            ),
+                          ),
+                          for (final line in _lines)
+                            Builder(
+                              key: ObjectKey(line),
+                              builder: (context) {
+                                final item = items
+                                    .where(
+                                      (row) => text(row, 'id') == line.itemId,
+                                    )
+                                    .firstOrNull;
+                                final rawUnits = item?['units'];
+                                final units =
+                                    (rawUnits is List && rawUnits.isNotEmpty
+                                            ? rawUnits.cast<Json>().where(
+                                                (unit) => flag(
+                                                  unit,
+                                                  'isActive',
+                                                  fallback: true,
+                                                ),
+                                              )
+                                            : lineUnitsOf(item))
+                                        .where(
+                                          (unit) => text(unit, 'unit').isNotEmpty,
+                                        )
+                                        .toList();
+                                // An unchanged saved line retains its frozen unit, even if the
+                                // catalogue later disabled it. New selections remain active-only.
+                                if (line.id != null &&
+                                    line.itemId == line.originalItemId &&
+                                    line.unitName != null &&
+                                    line.unitName == line.originalUnitName &&
+                                    !units.any(
+                                      (unit) =>
+                                          text(unit, 'unit') == line.unitName,
+                                    )) {
+                                  units.add({'unit': line.unitName});
+                                }
+                                return Card(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      children: [
+                                        TextFormField(
+                                          controller: line.barcode,
+                                          decoration: InputDecoration(
+                                            labelText: _label(
+                                              context,
+                                              'مسح باركود الصنف أو الوحدة',
+                                              'Scan item or unit barcode',
+                                            ),
                                           ),
-                                        ),
-                                        items: [
-                                          for (final row in items)
-                                            DropdownMenuItem(
-                                              value: text(row, 'id'),
-                                              child: Text(
-                                                '${text(row, 'code')} • ${_localizedName(context, row)}',
+                                          onFieldSubmitted: (value) =>
+                                              _scanBarcode(
+                                                line,
+                                                value,
+                                                snapshot.data![0],
                                               ),
-                                            ),
-                                        ],
-                                        onChanged: (v) {
-                                          setState(() {
-                                            line.itemId = v;
-                                            line.unitName = null;
-                                          });
-                                          _changed();
-                                        },
-                                        validator: (v) => v == null
-                                            ? _label(
-                                                context,
-                                                'مطلوب',
-                                                'Required',
-                                              )
-                                            : null,
-                                      ),
-                                      if (item != null &&
-                                          (units.isNotEmpty ||
-                                              line.unitName != null))
+                                        ),
                                         DropdownButtonFormField<String>(
-                                          key: ValueKey(
-                                            'voucher-unit-${line.itemId}-${line.unitName}',
-                                          ),
                                           initialValue:
-                                              units.any(
-                                                (unit) =>
-                                                    text(unit, 'unit') ==
-                                                    line.unitName,
+                                              items.any(
+                                                (x) =>
+                                                    text(x, 'id') == line.itemId,
                                               )
-                                              ? line.unitName
+                                              ? line.itemId
                                               : null,
                                           decoration: InputDecoration(
                                             labelText: _label(
                                               context,
-                                              'الوحدة (الأساسية افتراضيًا)',
-                                              'Unit (base by default)',
+                                              'الصنف',
+                                              'Item',
                                             ),
                                           ),
                                           items: [
-                                            for (final unit in units)
+                                            for (final row in items)
                                               DropdownMenuItem(
-                                                value: text(unit, 'unit'),
-                                                child: Text(text(unit, 'unit')),
+                                                value: text(row, 'id'),
+                                                child: Text(
+                                                  '${text(row, 'code')} • ${_localizedName(context, row)}',
+                                                ),
                                               ),
                                           ],
                                           onChanged: (v) {
-                                            setState(() => line.unitName = v);
+                                            setState(() {
+                                              line.itemId = v;
+                                              line.unitName = null;
+                                            });
                                             _changed();
                                           },
-                                          validator: (_) =>
-                                              line.unitName != null &&
-                                                  !units.any(
-                                                    (unit) =>
-                                                        text(unit, 'unit') ==
-                                                        line.unitName,
-                                                  )
+                                          validator: (v) => v == null
                                               ? _label(
                                                   context,
-                                                  'اختر وحدة صالحة',
-                                                  'Select an active unit',
+                                                  'مطلوب',
+                                                  'Required',
                                                 )
                                               : null,
                                         ),
-                                      TextFormField(
-                                        controller: line.quantity,
-                                        onChanged: (_) => _changed(),
-                                        keyboardType: TextInputType.number,
-                                        decoration: InputDecoration(
-                                          labelText: line.unitName == null
-                                              ? _label(
-                                                  context,
-                                                  'الكمية بالوحدة الأساسية',
-                                                  'Quantity in base units',
+                                        if (item != null &&
+                                            (units.isNotEmpty ||
+                                                line.unitName != null))
+                                          DropdownButtonFormField<String>(
+                                            key: ValueKey(
+                                              'voucher-unit-${line.itemId}-${line.unitName}',
+                                            ),
+                                            initialValue:
+                                                units.any(
+                                                  (unit) =>
+                                                      text(unit, 'unit') ==
+                                                      line.unitName,
                                                 )
-                                              : _label(
-                                                  context,
-                                                  'الكمية بالوحدة المختارة',
-                                                  'Quantity in selected unit',
+                                                ? line.unitName
+                                                : null,
+                                            decoration: InputDecoration(
+                                              labelText: _label(
+                                                context,
+                                                'الوحدة (الأساسية افتراضيًا)',
+                                                'Unit (base by default)',
+                                              ),
+                                            ),
+                                            items: [
+                                              for (final unit in units)
+                                                DropdownMenuItem(
+                                                  value: text(unit, 'unit'),
+                                                  child: Text(text(unit, 'unit')),
                                                 ),
-                                        ),
-                                        validator: (v) =>
-                                            _number(v, positive: true),
-                                      ),
-                                      if (widget.kind == 'RECEIPT')
+                                            ],
+                                            onChanged: (v) {
+                                              setState(() => line.unitName = v);
+                                              _changed();
+                                            },
+                                            validator: (_) =>
+                                                line.unitName != null &&
+                                                    !units.any(
+                                                      (unit) =>
+                                                          text(unit, 'unit') ==
+                                                          line.unitName,
+                                                    )
+                                                ? _label(
+                                                    context,
+                                                    'اختر وحدة صالحة',
+                                                    'Select an active unit',
+                                                  )
+                                                : null,
+                                          ),
                                         TextFormField(
-                                          controller: line.cost,
+                                          controller: line.quantity,
                                           onChanged: (_) => _changed(),
                                           keyboardType: TextInputType.number,
                                           decoration: InputDecoration(
+                                            labelText: line.unitName == null
+                                                ? _label(
+                                                    context,
+                                                    'الكمية بالوحدة الأساسية',
+                                                    'Quantity in base units',
+                                                  )
+                                                : _label(
+                                                    context,
+                                                    'الكمية بالوحدة المختارة',
+                                                    'Quantity in selected unit',
+                                                  ),
+                                          ),
+                                          validator: (v) =>
+                                              _number(v, positive: true),
+                                        ),
+                                        if (widget.kind == 'RECEIPT')
+                                          TextFormField(
+                                            controller: line.cost,
+                                            onChanged: (_) => _changed(),
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: _label(
+                                                context,
+                                                'تكلفة الوحدة الأساسية',
+                                                'Base unit cost',
+                                              ),
+                                            ),
+                                            validator: _number,
+                                          ),
+                                        TextFormField(
+                                          initialValue: line.notes,
+                                          onChanged: (value) {
+                                            line.notes = value;
+                                            _changed();
+                                          },
+                                          decoration: InputDecoration(
                                             labelText: _label(
                                               context,
-                                              'تكلفة الوحدة الأساسية',
-                                              'Base unit cost',
-                                            ),
-                                          ),
-                                          validator: _number,
-                                        ),
-                                      TextFormField(
-                                        initialValue: line.notes,
-                                        onChanged: (value) {
-                                          line.notes = value;
-                                          _changed();
-                                        },
-                                        decoration: InputDecoration(
-                                          labelText: _label(
-                                            context,
-                                            'ملاحظات السطر',
-                                            'Line notes',
-                                          ),
-                                        ),
-                                      ),
-                                      if (_lines.length > 1)
-                                        TextButton(
-                                          onPressed: () {
-                                            setState(() => _lines.remove(line));
-                                            _changed();
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback(
-                                                  (_) => line.dispose(),
-                                                );
-                                          },
-                                          child: Text(
-                                            _label(
-                                              context,
-                                              'حذف السطر',
-                                              'Remove line',
+                                              'ملاحظات السطر',
+                                              'Line notes',
                                             ),
                                           ),
                                         ),
-                                    ],
+                                        if (_lines.length > 1)
+                                          TextButton(
+                                            onPressed: () {
+                                              setState(() => _lines.remove(line));
+                                              _changed();
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback(
+                                                    (_) => line.dispose(),
+                                                  );
+                                            },
+                                            child: Text(
+                                              _label(
+                                                context,
+                                                'حذف السطر',
+                                                'Remove line',
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              );
+                                );
+                              },
+                            ),
+                          TextButton.icon(
+                            onPressed: () {
+                              setState(() => _lines.add(_VoucherLine()));
+                              _changed();
                             },
+                            icon: const Icon(Icons.add),
+                            label: Text(_label(context, 'إضافة صنف', 'Add item')),
                           ),
-                        TextButton.icon(
-                          onPressed: () {
-                            setState(() => _lines.add(_VoucherLine()));
-                            _changed();
-                          },
-                          icon: const Icon(Icons.add),
-                          label: Text(_label(context, 'إضافة صنف', 'Add item')),
-                        ),
-                        if (_moreItems)
-                          TextButton(
-                            onPressed: _loadingMore
-                                ? null
-                                : () => _loadMore(snapshot.data!, items: true),
-                            child: Text(
-                              _label(
-                                context,
-                                'تحميل المزيد من الأصناف',
-                                'Load more items',
+                          if (_moreItems)
+                            TextButton(
+                              onPressed: _loadingMore
+                                  ? null
+                                  : () => _loadMore(snapshot.data!, items: true),
+                              child: Text(
+                                _label(
+                                  context,
+                                  'تحميل المزيد من الأصناف',
+                                  'Load more items',
+                                ),
                               ),
                             ),
+                          FilledButton(
+                            onPressed: disabled ? null : _save,
+                            child: Text(
+                              _label(context, 'حفظ المسودة', 'Save draft'),
+                            ),
                           ),
-                        FilledButton(
-                          onPressed: disabled ? null : _save,
-                          child: Text(
-                            _label(context, 'حفظ المسودة', 'Save draft'),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            );
+                ],
+              );
+                }
           },
         ),
       ),
