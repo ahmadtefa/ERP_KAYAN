@@ -256,9 +256,16 @@ export class BatchesService {
         item: { select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } },
         warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         movements: {
+          where: {
+            ...(scope !== null ? { branchId: { in: scope } } : {}),
+            ...(visibleWarehouseIds !== undefined
+              ? { warehouseId: { in: visibleWarehouseIds } }
+              : {}),
+          },
           orderBy: { createdAt: 'asc' },
           select: {
             id: true,
+            warehouseId: true,
             movementDate: true,
             direction: true,
             quantity: true,
