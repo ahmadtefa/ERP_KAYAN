@@ -145,6 +145,9 @@ describe('stock takes', () => {
           Object.assign(row, data);
           return row;
         }),
+        count: jest.fn(async ({ where }: any) =>
+          state.lines.filter((line) => matches(line, where)).length,
+        ),
       },
       itemBatch: {
         findMany: jest.fn(async ({ where }: any) =>
@@ -375,6 +378,32 @@ describe('stock takes', () => {
       harness.service.record(COMPANY, COUNTER, sessionId, { lines: [{ lineId: 'line-elsewhere', countedQuantity: 1 }] }),
     ).rejects.toThrow(/does not belong to this session/i);
     expect(harness.state.lines[0].countedQuantity).toBeNull();
+  });
+
+  it('refuses to finish while any frozen line remains uncounted', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') },
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('4'), value: D('40') },
+        ],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const sessionId = harness.state.sessions[0].id;
+    const firstLine = harness.state.lines[0];
+
+    await expect(
+      harness.service.record(COMPANY, COUNTER, sessionId, {
+        lines: [{ lineId: firstLine.id, countedQuantity: 9 }],
+        finish: true,
+      }),
+    ).rejects.toThrow(/1 line\(s\) have not been counted/i);
+
+    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    expect(harness.state.lines[0].countedQuantity.toFixed(4)).toBe('9.0000');
+    expect(harness.state.lines[1].countedQuantity).toBeNull();
   });
 
   it('finishing moves the session to review, and a second count on a closed session is refused', async () => {

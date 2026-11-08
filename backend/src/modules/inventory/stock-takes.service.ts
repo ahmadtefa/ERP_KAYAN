@@ -317,6 +317,14 @@ export class StockTakesService {
         });
       }
       if (dto.finish) {
+        const uncounted = await tx.stockTakeLine.count({
+          where: { sessionId: session.id, countedQuantity: null },
+        });
+        if (uncounted > 0) {
+          throw new BadRequestException(
+            `Cannot finish this count: ${uncounted} line(s) have not been counted.`,
+          );
+        }
         await tx.stockTakeSession.update({
           where: { id: session.id },
           data: { status: 'REVIEW' },

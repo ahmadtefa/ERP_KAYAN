@@ -463,7 +463,20 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     final payload = <Map<String, dynamic>>[];
     for (final line in listOf(_session['lines'])) {
       final raw = _counts[text(line, 'id')] ?? text(line, 'countedQuantity');
-      if (raw.trim().isEmpty) continue;
+      if (raw.trim().isEmpty) {
+        if (finish) {
+          showMessage(
+            context,
+            _t(
+              'لا يمكن إنهاء الجرد قبل إدخال كمية كل صنف. الصنف الناقص: ${text(line, 'itemCode')}.',
+              'Enter a counted quantity for every item before finishing. Missing: ${text(line, 'itemCode')}.',
+            ),
+            error: true,
+          );
+          return;
+        }
+        continue;
+      }
       final value = double.tryParse(raw.trim());
       if (value == null || !value.isFinite || value < 0) {
         showMessage(context, _t('أدخل كمية صحيحة غير سالبة للصنف ${text(line, 'itemCode')}.', 'Enter a valid non-negative quantity for ${text(line, 'itemCode') }.'), error: true);
