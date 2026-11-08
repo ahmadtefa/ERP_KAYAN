@@ -162,6 +162,10 @@ const _signer = [
   'inventory.writeoff.post',
 ];
 
+Finder tableText(String value) => find.byWidgetPredicate(
+  (widget) => widget is Text && widget.data == value,
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -224,7 +228,7 @@ void main() {
   ) async {
     await pump(tester, _WriteOffsApi());
     // WO-001 is untouched; WO-002 carries an approval stamp.
-    expect(find.text('Draft'), findsOneWidget);
+    expect(find.text('Draft'), findsNWidgets(2));
     expect(find.text('Awaiting posting'), findsOneWidget);
   });
 
@@ -248,7 +252,9 @@ void main() {
       'You raised this document, so you cannot approve it',
     );
     expect(tooltip, findsOneWidget);
-    final button = tester.widget<IconButton>(tooltip);
+    final button = tester.widget<IconButton>(
+      find.descendant(of: tooltip, matching: find.byType(IconButton)),
+    );
     expect(button.onPressed, isNull);
   });
 
@@ -313,8 +319,8 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'WO-001');
     await tester.pumpAndSettle();
-    expect(find.text('WO-001'), findsOneWidget);
-    expect(find.text('WO-002'), findsNothing);
+    expect(tableText('WO-001'), findsOneWidget);
+    expect(tableText('WO-002'), findsNothing);
   });
 
   testWidgets('a failed list shows the error view with a retry', (tester) async {

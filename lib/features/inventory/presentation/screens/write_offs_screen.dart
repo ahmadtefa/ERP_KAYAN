@@ -160,17 +160,27 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     final actions = <Widget>[];
 
     if (canApprove && status == 'draft' && !_isApprovedDraft(row)) {
-      actions.add(
-        IconButton(
-          tooltip: raisedByMe
-              ? (_arabic
-                    ? 'رفعت هذا المستند، فلا يمكنك اعتماده'
-                    : 'You raised this document, so you cannot approve it')
-              : (_arabic ? 'اعتماد' : 'Approve'),
-          icon: const Icon(Icons.verified_outlined),
-          onPressed: raisedByMe ? null : () => _approve(row),
-        ),
-      );
+      if (raisedByMe) {
+        actions.add(
+          Tooltip(
+            message: _arabic
+                ? 'رفعت هذا المستند، فلا يمكنك اعتماده'
+                : 'You raised this document, so you cannot approve it',
+            child: const IconButton(
+              icon: Icon(Icons.verified_outlined),
+              onPressed: null,
+            ),
+          ),
+        );
+      } else {
+        actions.add(
+          IconButton(
+            tooltip: _arabic ? 'اعتماد' : 'Approve',
+            icon: const Icon(Icons.verified_outlined),
+            onPressed: () => _approve(row),
+          ),
+        );
+      }
     }
 
     if (canPost && _isApprovedDraft(row)) {

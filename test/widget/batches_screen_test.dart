@@ -99,6 +99,10 @@ class _BatchesApi extends ApiClient {
   }
 }
 
+Finder tableText(String value) => find.byWidgetPredicate(
+  (widget) => widget is Text && widget.data == value,
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -194,13 +198,13 @@ void main() {
     await pump(tester, _BatchesApi());
     await tester.enterText(find.byType(TextField).first, 'LOT-B');
     await tester.pumpAndSettle();
-    expect(find.text('LOT-B'), findsOneWidget);
-    expect(find.text('LOT-A'), findsNothing);
+    expect(tableText('LOT-B'), findsOneWidget);
+    expect(tableText('LOT-A'), findsNothing);
 
     await tester.enterText(find.byType(TextField).first, 'Screws');
     await tester.pumpAndSettle();
-    expect(find.text('LOT-C'), findsOneWidget);
-    expect(find.text('LOT-B'), findsNothing);
+    expect(tableText('LOT-C'), findsOneWidget);
+    expect(tableText('LOT-B'), findsNothing);
   });
 
   testWidgets('a lot with no expiry date shows a dash, not a crash', (
@@ -246,7 +250,7 @@ void main() {
   ) async {
     await pump(tester, _BatchesApi());
     expect(find.text('Batches'), findsOneWidget);
-    expect(find.text('Inventory'), findsOneWidget);
+    expect(find.text('INVENTORY'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });
 }
