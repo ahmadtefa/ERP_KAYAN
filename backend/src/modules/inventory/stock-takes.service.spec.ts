@@ -50,6 +50,7 @@ describe('stock takes', () => {
       items: [
         { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
         { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
+        { id: 'item-service', code: 'SERVICE', nameEn: 'Service', nameAr: 'خدمة', unit: 'مرة', isStockTracked: false, companyId: COMPANY, deletedAt: null },
       ] as Session[],
       lots: (seed.lots ?? []) as Session[],
       balances: (seed.balances ?? []) as Session[],
