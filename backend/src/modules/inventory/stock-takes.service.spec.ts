@@ -494,6 +494,10 @@ describe('stock takes', () => {
       { id: WAREHOUSE, branchId: BRANCH },
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 1 }],
+      finish: true,
+    });
 
     await expect(
       harness.service.approve(COMPANY, COUNTER, harness.state.sessions[0].id),
@@ -508,6 +512,10 @@ describe('stock takes', () => {
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
+    await harness.service.record(COMPANY, COUNTER, sessionId, {
+      lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 1 }],
+      finish: true,
+    });
 
     await harness.service.approve(COMPANY, APPROVER, sessionId);
     expect(harness.state.sessions[0]).toMatchObject({ status: 'APPROVED', approvedBy: APPROVER });
@@ -525,6 +533,10 @@ describe('stock takes', () => {
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
+    await harness.service.record(COMPANY, COUNTER, sessionId, {
+      lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 1 }],
+      finish: true,
+    });
     // Someone else claimed it between our read and our write.
     (harness.tx.stockTakeSession.updateMany as jest.Mock).mockResolvedValueOnce({ count: 0 });
 
@@ -553,6 +565,7 @@ describe('stock takes', () => {
         { lineId: plugLine.id, countedQuantity: 7 },
         { lineId: milkLine.id, countedQuantity: 5 },
       ],
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
 
@@ -586,6 +599,7 @@ describe('stock takes', () => {
     const sessionId = harness.state.sessions[0].id;
     await harness.service.record(COMPANY, COUNTER, sessionId, {
       lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 10 }],
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
 
@@ -617,6 +631,7 @@ describe('stock takes', () => {
     const sessionId = harness.state.sessions[0].id;
     await harness.service.record(COMPANY, COUNTER, sessionId, {
       lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 6 }],
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
     harness.documents.post.mockRejectedValueOnce(new Error('the period is closed'));
