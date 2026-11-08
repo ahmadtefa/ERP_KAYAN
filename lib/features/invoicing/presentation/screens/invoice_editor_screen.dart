@@ -1123,13 +1123,13 @@ class _LinesTable extends StatelessWidget {
                                     for (final item in items)
                                       DropdownMenuItem(
                                         value: text(item, 'id'),
-                                        // No Flexible here: a dropdown item
-                                        // is laid out at the text's intrinsic
-                                        // width, so a flex child would assert.
-                                        // The ellipsis on the field itself
-                                        // does the clipping.
+                                        // The field is expanded, so the item
+                                        // is laid out within its width. The
+                                        // fixed thumbnail and the gap are
+                                        // subtracted first and the name takes
+                                        // what is left, ellipsised - without a
+                                        // flexible child this row overflows.
                                         child: Row(
-                                          mainAxisSize: MainAxisSize.min,
                                           children: [
                                             ItemThumbnail(
                                               bytes:
@@ -1137,9 +1137,11 @@ class _LinesTable extends StatelessWidget {
                                               size: 24,
                                             ),
                                             const SizedBox(width: 8),
-                                            Text(
-                                              '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                              overflow: TextOverflow.ellipsis,
+                                            Flexible(
+                                              child: Text(
+                                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
                                             ),
                                           ],
                                         ),
