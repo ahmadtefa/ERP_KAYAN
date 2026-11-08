@@ -102,6 +102,7 @@ model Company {
   salesOrders    SalesOrder[]
 
   userProfilePhotos UserProfilePhoto[]
+  itemImages        ItemImage[]
 
   @@map("companies")
 }
@@ -208,6 +209,7 @@ model UserProfilePhoto {
   userId    String   @id @db.Uuid
   companyId String   @db.Uuid
   data      Bytes
+  /// Always the mime type of the re-encoded image, never the uploader's.
   mime      String   @db.VarChar(64)
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1442,6 +1444,7 @@ model Item {
   warehouseSettings ItemWarehouseSetting[]
   warehouseBalances WarehouseStockBalance[]
   stockTakeLines    StockTakeLine[]
+  image             ItemImage?
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -3034,4 +3037,23 @@ model PrintPriceSetting {
 
   @@unique([companyId, documentType])
   @@map("print_price_settings")
+}
+
+/// The picture shown for an item: on its catalogue row, in the item picker and
+/// on an invoice line. Kept in its own table rather than as columns on `items`
+/// so listing the catalogue never drags image bytes through the database.
+model ItemImage {
+  /// One picture per item, so the item is the key.
+  itemId    String   @id @db.Uuid
+  companyId String   @db.Uuid
+  data      Bytes
+  mime      String   @db.VarChar(64)
+  width     Int
+  height    Int
+  updatedAt DateTime @updatedAt
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("item_images")
 }

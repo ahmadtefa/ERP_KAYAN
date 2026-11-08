@@ -85,6 +85,8 @@ describe('ResetService', () => {
     'priceListItem',
     'customer',
     'supplier',
+    // Cleared just before the items it hangs from.
+    'itemImage',
     'item',
     'priceList',
     'itemCategory',

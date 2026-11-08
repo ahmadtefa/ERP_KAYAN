@@ -624,6 +624,14 @@ export class ResetService {
             });
             return count;
           });
+          // Pictures are cleared before the items they hang from, so the reset
+          // does not depend on cascade behaviour to remove a company's images.
+          await step('itemImage', async () => {
+            const { count } = await tx.itemImage.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('items', async () => {
             const { count } = await tx.item.deleteMany({
               where: { companyId: me.companyId },

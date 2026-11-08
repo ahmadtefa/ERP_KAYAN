@@ -24,6 +24,8 @@ import { StockDocumentsService } from './stock-documents.service';
 import { StockService } from './stock.service';
 import { StockTakesController } from './stock-takes.controller';
 import { StockTakesService } from './stock-takes.service';
+import { ItemImageController } from './item-image.controller';
+import { ItemImageService } from './item-image.service';
 import { WarehouseAccessController } from './warehouse-access.controller';
 import { WarehouseAccessService } from './warehouse-access.service';
 import { WarehousesController } from './warehouses.controller';
@@ -43,6 +45,7 @@ import { WarehousesController } from './warehouses.controller';
     ItemWarehouseSettingsController,
     StockTakesController,
     WarehouseAccessController,
+    ItemImageController,
   ],
   providers: [
     ItemsService,
@@ -56,6 +59,7 @@ import { WarehousesController } from './warehouses.controller';
     ItemWarehouseSettingsService,
     StockTakesService,
     WarehouseAccessService,
+    ItemImageService,
   ],
   exports: [
     StockService,

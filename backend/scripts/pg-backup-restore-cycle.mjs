@@ -189,7 +189,15 @@ async function main() {
   // --------------------------------------------- 5. table-by-table comparison
   console.log('\n[5] compare every public table between source and restored databases');
   // Installation-level state, deliberately outside the company backup file.
-  const INSTALLATION_TABLES = new Set(['license_seat_usage', 'licenses']);
+  // Two families are deliberately outside a company backup file:
+  //   * licence bookkeeping describes this installation, not the company;
+  //   * refresh tokens are live sign-in sessions, and BackupService.OMITTED
+  //     keeps them out so a restore cannot resurrect someone's session.
+  const INSTALLATION_TABLES = new Set([
+    'license_seat_usage',
+    'licenses',
+    'refresh_tokens',
+  ]);
   const tableNames = (await target.$queryRaw`
     SELECT table_name::text AS table_name FROM information_schema.tables
      WHERE table_schema='public' AND table_type='BASE TABLE'

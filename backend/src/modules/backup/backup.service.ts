@@ -107,6 +107,11 @@ interface TableSpec {
   selfReferencing?: boolean;
   /// The scalar column that names the parent row in this same table.
   selfReferenceField?: string;
+  /// Columns that hold bytes. They are written to the file as base64 and read
+  /// back as Buffers — a JSON file cannot carry a Buffer, and one that tried
+  /// came back as `{type:"Buffer",data:[...]}`, which Prisma rejects with a
+  /// validation error in the middle of a restore.
+  binaryFields?: string[];
 }
 
 /// Backs everything up as one JSON file, and puts it back again.
@@ -157,6 +162,10 @@ export const TABLES: TableSpec[] = [
   { model: 'customer', scope: 'company' },
   { model: 'supplier', scope: 'company' },
   { model: 'item', scope: 'company' },
+  // Item pictures are company data, not installation state: they are what the
+  // catalogue looks like, and a restore without them loses every picture the
+  // shop took. They travel as base64 inside the JSON file like any other bytes.
+  { model: 'itemImage', scope: 'child', parent: 'item', foreignKey: 'itemId', binaryFields: ['data'] },
   { model: 'itemUnit', scope: 'child', parent: 'item', foreignKey: 'itemId' },
   { model: 'warehouse', scope: 'company' },
   {
@@ -384,6 +393,55 @@ export class BackupService {
     return (client as unknown as Record<string, Record<string, any>>)[model];
   }
 
+  /// Bytes → base64 for the file. A backup that carried a Buffer raw came back
+  /// from JSON as `{type:"Buffer",data:[...]}`, and the restore then failed
+  /// with "Expected Bytes, provided Object" halfway through writing.
+  private encodeBinaryFields(
+    rows: Array<Record<string, unknown>>,
+    fields?: string[],
+  ): Array<Record<string, unknown>> {
+    if (!fields?.length) return rows;
+    return rows.map((row) => {
+      const copy = { ...row };
+      for (const field of fields) {
+        const value = copy[field];
+        if (value === null || value === undefined) continue;
+        copy[field] = Buffer.isBuffer(value)
+          ? value.toString('base64')
+          : value instanceof Uint8Array
+            ? Buffer.from(value).toString('base64')
+            : value;
+      }
+      return copy;
+    });
+  }
+
+  /// base64 → bytes on the way back in. A file written before this existed (or
+  /// by hand) may already hold a Buffer-shaped object; both are accepted.
+  private decodeBinaryFields(
+    rows: Array<Record<string, unknown>>,
+    fields?: string[],
+  ): Array<Record<string, unknown>> {
+    if (!fields?.length) return rows;
+    return rows.map((row) => {
+      const copy = { ...row };
+      for (const field of fields) {
+        const value = copy[field];
+        if (value === null || value === undefined) continue;
+        if (typeof value === 'string') {
+          copy[field] = Buffer.from(value, 'base64');
+        } else if (
+          typeof value === 'object' &&
+          (value as { type?: string }).type === 'Buffer' &&
+          Array.isArray((value as { data?: unknown }).data)
+        ) {
+          copy[field] = Buffer.from((value as { data: number[] }).data);
+        }
+      }
+      return copy;
+    });
+  }
+
   private async readTable(
     client: RestoreClient,
     spec: TableSpec,
@@ -392,18 +450,23 @@ export class BackupService {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.findMany) return [];
 
+    // Bytes cannot survive JSON as bytes. Encode them once, on the way out, so
+    // every return path below writes base64 into the file.
+    const encode = (rows: Array<Record<string, unknown>>) =>
+      this.encodeBinaryFields(rows, spec.binaryFields);
+
     if (spec.scope === 'company') {
-      return (await delegate.findMany({ where: { companyId } })) as Array<
+      return encode((await delegate.findMany({ where: { companyId } })) as Array<
         Record<string, unknown>
-      >;
+      >);
     }
 
     // A child that reaches the company through two relations is filtered
     // directly: its parent has no companyId to list.
     if (spec.companyWhere) {
-      return (await delegate.findMany({
+      return encode((await delegate.findMany({
         where: spec.companyWhere(companyId),
-      })) as Array<Record<string, unknown>>;
+      })) as Array<Record<string, unknown>>);
     }
 
     // A child table is reached through its parent's ids.
@@ -420,8 +483,8 @@ export class BackupService {
       where: { [spec.foreignKey as string]: { in: parents.map((row) => row.id) } },
       ...(includePermissionCode ? { include: { permission: { select: { code: true } } } } : {}),
     })) as Array<Record<string, unknown>>;
-    if (!includePermissionCode) return rows;
-    return rows.map((row) => {
+    if (!includePermissionCode) return encode(rows);
+    return encode(rows.map((row) => {
       const { permission, ...scalars } = row as Record<string, unknown> & {
         permission?: { code?: string } | null;
       };
@@ -429,7 +492,7 @@ export class BackupService {
         ...scalars,
         ...(permission?.code ? { permissionCode: permission.code } : {}),
       };
-    });
+    }));
   }
 
   /// ───────────────────────────────────────────────────────── putting one back
@@ -875,6 +938,8 @@ export class BackupService {
   ): Promise<void> {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.createMany) return;
+
+    rows = this.decodeBinaryFields(rows, spec.binaryFields);
 
     // Two fixes before writing. A company table gets its companyId back (the
     // file carries it, but this is what makes a restore into a repaired
