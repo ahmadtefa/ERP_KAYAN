@@ -3,6 +3,10 @@ import sharp from 'sharp';
 
 import { ItemImageService } from './item-image.service';
 
+/// An 8x8 WebP encoded once, so every test in this file uses real bytes.
+const TINY_WEBP =
+  'UklGRjgAAABXRUJQVlA4ICwAAADQAQCdASoIAAgAAUAmJaACdLoB+AADsAD+8ut//OJY6nd3Z//MEr8g3XIAAA==';
+
 const COMPANY = 'company-1';
 const USER = 'user-1';
 const ITEM = '11111111-1111-4111-8111-111111111111';
@@ -24,7 +28,9 @@ function build(options: { items?: Array<{ id: string }>; existing?: boolean } = 
     images.set(ITEM, {
       itemId: ITEM,
       companyId: COMPANY,
-      data: Buffer.from('old'),
+      // A real 8x8 WebP, so the thumbnail path exercises sharp rather than a
+      // stub: a fake that is not decodable would only prove the error branch.
+      data: Buffer.from(TINY_WEBP, 'base64'),
       mime: 'image/webp',
       width: 10,
       height: 10,
@@ -45,9 +51,20 @@ function build(options: { items?: Array<{ id: string }>; existing?: boolean } = 
         return { count: had ? 1 : 0 };
       }),
       findFirst: jest.fn(async ({ where }: any) => images.get(where.itemId) ?? null),
-      findMany: jest.fn(async ({ where }: any) =>
-        (where.itemId?.in ?? []).filter((id: string) => images.has(id)).map((id: string) => ({ itemId: id })),
-      ),
+      findMany: jest.fn(async ({ where, select }: any) => {
+        // A company-wide query omits itemId; a targeted one lists ids.
+        const wanted: string[] = where.itemId?.in ?? [...images.keys()];
+        return wanted
+          .filter((id: string) => images.get(id)?.companyId === where.companyId)
+          .map((id: string) => {
+            const row = images.get(id)!;
+            // Mirror Prisma: only the selected columns come back.
+            if (!select) return row;
+            return Object.fromEntries(
+              Object.keys(select).map((column) => [column, row[column]]),
+            );
+          });
+      }),
     },
     item: {
       findFirst: jest.fn(async ({ where }: any) =>
@@ -174,6 +191,26 @@ describe('item pictures', () => {
     // The query must not select the data column.
     const select = (tx.itemImage.findMany as jest.Mock).mock.calls[0][0].select;
     expect(select).toEqual({ itemId: true });
+  });
+
+  it('answers a whole page of thumbnails from one query', async () => {
+    const { service, tx } = build({ existing: true });
+
+    const pictures = await service.thumbnails(COMPANY, [ITEM, 'other']);
+
+    // One row has a picture; the other simply does not appear, so the screen
+    // can draw its placeholder without a second request.
+    expect(pictures.map((p) => p.itemId)).toEqual([ITEM]);
+    // The thumbnails are WebP produced here, not the stored bytes echoed back.
+    expect(Buffer.from(pictures[0].data, 'base64').subarray(8, 12).toString('ascii')).toBe('WEBP');
+    expect(tx.itemImage.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for nothing when the page has no items', async () => {
+    const { service, tx } = build();
+
+    expect(await service.thumbnails(COMPANY, [])).toEqual([]);
+    expect(tx.itemImage.findMany).not.toHaveBeenCalled();
   });
 
   it('asks for nothing when given no ids', async () => {

@@ -24,7 +24,7 @@ import { StockDocumentsService } from './stock-documents.service';
 import { StockService } from './stock.service';
 import { StockTakesController } from './stock-takes.controller';
 import { StockTakesService } from './stock-takes.service';
-import { ItemImageController } from './item-image.controller';
+import { ItemImageController, ItemPictureIndexController } from './item-image.controller';
 import { ItemImageService } from './item-image.service';
 import { WarehouseAccessController } from './warehouse-access.controller';
 import { WarehouseAccessService } from './warehouse-access.service';
@@ -33,6 +33,10 @@ import { WarehousesController } from './warehouses.controller';
 @Module({
   imports: [PrismaModule, AuditModule, AccountingModule, ExportModule],
   controllers: [
+    // Ahead of ItemsController on purpose: its `GET :id` would otherwise
+    // swallow `items/with-picture` and try to read an item literally called
+    // "with-picture". Nest matches routes in registration order.
+    ItemPictureIndexController,
     ItemsController,
     StockController,
     StockDocumentsController,

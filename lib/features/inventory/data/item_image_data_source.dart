@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -93,5 +94,38 @@ class ItemImageDataSource {
     final ids = json['itemIds'];
     if (ids is! List) return const {};
     return ids.whereType<String>().toSet();
+  }
+
+  /// Small pictures for a page of items, in one request.
+  ///
+  /// A catalogue page draws 32-pixel squares; asking for each full picture
+  /// would be one request per row and a page's worth of full-size images in
+  /// memory. The server reduces each to a thumbnail and returns only the rows
+  /// that have one, so an absent key means "show the placeholder".
+  Future<Map<String, Uint8List>> thumbnails(List<String> itemIds) async {
+    if (itemIds.isEmpty) return const {};
+    final json = await _client.get(
+      '/inventory/items/with-picture?itemIds=${itemIds.join(',')}',
+    );
+    final rows = json['pictures'];
+    if (rows is! List) return const {};
+    final result = <String, Uint8List>{};
+    for (final row in rows) {
+      if (row is! Map) continue;
+      final id = row['itemId'];
+      final data = row['data'];
+      if (id is! String || data is! String) continue;
+      final bytes = _decodeBase64Bytes(data);
+      if (bytes != null) result[id] = bytes;
+    }
+    return result;
+  }
+
+  static Uint8List? _decodeBase64Bytes(String value) {
+    try {
+      return base64Decode(value);
+    } on FormatException {
+      return null;
+    }
   }
 }

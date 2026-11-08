@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +7,8 @@ import '../../core/json/amount_format.dart';
 import '../../core/json/json_utils.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/common/presentation/providers/resource_providers.dart';
+import '../../features/inventory/data/item_image_data_source.dart';
+import '../../features/inventory/presentation/widgets/item_picture.dart';
 import '../extensions/l10n_extension.dart';
 import 'data_dialog.dart';
 import 'resizable_table.dart';
@@ -53,6 +57,11 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
   Future<List<Json>>? _byWarehouse;
   bool _canSeeStock = false;
   String _query = '';
+
+  /// Small pictures for the items currently listed, so a picker shows the same
+  /// picture the catalogue and the invoice do. Absent means "no picture".
+  Map<String, Uint8List> _pictures = const {};
+  String _picturesKey = '';
 
   @override
   void initState() {
@@ -140,6 +149,7 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                     final where = _warehousesByItem(
                       warehouseSnapshot.data ?? const [],
                     );
+                    _loadPictures(_filter(rows, language));
                     return SingleChildScrollView(
                       child: ResizableTable(
                         storageKey: 'item-picker',
@@ -148,8 +158,10 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                         columns: [
                           ResizableColumn(
                             l10n.item,
-                            width: 110,
+                            width: 150,
                             value: (row) => text(row, 'code'),
+                            leading: (row) =>
+                                ItemThumbnail(bytes: _pictures[text(row, 'id')]),
                           ),
                           ResizableColumn(
                             language == 'ar' ? 'الاسم' : 'Name',
@@ -227,6 +239,29 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
         ],
       ),
     );
+  }
+
+  /// Asks for the pictures of the items on show, once per distinct set.
+  ///
+  /// The ids are sorted before they form the key, so scrolling or rebuilding
+  /// does not re-request the same page. A failure is silence: a picker that
+  /// cannot fetch a thumbnail still lists every item, just without pictures.
+  void _loadPictures(List<Json> rows) {
+    final ids = [
+      for (final row in rows)
+        if (text(row, 'id').isNotEmpty) text(row, 'id'),
+    ]..sort();
+    final key = ids.join(',');
+    if (key == _picturesKey) return;
+    _picturesKey = key;
+    if (ids.isEmpty) return;
+    ItemImageDataSource(ref.read(apiClientProvider))
+        .thumbnails(ids)
+        .then((pictures) {
+          if (!mounted || _picturesKey != key) return;
+          setState(() => _pictures = pictures);
+        })
+        .catchError((Object _) => <String, Uint8List>{});
   }
 
   List<Json> _filter(List<Json> rows, String language) {

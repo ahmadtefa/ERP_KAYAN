@@ -101,3 +101,30 @@ export class ItemImageController {
 
 /** The maximum upload accepted by the interceptor, exported for the tests. */
 export const ITEM_IMAGE_UPLOAD_MAX = ITEM_IMAGE_MAX_BYTES;
+
+/// Answers for the catalogue as a whole, so it cannot hang off one item's path.
+/// A list needs to know which rows to draw a picture on; asking per row would
+/// be one request per item. Only ids come back - the bytes are fetched later,
+/// and only for the rows that have them.
+@Controller('inventory/items')
+export class ItemPictureIndexController {
+  constructor(private readonly images: ItemImageService) {}
+
+  /// `?itemIds=a,b,c` - the rows on the page the caller is already drawing.
+  /// Ids not belonging to this company simply produce no answer.
+  @Get('with-picture')
+  @RequirePermissions('inventory.items.read')
+  async withPicture(@CurrentUser() user: AuthUser, @Query('itemIds') itemIds?: string) {
+    const grants = grantsOf(user);
+    if (grants !== null && !grants.some((grant) => may(user, grant.warehouseId, 'view'))) {
+      throw new BadRequestException(
+        'لا تملك صلاحية عرض أصناف أي مستودع / You may not view the catalogue of any warehouse.',
+      );
+    }
+    const ids = String(itemIds ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+    return { pictures: await this.images.thumbnails(user.companyId, ids) };
+  }
+}

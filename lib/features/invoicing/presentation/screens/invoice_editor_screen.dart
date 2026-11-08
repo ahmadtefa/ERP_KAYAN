@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +13,8 @@ import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../inventory/data/item_image_data_source.dart';
+import '../../../inventory/presentation/widgets/item_picture.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart';
@@ -203,6 +207,12 @@ class InvoiceEditorScreen extends ConsumerStatefulWidget {
 
 class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   final _lines = <_LineDraft>[];
+
+  /// Small pictures for the items this invoice can name, so a line shows the
+  /// same picture as the catalogue. Absent means "no picture".
+  Map<String, Uint8List> _itemPictures = const {};
+  String _itemPicturesKey = '';
+
   String? _partyId;
   String? _supplierReference;
   String? _notes;
@@ -468,6 +478,29 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     );
   }
 
+  /// Fetches the pictures for the items this invoice can name, once.
+  ///
+  /// The key is the sorted ids, so a rebuild, a keystroke or a row edit does
+  /// not re-request them. A failure leaves the pictures empty: an invoice must
+  /// still be written when a thumbnail cannot be fetched.
+  void _loadItemPictures(List<Json> items) {
+    final ids = [
+      for (final item in items)
+        if (text(item, 'id').isNotEmpty) text(item, 'id'),
+    ]..sort();
+    final key = ids.join(',');
+    if (key == _itemPicturesKey) return;
+    _itemPicturesKey = key;
+    if (ids.isEmpty) return;
+    ItemImageDataSource(ref.read(apiClientProvider))
+        .thumbnails(ids)
+        .then((pictures) {
+          if (!mounted || _itemPicturesKey != key) return;
+          setState(() => _itemPictures = pictures);
+        })
+        .catchError((Object _) => <String, Uint8List>{});
+  }
+
   void _applyItemDefaults(_LineDraft line, Json item) {
     // The visible blank rate means zero, not an omitted server default.
     // Never replace the entered or blank rate when selecting an item.
@@ -623,6 +656,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final itemsAsync = ref.watch(activeItemsProvider);
+    // Fetching the thumbnails here keeps it next to the watch that supplies
+    // the catalogue; the loader itself does nothing on a rebuild with the
+    // same items.
+    _loadItemPictures(itemsAsync.value ?? const []);
     final partiesAsync = ref.watch(
       widget.kind.isSales ? activeCustomersProvider : activeSuppliersProvider,
     );
@@ -795,6 +832,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       kind: widget.kind,
                       lines: _lines,
                       items: itemsAsync.value ?? const [],
+                      pictures: _itemPictures,
                       costCenters: costCenters,
                       language: language,
                       onChanged: () => setState(() {}),
@@ -1021,6 +1059,7 @@ class _LinesTable extends StatelessWidget {
     required this.kind,
     required this.lines,
     required this.items,
+    required this.pictures,
     required this.costCenters,
     required this.language,
     required this.onChanged,
@@ -1032,6 +1071,9 @@ class _LinesTable extends StatelessWidget {
   final InvoiceKind kind;
   final List<_LineDraft> lines;
   final List<Json> items;
+
+  /// Small pictures by item id; an absent entry means the item has none.
+  final Map<String, Uint8List> pictures;
   final List<Json> costCenters;
   final String language;
   final VoidCallback onChanged;
@@ -1079,9 +1121,22 @@ class _LinesTable extends StatelessWidget {
                                     for (final item in items)
                                       DropdownMenuItem(
                                         value: text(item, 'id'),
-                                        child: Text(
-                                          '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                          overflow: TextOverflow.ellipsis,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            ItemThumbnail(
+                                              bytes:
+                                                  pictures[text(item, 'id')],
+                                              size: 24,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Text(
+                                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                   ],

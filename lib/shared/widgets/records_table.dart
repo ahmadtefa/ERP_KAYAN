@@ -15,6 +15,7 @@ class ColumnSpec {
     this.emphasise = false,
     this.textDirection,
     this.tone,
+    this.leading,
   });
 
   final String label;
@@ -31,6 +32,44 @@ class ColumnSpec {
   /// text is still the same label the column already produced, so nothing is
   /// renamed by the presentation.
   final AppTone Function(Json row)? tone;
+
+  /// A small widget drawn before the value, for columns whose meaning is
+  /// better seen than read - a picture, a swatch. It is decoration: the
+  /// value still carries the text, so a screen reader and a search still
+  /// find it, and the column still exports to CSV.
+  final Widget Function(Json row)? leading;
+}
+
+/// Draws a column's leading widget (a picture, a swatch) beside its text.
+///
+/// Columns without one return their child untouched, so this adds no layout
+/// cost to the hundreds of cells that do not use it. The leading widget is
+/// decoration: the text is still there for the reader, the screen reader and
+/// the export.
+class _CellWithLeading extends StatelessWidget {
+  const _CellWithLeading({
+    required this.column,
+    required this.row,
+    required this.child,
+  });
+
+  final ColumnSpec column;
+  final Json row;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final leading = column.leading;
+    if (leading == null) return child;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        leading(row),
+        const SizedBox(width: AppSpacing.sm),
+        Flexible(child: child),
+      ],
+    );
+  }
 }
 
 /// A record list that stays readable on a phone and on a desktop.
@@ -126,7 +165,10 @@ class RecordsTable extends StatelessWidget {
                   cells: [
                     for (final column in columns)
                       DataCell(
-                        column.tone == null
+                        _CellWithLeading(
+                          column: column,
+                          row: row,
+                          child: column.tone == null
                             ? column.numeric
                                   // A number is shown whole or not at all:
                                   // never wrapped at a comma, never split
@@ -161,6 +203,7 @@ class RecordsTable extends StatelessWidget {
                                   dense: true,
                                 ),
                               ),
+                        ),
                       ),
                     if (actions != null)
                       DataCell(
@@ -220,13 +263,20 @@ class RecordsTable extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    headline,
-                    textDirection: columns.isEmpty ? null : columns.first.textDirection,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                  if (columns.isEmpty)
+                    Text(headline, style: theme.textTheme.titleSmall)
+                  else
+                    _CellWithLeading(
+                      column: columns.first,
+                      row: row,
+                      child: Text(
+                        headline,
+                        textDirection: columns.first.textDirection,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                  ),
                   if (columns.length > 1) const SizedBox(height: AppSpacing.sm),
                   // Label above, value below at full card width. Side by
                   // side, a long Arabic account name and its amount
@@ -270,9 +320,14 @@ class RecordsTable extends StatelessWidget {
                               ),
                             )
                           else
-                            Text(
-                              column.value(row) ?? '—',
-                              textDirection: column.textDirection,
+                            _CellWithLeading(
+                              column: column,
+                              row: row,
+                              child: Text(
+                                column.value(row) ?? '—',
+                                textDirection: column.textDirection,
+                                style: theme.textTheme.bodyMedium,
+                              ),
                             ),
                         ],
                       ),

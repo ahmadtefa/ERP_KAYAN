@@ -35,12 +35,23 @@ class _ImageApi extends ApiClient {
   bool failDelete;
   int fetches = 0;
   int deletes = 0;
+  int batchRequests = 0;
 
   @override
   Future<Map<String, dynamic>> getObject(
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    if (path.endsWith('/items/with-picture')) {
+      batchRequests++;
+      // Only the first id has a picture; the second must come back absent,
+      // which is how the catalogue knows to draw a placeholder.
+      return {
+        'pictures': [
+          {'itemId': 'item-1', 'data': base64Encode(_png)},
+        ],
+      };
+    }
     if (path.contains('/image')) {
       fetches++;
       if (failFetch) throw StateError('NETWORK_DOWN');
@@ -147,5 +158,27 @@ void main() {
     );
 
     expect(find.byType(Image), findsOneWidget);
+  });
+
+  test('a page of thumbnails is one request, and only rows with a picture come back', () async {
+    final api = _ImageApi();
+    final source = ItemImageDataSource(api);
+
+    final pictures = await source.thumbnails(const ['item-1', 'item-2']);
+
+    expect(api.batchRequests, 1);
+    expect(pictures.keys, ['item-1']);
+    expect(pictures['item-1'], isNotNull);
+    // The missing row is absent rather than an empty entry, so the caller can
+    // tell "no picture" from "picture failed to decode".
+    expect(pictures.containsKey('item-2'), isFalse);
+  });
+
+  test('an empty page asks the server nothing at all', () async {
+    final api = _ImageApi();
+    final source = ItemImageDataSource(api);
+
+    expect(await source.thumbnails(const []), isEmpty);
+    expect(api.batchRequests, 0);
   });
 }

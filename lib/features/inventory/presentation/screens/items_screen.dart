@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -18,6 +20,7 @@ import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../data/item_image_data_source.dart';
 import '../widgets/barcode_labels_dialog.dart';
 import '../widgets/item_picture.dart';
 import 'stock_screen.dart' show stockListProvider;
@@ -33,6 +36,25 @@ class ItemsController extends JsonListController {
 final itemsListProvider = AsyncNotifierProvider<JsonListController, List<Json>>(
   ItemsController.new,
 );
+
+/// The small pictures for a page of the catalogue, in one request.
+///
+/// Keyed by the ids on screen, so paging or filtering asks exactly for what is
+/// drawn and nothing more. Items without a picture are simply absent from the
+/// answer and get the placeholder, which is why this is a map and not a list.
+/// The key is the ids joined, not the list: two lists with the same ids are
+/// not equal in Dart, so a list key would re-request the same page on every
+/// rebuild. Sorting first means the same rows always produce the same key.
+final itemThumbnailsProvider =
+    FutureProvider.family<Map<String, Uint8List>, String>((ref, key) async {
+  if (key.isEmpty) return const {};
+  return ItemImageDataSource(ref.watch(apiClientProvider)).thumbnails(
+    key.split(','),
+  );
+});
+
+/// The provider key for a page of ids.
+String _thumbnailKey(Iterable<String> ids) => (ids.toList()..sort()).join(',');
 
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key, this.navigationKey});
@@ -179,9 +201,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         ),
       ),
     );
-    // The row may now show a picture, so the list is reloaded rather than
-    // left claiming the item has none.
-    if (mounted) ref.read(itemsListProvider.notifier).reload();
+    // The row now shows a different picture (or none), so both the list and
+    // the thumbnails it draws are dropped. Invalidating the list alone would
+    // leave the old thumbnail, because it is cached under the page's key.
+    if (mounted) {
+      ref.invalidate(itemThumbnailsProvider);
+      ref.read(itemsListProvider.notifier).reload();
+    }
   }
 
   /// Units, packs and cartons for one item, each with its own code.
@@ -638,75 +664,93 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         onRetry: () => ref.read(itemsListProvider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
         emptyMessage: l10n.noItems,
-        data: (rows) => RecordsTable(
-          rows: _filter(rows),
-          columns: [
-            ColumnSpec(
-              l10n.accountCode,
-              value: (r) => text(r, 'code'),
-              emphasise: true,
-            ),
-            ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
-            ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
-            ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
-            ColumnSpec(
-              l10n.salePrice,
-              numeric: true,
-              value: (r) => formatAmount(asString(r['salePrice'])),
-            ),
-            ColumnSpec(
-              l10n.taxAmount,
-              numeric: true,
-              value: (r) => formatQuantity(asString(r['taxRate'])),
-            ),
-            ColumnSpec(
-              l10n.isStockTracked,
-              value: (r) => flag(r, 'isStockTracked')
-                  ? l10n.stockTracked
-                  : l10n.stockNotTracked,
-            ),
-            ColumnSpec(
-              l10n.status,
-              value: (r) => flag(r, 'isActive', fallback: true)
-                  ? l10n.active
-                  : l10n.inactive,
-              tone: (r) => flag(r, 'isActive', fallback: true)
-                  ? AppTone.success
-                  : AppTone.neutral,
-            ),
-          ],
-          actions: (row) => [
-            IconButton(
-              // The picture is edited on its own screen because changing it
-              // uploads a file, which the plain field sheet cannot do.
-              tooltip: l10n.itemPicture,
-              icon: const Icon(Icons.image_outlined, size: 20),
-              onPressed: _busy ? null : () => _openPicture(row),
-            ),
-            IconButton(
-              tooltip: l10n.edit,
-              icon: const Icon(Icons.edit_outlined, size: 20),
-              onPressed: _busy ? null : () => _save(existing: row),
-            ),
-            IconButton(
-              tooltip: l10n.unitsBarcodesTooltip,
-              icon: const Icon(Icons.qr_code_2_outlined, size: 20),
-              onPressed: _busy ? null : () => _manageUnits(row),
-            ),
-            IconButton(
-              tooltip: flag(row, 'isActive', fallback: true)
-                  ? l10n.deactivate
-                  : l10n.activate,
-              icon: Icon(
-                flag(row, 'isActive', fallback: true)
-                    ? Icons.block_outlined
-                    : Icons.check_circle_outline,
-                size: 20,
+        data: (rows) {
+          final visible = _filter(rows);
+          // Only the rows on screen are asked about, and only once: a filtered
+          // catalogue does not fetch pictures for items it is not drawing.
+          final ids = [
+            for (final row in visible)
+              if (text(row, 'id').isNotEmpty) text(row, 'id'),
+          ];
+          final pictures = ids.isEmpty
+              ? const <String, Uint8List>{}
+              : ref.watch(itemThumbnailsProvider(_thumbnailKey(ids))).valueOrNull ??
+                    const <String, Uint8List>{};
+          return RecordsTable(
+            rows: visible,
+            columns: [
+              ColumnSpec(
+                l10n.accountCode,
+                value: (r) => text(r, 'code'),
+                emphasise: true,
+                // The item's own picture sits with its code rather than in a
+                // column of its own: on a phone the first column is the card's
+                // headline, and a headline of nothing but a picture would lose
+                // the code the rest of the app refers to.
+                leading: (row) => ItemThumbnail(bytes: pictures[text(row, 'id')]),
               ),
-              onPressed: _busy ? null : () => _toggleActive(row),
-            ),
-          ],
-        ),
+              ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+              ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
+              ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
+              ColumnSpec(
+                l10n.salePrice,
+                numeric: true,
+                value: (r) => formatAmount(asString(r['salePrice'])),
+              ),
+              ColumnSpec(
+                l10n.taxAmount,
+                numeric: true,
+                value: (r) => formatQuantity(asString(r['taxRate'])),
+              ),
+              ColumnSpec(
+                l10n.isStockTracked,
+                value: (r) => flag(r, 'isStockTracked')
+                    ? l10n.stockTracked
+                    : l10n.stockNotTracked,
+              ),
+              ColumnSpec(
+                l10n.status,
+                value: (r) => flag(r, 'isActive', fallback: true)
+                    ? l10n.active
+                    : l10n.inactive,
+                tone: (r) => flag(r, 'isActive', fallback: true)
+                    ? AppTone.success
+                    : AppTone.neutral,
+              ),
+            ],
+            actions: (row) => [
+              IconButton(
+                // The picture is edited on its own screen because changing it
+                // uploads a file, which the plain field sheet cannot do.
+                tooltip: l10n.itemPicture,
+                icon: const Icon(Icons.image_outlined, size: 20),
+                onPressed: _busy ? null : () => _openPicture(row),
+              ),
+              IconButton(
+                tooltip: l10n.edit,
+                icon: const Icon(Icons.edit_outlined, size: 20),
+                onPressed: _busy ? null : () => _save(existing: row),
+              ),
+              IconButton(
+                tooltip: l10n.unitsBarcodesTooltip,
+                icon: const Icon(Icons.qr_code_2_outlined, size: 20),
+                onPressed: _busy ? null : () => _manageUnits(row),
+              ),
+              IconButton(
+                tooltip: flag(row, 'isActive', fallback: true)
+                    ? l10n.deactivate
+                    : l10n.activate,
+                icon: Icon(
+                  flag(row, 'isActive', fallback: true)
+                      ? Icons.block_outlined
+                      : Icons.check_circle_outline,
+                  size: 20,
+                ),
+                onPressed: _busy ? null : () => _toggleActive(row),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
