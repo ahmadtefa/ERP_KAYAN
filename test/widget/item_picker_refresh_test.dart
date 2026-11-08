@@ -31,6 +31,16 @@ class _MutableItemApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async => rows;
+
+  /// The dialog also asks for item pictures once it has rows. Leaving this
+  /// unhandled let the request escape to a real socket, whose connect timeout
+  /// outlived the test as a pending timer. An empty answer means "no item in
+  /// this page has a picture", which is a state the picker must draw anyway.
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => const {};
 }
 
 void main() {
