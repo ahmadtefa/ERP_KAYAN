@@ -31,6 +31,7 @@ const { PostingService } = require('../src/modules/accounting/posting.service');
 const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
 const { JournalEntriesController } = require('../src/modules/accounting/journal-entries.controller');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
+const { StockLedgerService } = require('../src/common/warehouse/stock-ledger.service');
 const { ItemsService } = require('../src/modules/inventory/items.service');
 const { ItemsController } = require('../src/modules/inventory/items.controller');
 const { InventoryReportsController } = require('../src/modules/inventory/inventory-reports.controller');
@@ -351,9 +352,10 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const costCenters = new CostCentersService(prisma, audit);
     const numbers = new DocumentNumberService();
     const periods = new FiscalPeriodsService(prisma, audit);
+    const ledger = new StockLedgerService();
     const service = new StockDocumentsService(prisma, numbers,
       new PostingService(numbers, periods, costCenters), new AccountMapService(), audit,
-      new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters);
+      new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters, ledger);
     const date = '2026-10-28';
     // Date clear semantics on the real service and isolated PostgreSQL. This
     // centre is separate from the centre used by stock posting below.
@@ -1175,7 +1177,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
         return typeof value === 'function' ? value.bind(target) : value;
       }});
       const guarded = new StockDocumentsService(wrappedPrisma,service.numbers,service.posting,service.accounts,
-        service.audit,service.settings,service.warehouses,service.costCenters);
+        service.audit,service.settings,service.warehouses,service.costCenters,service.ledger);
       const pending = guarded.post(company,user,doc.id,true,branch,expectedVersion,expectedVersion !== undefined);
       try { await waitForBarrier(barrier,pending); } catch (error) { resume(); throw error; }
       return {pending,resume};
