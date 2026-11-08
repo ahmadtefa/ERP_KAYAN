@@ -118,8 +118,9 @@ export class StockDocumentsService {
       and.push({
         OR: [
           { fromWarehouseId: null, toWarehouseId: null },
-          { fromWarehouseId: { in: ids } },
-          { toWarehouseId: { in: ids } },
+          { fromWarehouseId: null, toWarehouseId: { in: ids } },
+          { fromWarehouseId: { in: ids }, toWarehouseId: null },
+          { fromWarehouseId: { in: ids }, toWarehouseId: { in: ids } },
         ],
       });
       where.AND = and;

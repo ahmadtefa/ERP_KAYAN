@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Put, 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
-import { assertTransferAccess, assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
+import { assertTransferAccess, assertWarehouseAccess, grantsOf, WarehouseAction } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -31,12 +31,13 @@ export class StockDocumentsController {
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
       pageSize: query.pageSize ? Number(query.pageSize) : undefined,
-    }, user.branchId ?? null, warehouseScopeOf(user));
+    }, user.branchId ?? null, grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId));
   }
 
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
-  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'view');
     return this.service.findOne(user.companyId, id, canReadCost(user), user.branchId ?? null);
   }
 
@@ -95,19 +96,30 @@ export class StockDocumentsController {
   /// accepting it are two people's jobs, but both of them have to be trusted
   /// with the shelf it happens on - otherwise the access screen would only
   /// decide who may *start* the paperwork.
-  private async assertDocumentAccess(user: AuthUser, id: string, action: 'approve' | 'post') {
-    const document = (await this.service.findOne(user.companyId, id, canReadCost(user), user.branchId ?? null)) as unknown as {
+  private async assertDocumentAccess(
+    user: AuthUser,
+    id: string,
+    action: WarehouseAction,
+  ) {
+    const document = (await this.service.findOne(
+      user.companyId,
+      id,
+      canReadCost(user),
+      user.branchId ?? null,
+    )) as unknown as {
       kind?: string;
+      voucherKind?: string | null;
       fromWarehouseId?: string | null;
       toWarehouseId?: string | null;
     };
     const kind = String(document?.kind ?? '').toUpperCase();
     if (kind === 'TRANSFER') {
       assertTransferAccess(user, document.fromWarehouseId ?? '', document.toWarehouseId ?? '');
-      return;
+      return document;
     }
     const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';
-    assertWarehouseAccess(user, warehouseId, action === 'approve' ? 'approve' : 'transfer');
+    assertWarehouseAccess(user, warehouseId, action);
+    return document;
   }
 
   /// Approves a write-off. Its own permission: recording a loss and accepting
