@@ -68,7 +68,7 @@ for (const line of lines) {
       line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No ScaffoldMessenger widget found|No Material widget found)/)?.[0] ??
       line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
     ).filter(Boolean).join(' ');
-    if (details) printed.set(event.testID, \`\${printed.get(event.testID) ?? ''} \${details}\`.slice(0, 1000));
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
   // Invoice navigation tests use only checked-in synthetic widget data.
   if (event.type === 'print' && /^(?:sales|purchase) invoice (?:remains guarded when its routed list leaves|unexpected save error is acknowledged without losing inputs)$/.test(tests.get(event.testID) ?? '')) {
