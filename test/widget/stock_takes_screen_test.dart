@@ -132,7 +132,10 @@ class _StockTakesApi extends ApiClient {
   }
 
   @override
-  Future<Map<String, dynamic>> getObject(String path) async {
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
     if (path == '/inventory/stock-takes/st-1' || path == '/inventory/stock-takes/st-new') {
       return Map<String, dynamic>.from(detail);
     }
