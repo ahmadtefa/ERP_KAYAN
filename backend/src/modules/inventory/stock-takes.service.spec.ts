@@ -252,6 +252,28 @@ describe('stock takes', () => {
     return harness;
   }
 
+  it('filters the stock take list to warehouses the caller may view', async () => {
+    const harness = makeHarness();
+
+    await harness.service.list(COMPANY, {}, null, ['warehouse-visible']);
+
+    expect(harness.prisma.stockTakeSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: COMPANY,
+          warehouseId: { in: ['warehouse-visible'] },
+        }),
+      }),
+    );
+    expect(harness.prisma.stockTakeSession.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          warehouseId: { in: ['warehouse-visible'] },
+        }),
+      }),
+    );
+  });
+
   it('freezes lots per lot and the rest per item, at the shelf\u2019s own average', async () => {
     const harness = withWarehouse(
       makeHarness({
