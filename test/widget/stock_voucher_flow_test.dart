@@ -70,11 +70,12 @@ class _VoucherApi extends ApiClient {
         },
       ];
     }
-    if (path == '/inventory/warehouses')
+    if (path == '/inventory/warehouses') {
       return [
         {'id': 'warehouse', 'code': 'WH', 'nameEn': 'Warehouse'},
       ];
-    if (path == '/accounting/cost-centers')
+    }
+    if (path == '/accounting/cost-centers') {
       return [
         {
           'id': 'center',
@@ -83,6 +84,7 @@ class _VoucherApi extends ApiClient {
           'isActive': true,
         },
       ];
+    }
     return [];
   }
 
@@ -176,7 +178,7 @@ class _BilingualVoucherApi extends _VoucherApi {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path == '/inventory/warehouses')
+    if (path == '/inventory/warehouses') {
       return [
         {
           'id': 'warehouse',
@@ -185,7 +187,8 @@ class _BilingualVoucherApi extends _VoucherApi {
           'nameEn': 'Test warehouse',
         },
       ];
-    if (path == '/accounting/cost-centers')
+    }
+    if (path == '/accounting/cost-centers') {
       return [
         {
           'id': 'center',
@@ -195,7 +198,8 @@ class _BilingualVoucherApi extends _VoucherApi {
           'isActive': true,
         },
       ];
-    if (path == '/inventory/items')
+    }
+    if (path == '/inventory/items') {
       return [
         {
           'id': 'item',
@@ -205,6 +209,7 @@ class _BilingualVoucherApi extends _VoucherApi {
           'unit': 'piece',
         },
       ];
+    }
     return super.getList(path, query: query);
   }
 
@@ -632,11 +637,12 @@ void main() {
           find.widgetWithText(TextFormField, 'Quantity in selected unit'),
           '2',
         );
-        if (kind == 'RECEIPT')
+        if (kind == 'RECEIPT') {
           await tester.enterText(
             find.widgetWithText(TextFormField, 'Base unit cost'),
             '7.5',
           );
+        }
         await tester.ensureVisible(find.text('Save draft'));
         await tester.tap(find.text('Save draft'));
         await tester.pumpAndSettle();
