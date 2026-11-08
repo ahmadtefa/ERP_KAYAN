@@ -284,6 +284,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
           canCount: ref.read(currentUserProvider)?.can('inventory.stocktake.count') ?? false,
           canApprove: ref.read(currentUserProvider)?.can('inventory.stocktake.approve') ?? false,
           canPost: ref.read(currentUserProvider)?.can('inventory.stocktake.post') ?? false,
+          canCancel: ref.read(currentUserProvider)?.can('inventory.stocktake.create') ?? false,
           api: ref.read(apiClientProvider),
           onChanged: () => ref.read(stockTakesProvider.notifier).refreshQuietly(),
         ),
@@ -405,6 +406,7 @@ class _StockTakeDetailDialog extends StatefulWidget {
     required this.canCount,
     required this.canApprove,
     required this.canPost,
+    required this.canCancel,
     required this.api,
     required this.onChanged,
   });
@@ -415,6 +417,7 @@ class _StockTakeDetailDialog extends StatefulWidget {
   final bool canCount;
   final bool canApprove;
   final bool canPost;
+  final bool canCancel;
   final ApiClient api;
   final Future<void> Function() onChanged;
 
@@ -457,6 +460,62 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _approveWithConfirmation() async {
+    final confirmed = await confirmAction(
+      context,
+      title: _t('اعتماد الجرد', 'Approve stock take'),
+      message: _t(
+        'سيعتمد شخص آخر الفروق المسجلة. لن تتحرك الأرصدة إلا بعد الترحيل.',
+        'This approves the recorded differences. Stock will not move until posting.',
+      ),
+      confirmLabel: _t('اعتماد', 'Approve'),
+    );
+    if (confirmed && mounted) {
+      await _act('approve', success: _t('تم اعتماد الجرد.', 'Count approved.'));
+    }
+  }
+
+  Future<void> _postWithConfirmation() async {
+    final confirmed = await confirmAction(
+      context,
+      title: _t('ترحيل الجرد', 'Post stock take'),
+      message: _t(
+        'سيتم إنشاء مستند تسوية وترحيل أثره على المخزون والحسابات. لا يمكن التراجع عن الترحيل.',
+        'An adjustment document and its accounting impact will be posted. This cannot be undone.',
+      ),
+      confirmLabel: _t('ترحيل', 'Post'),
+      destructive: true,
+    );
+    if (confirmed && mounted) {
+      await _act('post', success: _t('تم ترحيل الجرد.', 'Count posted.'));
+    }
+  }
+
+  Future<void> _cancelWithReason() async {
+    final reason = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_t('إلغاء الجرد', 'Cancel stock take')),
+        content: TextField(
+          controller: reason,
+          decoration: InputDecoration(labelText: _t('سبب الإلغاء', 'Cancellation reason')),
+          maxLines: 2,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, reason.text.trim()),
+            child: Text(_t('تأكيد الإلغاء', 'Confirm cancellation')),
+          ),
+        ],
+      ),
+    );
+    reason.dispose();
+    if (value == null || !mounted) return;
+    await _act('cancel', body: {'reason': value}, success: _t('تم إلغاء الجرد.', 'Count cancelled.'));
   }
 
   Future<void> _save({required bool finish}) async {
@@ -550,9 +609,11 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
         if (editable) OutlinedButton(onPressed: _busy ? null : () => _save(finish: false), child: Text(_t('حفظ العد', 'Save count'))),
         if (editable) FilledButton(onPressed: _busy ? null : () => _save(finish: true), child: Text(_t('إنهاء وإرسال للمراجعة', 'Finish & review'))),
         if (widget.canApprove && !openedByMe && (status == 'COUNTING' || status == 'REVIEW'))
-          FilledButton.tonal(onPressed: _busy ? null : () => _act('approve', success: _t('تم اعتماد الجرد.', 'Count approved.')), child: Text(_t('اعتماد', 'Approve'))),
+          FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('اعتماد', 'Approve'))),
         if (widget.canPost && status == 'APPROVED')
-          FilledButton(onPressed: _busy ? null : () => _act('post', success: _t('تم ترحيل الجرد.', 'Count posted.')), child: Text(_t('ترحيل', 'Post'))),
+          FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('ترحيل', 'Post'))),
+        if (widget.canCancel && (status == 'COUNTING' || status == 'REVIEW'))
+          OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('إلغاء الجرد', 'Cancel count'))),
         if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
         TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),
       ],
