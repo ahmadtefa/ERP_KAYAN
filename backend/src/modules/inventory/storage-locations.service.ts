@@ -377,6 +377,7 @@ export class StorageLocationsService {
     },
     scope: WarehouseScope,
     warehouseIds?: string[],
+    transferWarehouseIds?: string[],
   ) {
     if (input.fromLocationId === input.toLocationId) {
       throw new BadRequestException(
@@ -411,6 +412,9 @@ export class StorageLocationsService {
     }
     if (warehouseIds !== undefined && !warehouseIds.includes(from.warehouseId)) {
       throw new ForbiddenException('You cannot move stock in this warehouse');
+    }
+    if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(from.warehouseId)) {
+      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
     }
 
     const item = await this.prisma.item.findFirst({

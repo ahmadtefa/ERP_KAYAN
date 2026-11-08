@@ -89,6 +89,7 @@ export class StorageLocationsController {
       dto,
       warehouseScopeOf(user),
       grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      grantsOf(user)?.filter((grant) => grant.canTransfer).map((grant) => grant.warehouseId),
     );
   }
 
