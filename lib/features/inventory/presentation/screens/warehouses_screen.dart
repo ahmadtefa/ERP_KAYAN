@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../shared/widgets/data_dialog.dart';
+import '../widgets/warehouse_balance_dialog.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -130,6 +132,11 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
             ),
           ],
           actions: (row) => [
+            IconButton(
+              tooltip: _arabic ? 'أرصدة المستودع' : 'Warehouse balances',
+              icon: const Icon(Icons.account_balance_wallet_outlined, size: 20),
+              onPressed: () => _openBalances(row),
+            ),
             if (canManage) ...[
               IconButton(
                 tooltip: l10n.edit,
@@ -167,6 +174,19 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
               text(r, 'address').toLowerCase().contains(needle),
         )
         .toList(growable: false);
+  }
+
+  void _openBalances(Json row) {
+    final id = text(row, 'id');
+    if (id.isEmpty) return;
+    showDataDialog<void>(
+      context,
+      storageKey: 'warehouse-balances-$id',
+      title: _arabic ? 'أرصدة ' + _name(row) : _name(row) + ' balances',
+      icon: Icons.account_balance_wallet_outlined,
+      initialSize: const Size(1000, 640),
+      child: WarehouseBalanceDialog(warehouseId: id, warehouseName: _name(row)),
+    );
   }
 
   Future<void> _save({Json? existing}) async {
