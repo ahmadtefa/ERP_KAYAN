@@ -257,11 +257,13 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
     if (ids.isEmpty) return;
     ItemImageDataSource(ref.read(apiClientProvider))
         .thumbnails(ids)
-        .then((pictures) {
+        .then<void>((pictures) {
           if (!mounted || _picturesKey != key) return;
           setState(() => _pictures = pictures);
-        })
-        .catchError((Object _) => <String, Uint8List>{});
+        }, onError: (Object _) {
+          // A thumbnail that cannot be fetched is not worth a dialog: the
+          // picker still lists every item, just without pictures.
+        });
   }
 
   List<Json> _filter(List<Json> rows, String language) {

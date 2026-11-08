@@ -494,11 +494,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (ids.isEmpty) return;
     ItemImageDataSource(ref.read(apiClientProvider))
         .thumbnails(ids)
-        .then((pictures) {
+        .then<void>((pictures) {
           if (!mounted || _itemPicturesKey != key) return;
           setState(() => _itemPictures = pictures);
-        })
-        .catchError((Object _) => <String, Uint8List>{});
+        }, onError: (Object _) {
+          // A thumbnail that cannot be fetched is not worth a dialog: the
+          // picker still lists every item, just without pictures.
+        });
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
@@ -1121,6 +1123,11 @@ class _LinesTable extends StatelessWidget {
                                     for (final item in items)
                                       DropdownMenuItem(
                                         value: text(item, 'id'),
+                                        // No Flexible here: a dropdown item
+                                        // is laid out at the text's intrinsic
+                                        // width, so a flex child would assert.
+                                        // The ellipsis on the field itself
+                                        // does the clipping.
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -1130,11 +1137,9 @@ class _LinesTable extends StatelessWidget {
                                               size: 24,
                                             ),
                                             const SizedBox(width: 8),
-                                            Flexible(
-                                              child: Text(
-                                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
+                                            Text(
+                                              '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ],
                                         ),
