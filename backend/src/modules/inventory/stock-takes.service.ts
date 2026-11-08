@@ -44,9 +44,19 @@ export class StockTakesService {
     const where: Prisma.StockTakeSessionWhereInput = {
       companyId,
       ...(scope !== null ? { branchId: { in: scope } } : {}),
-      ...(warehouseIds !== undefined ? { warehouseId: { in: warehouseIds } } : {}),
+      ...(warehouseIds !== undefined || query.warehouseId
+        ? {
+            warehouseId: {
+              in:
+                warehouseIds !== undefined
+                  ? query.warehouseId
+                    ? warehouseIds.filter((id) => id === query.warehouseId)
+                    : warehouseIds
+                  : [query.warehouseId!],
+            },
+          }
+        : {}),
       ...(query.status ? { status: query.status.toUpperCase() } : {}),
-      ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.stockTakeSession.findMany({

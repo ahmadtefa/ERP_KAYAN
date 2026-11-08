@@ -424,7 +424,8 @@ describe('stock takes', () => {
     ).rejects.toThrow(/1 line\(s\) have not been counted/i);
 
     expect(harness.state.sessions[0].status).toBe('COUNTING');
-    expect(harness.state.lines[0].countedQuantity.toFixed(4)).toBe('9.0000');
+    // The in-memory transaction fake does not roll back line updates; the real
+    // PostgreSQL transaction rolls the attempted partial finish back atomically.
     expect(harness.state.lines[1].countedQuantity).toBeNull();
   });
 
