@@ -88,10 +88,20 @@ Widget _host(_ImageApi api) => ProviderScope(
 );
 
 void main() {
+  /// Pumps the editor past its loading state.
+  ///
+  /// `pumpAndSettle` cannot be used: the editor shows a CircularProgress
+  /// Indicator while it loads, that spinner animates forever, and settling
+  /// therefore times out. A bounded pump lets the completed future deliver.
+  Future<void> settleEditor(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+
   testWidgets('reads the picture from the server and offers to change it', (tester) async {
     final api = _ImageApi(hasPicture: true);
     await tester.pumpWidget(_host(api));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     expect(api.fetches, 1, reason: 'the editor must ask the server, not guess');
     // Replace is offered once a picture exists; the remove action appears too.
@@ -102,7 +112,7 @@ void main() {
   testWidgets('offers an add action when the item has no picture', (tester) async {
     final api = _ImageApi();
     await tester.pumpWidget(_host(api));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     expect(find.byKey(const Key('item-image-choose')), findsOneWidget);
     // Nothing to remove, so no remove button.
@@ -112,10 +122,10 @@ void main() {
   testWidgets('removing the picture calls the server and drops the preview', (tester) async {
     final api = _ImageApi(hasPicture: true);
     await tester.pumpWidget(_host(api));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     await tester.tap(find.byKey(const Key('item-image-remove')));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     expect(api.deletes, 1);
     expect(find.byKey(const Key('item-image-remove')), findsNothing);
@@ -124,11 +134,11 @@ void main() {
   testWidgets('a failed delete is reported and the truth is re-read', (tester) async {
     final api = _ImageApi(hasPicture: true, failDelete: true);
     await tester.pumpWidget(_host(api));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
     final fetchesBefore = api.fetches;
 
     await tester.tap(find.byKey(const Key('item-image-remove')));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     expect(api.deletes, 1);
     // The deletion may have committed before the response was lost, so the
@@ -139,7 +149,7 @@ void main() {
   testWidgets('a failed read says so rather than showing an empty picture', (tester) async {
     final api = _ImageApi(failFetch: true);
     await tester.pumpWidget(_host(api));
-    await tester.pumpAndSettle();
+    await settleEditor(tester);
 
     expect(find.textContaining('could not be loaded'), findsOneWidget);
   });
