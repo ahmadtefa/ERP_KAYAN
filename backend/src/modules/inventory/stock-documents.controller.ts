@@ -135,7 +135,17 @@ export class StockDocumentsController {
     };
     const kind = String(document?.kind ?? '').toUpperCase();
     if (kind === 'TRANSFER') {
-      assertTransferAccess(user, document.fromWarehouseId ?? '', document.toWarehouseId ?? '');
+      if (action === 'view') {
+        assertWarehouseAccess(user, document.fromWarehouseId, 'view');
+        assertWarehouseAccess(user, document.toWarehouseId, 'view');
+      } else if (action === 'approve') {
+        assertWarehouseAccess(user, document.fromWarehouseId, 'approve');
+        assertWarehouseAccess(user, document.toWarehouseId, 'approve');
+      } else if (action === 'reverse') {
+        assertTransferAccess(user, document.toWarehouseId ?? '', document.fromWarehouseId ?? '');
+      } else {
+        assertTransferAccess(user, document.fromWarehouseId ?? '', document.toWarehouseId ?? '');
+      }
       return document;
     }
     const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';

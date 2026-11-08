@@ -55,6 +55,42 @@ describe('stock document warehouse access', () => {
     );
   });
 
+  it('allows a read-only user to open a transfer when both warehouses are visible', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'doc-visible',
+      kind: 'TRANSFER',
+      fromWarehouseId: 'warehouse-visible',
+      toWarehouseId: 'warehouse-destination',
+    });
+
+    const result = await controller.findOne(user({
+      warehouseAccess: [
+        {
+          warehouseId: 'warehouse-visible',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+        {
+          warehouseId: 'warehouse-destination',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+      ],
+    }), 'doc-visible');
+
+    expect(result).toMatchObject({ id: 'doc-visible' });
+  });
+
   it('refuses a transfer detail if either warehouse is outside the user grants', async () => {
     service.findOne.mockResolvedValueOnce({
       id: 'doc-1',
