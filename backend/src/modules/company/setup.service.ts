@@ -85,11 +85,22 @@ export class SetupService {
     // reused rather than duplicated. This preflight avoids hashing on the
     // common closed-route path; the transaction repeats both checks under the
     // advisory lock.
-    const [companyRows, userRows] = await Promise.all([
+    // A reset retires its company and keeps exactly one account - the
+    // administrator who pressed the button - so that setup can complete
+    // against them instead of duplicating either. Both conditions have to
+    // hold together: one orphaned account with no retired company is a
+    // damaged database and stays closed, and so does any second account.
+    const [companyRows, userRows, retiredCompany] = await Promise.all([
       this.prisma.company.count({ where: { deletedAt: null } }),
       this.prisma.user.count(),
+      this.prisma.company.findFirst({
+        where: { deletedAt: { not: null } },
+        orderBy: { deletedAt: 'desc' },
+        select: { id: true },
+      }),
     ]);
-    if (companyRows > 0 || userRows > 0) {
+    const resumingAfterReset = retiredCompany !== null && userRows <= 1;
+    if (companyRows > 0 || (userRows > 0 && !resumingAfterReset)) {
       throw new ConflictException(
         'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
       );
@@ -118,7 +129,8 @@ export class SetupService {
           select: { id: true },
         }),
       ]);
-      if (existingCompanies > 0 || existingUsers > 0) {
+      const resumeInTransaction = retiredCompany !== null && existingUsers <= 1;
+      if (existingCompanies > 0 || (existingUsers > 0 && !resumeInTransaction)) {
         throw new ConflictException(
           'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
         );
@@ -189,18 +201,42 @@ export class SetupService {
       await this.seedPermissions(tx);
       const roles = await this.seedRoles(tx, company.id);
 
-      // A public setup request can only create the first administrator on a
-      // pristine database. Existing accounts are never adopted or overwritten.
-      const admin = await tx.user.create({
-        data: {
-          companyId: company.id,
-          username: dto.adminUsername,
-          fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-          fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-          passwordHash,
-          isSuperAdmin: true,
-        },
-      });
+      // The first administrator of this company: the retained one when a
+      // reset kept it, otherwise a new account. A reset deletes every role and
+      // branch assignment but keeps the administrator so nobody locks
+      // themselves out, so that account has to be re-linked here or the
+      // installation would come back with an administrator who cannot do
+      // anything. Its identity is kept as it is; only the password the
+      // operator just typed replaces the old one.
+      const retainedAdmin = retiredCompany
+        ? await tx.user.findFirst({
+            where: { companyId: company.id },
+            orderBy: [{ isSuperAdmin: 'desc' }, { createdAt: 'asc' }],
+            select: { id: true },
+          })
+        : null;
+      const admin = retainedAdmin
+        ? await tx.user.update({
+            where: { id: retainedAdmin.id },
+            data: {
+              passwordHash,
+              fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
+              fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
+              isSuperAdmin: true,
+              isActive: true,
+              deletedAt: null,
+            },
+          })
+        : await tx.user.create({
+            data: {
+              companyId: company.id,
+              username: dto.adminUsername,
+              fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
+              fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
+              passwordHash,
+              isSuperAdmin: true,
+            },
+          });
 
       await tx.userRole.create({
         data: {

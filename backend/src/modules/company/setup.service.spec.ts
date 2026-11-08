@@ -69,21 +69,52 @@ describe('SetupService status and public setup boundary', () => {
   });
 
   it.each([
-    ['soft-deleted company data', 1, 0],
-    ['orphaned user data', 0, 1],
-    ['active company data', 1, 1],
-  ])('rejects public initial setup over %s before opening a transaction', async (_case, companies, users) => {
+    // A live company closes setup even with nobody to sign in.
+    ['a live company', 1, 0, null],
+    // One surviving account with no company and nothing retired is a damaged
+    // database: recovery, never a public setup that would adopt it.
+    ['an orphaned account', 0, 1, null],
+    ['a live company and an account', 1, 1, null],
+    // After a reset the single retained administrator does not close setup,
+    // but a second account would: that one is not the operator who reset.
+    ['a retained administrator plus another account', 0, 2, 'retired'],
+  ])(
+    'rejects public initial setup over %s before opening a transaction',
+    async (_case, companies, users, retired) => {
+      const prisma = {
+        company: {
+          count: jest.fn().mockResolvedValue(companies),
+          findFirst: jest.fn().mockResolvedValue(retired ? { id: 'retired' } : null),
+        },
+        user: { count: jest.fn().mockResolvedValue(users) },
+        $transaction: jest.fn(),
+      };
+      const service = new SetupService(prisma as any, {} as any, licensingStub);
+
+      await expect(service.initialSetup({} as any)).rejects.toThrow(
+        'This installation already contains company or user data',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reopens setup for the single administrator a reset kept', async () => {
+    // Two halves must hold together: a retired company row, and no more than
+    // the one account the reset preserved. This is the reset promise.
     const prisma = {
-      company: { count: jest.fn().mockResolvedValue(companies) },
-      user: { count: jest.fn().mockResolvedValue(users) },
+      company: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue({ id: 'retired' }),
+      },
+      user: { count: jest.fn().mockResolvedValue(1) },
       $transaction: jest.fn(),
     };
     const service = new SetupService(prisma as any, {} as any, licensingStub);
 
-    await expect(service.initialSetup({} as any)).rejects.toThrow(
-      'This installation already contains company or user data',
-    );
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    // It gets far enough to hash a password and open the transaction, which
+    // is exactly the point the guard would have stopped it.
+    await expect(service.initialSetup({ adminPassword: 'safe-test-password' } as any)).rejects.toThrow();
+    expect(prisma.$transaction).toHaveBeenCalled();
   });
 
   it('rechecks company and user rows after taking the transaction lock', async () => {
@@ -97,7 +128,10 @@ describe('SetupService status and public setup boundary', () => {
       user: { count: jest.fn().mockResolvedValue(0) },
     };
     const prisma = {
-      company: { count: jest.fn().mockResolvedValue(0) },
+      company: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       user: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn(async (callback: (transaction: unknown) => unknown) =>
         callback(tx),
