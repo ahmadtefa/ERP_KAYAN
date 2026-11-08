@@ -4685,6 +4685,30 @@ abstract class AppLocalizations {
   /// **'Layout saved to the library'**
   String get templateSaved;
 
+  /// No description provided for @templateApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Layout applied'**
+  String get templateApplied;
+
+  /// No description provided for @templateApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply template'**
+  String get templateApply;
+
+  /// No description provided for @templateRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Update the template with the current design'**
+  String get templateRefresh;
+
+  /// No description provided for @templateDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete template'**
+  String get templateDelete;
+
   /// No description provided for @keepOneColumnVisible.
   ///
   /// In en, this message translates to:

@@ -417,7 +417,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
                 fit: BoxFit.contain,
               ),
               IconButton(
-                tooltip: 'إزالة / Remove',
+                tooltip: context.l10n.removeFile,
                 onPressed: busy ? null : () => setState(() => _logo = null),
                 icon: const Icon(Icons.close, size: 18),
               ),

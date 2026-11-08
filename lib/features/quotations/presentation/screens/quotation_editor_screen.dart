@@ -1262,7 +1262,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         await ref.read(apiClientProvider).put('/sales/quotation-design-templates/$id', body: body);
       }
       ref.invalidate(quotationDesignTemplatesProvider);
-      if (mounted) showMessage(context, 'تم حفظ قالب التصميم');
+      if (mounted) showMessage(context, context.l10n.templateSaved);
     } on Failure catch (error) {
       if (mounted) showMessage(context, error, error: true);
     } catch (error) {
@@ -1302,7 +1302,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             spacing: 2,
                             children: [
                               IconButton(
-                                tooltip: 'تطبيق القالب',
+                                tooltip: context.l10n.templateApply,
                                 icon: const Icon(Icons.check_circle_outline),
                                 onPressed: () {
                                   final raw = template['design'];
@@ -1311,12 +1311,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       Map<String, dynamic>.from(raw),
                                     ));
                                     Navigator.of(dialogContext).pop();
-                                    showMessage(context, 'تم تطبيق قالب التصميم');
+                                    showMessage(context, context.l10n.templateApplied);
                                   }
                                 },
                               ),
                               IconButton(
-                                tooltip: 'تحديث القالب بالتصميم الحالي',
+                                tooltip: context.l10n.templateRefresh,
                                 icon: const Icon(Icons.save_outlined),
                                 onPressed: () async {
                                   Navigator.of(dialogContext).pop();
@@ -1324,7 +1324,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                 },
                               ),
                               IconButton(
-                                tooltip: 'حذف القالب',
+                                tooltip: context.l10n.templateDelete,
                                 icon: const Icon(Icons.delete_outline, color: Colors.red),
                                 onPressed: () async {
                                   try {

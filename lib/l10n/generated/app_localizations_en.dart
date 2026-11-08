@@ -2420,6 +2420,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get templateSaved => 'Layout saved to the library';
 
   @override
+  String get templateApplied => 'Layout applied';
+
+  @override
+  String get templateApply => 'Apply template';
+
+  @override
+  String get templateRefresh => 'Update the template with the current design';
+
+  @override
+  String get templateDelete => 'Delete template';
+
+  @override
   String get keepOneColumnVisible => 'Keep at least one column visible.';
 
   @override

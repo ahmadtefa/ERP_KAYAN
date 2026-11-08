@@ -2403,6 +2403,18 @@ class AppLocalizationsAr extends AppLocalizations {
   String get templateSaved => 'تم حفظ التخطيط في المكتبة';
 
   @override
+  String get templateApplied => 'تم تطبيق التخطيط';
+
+  @override
+  String get templateApply => 'تطبيق القالب';
+
+  @override
+  String get templateRefresh => 'تحديث القالب بالتصميم الحالي';
+
+  @override
+  String get templateDelete => 'حذف القالب';
+
+  @override
   String get keepOneColumnVisible => 'أبقِ عمودًا واحدًا ظاهرًا على الأقل.';
 
   @override
