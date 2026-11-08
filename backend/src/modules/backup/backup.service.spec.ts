@@ -99,6 +99,17 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
               code: 'KAYAN',
               nameAr: 'شركة كيان',
               nameEn: 'Kayan Company',
+              taxId: null,
+              commercialRegistration: null,
+              addressEn: null,
+              addressAr: null,
+              phone: null,
+              email: null,
+              address: null,
+              currency: 'EGP',
+              timezone: 'Africa/Cairo',
+              logoData: null,
+              logoMime: null,
             };
           }
           return null;
