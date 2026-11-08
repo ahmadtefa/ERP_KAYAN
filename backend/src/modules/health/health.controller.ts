@@ -42,16 +42,29 @@ export class HealthController {
       try {
         const counts = await this.withTimeout(
           Promise.all([
-            this.prisma.company.count(),
+            // Live companies only, matching /setup/status: a reset retires the
+            // company on purpose so setup can be completed again.
+            this.prisma.company.count({ where: { deletedAt: null } }),
             this.prisma.user.count(),
             this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
+            this.prisma.company.findFirst({
+              where: { deletedAt: { not: null } },
+              orderBy: { deletedAt: 'desc' },
+              select: { id: true },
+            }),
           ]),
           HealthController.DATABASE_DETAILS_TIMEOUT_MS,
           'database setup-state query',
         );
-        const [companies, users, active] = counts;
-        needsSetup = companies === 0 && users === 0;
-        recoveryRequired = (companies > 0 && active === 0) || (companies === 0 && users > 0);
+        const [companies, users, active, retired] = counts;
+        // Same three states as /setup/status, so the shell and the login
+        // screen never disagree: a reset retired its company and kept the row
+        // for setup to complete again; user rows with no live and no retired
+        // company is a damaged database and genuine recovery; a live company
+        // that lost every usable account is recovery too.
+        const wasReset = companies === 0 && retired !== null;
+        needsSetup = companies === 0 && (users === 0 || wasReset);
+        recoveryRequired = companies === 0 ? !wasReset && users > 0 : active === 0;
       } catch (error) {
         HealthController.logger.warn(
           `Database is reachable but setup-state details were not ready: ${(error as Error).message}`,

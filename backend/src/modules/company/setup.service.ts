@@ -34,19 +34,41 @@ export class SetupService {
   ) {}
 
   async status() {
-    const [companies, users, activeCompanyUsers] = await Promise.all([
-      // Any company row, including a soft-deleted one, means this is not a
-      // pristine installation. Public first-run setup must never revive it.
-      this.prisma.company.count(),
+    const [companies, users, activeCompanyUsers, retiredCompany] = await Promise.all([
+      // A retired company is not a set-up installation. The reset marks the
+      // row deleted precisely so setup can be completed again against it, and
+      // the settings screen promises the operator exactly that ("the program
+      // will ask to be set up again"). Counting retired rows here contradicted
+      // that promise and sent the operator to authorised recovery instead.
+      this.prisma.company.count({ where: { deletedAt: null } }),
       // Include retired accounts too: the public setup endpoint refuses any user row.
       this.prisma.user.count(),
       this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
+      // A reset keeps the company row, marked deleted, so setup can be
+      // completed against it again. Its presence is what separates "the
+      // operator just reset this installation" from "there are user rows and
+      // no company at all", which is a damaged database and real recovery.
+      this.prisma.company.findFirst({
+        where: { deletedAt: { not: null } },
+        orderBy: { deletedAt: 'desc' },
+        select: { id: true },
+      }),
     ]);
+    // Three states, and they must not be confused with each other:
+    //
+    //  * no live company and a retired row: a reset, which the settings screen
+    //    promises will ask to be set up again - so setup, over that row;
+    //  * no live company and no retired row: a pristine installation, so setup
+    //    can create the first company;
+    //  * user rows but no live company and nothing retired: nobody can reach
+    //    them, which is recovery, not a fresh install.
+    //
+    // Recovery also covers a live company that has lost every account able to
+    // sign in. Neither recovery case may reopen public setup.
+    const wasReset = companies === 0 && retiredCompany !== null;
     return {
-      needsSetup: companies === 0 && users === 0,
-      recoveryRequired:
-        (companies > 0 && activeCompanyUsers === 0) ||
-        (companies === 0 && users > 0),
+      needsSetup: companies === 0 && (users === 0 || wasReset),
+      recoveryRequired: companies === 0 ? !wasReset && users > 0 : activeCompanyUsers === 0,
       companyCount: companies,
       hasUsers: users > 0,
     };
@@ -54,12 +76,17 @@ export class SetupService {
 
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
     // This endpoint is public so a genuinely empty installation can be
-    // initialized. It must never become an account-recovery or company-revival
-    // endpoint: even soft-deleted companies and orphaned users close setup.
-    // This preflight avoids hashing on the common closed-route path; the
-    // transaction repeats both checks under the advisory lock.
+    // initialized. It must never become an account-recovery endpoint: any
+    // existing account closes it, so a stranger cannot adopt somebody's users.
+    //
+    // A live company closes it too, because one installation holds one active
+    // company. A company that the reset retired does not - reset keeps that
+    // row precisely so setup can be completed against it again, and the row is
+    // reused rather than duplicated. This preflight avoids hashing on the
+    // common closed-route path; the transaction repeats both checks under the
+    // advisory lock.
     const [companyRows, userRows] = await Promise.all([
-      this.prisma.company.count(),
+      this.prisma.company.count({ where: { deletedAt: null } }),
       this.prisma.user.count(),
     ]);
     if (companyRows > 0 || userRows > 0) {
@@ -79,12 +106,17 @@ export class SetupService {
       // Serialize concurrent first-run requests across application processes;
       // the authoritative company check must occur after acquiring the lock.
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(172895144, 485772)`);
-      // Repeat the pristine-installation check only after acquiring the
-      // transaction-scoped lock. Count soft-deleted rows too: setup is never
-      // allowed to resurrect a tenant or replace an existing administrator.
-      const [existingCompanies, existingUsers] = await Promise.all([
-        tx.company.count(),
+      // Repeat the check only after acquiring the transaction-scoped lock.
+      // Any existing account closes setup, and so does a live company; only a
+      // company the reset retired may be completed again.
+      const [existingCompanies, existingUsers, retiredCompany] = await Promise.all([
+        tx.company.count({ where: { deletedAt: null } }),
         tx.user.count(),
+        tx.company.findFirst({
+          where: { deletedAt: { not: null } },
+          orderBy: { deletedAt: 'desc' },
+          select: { id: true },
+        }),
       ]);
       if (existingCompanies > 0 || existingUsers > 0) {
         throw new ConflictException(
@@ -92,18 +124,26 @@ export class SetupService {
         );
       }
 
-      const company = await tx.company.create({
-        data: {
-          code: dto.companyCode,
-          nameEn: dto.companyNameEn,
-          nameAr: dto.companyNameAr,
-          phone: dto.phone ?? null,
-          email: dto.email ?? null,
-          address: dto.address ?? null,
-          logoData: logo?.data ?? null,
-          logoMime: logo?.mime ?? null,
-        },
-      });
+      // Complete setup against the retired row instead of adding a second
+      // company: one installation holds one active company, and the reset
+      // kept this row for exactly this moment. The request's own code and
+      // names are what the operator is entering now, so they win.
+      const profile = {
+        code: dto.companyCode,
+        nameEn: dto.companyNameEn,
+        nameAr: dto.companyNameAr,
+        phone: dto.phone ?? null,
+        email: dto.email ?? null,
+        address: dto.address ?? null,
+        logoData: logo?.data ?? null,
+        logoMime: logo?.mime ?? null,
+      };
+      const company = retiredCompany
+        ? await tx.company.update({
+            where: { id: retiredCompany.id },
+            data: { ...profile, deletedAt: null },
+          })
+        : await tx.company.create({ data: profile });
 
       const isBranch = dto.facilityKind === 'BRANCH';
       const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;

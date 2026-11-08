@@ -5,9 +5,20 @@ import { SetupService } from './setup.service';
 const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('SetupService status and public setup boundary', () => {
-  const makeService = (companyRows: number, userRows: number, activeUsers = 0) => {
+  /// `companyRows` counts live companies. `retired` says whether a reset left
+  /// a company row behind, which is the one thing that tells a reset apart
+  /// from a damaged database holding user rows with no company at all.
+  const makeService = (
+    companyRows: number,
+    userRows: number,
+    activeUsers = 0,
+    retired = false,
+  ) => {
     const prisma = {
-      company: { count: jest.fn().mockResolvedValue(companyRows) },
+      company: {
+        count: jest.fn().mockResolvedValue(companyRows),
+        findFirst: jest.fn().mockResolvedValue(retired ? { id: 'retired-company' } : null),
+      },
       user: {
         count: jest.fn()
           .mockResolvedValueOnce(userRows)
@@ -25,7 +36,18 @@ describe('SetupService status and public setup boundary', () => {
     });
   });
 
-  it('classifies a soft-deleted company as recovery, never first-run setup', async () => {
+  it('treats a company retired by a reset as setup again, not recovery', async () => {
+    // The settings screen tells the operator the program "will ask to be set
+    // up again". The reset keeps the row for exactly that, so this state must
+    // open setup - while a live company without a usable account stays the
+    // recovery case below.
+    const { service } = makeService(0, 1, 0, true);
+    expect(await service.status()).toMatchObject({
+      needsSetup: true, recoveryRequired: false, companyCount: 0, hasUsers: true,
+    });
+  });
+
+  it('classifies a live company with no usable account as recovery', async () => {
     const { service } = makeService(1, 0, 0);
     expect(await service.status()).toMatchObject({
       needsSetup: false, recoveryRequired: true, companyCount: 1,
@@ -68,7 +90,10 @@ describe('SetupService status and public setup boundary', () => {
     const executeRaw = jest.fn().mockResolvedValue(1);
     const tx = {
       $executeRaw: executeRaw,
-      company: { count: jest.fn().mockResolvedValue(1) },
+      company: {
+        count: jest.fn().mockResolvedValue(1),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       user: { count: jest.fn().mockResolvedValue(0) },
     };
     const prisma = {
@@ -86,7 +111,9 @@ describe('SetupService status and public setup boundary', () => {
       'This installation already contains company or user data',
     );
     expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(tx.company.count).toHaveBeenCalledWith();
+    // The authoritative check counts live companies only: a company retired
+    // by a reset is allowed through so setup can complete against its row.
+    expect(tx.company.count).toHaveBeenCalledWith({ where: { deletedAt: null } });
     expect(tx.user.count).toHaveBeenCalledWith();
   });
 });

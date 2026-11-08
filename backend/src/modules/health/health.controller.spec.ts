@@ -47,6 +47,7 @@ describe('HealthController', () => {
       }),
       company: {
         count: jest.fn().mockResolvedValue(1),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       user: {
         count: jest.fn().mockResolvedValue(1),
@@ -71,10 +72,30 @@ describe('HealthController', () => {
     expect(res.recoveryRequired).toBe(true);
   });
 
-  it('requires recovery when a reset company and its retained user are soft-deleted', async () => {
+  it('asks for setup, not recovery, after a reset retired the company', async () => {
+    // The settings screen promises the program "will ask to be set up again".
+    // The reset keeps the company row so that promise can be kept; /health has
+    // to agree with /setup/status or the shell shows recovery instead.
     mockPrisma.company.count.mockImplementation((args?: { where?: unknown }) =>
       Promise.resolve(args?.where ? 0 : 1),
     );
+    mockPrisma.company.findFirst.mockResolvedValue({ id: 'retired' });
+    mockPrisma.user.count.mockImplementation((args?: { where?: unknown }) =>
+      Promise.resolve(args?.where ? 0 : 1),
+    );
+
+    const res = await controller.check();
+
+    expect(res.needsSetup).toBe(true);
+    expect(res.recoveryRequired).toBe(false);
+    // Live companies only, so a retired row cannot make this look set up.
+    expect(mockPrisma.company.count).toHaveBeenCalledWith({ where: { deletedAt: null } });
+    expect(mockPrisma.user.count).toHaveBeenCalledWith();
+  });
+
+  it('requires recovery when user rows survive with no company at all', async () => {
+    mockPrisma.company.count.mockResolvedValue(0);
+    mockPrisma.company.findFirst.mockResolvedValue(null);
     mockPrisma.user.count.mockImplementation((args?: { where?: unknown }) =>
       Promise.resolve(args?.where ? 0 : 1),
     );
@@ -83,8 +104,6 @@ describe('HealthController', () => {
 
     expect(res.needsSetup).toBe(false);
     expect(res.recoveryRequired).toBe(true);
-    expect(mockPrisma.company.count).toHaveBeenCalledWith();
-    expect(mockPrisma.user.count).toHaveBeenCalledWith();
   });
 
   it('reports setup only when the database has no companies or users', async () => {

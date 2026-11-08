@@ -1524,24 +1524,23 @@ async function main() {
 
     const setupAfterReset = await api('/setup/status', { noAuth: true });
     const healthAfterReset = await api('/health', { noAuth: true });
-    // The reset retires the company and keeps the administrator, so what is
-    // left is "company or user data without an active company account". That
-    // is recovery, never a fresh install: the public setup endpoint must not
-    // be able to recreate a tenant over retained data, and the desktop shell
-    // shows the authorised-recovery message for the same state. Asserting
-    // needsSetup here would be asking for that protection to be removed.
+    // The reset retires the company, keeping its row so setup can be completed
+    // against it, and keeps the administrator. The settings screen promises
+    // exactly this: "the program will ask to be set up again". It is setup,
+    // not recovery - recovery is for a company that is still live but has lost
+    // every account able to sign in.
     check(
-      'setup after reset asks for authorised recovery instead of reopening first-run setup',
-      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === false &&
-        setupAfterReset.data?.recoveryRequired === true &&
-        Number(setupAfterReset.data?.companyCount) === 1 && setupAfterReset.data?.hasUsers === true,
+      'setup after reset reopens first-run setup while the administrator is kept',
+      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === true &&
+        setupAfterReset.data?.recoveryRequired === false &&
+        Number(setupAfterReset.data?.companyCount) === 0 && setupAfterReset.data?.hasUsers === true,
       `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, recovery ${setupAfterReset.data?.recoveryRequired}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
     );
     check(
       'the API and PostgreSQL stay healthy after reset',
       healthAfterReset.status === 200 && healthAfterReset.data?.status === 'ok' &&
-        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.recoveryRequired === true,
-      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, recovery ${healthAfterReset.data?.recoveryRequired}`,
+        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.needsSetup === true,
+      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, setup ${healthAfterReset.data?.needsSetup}`,
     );
     const administratorAfterReset = await api('/auth/login', {
       method: 'POST',
@@ -1572,14 +1571,15 @@ async function main() {
         seedChartOfAccounts: true,
       },
     });
-    // The retained administrator and the retained company rows close this
-    // public route. Recovering the installation is a separate, authorised
-    // operation; a public POST must not be able to recreate a tenant over
-    // data that is still there, which is also why the row was kept.
+    // Setup completes against the retired company row rather than adding a
+    // second company: one installation holds one active company, and the
+    // request's own company code and names win over the retired ones.
     check(
-      'public first-run setup stays closed over the retained company and administrator',
-      completedSetup.status === 409,
-      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode ?? '-'}`,
+      'the preserved administrator can finish first-run setup on the reset company',
+      completedSetup.status < 300 &&
+        completedSetup.data?.companyId === reset.data?.companyId &&
+        completedSetup.data?.companyCode === reset.data?.companyCode,
+      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode ?? '-'}, administrator ${completedSetup.data?.adminUsername ?? '-'}`,
     );
 
     const setupAfterCompletion = await api('/setup/status', { noAuth: true });
