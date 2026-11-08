@@ -38,8 +38,8 @@ export class StockDocumentsController {
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
   async findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertDocumentAccess(user, id, 'view');
-    return this.service.findOne(user.companyId, id, canReadCost(user), user.branchId ?? null);
+    const document = await this.assertDocumentAccess(user, id, 'view');
+    return this.service.findOne(user.companyId, id, this.mayReadDocumentCost(user, document), user.branchId ?? null);
   }
 
   @Post()
@@ -93,14 +93,14 @@ export class StockDocumentsController {
       document.toWarehouseId ?? '',
       document.voucherKind === 'RECEIPT' ? 'receive' : 'issue',
     );
-    return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, canReadCost(user));
+    return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, this.mayReadDocumentCost(user, document));
   }
 
   @Post(':id/review')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
   async review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
-    await this.assertDocumentAccess(user, id, 'approve');
-    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user), this.voucherVersion(body));
+    const document = await this.assertDocumentAccess(user, id, 'approve');
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', this.mayReadDocumentCost(user, document), this.voucherVersion(body));
   }
 
   /// Stock-voucher approval (workflow of PR70). Write-off documents use
@@ -108,8 +108,8 @@ export class StockDocumentsController {
   @Post(':id/approve')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.approve')
   async approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
-    await this.assertDocumentAccess(user, id, 'approve');
-    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user), this.voucherVersion(body));
+    const document = await this.assertDocumentAccess(user, id, 'approve');
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', this.mayReadDocumentCost(user, document), this.voucherVersion(body));
   }
 
   /// The warehouse a document touches, so approving or posting it is checked
@@ -117,6 +117,21 @@ export class StockDocumentsController {
   /// accepting it are two people's jobs, but both of them have to be trusted
   /// with the shelf it happens on - otherwise the access screen would only
   /// decide who may *start* the paperwork.
+  private mayReadDocumentCost(
+    user: AuthUser,
+    document: { fromWarehouseId?: string | null; toWarehouseId?: string | null },
+  ): boolean {
+    if (!canReadCost(user)) return false;
+    const grants = grantsOf(user);
+    if (grants === null) return true;
+    const warehouseIds = [document.fromWarehouseId, document.toWarehouseId].filter(
+      (id): id is string => Boolean(id),
+    );
+    return warehouseIds.every((id) =>
+      grants.some((grant) => grant.warehouseId === id && grant.canSeeCost),
+    );
+  }
+
   private async assertDocumentAccess(
     user: AuthUser,
     id: string,
@@ -125,7 +140,7 @@ export class StockDocumentsController {
     const document = (await this.service.findOne(
       user.companyId,
       id,
-      canReadCost(user),
+      false,
       user.branchId ?? null,
     )) as unknown as {
       kind?: string;
@@ -173,15 +188,15 @@ export class StockDocumentsController {
   @Post(':id/write-off/approve')
   @RequirePermissions('inventory.writeoff.approve')
   async approveWriteOff(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertDocumentAccess(user, id, 'approve');
-    return this.service.approve(user.companyId, user.userId, id);
+    const document = await this.assertDocumentAccess(user, id, 'approve');
+    return this.service.approve(user.companyId, user.userId, id, this.mayReadDocumentCost(user, document));
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
   async post(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
-    await this.assertDocumentAccess(user, id, 'post');
-    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId, body?.expectedVersion, true);
+    const document = await this.assertDocumentAccess(user, id, 'post');
+    return this.service.post(user.companyId, user.userId, id, this.mayReadDocumentCost(user, document), user.branchId, body?.expectedVersion, true);
   }
 
   /// Write-off posting has its own permission, but the same approval rule is
@@ -189,8 +204,8 @@ export class StockDocumentsController {
   @Post(':id/write-off/post')
   @RequirePermissions('inventory.writeoff.post')
   async postWriteOff(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertDocumentAccess(user, id, 'post');
-    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId);
+    const document = await this.assertDocumentAccess(user, id, 'post');
+    return this.service.post(user.companyId, user.userId, id, this.mayReadDocumentCost(user, document), user.branchId);
   }
 
   private voucherVersion(body: Record<string, unknown> | undefined): number {
@@ -202,7 +217,7 @@ export class StockDocumentsController {
   @Post(':id/reverse')
   @RequirePermissions('inventory.stock.adjust')
   async reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertDocumentAccess(user, id, 'reverse');
-    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user), user.branchId);
+    const document = await this.assertDocumentAccess(user, id, 'reverse');
+    return this.service.reverse(user.companyId, user.userId, id, this.mayReadDocumentCost(user, document), user.branchId);
   }
 }
