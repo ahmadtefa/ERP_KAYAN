@@ -56,7 +56,7 @@ describe('stock document warehouse access', () => {
   });
 
   it('allows a read-only user to open a transfer when both warehouses are visible', async () => {
-    service.findOne.mockResolvedValueOnce({
+    service.findOne.mockResolvedValue({
       id: 'doc-visible',
       kind: 'TRANSFER',
       fromWarehouseId: 'warehouse-visible',
