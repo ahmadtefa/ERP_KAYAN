@@ -1620,7 +1620,8 @@ async function main() {
     });
     check(
       'the company policy is set again on the company that setup recreated',
-      policyAfterSetup.status === 200 && String(policyAfterSetup.data?.taxRate) === TAX,
+      // Decimal(9,4) comes back as "14.0000", not "14": compare the number.
+      policyAfterSetup.status === 200 && Number(policyAfterSetup.data?.taxRate) === Number(TAX),
       `status ${policyAfterSetup.status}, tax ${policyAfterSetup.data?.taxRate}`,
     );
   } else {
