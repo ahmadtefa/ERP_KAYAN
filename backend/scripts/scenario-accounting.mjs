@@ -1332,13 +1332,21 @@ async function main() {
     // does not carry external files or the device-bound licence. Until the
     // combined recovery path is independently proven, both manual full backup
     // and full restore must remain explicitly unavailable.
+    check(
+      'the machine reports complete full backup and restore as unsupported',
+      capabilities.data?.fullBackupSupported === false &&
+        capabilities.data?.fullRestoreSupported === false,
+      `backup=${capabilities.data?.fullBackupSupported}, restore=${capabilities.data?.fullRestoreSupported}`,
+    );
     const scheduled = await api('/backup/schedule/run', { method: 'POST' });
     const scheduledRun = (scheduled.data ?? [])[0];
     check(
       'the scheduled full-backup attempt is visibly marked incomplete, never successful',
       scheduled.status < 300 &&
         scheduledRun?.status === 'FAILED' &&
-        String(scheduledRun?.message ?? '').includes('فشل اكتمال النسخة'),
+        String(scheduledRun?.message ?? '').includes('فشل اكتمال النسخة') &&
+        String(scheduledRun?.message ?? '').includes('الملفات') &&
+        String(scheduledRun?.message ?? '').includes('الترخيص'),
       `${scheduledRun?.fileName} — ${scheduledRun?.status}: ${scheduledRun?.message}`,
     );
     const history = await api('/backup/schedule/history');
