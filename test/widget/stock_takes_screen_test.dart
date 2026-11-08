@@ -114,6 +114,10 @@ const _approver = [
   'inventory.stocktake.post',
 ];
 
+Finder tableText(String value) => find.byWidgetPredicate(
+  (widget) => widget is Text && widget.data == value,
+);
+
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -191,8 +195,11 @@ void main() {
       find.byTooltip('You opened this count, so you cannot approve it'),
       findsOneWidget,
     );
+    final tooltip = find.byTooltip(
+      'You opened this count, so you cannot approve it',
+    );
     final button = tester.widget<IconButton>(
-      find.byTooltip('You opened this count, so you cannot approve it'),
+      find.descendant(of: tooltip, matching: find.byType(IconButton)),
     );
     expect(button.onPressed, isNull);
   });
@@ -255,8 +262,8 @@ void main() {
     await pump(tester, _StockTakesApi());
     await tester.enterText(find.byType(TextField).first, 'ST-002');
     await tester.pumpAndSettle();
-    expect(find.text('ST-002'), findsOneWidget);
-    expect(find.text('ST-001'), findsNothing);
+    expect(tableText('ST-002'), findsOneWidget);
+    expect(tableText('ST-001'), findsNothing);
   });
 
   testWidgets('a failed list shows the error view with a retry', (
