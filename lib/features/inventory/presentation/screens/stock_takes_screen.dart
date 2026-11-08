@@ -169,7 +169,18 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
       }
       List<Json> items = const [];
       try {
-        items = await client.getList('/inventory/items', query: const {'pageSize': 500});
+        final loaded = <Json>[];
+        var page = 1;
+        while (true) {
+          final batch = await client.getList(
+            '/inventory/items',
+            query: {'pageSize': 200, 'page': page},
+          );
+          loaded.addAll(batch);
+          if (batch.length < 200) break;
+          page++;
+        }
+        items = loaded;
       } catch (_) {
         // Full counts do not need the item catalogue.
       }
