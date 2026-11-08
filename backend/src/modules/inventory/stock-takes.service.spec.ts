@@ -211,6 +211,7 @@ describe('stock takes', () => {
           kind: dto.kind,
           toWarehouseId: dto.toWarehouseId ?? null,
           status: 'DRAFT',
+          deletedAt: null,
           stockTakeSessionId: null,
           idempotencyKey: options?.idempotencyKey,
           lines: dto.lines.map((line: any) => ({
