@@ -295,7 +295,7 @@ export class BatchesService {
 
     const customers: Array<{ invoiceNumber: string; customerName: string | null }> = [];
     const salesIds = movements
-      .filter((row) => row.referenceType.startsWith('SALES'))
+      .filter((row) => (row.referenceType ?? '').startsWith('SALES'))
       .map((row) => row.referenceNumber)
       .filter((value): value is string => Boolean(value));
     if (salesIds.length > 0) {
