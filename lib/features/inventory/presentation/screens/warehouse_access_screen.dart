@@ -105,6 +105,11 @@ class WarehouseAccessScreen extends ConsumerWidget {
     return ModuleScaffold(
       title: arabic ? 'صلاحيات المستودعات' : 'Warehouse access',
       eyebrow: arabic ? 'المخزون' : 'Inventory',
+      trailing: IconButton(
+        tooltip: arabic ? 'تحديث' : 'Refresh',
+        onPressed: () => ref.invalidate(_peopleProvider),
+        icon: const Icon(Icons.refresh),
+      ),
       body: AsyncStateView<List<Json>>(
         value: people,
         onRetry: () => ref.invalidate(_peopleProvider),

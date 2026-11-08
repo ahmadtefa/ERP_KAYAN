@@ -81,9 +81,20 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
     return ModuleScaffold(
       title: _arabic ? 'الجرد' : 'Stock takes',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
-      trailing: SearchField(
-        hint: _arabic ? 'بحث في الجرد' : 'Search counts',
-        onChanged: (value) => setState(() => _query = value.trim()),
+      trailing: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SearchField(
+            hint: _arabic ? 'بحث في الجرد' : 'Search counts',
+            onChanged: (value) => setState(() => _query = value.trim()),
+          ),
+          IconButton(
+            tooltip: _arabic ? 'تحديث' : 'Refresh',
+            onPressed: () => ref.read(stockTakesProvider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: AsyncStateView<List<Json>>(
         value: async,
