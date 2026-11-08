@@ -2178,7 +2178,6 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const PostingClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
       const instrumented = new PostingClass(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit);
       const pendingPost = instrumented.post(company,user,draft.id);
       try {
