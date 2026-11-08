@@ -190,6 +190,17 @@ try {
   $backendDir = Join-Path $PSScriptRoot 'backend'
   $nodeExe = Join-Path $backendDir 'node\node.exe'
   $prepareScript = Join-Path $backendDir 'scripts\prepare-database.mjs'
+  $mainJs = Join-Path $backendDir 'dist\src\main.js'
+  # Repair must never report success on a partial installation. The two checks
+  # below used to be silent guards: if a file was missing the check was skipped
+  # and the script still printed "repaired successfully". Anything this script
+  # is required to verify must now be present first, so the guards below are
+  # consistency checks, not an off switch.
+  foreach ($requiredRuntimeFile in @($nodeExe, $prepareScript, $mainJs)) {
+    if (-not (Test-Path -LiteralPath $requiredRuntimeFile -PathType Leaf)) {
+      throw ("Repair cannot verify the runtime because a required installed file is missing: " + $requiredRuntimeFile + ". Reinstall from the complete KAYAN Setup package; company data will remain untouched.")
+    }
+  }
   if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $prepareScript)) {
     $prepOut = Join-Path $env:TEMP ('kayan-repair-prep-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     $prepErr = Join-Path $env:TEMP ('kayan-repair-prep-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
@@ -212,7 +223,8 @@ try {
   # afterwards. An empty database answering needsSetup=true is a PASS:
   # the runtime, the database and the server all work, and first-run
   # setup belongs to the program window, not to this script.
-  $mainJs = Join-Path $backendDir 'dist\src\main.js'
+  # The precondition above already proved the file exists; keep the guard so a
+  # future edit cannot quietly turn this probe back into an optional step.
   if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $mainJs)) {
     $probePort = $null
     foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {

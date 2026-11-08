@@ -55,7 +55,17 @@ jobs:
       - name: Test migration exit handling and non-signing payload policy
         env:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
-        run: node --test backend/scripts/migrate-deploy.test.mjs scripts/windows-policy-non-signing.test.mjs
+        run: >-
+          node --test
+          backend/scripts/migrate-deploy.test.mjs
+          scripts/windows-policy-non-signing.test.mjs
+          scripts/windows-runtime-preflight.test.mjs
+          scripts/windows-repair-semantics.test.mjs
+          scripts/windows-payload-contract.test.mjs
+      - name: Analyse bundled Windows scripts beyond syntax
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        run: node scripts/verify-windows-scripts.mjs
 
   windows-build:
     name: Build Windows application from exact head (no installer)

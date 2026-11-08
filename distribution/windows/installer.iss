@@ -39,6 +39,12 @@ OutputDir={#OutputDir}
 OutputBaseFilename={#SetupBase}-{#AppVersion}-x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; KAYAN ERP supports Windows 10 and Windows 11 only. The bundled PostgreSQL 17
+; and Node.js 24 payloads have no supported configuration on earlier Windows,
+; so Setup refuses to start there instead of installing a runtime that cannot
+; run. 10.0 is Windows 10 / Windows Server 2016; Windows 11 and every later
+; release report a higher build number and are covered by the same floor.
+MinVersion=10.0
 PrivilegesRequired=admin
 ; The KAYAN mark on Setup.exe itself and on the uninstall entry. setup.ico
 ; is staged next to this script by build-installer.ps1, which generates it
