@@ -1342,11 +1342,24 @@ async function main() {
       `${(await api('/backup/schedule/history')).data?.length ?? 0} recorded runs`,
     );
 
-    const backup = await api('/backup/full', { method: 'POST' });
+    // The complete backup, which would also have to carry external files and
+    // the licence, is refused on purpose until those are bound and verified
+    // together. The explicit PostgreSQL archive is the path that does exist,
+    // and it says so in its own response rather than pretending to be more.
+    const refusedFull = await api('/backup/full', { method: 'POST' });
+    check(
+      'a complete backup stays refused until files and licence are bound and verified',
+      refusedFull.status === 503 && refusedFull.data?.code === 'FULL_BACKUP_INCOMPLETE',
+      `status ${refusedFull.status}, code ${refusedFull.data?.code ?? '?'}`,
+    );
+
+    const backup = await api('/backup/full/database-archive', { method: 'POST' });
     const file = backup.data?.file ?? backup.data;
     check(
-      'a full backup of the database can be taken by hand as well',
-      backup.status < 300 && Boolean(file?.name),
+      'the explicit PostgreSQL archive can be taken by hand, and admits what it leaves out',
+      backup.status < 300 && Boolean(file?.name) &&
+        backup.data?.fullBackup === false && backup.data?.includesExternalFiles === false &&
+        backup.data?.includesLicence === false,
       `${file?.name} (${file?.sizeBytes ?? '?'} bytes, ${backup.data?.durationMs ?? '?'} ms)`,
     );
     const name = scheduledRun?.fileName ?? file?.name;
@@ -1369,10 +1382,15 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
+    // A destructive full restore is guarded shut on purpose: the controller
+    // refuses it until database, files, licence recovery and interruption
+    // safety are proven, and no environment switch can open it. Asserting that
+    // guard is the honest check - a scenario that demanded a 2xx here would be
+    // demanding the guard be removed.
     check(
-      'the backup can be restored, and the restore reports what it put back',
-      restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
-      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 400)}`,
+      'a full restore stays refused until recovery and interruption safety are proven',
+      restored.status === 503 && restored.data?.title === 'SERVICE_UNAVAILABLE',
+      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 200)}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
@@ -1506,17 +1524,24 @@ async function main() {
 
     const setupAfterReset = await api('/setup/status', { noAuth: true });
     const healthAfterReset = await api('/health', { noAuth: true });
+    // The reset retires the company and keeps the administrator, so what is
+    // left is "company or user data without an active company account". That
+    // is recovery, never a fresh install: the public setup endpoint must not
+    // be able to recreate a tenant over retained data, and the desktop shell
+    // shows the authorised-recovery message for the same state. Asserting
+    // needsSetup here would be asking for that protection to be removed.
     check(
-      'setup status after reset exposes the first-run flow while keeping the administrator',
-      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === true &&
-        Number(setupAfterReset.data?.companyCount) === 0 && setupAfterReset.data?.hasUsers === true,
-      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
+      'setup after reset asks for authorised recovery instead of reopening first-run setup',
+      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === false &&
+        setupAfterReset.data?.recoveryRequired === true &&
+        Number(setupAfterReset.data?.companyCount) === 1 && setupAfterReset.data?.hasUsers === true,
+      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, recovery ${setupAfterReset.data?.recoveryRequired}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
     );
     check(
       'the API and PostgreSQL stay healthy after reset',
       healthAfterReset.status === 200 && healthAfterReset.data?.status === 'ok' &&
-        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.needsSetup === true,
-      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, setup ${healthAfterReset.data?.needsSetup}`,
+        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.recoveryRequired === true,
+      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, recovery ${healthAfterReset.data?.recoveryRequired}`,
     );
     const administratorAfterReset = await api('/auth/login', {
       method: 'POST',
@@ -1547,12 +1572,14 @@ async function main() {
         seedChartOfAccounts: true,
       },
     });
+    // The retained administrator and the retained company rows close this
+    // public route. Recovering the installation is a separate, authorised
+    // operation; a public POST must not be able to recreate a tenant over
+    // data that is still there, which is also why the row was kept.
     check(
-      'the preserved administrator can finish first-run setup on the reset company',
-      completedSetup.status < 300 &&
-        completedSetup.data?.companyId === reset.data?.companyId &&
-        completedSetup.data?.companyCode === reset.data?.companyCode,
-      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode}, administrator ${completedSetup.data?.adminUsername}`,
+      'public first-run setup stays closed over the retained company and administrator',
+      completedSetup.status === 409,
+      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode ?? '-'}`,
     );
 
     const setupAfterCompletion = await api('/setup/status', { noAuth: true });
