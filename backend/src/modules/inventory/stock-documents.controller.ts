@@ -2,7 +2,8 @@ import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Put, 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
-import { assertTransferAccess, assertWarehouseAccess, grantsOf, WarehouseAction } from '../../common/warehouse/warehouse-access';
+import { assertTransferAccess, assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
+import type { WarehouseAction } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -70,6 +71,10 @@ export class StockDocumentsController {
         body.fromWarehouseId as string,
         body.toWarehouseId as string,
       );
+    } else if (kind === 'ADJUSTMENT' && !voucherKind) {
+      assertWarehouseAccess(user, body.toWarehouseId as string, 'approve');
+    } else if (kind === 'COUNT') {
+      assertWarehouseAccess(user, body.toWarehouseId as string, 'count');
     }
     // The header key is folded into the body so the service sees one request
     // object; a retry after a dropped connection returns the same document.
@@ -115,7 +120,7 @@ export class StockDocumentsController {
   private async assertDocumentAccess(
     user: AuthUser,
     id: string,
-    action: WarehouseAction | 'post',
+    action: WarehouseAction | 'post' | 'reverse',
   ) {
     const document = (await this.service.findOne(
       user.companyId,
@@ -135,14 +140,18 @@ export class StockDocumentsController {
     }
     const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';
     const requiredAction: WarehouseAction =
-      action !== 'post'
+      action !== 'post' && action !== 'reverse'
         ? action
-        : kind === 'WRITE_OFF'
-          ? 'issue'
-          : document?.voucherKind === 'RECEIPT'
+        : action === 'reverse'
+          ? kind === 'WRITE_OFF' || document?.voucherKind === 'ISSUE'
             ? 'receive'
-            : document?.voucherKind === 'ISSUE'
+            : document?.voucherKind === 'RECEIPT'
               ? 'issue'
+              : 'approve'
+          : kind === 'WRITE_OFF' || document?.voucherKind === 'ISSUE'
+            ? 'issue'
+            : document?.voucherKind === 'RECEIPT'
+              ? 'receive'
               : 'approve';
     assertWarehouseAccess(user, warehouseId, requiredAction);
     return document;
@@ -183,7 +192,7 @@ export class StockDocumentsController {
   @Post(':id/reverse')
   @RequirePermissions('inventory.stock.adjust')
   async reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertDocumentAccess(user, id, 'post');
+    await this.assertDocumentAccess(user, id, 'reverse');
     return this.service.reverse(user.companyId, user.userId, id, canReadCost(user), user.branchId);
   }
 }
