@@ -1336,6 +1336,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const map = new AccountMapService();
     const batches = new BatchesService(prisma,warehouses,posting,map,numbers,audit,ledger);
     const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger);
+    // Keep the fixture's runtime wiring explicit as this service gains
+    // inventory dependencies; the production Nest module injects these.
+    Object.assign(si, { batches, ledger });
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
     await require('./verify-quotation-conversion-real-pg.cjs')({prisma,numbers,settings,invoices:si,audit,company,branch,user,customer:customer.id,date});
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
