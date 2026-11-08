@@ -38,6 +38,14 @@ class _ImageApi extends ApiClient {
   int deletes = 0;
   int batchRequests = 0;
 
+  // The data source calls get(); getObject is kept because ApiClient offers
+  // both and the batch path historically used it.
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) => getObject(path, query: query);
+
   @override
   Future<Map<String, dynamic>> getObject(
     String path, {
