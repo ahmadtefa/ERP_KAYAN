@@ -61,6 +61,7 @@ export class WarehouseService {
     companyId: string,
     query: { branchId?: string; includeInactive?: boolean } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const where: Prisma.WarehouseWhereInput = { companyId, deletedAt: null };
     if (!query.includeInactive) where.isActive = true;
@@ -69,6 +70,7 @@ export class WarehouseService {
     // returning an empty list is honest: the shelf exists, they do not work
     // there.
     if (scope !== null) where.branchId = { in: scope };
+    if (warehouseIds !== undefined) where.id = { in: warehouseIds };
 
     const items = await this.prisma.warehouse.findMany({
       where,
@@ -320,6 +322,7 @@ export class WarehouseService {
       asOf?: string;
     } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
     mayReadCost = true,
   ) {
     const asOf = query.asOf
@@ -363,6 +366,7 @@ export class WarehouseService {
          AND w."deletedAt" IS NULL
          AND m."movementDate" <= ${asOf}::date
          ${query.warehouseId ? Prisma.sql`AND w.id = ${query.warehouseId}::uuid` : Prisma.empty}
+         ${warehouseIds !== undefined ? Prisma.sql`AND w.id = ANY(${warehouseIds}::uuid[])` : Prisma.empty}
          ${query.branchId ? Prisma.sql`AND w."branchId" = ${query.branchId}::uuid` : Prisma.empty}
          ${scope !== null ? Prisma.sql`AND w."branchId" = ANY(${scope}::uuid[])` : Prisma.empty}
          ${query.itemId ? Prisma.sql`AND m."itemId" = ${query.itemId}::uuid` : Prisma.empty}

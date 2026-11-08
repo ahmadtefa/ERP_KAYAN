@@ -78,7 +78,12 @@ function build(doc: Record<string, unknown> = document()) {
       // The argument is named so `mock.calls[0][0]` is a tuple with an
       // element: a zero-argument mock types `calls` as `[]` and indexing it
       // is a compile error, not a test failure.
-      findMany: jest.fn(async (_args: { include?: Record<string, unknown> }) => [doc]),
+      findMany: jest.fn(
+        async (_args: {
+          include?: Record<string, unknown>;
+          where?: Record<string, unknown>;
+        }) => [doc],
+      ),
       count: jest.fn(async () => 1),
       findFirst: jest.fn(async () => doc),
     },
@@ -139,6 +144,44 @@ describe('the stock document list names its warehouses and its people', () => {
     const include = prisma.stockDocument.findMany.mock.calls[0][0].include;
     expect(include?.fromWarehouse).toBeDefined();
     expect(include?.toWarehouse).toBeDefined();
+  });
+
+  it('requires both ends of a transfer to be visible in a restricted warehouse list', async () => {
+    const { service, prisma } = build();
+
+    await service.findAll(COMPANY, {}, null, ['wh-front']);
+
+    const where = prisma.stockDocument.findMany.mock.calls[0][0].where as any;
+    // `AND` also carries the voucher-branch OR, so pick the warehouse one by
+    // its shape rather than by position.
+    const warehouseFilter = (where.AND as any[])
+      .map((entry) => entry.OR)
+      .find((or) => or?.some((clause: any) => 'fromWarehouseId' in clause));
+    expect(warehouseFilter).toEqual([
+      { fromWarehouseId: null, toWarehouseId: null },
+      { fromWarehouseId: null, toWarehouseId: { in: ['wh-front'] } },
+      { fromWarehouseId: { in: ['wh-front'] }, toWarehouseId: null },
+      { fromWarehouseId: { in: ['wh-front'] }, toWarehouseId: { in: ['wh-front'] } },
+    ]);
+  });
+
+  it('returns no warehouse-linked documents when the user has no visible warehouses', async () => {
+    const { service, prisma } = build();
+
+    await service.findAll(COMPANY, {}, null, []);
+
+    const where = prisma.stockDocument.findMany.mock.calls[0][0].where as any;
+    // `AND` also carries the voucher-branch OR, so pick the warehouse one by
+    // its shape rather than by position.
+    const warehouseFilter = (where.AND as any[])
+      .map((entry) => entry.OR)
+      .find((or) => or?.some((clause: any) => 'fromWarehouseId' in clause));
+    expect(warehouseFilter).toEqual([
+      { fromWarehouseId: null, toWarehouseId: null },
+      { fromWarehouseId: null, toWarehouseId: { in: [] } },
+      { fromWarehouseId: { in: [] }, toWarehouseId: null },
+      { fromWarehouseId: { in: [] }, toWarehouseId: { in: [] } },
+    ]);
   });
 
   it('keeps a document that names no warehouse readable', async () => {

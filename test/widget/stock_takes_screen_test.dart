@@ -21,13 +21,47 @@ class _StockTakesApi extends ApiClient {
 
   bool failList;
   final posts = <String>[];
+  final bodies = <String, Object?>{};
+  final Map<String, dynamic> detail = {
+    'id': 'st-1',
+    'code': 'ST-001',
+    'warehouseId': 'wh-1',
+    'warehouseNameEn': 'Main store',
+    'warehouseNameAr': 'المخزن الرئيسي',
+    'status': 'COUNTING',
+    'createdBy': 'someone-else',
+    'lines': [
+      {
+        'id': 'line-1',
+        'itemId': 'item-1',
+        'itemCode': 'ITEM-1',
+        'itemNameEn': 'Coffee',
+        'itemNameAr': 'قهوة',
+        'unit': 'piece',
+        'systemQuantity': '10.0000',
+        'countedQuantity': null,
+        'varianceQuantity': '0.0000',
+        'varianceValue': '0.0000',
+      },
+    ],
+  };
 
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (failList) throw StateError('STOCKTAKE_LIST_FAILED');
+    if (failList && path == '/inventory/stock-takes') throw StateError('STOCKTAKE_LIST_FAILED');
+    if (path == '/inventory/warehouses') {
+      return [
+        {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'المخزن الرئيسي'},
+      ];
+    }
+    if (path == '/inventory/items') {
+      return [
+        {'id': 'item-1', 'code': 'ITEM-1', 'nameEn': 'Coffee', 'nameAr': 'قهوة'},
+      ];
+    }
     return [
       {
         'id': 'st-1',
@@ -98,12 +132,26 @@ class _StockTakesApi extends ApiClient {
   }
 
   @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (path == '/inventory/stock-takes/st-1' || path == '/inventory/stock-takes/st-new') {
+      return Map<String, dynamic>.from(detail);
+    }
+    throw StateError('Unexpected GET $path');
+  }
+
+  @override
   Future<Map<String, dynamic>> post(
     String path, {
     Object? body,
     String? idempotencyKey,
   }) async {
     posts.add(path);
+    bodies[path] = body;
+    if (path == '/inventory/stock-takes') return {'id': 'st-new'};
+    if (path.endsWith('/count')) return Map<String, dynamic>.from(detail);
     return const {};
   }
 }
@@ -273,6 +321,64 @@ void main() {
     expect(find.textContaining('STOCKTAKE_LIST_FAILED'), findsNothing);
     expect(find.text('Retry'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('creates a full stock take and opens its frozen count lines', (
+    tester,
+  ) async {
+    final api = _StockTakesApi();
+    await pump(
+      tester,
+      api,
+      permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create', 'inventory.stocktake.count'],
+    );
+    await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+    await tester.pumpAndSettle();
+    expect(find.text('Open count'), findsOneWidget);
+    await tester.tap(find.text('Open count'));
+    await tester.pumpAndSettle();
+    expect(api.posts, contains('/inventory/stock-takes'));
+    expect(find.text('ST-001 — Stock take details'), findsOneWidget);
+    expect(find.text('ITEM-1 — Coffee'), findsOneWidget);
+  });
+
+  testWidgets('saves counted quantities to the session count endpoint', (
+    tester,
+  ) async {
+    final api = _StockTakesApi();
+    await pump(
+      tester,
+      api,
+      permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count'],
+    );
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    expect(find.text('ITEM-1 — Coffee'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).last, '8');
+    await tester.tap(find.text('Save count'));
+    await tester.pumpAndSettle();
+    expect(api.posts, contains('/inventory/stock-takes/st-1/count'));
+    expect(api.bodies['/inventory/stock-takes/st-1/count'], {
+      'lines': [
+        {'lineId': 'line-1', 'countedQuantity': 8.0},
+      ],
+      'finish': false,
+    });
+  });
+
+  testWidgets('does not offer approval while a stock take is still being counted', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      _StockTakesApi(),
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.approve',
+      ],
+    );
+    expect(find.byTooltip('Approve'), findsNothing);
+    expect(find.text('Counting'), findsNWidgets(2));
   });
 
   testWidgets('Arabic reads the Arabic warehouse name and mirrors', (

@@ -37,14 +37,26 @@ export class StockTakesService {
     companyId: string,
     query: { status?: string; warehouseId?: string; page?: number; pageSize?: number } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
     const where: Prisma.StockTakeSessionWhereInput = {
       companyId,
       ...(scope !== null ? { branchId: { in: scope } } : {}),
+      ...(warehouseIds !== undefined || query.warehouseId
+        ? {
+            warehouseId: {
+              in:
+                warehouseIds !== undefined
+                  ? query.warehouseId
+                    ? warehouseIds.filter((id) => id === query.warehouseId)
+                    : warehouseIds
+                  : [query.warehouseId!],
+            },
+          }
+        : {}),
       ...(query.status ? { status: query.status.toUpperCase() } : {}),
-      ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.stockTakeSession.findMany({
@@ -149,6 +161,21 @@ export class StockTakesService {
     if (partial && itemIds.length === 0) {
       throw new BadRequestException('A partial count must name the items it covers.');
     }
+    if (partial) {
+      const uniqueItemIds = [...new Set(itemIds)];
+      const eligible = await this.prisma.item.findMany({
+        where: {
+          id: { in: uniqueItemIds },
+          companyId,
+          deletedAt: null,
+          isStockTracked: true,
+        },
+        select: { id: true },
+      });
+      if (eligible.length !== uniqueItemIds.length) {
+        throw new BadRequestException('A partial count can include only existing stock-tracked items.');
+      }
+    }
 
     // The session is created inside the transaction and read back after it
     // commits. Reading it from inside - which this used to do - asks a
@@ -224,24 +251,37 @@ export class StockTakesService {
         });
       }
 
-      // A partial count of an item that is not in stock still needs a line:
-      // counting nothing and finding ten boxes is the difference that matters.
-      if (partial) {
-        const seen = new Set<string>([
-          ...lots.map((lot) => lot.itemId),
-          ...balances.map((balance) => balance.itemId),
-        ]);
-        for (const itemId of itemIds) {
-          if (seen.has(itemId)) continue;
-          const item = await tx.item.findFirst({
-            where: { id: itemId, companyId, deletedAt: null },
-            select: { id: true },
-          });
-          if (!item) throw new BadRequestException('A counted item does not exist');
-          await tx.stockTakeLine.create({
-            data: { sessionId: session.id, itemId, systemQuantity: 0, unitCost: 0 },
-          });
-        }
+      // Every stock-tracked item belongs in a FULL count, including items
+      // whose current shelf balance is zero. Otherwise a count cannot record
+      // newly found goods for an item the system believes is out of stock.
+      // PARTIAL counts use the explicitly selected catalogue entries instead.
+      const seen = new Set<string>([
+        ...lots.map((lot) => lot.itemId),
+        ...balances.map((balance) => balance.itemId),
+      ]);
+      const missingItemIds = partial
+        ? itemIds.filter((itemId) => !seen.has(itemId))
+        : (
+            await tx.item.findMany({
+              where: { companyId, deletedAt: null, isStockTracked: true },
+              select: { id: true },
+            })
+          ).map((item) => item.id).filter((itemId) => !seen.has(itemId));
+
+      for (const itemId of missingItemIds) {
+        const item = await tx.item.findFirst({
+          where: {
+            id: itemId,
+            companyId,
+            deletedAt: null,
+            isStockTracked: true,
+          },
+          select: { id: true },
+        });
+        if (!item) throw new BadRequestException('A counted item does not exist');
+        await tx.stockTakeLine.create({
+          data: { sessionId: session.id, itemId, systemQuantity: 0, unitCost: 0 },
+        });
       }
 
       return { id: session.id, code };
@@ -281,9 +321,9 @@ export class StockTakesService {
       select: { id: true, status: true, warehouseId: true },
     });
     if (!session) throw new NotFoundException('Stock-take session not found');
-    if (!['COUNTING', 'REVIEW'].includes(session.status)) {
+    if (session.status !== 'COUNTING') {
       throw new BadRequestException(
-        `This session can no longer be counted (status: ${session.status}).`,
+        `This session is no longer open for counting (status: ${session.status}).`,
       );
     }
     if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
@@ -317,6 +357,14 @@ export class StockTakesService {
         });
       }
       if (dto.finish) {
+        const uncounted = await tx.stockTakeLine.count({
+          where: { sessionId: session.id, countedQuantity: null },
+        });
+        if (uncounted > 0) {
+          throw new BadRequestException(
+            `Cannot finish this count: ${uncounted} line(s) have not been counted.`,
+          );
+        }
         await tx.stockTakeSession.update({
           where: { id: session.id },
           data: { status: 'REVIEW' },
@@ -351,8 +399,10 @@ export class StockTakesService {
         `This count was already approved (status: ${session.status}). / تم اعتماد هذا الجرد مسبقًا.`,
       );
     }
-    if (!['COUNTING', 'REVIEW'].includes(session.status)) {
-      throw new BadRequestException(`This session cannot be approved (status: ${session.status}).`);
+    if (session.status !== 'REVIEW') {
+      throw new BadRequestException(
+        `A count can be approved only after every line is counted and submitted for review (status: ${session.status}).`,
+      );
     }
     if (session.createdBy && session.createdBy === userId) {
       throw new BadRequestException(
@@ -361,7 +411,7 @@ export class StockTakesService {
     }
 
     const claimed = await this.prisma.stockTakeSession.updateMany({
-      where: { id: session.id, companyId, status: { in: ['COUNTING', 'REVIEW'] } },
+      where: { id: session.id, companyId, status: 'REVIEW' },
       data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: userId },
     });
     if (claimed.count !== 1) {

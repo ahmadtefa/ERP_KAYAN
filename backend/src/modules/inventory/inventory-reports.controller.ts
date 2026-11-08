@@ -16,6 +16,7 @@ import { AllowQueryToken } from '../../common/decorators/allow-query-token.decor
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
+import { grantsOf } from '../../common/warehouse/warehouse-access';
 import { BarcodeLabelsService } from './barcode-labels.service';
 import { BarcodeLabelsQueryDto } from './dto/barcode-labels.dto';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -161,6 +162,14 @@ export class InventoryReportsController {
     );
   }
 
+  private assertUnrestrictedWarehouseReport(user: AuthUser): void {
+    if (grantsOf(user) !== null) {
+      throw new ForbiddenException(
+        'This report is not yet scoped to individual warehouse grants. Use the warehouse-filtered inventory reports. / هذا التقرير غير مقيّد بعد بصلاحيات كل مستودع.',
+      );
+    }
+  }
+
   private mayManageBarcodes(user: AuthUser): boolean {
     return user.isSuperAdmin || user.permissions.includes('inventory.barcodes.manage');
   }
@@ -172,6 +181,7 @@ export class InventoryReportsController {
     @Query('branchId') branchId?: string,
     @Query('categoryId') categoryId?: string,
   ) {
+    this.assertUnrestrictedWarehouseReport(user);
     return this.service.valuation(
       user.companyId,
       { branchId, categoryId },
@@ -185,6 +195,7 @@ export class InventoryReportsController {
     @CurrentUser() user: AuthUser,
     @Query('costCenterId') costCenterId?: string,
   ) {
+    this.assertUnrestrictedWarehouseReport(user);
     return this.service.costCenterMovements(
       user.companyId,
       { costCenterId },
@@ -199,6 +210,7 @@ export class InventoryReportsController {
     @Query('days') days?: string,
     @Query('branchId') branchId?: string,
   ) {
+    this.assertUnrestrictedWarehouseReport(user);
     return this.service.slowMoving(
       user.companyId,
       {
@@ -212,6 +224,7 @@ export class InventoryReportsController {
   @Get('reports/reorder')
   @RequirePermissions('inventory.stock.read')
   reorder(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    this.assertUnrestrictedWarehouseReport(user);
     return this.service.reorder(user.companyId, { branchId }, canReadCost(user));
   }
 

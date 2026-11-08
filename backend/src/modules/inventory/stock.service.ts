@@ -73,6 +73,7 @@ export class StockService {
   async byWarehouse(
     companyId: string,
     filters: { branchId?: string; itemIds?: string[] },
+    warehouseIds?: string[],
   ) {
     const rows = await this.prisma.$queryRaw<
       Array<{
@@ -88,14 +89,20 @@ export class StockService {
          AND (${filters.branchId ?? null}::uuid IS NULL OR "branchId" = ${filters.branchId ?? null}::uuid)
          AND (${filters.itemIds && filters.itemIds.length ? filters.itemIds : null}::uuid[] IS NULL
               OR "itemId" = ANY(${filters.itemIds && filters.itemIds.length ? filters.itemIds : null}::uuid[]))
+         ${warehouseIds !== undefined ? Prisma.sql`AND "warehouseId" = ANY(${warehouseIds}::uuid[])` : Prisma.empty}
        GROUP BY "warehouseId", "itemId"
        ORDER BY "itemId", "warehouseId"
     `);
 
-    const warehouseIds = [...new Set(rows.map((row) => row.warehouseId).filter((id): id is string => !!id))];
-    const warehouses = warehouseIds.length
+    // Named apart from the `warehouseIds` filter parameter above: one is what
+    // the caller asked to narrow to, the other is what the ledger actually
+    // returned, and they are different sets.
+    const presentWarehouseIds = [
+      ...new Set(rows.map((row) => row.warehouseId).filter((id): id is string => !!id)),
+    ];
+    const warehouses = presentWarehouseIds.length
       ? await this.prisma.warehouse.findMany({
-          where: { id: { in: warehouseIds }, companyId },
+          where: { id: { in: presentWarehouseIds }, companyId },
           select: { id: true, code: true, nameEn: true, nameAr: true },
         })
       : [];
@@ -128,7 +135,12 @@ export class StockService {
     }));
   }
 
-  async itemLedger(companyId: string, itemId: string, mayReadCost = true) {
+  async itemLedger(
+    companyId: string,
+    itemId: string,
+    mayReadCost = true,
+    warehouseIds?: string[],
+  ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, nameEn: true, nameAr: true, unit: true },
@@ -136,7 +148,11 @@ export class StockService {
     if (!item) throw new NotFoundException('Item not found');
 
     const movements = await this.prisma.stockMovement.findMany({
-      where: { companyId, itemId },
+      where: {
+        companyId,
+        itemId,
+        ...(warehouseIds !== undefined ? { warehouseId: { in: warehouseIds } } : {}),
+      },
       orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],
       include: {
         branch: { select: { code: true } },

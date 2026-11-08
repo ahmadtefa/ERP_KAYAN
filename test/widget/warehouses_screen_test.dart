@@ -23,6 +23,7 @@ class _WarehousesApi extends ApiClient {
   bool failList;
   final posts = <String>[];
   final patches = <(String, Object?)>[];
+  final balanceRequests = <(String, Map<String, dynamic>?)>[];
 
   /// Every balance query the screen asked for, so a test can prove the dialog
   /// reads the real endpoint rather than rendering local rows.
@@ -103,6 +104,31 @@ class _WarehousesApi extends ApiClient {
         'branchNameAr': 'الفرع الثاني',
       },
     ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    balanceRequests.add((path, query));
+    return {
+      'rows': [
+        {
+          'warehouseId': 'wh-1',
+          'itemId': 'item-1',
+          'itemCode': 'ITEM-001',
+          'itemNameEn': 'Coffee',
+          'itemNameAr': 'قهوة',
+          'unit': 'kg',
+          'quantity': '12.5000',
+          'quantityText': '12.5',
+        },
+      ],
+      'itemTotals': const [],
+      'warehouseTotals': const [],
+      'totals': {'rows': 1},
+    };
   }
 
   @override
@@ -214,7 +240,7 @@ void main() {
     expect(find.byTooltip('Deactivate'), findsWidgets);
   });
 
-  testWidgets('a read-only grant hides create and row actions', (
+  testWidgets('a read-only grant keeps balance viewing but hides management actions', (
     tester,
   ) async {
     await pump(
@@ -226,6 +252,24 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'New warehouse'), findsNothing);
     expect(find.byTooltip('Edit'), findsNothing);
     expect(find.byTooltip('Deactivate'), findsNothing);
+    expect(find.byTooltip('Warehouse balances'), findsNWidgets(2));
+  });
+
+  testWidgets('warehouse balance dialog reads the API rows and scopes request', (
+    tester,
+  ) async {
+    final api = _WarehousesApi();
+    await pump(tester, api);
+    await tester.tap(find.byTooltip('Warehouse balances').first);
+    await tester.pumpAndSettle();
+
+    expect(api.balanceRequests, hasLength(1));
+    expect(api.balanceRequests.single.$1, '/inventory/warehouses/balance');
+    expect(api.balanceRequests.single.$2?['warehouseId'], 'wh-1');
+    expect(find.text('ITEM-001'), findsOneWidget);
+    expect(find.text('Coffee'), findsOneWidget);
+    expect(find.text('12.5'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('deactivating asks first, then posts and refreshes', (

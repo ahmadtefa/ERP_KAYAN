@@ -13,7 +13,8 @@ import {
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
+import { canReadCost } from '../../common/auth/cost-visibility';
+import { assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockTakesService } from './stock-takes.service';
 
@@ -65,13 +66,15 @@ export class StockTakesController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
     );
   }
 
   @Get(':id')
   @RequirePermissions('inventory.stocktake.read')
-  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, warehouseScopeOf(user));
+  async findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const take = await this.assertTakeAccess(user, id, 'view');
+    return this.redactCosts(user, take.warehouseId, take);
   }
 
   @Post()
@@ -83,19 +86,39 @@ export class StockTakesController {
       user.userId,
       { ...dto, branchId: user.branchId ?? null },
       warehouseScopeOf(user),
-    );
+    ).then((result) => this.redactCosts(user, dto.warehouseId, result));
   }
 
   /// A count is opened for one shelf, so counting it - and approving what was
   /// counted there - needs the grant for that same shelf. Without this the
   /// access screen would decide what a person may *read* and nothing else.
+  private redactCosts(user: AuthUser, warehouseId: string | undefined, result: unknown): unknown {
+    const grants = grantsOf(user);
+    const mayRead = canReadCost(user) && (
+      grants === null ||
+      grants.some((grant) => grant.warehouseId === warehouseId && grant.canSeeCost)
+    );
+    if (mayRead) return result;
+    const hide = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(hide);
+      if (value === null || typeof value !== 'object') return value;
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .filter(([key]) => key !== 'unitCost' && key !== 'varianceValue')
+          .map(([key, child]) => [key, hide(child)]),
+      );
+    };
+    return hide(result);
+  }
+
   private async assertTakeAccess(
     user: AuthUser,
     id: string,
-    action: 'count' | 'approve',
-  ): Promise<void> {
+    action: 'view' | 'count' | 'approve',
+  ): Promise<{ warehouseId?: string } & Record<string, unknown>> {
     const take = await this.service.findOne(user.companyId, id, warehouseScopeOf(user));
     assertWarehouseAccess(user, (take as { warehouseId?: string } | null)?.warehouseId, action);
+    return take as { warehouseId?: string } & Record<string, unknown>;
   }
 
   @Post(':id/count')
@@ -105,37 +128,46 @@ export class StockTakesController {
     @Param('id') id: string,
     @Body() dto: RecordStockTakeDto,
   ) {
-    await this.assertTakeAccess(user, id, 'count');
-    return this.service.record(user.companyId, user.userId, id, dto, warehouseScopeOf(user));
+    const take = await this.assertTakeAccess(user, id, 'count');
+    const result = await this.service.record(user.companyId, user.userId, id, dto, warehouseScopeOf(user));
+    return this.redactCosts(user, take.warehouseId, result);
   }
 
   @Post(':id/approve')
   @RequirePermissions('inventory.stocktake.approve')
   async approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertTakeAccess(user, id, 'approve');
-    return this.service.approve(user.companyId, user.userId, id, warehouseScopeOf(user));
+    const take = await this.assertTakeAccess(user, id, 'approve');
+    const result = await this.service.approve(user.companyId, user.userId, id, warehouseScopeOf(user));
+    return this.redactCosts(user, take.warehouseId, result);
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stocktake.post')
   async post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.assertTakeAccess(user, id, 'count');
-    return this.service.post(user.companyId, user.userId, id, warehouseScopeOf(user));
+    // Counting and posting the correction is the counter's own job: the
+    // separate approval step above is what needs canApprove. Posting therefore
+    // asks for the count grant, matching how stock documents treat posting as
+    // an operational action rather than an approval.
+    const take = await this.assertTakeAccess(user, id, 'count');
+    const result = await this.service.post(user.companyId, user.userId, id, warehouseScopeOf(user));
+    return this.redactCosts(user, take.warehouseId, result);
   }
 
   @Post(':id/cancel')
   @RequirePermissions('inventory.stocktake.create')
-  cancel(
+  async cancel(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: { reason?: string },
   ) {
-    return this.service.cancel(
+    const take = await this.assertTakeAccess(user, id, 'count');
+    const result = await this.service.cancel(
       user.companyId,
       user.userId,
       id,
       dto?.reason,
       warehouseScopeOf(user),
     );
+    return this.redactCosts(user, take.warehouseId, result);
   }
 }

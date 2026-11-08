@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-vali
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import {
   assertTransferAccess,
   assertWarehouseAccess,
@@ -117,7 +118,7 @@ export class BatchesController {
       // A person with warehouse grants sees the lots of their own shelves and
       // no others - in the list, the expiry report and the trace alike.
       grantsOf(user),
-    );
+    ).then((result) => this.redactBatchCosts(user, result));
   }
 
   @Get('expiry-report')
@@ -134,19 +135,84 @@ export class BatchesController {
       days?: string;
     },
   ) {
-    return this.service.expiryReport(user.companyId, query, warehouseScopeOf(user));
+    const grants = grantsOf(user);
+    const visibleGrants = grants?.filter((grant) =>
+      query.warehouseId
+        ? grant.warehouseId === query.warehouseId && grant.canView
+        : grant.canView,
+    );
+    const mayReadCosts =
+      canReadCost(user) && (grants === null || (visibleGrants ?? []).every((grant) => grant.canSeeCost));
+    return this.service.expiryReport(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    ).then((report) => {
+      if (mayReadCosts) return report;
+      const hideCosts = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(hideCosts);
+        if (value === null || typeof value !== 'object') return value;
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => key !== 'unitCost' && key !== 'value' && key !== 'atRisk')
+            .map(([key, child]) => [key, hideCosts(child)]),
+        );
+      };
+      return hideCosts(report);
+    });
   }
 
   @Get(':id/trace')
   @RequirePermissions('inventory.batches.read')
   trace(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.trace(user.companyId, id);
+    return this.service.trace(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    ).then((result) => this.redactBatchCosts(user, result));
   }
 
   @Get(':id')
   @RequirePermissions('inventory.batches.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    ).then((result) => this.redactBatchCosts(user, result));
+  }
+
+  private redactBatchCosts(user: AuthUser, result: unknown): unknown {
+    const grants = grantsOf(user);
+    const mayRead = (warehouseId?: string): boolean =>
+      canReadCost(user) &&
+      (grants === null ||
+        Boolean(warehouseId && grants.some(
+          (grant) => grant.warehouseId === warehouseId && grant.canSeeCost,
+        )));
+    const hide = (value: unknown, inheritedAccess: boolean): unknown => {
+      if (Array.isArray(value)) return value.map((entry) => hide(entry, inheritedAccess));
+      if (value === null || typeof value !== 'object') return value;
+      const row = value as Record<string, unknown>;
+      const warehouse = row.warehouse as Record<string, unknown> | null | undefined;
+      const warehouseId =
+        typeof row.warehouseId === 'string'
+          ? row.warehouseId
+          : typeof warehouse?.id === 'string'
+            ? warehouse.id
+            : undefined;
+      const allowed = warehouseId ? mayRead(warehouseId) : inheritedAccess;
+      const costFields = new Set(['unitCost', 'totalCost', 'value', 'averageCost']);
+      return Object.fromEntries(
+        Object.entries(row)
+          .filter(([key]) => allowed || !costFields.has(key))
+          .map(([key, child]) => [key, hide(child, allowed)]),
+      );
+    };
+    return hide(result, grants === null && canReadCost(user));
   }
 
   @Post('receive')

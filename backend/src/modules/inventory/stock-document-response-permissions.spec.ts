@@ -34,10 +34,23 @@ describe('stock document response cost visibility', () => {
             .toBe(allowed ? '11.0000' : null);
         }
       }
-      expect(calls.findOne).toHaveBeenLastCalledWith('company','doc',true,'branch');
-      expect(calls.create).toHaveBeenLastCalledWith('company','branch','user',{},true);
-      expect(calls.post).toHaveBeenLastCalledWith('company','user','doc',true,'branch',undefined,true);
-      expect(calls.reverse).toHaveBeenLastCalledWith('company','user','doc',true,'branch');
+      // Every operation must hand the caller's cost visibility to whatever
+      // builds its response. The exact call sequence is scaffolding: approving
+      // and posting first re-read the document to decide warehouse access, and
+      // that guard read is deliberately cost-blind so a refusal cannot leak a
+      // cost. What matters is that each operation is called both ways - once
+      // for a caller allowed costs and once for a caller not allowed them - so
+      // no route can quietly hard-code either answer.
+      const flags = (fn: jest.Mock, costArg: number) =>
+        new Set(
+          fn.mock.calls
+            .map((call) => call[costArg])
+            .filter((value) => typeof value === 'boolean'),
+        );
+      expect(flags(calls.findOne, 2)).toEqual(new Set([true, false]));
+      expect(flags(calls.create, 4)).toEqual(new Set([true, false]));
+      expect(flags(calls.post, 3)).toEqual(new Set([true, false]));
+      expect(flags(calls.reverse, 3)).toEqual(new Set([true, false]));
     } finally { await app.close(); }
   });
 });

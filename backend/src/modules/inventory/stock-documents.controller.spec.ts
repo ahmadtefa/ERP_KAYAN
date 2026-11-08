@@ -1,0 +1,197 @@
+import { ForbiddenException } from '@nestjs/common';
+
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { StockDocumentsController } from './stock-documents.controller';
+
+describe('stock document warehouse access', () => {
+  const service = {
+    findAll: jest.fn(),
+    create: jest.fn(),
+    findOne: jest.fn(),
+    updateVoucher: jest.fn(),
+    transitionVoucher: jest.fn(),
+    post: jest.fn(),
+    reverse: jest.fn(),
+  };
+  const controller = new StockDocumentsController(service as never);
+
+  const user = (overrides: Record<string, unknown> = {}): AuthUser =>
+    ({
+      companyId: 'company-1',
+      userId: 'user-1',
+      branchId: 'branch-1',
+      branchIds: ['branch-1'],
+      isSuperAdmin: false,
+      permissions: ['inventory.stock.read', 'inventory.stock.adjust'],
+      warehouseAccess: [
+        {
+          warehouseId: 'warehouse-visible',
+          canView: true,
+          canReceive: true,
+          canIssue: true,
+          canTransfer: true,
+          canCount: true,
+          canApprove: true,
+          canSeeCost: true,
+        },
+      ],
+      ...overrides,
+    }) as AuthUser;
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('passes only visible warehouse ids to the document list', () => {
+    controller.findAll(user({
+      warehouseAccess: [
+        { warehouseId: 'warehouse-visible', canView: true },
+        { warehouseId: 'warehouse-hidden', canView: false },
+      ],
+    }), {});
+
+    expect(service.findAll).toHaveBeenCalledWith(
+      'company-1',
+      expect.any(Object),
+      'branch-1',
+      ['warehouse-visible'],
+    );
+  });
+
+  it('allows a read-only user to open a transfer when both warehouses are visible', async () => {
+    service.findOne.mockResolvedValue({
+      id: 'doc-visible',
+      kind: 'TRANSFER',
+      fromWarehouseId: 'warehouse-visible',
+      toWarehouseId: 'warehouse-destination',
+    });
+
+    const result = await controller.findOne(user({
+      warehouseAccess: [
+        {
+          warehouseId: 'warehouse-visible',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+        {
+          warehouseId: 'warehouse-destination',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+      ],
+    }), 'doc-visible');
+
+    expect(result).toMatchObject({ id: 'doc-visible' });
+  });
+
+  it('requires warehouse cost visibility to create a receipt voucher', () => {
+    expect(() =>
+      controller.create(
+        user({
+          permissions: ['inventory.stock.adjust', 'inventory.cost.read'],
+          warehouseAccess: [
+            {
+              warehouseId: 'warehouse-visible',
+              canView: true,
+              canReceive: true,
+              canIssue: false,
+              canTransfer: false,
+              canCount: false,
+              canApprove: false,
+              canSeeCost: false,
+            },
+          ],
+        }),
+        {
+          kind: 'ADJUSTMENT',
+          voucherKind: 'RECEIPT',
+          toWarehouseId: 'warehouse-visible',
+        },
+      ),
+    ).toThrow(ForbiddenException);
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a transfer detail if either warehouse is outside the user grants', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'doc-1',
+      kind: 'TRANSFER',
+      fromWarehouseId: 'warehouse-visible',
+      toWarehouseId: 'warehouse-hidden',
+    });
+
+    await expect(
+      controller.findOne(user(), 'doc-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('refuses an issue voucher edit without issue access to its warehouse', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'doc-2',
+      kind: 'ADJUSTMENT',
+      voucherKind: 'ISSUE',
+      toWarehouseId: 'warehouse-visible',
+    });
+
+    await expect(
+      controller.updateVoucher(
+        user({
+          warehouseAccess: [
+            {
+              warehouseId: 'warehouse-visible',
+              canView: true,
+              canReceive: true,
+              canIssue: false,
+              canTransfer: false,
+              canCount: false,
+              canApprove: false,
+              canSeeCost: false,
+            },
+          ],
+        }),
+        'doc-2',
+        {},
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(service.updateVoucher).not.toHaveBeenCalled();
+  });
+
+  it('requires warehouse approval access before reviewing a voucher', async () => {
+    service.findOne.mockResolvedValueOnce({
+      id: 'doc-3',
+      kind: 'ADJUSTMENT',
+      voucherKind: 'RECEIPT',
+      toWarehouseId: 'warehouse-visible',
+    });
+
+    await expect(
+      controller.review(
+        user({
+          warehouseAccess: [
+            {
+              warehouseId: 'warehouse-visible',
+              canView: true,
+              canReceive: true,
+              canIssue: false,
+              canTransfer: false,
+              canCount: false,
+              canApprove: false,
+              canSeeCost: true,
+            },
+          ],
+        }),
+        'doc-3',
+        { expectedVersion: 0 },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(service.transitionVoucher).not.toHaveBeenCalled();
+  });
+});

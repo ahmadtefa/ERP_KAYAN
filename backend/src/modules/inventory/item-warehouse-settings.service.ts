@@ -30,9 +30,18 @@ export class ItemWarehouseSettingsService {
     companyId: string,
     query: { warehouseId?: string; itemId?: string; belowMinimum?: string } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const where: Prisma.ItemWarehouseSettingWhereInput = { companyId };
-    if (query.warehouseId) where.warehouseId = query.warehouseId;
+    if (warehouseIds !== undefined || query.warehouseId) {
+      where.warehouseId = {
+        in: warehouseIds === undefined
+          ? [query.warehouseId!]
+          : query.warehouseId
+            ? warehouseIds.filter((id) => id === query.warehouseId)
+            : warehouseIds,
+      };
+    }
     if (query.itemId) where.itemId = query.itemId;
     if (scope !== null) where.warehouse = { branchId: { in: scope } };
 

@@ -48,8 +48,9 @@ describe('stock takes', () => {
       sessions: [] as Session[],
       lines: [] as Line[],
       items: [
-        { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', companyId: COMPANY, deletedAt: null },
-        { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', companyId: COMPANY, deletedAt: null },
+        { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
+        { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
+        { id: 'item-service', code: 'SERVICE', nameEn: 'Service', nameAr: 'خدمة', unit: 'مرة', isStockTracked: false, companyId: COMPANY, deletedAt: null },
       ] as Session[],
       lots: (seed.lots ?? []) as Session[],
       balances: (seed.balances ?? []) as Session[],
@@ -145,6 +146,9 @@ describe('stock takes', () => {
           Object.assign(row, data);
           return row;
         }),
+        count: jest.fn(async ({ where }: any) =>
+          state.lines.filter((line) => matches(line, where)).length,
+        ),
       },
       itemBatch: {
         findMany: jest.fn(async ({ where }: any) =>
@@ -160,6 +164,7 @@ describe('stock takes', () => {
       },
       item: {
         findFirst: jest.fn(async ({ where }: any) => state.items.find((item) => matches(item, where)) ?? null),
+        findMany: jest.fn(async ({ where }: any) => state.items.filter((item) => matches(item, where))),
       },
       stockDocument: {
         findFirst: jest.fn(async ({ where }: any) =>
@@ -249,6 +254,62 @@ describe('stock takes', () => {
     return harness;
   }
 
+  /// A full count now freezes a line for every stock-tracked item, including
+  /// items the system believes are at zero, so a count can record goods it did
+  /// not know were there. Any test that wants to finish a session therefore has
+  /// to answer all of its lines, not just the one it seeded a balance for.
+  function answerEveryLine(
+    harness: ReturnType<typeof makeHarness>,
+    counted: Record<string, number> = {},
+  ) {
+    return harness.state.lines.map((line) => ({
+      lineId: line.id,
+      countedQuantity:
+        counted[line.itemId] !== undefined
+          ? counted[line.itemId]
+          : Number(line.systemQuantity),
+    }));
+  }
+
+  it('filters the stock take list to warehouses the caller may view', async () => {
+    const harness = makeHarness();
+
+    await harness.service.list(COMPANY, {}, null, ['warehouse-visible']);
+
+    expect(harness.prisma.stockTakeSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: COMPANY,
+          warehouseId: { in: ['warehouse-visible'] },
+        }),
+      }),
+    );
+    expect(harness.prisma.stockTakeSession.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          warehouseId: { in: ['warehouse-visible'] },
+        }),
+      }),
+    );
+  });
+
+  it('does not let a requested warehouse override the caller warehouse grants', async () => {
+    const harness = makeHarness();
+
+    await harness.service.list(
+      COMPANY,
+      { warehouseId: 'warehouse-hidden' },
+      null,
+      ['warehouse-visible'],
+    );
+
+    expect(harness.prisma.stockTakeSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ warehouseId: { in: [] } }),
+      }),
+    );
+  });
+
   it('freezes lots per lot and the rest per item, at the shelf\u2019s own average', async () => {
     const harness = withWarehouse(
       makeHarness({
@@ -310,6 +371,31 @@ describe('stock takes', () => {
       harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE, scope: 'PARTIAL', itemIds: [] }),
     ).rejects.toThrow(/must name the items/i);
     expect(harness.state.sessions).toHaveLength(0);
+  });
+
+  it('rejects non-stock items in a partial count before creating a session', async () => {
+    const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
+
+    await expect(
+      harness.service.start(COMPANY, COUNTER, {
+        warehouseId: WAREHOUSE,
+        scope: 'PARTIAL',
+        itemIds: ['item-service'],
+      }),
+    ).rejects.toThrow(/only existing stock-tracked items/i);
+    expect(harness.state.sessions).toHaveLength(0);
+  });
+
+  it('includes every zero-balance stock-tracked item in a full count', async () => {
+    const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
+
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+
+    expect(harness.state.lines.map((line) => line.itemId).sort()).toEqual([
+      'item-milk',
+      'item-plug',
+    ]);
+    expect(harness.state.lines.every((line) => line.systemQuantity.isZero())).toBe(true);
   });
 
   it('gives a partial count a line even for an item that holds nothing', async () => {
@@ -377,7 +463,34 @@ describe('stock takes', () => {
     expect(harness.state.lines[0].countedQuantity).toBeNull();
   });
 
-  it('finishing moves the session to review, and a second count on a closed session is refused', async () => {
+  it('refuses to finish while any frozen line remains uncounted', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') },
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('4'), value: D('40') },
+        ],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const sessionId = harness.state.sessions[0].id;
+    const firstLine = harness.state.lines[0];
+
+    await expect(
+      harness.service.record(COMPANY, COUNTER, sessionId, {
+        lines: [{ lineId: firstLine.id, countedQuantity: 9 }],
+        finish: true,
+      }),
+    ).rejects.toThrow(/1 line\(s\) have not been counted/i);
+
+    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    // The in-memory transaction fake does not roll back line updates; the real
+    // PostgreSQL transaction rolls the attempted partial finish back atomically.
+    expect(harness.state.lines[1].countedQuantity).toBeNull();
+  });
+
+  it('finishing locks the count against further edits while it awaits review', async () => {
     const harness = withWarehouse(
       makeHarness({
         balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') }],
@@ -389,15 +502,36 @@ describe('stock takes', () => {
     const lineId = harness.state.lines[0].id;
 
     await harness.service.record(COMPANY, COUNTER, sessionId, {
-      lines: [{ lineId, countedQuantity: 9 }],
+      lines: answerEveryLine(harness, { 'item-plug': 9 }),
       finish: true,
     });
     expect(harness.state.sessions[0].status).toBe('REVIEW');
 
-    harness.state.sessions[0].status = 'POSTED';
     await expect(
-      harness.service.record(COMPANY, COUNTER, sessionId, { lines: [{ lineId, countedQuantity: 9 }] }),
-    ).rejects.toThrow(/can no longer be counted/i);
+      harness.service.record(COMPANY, COUNTER, sessionId, {
+        lines: [{ lineId, countedQuantity: 9 }],
+      }),
+    ).rejects.toThrow(/no longer open for counting/i);
+    expect(harness.state.sessions[0].status).toBe('REVIEW');
+  });
+
+  it('cannot approve a counting session before all lines are submitted for review', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') },
+          { companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('4'), value: D('40') },
+        ],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+
+    await expect(
+      harness.service.approve(COMPANY, APPROVER, harness.state.sessions[0].id),
+    ).rejects.toThrow(/only after every line is counted/i);
+    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    expect(harness.tx.stockTakeSession.updateMany).not.toHaveBeenCalled();
   });
 
   it('will not let the person who counted approve their own difference', async () => {
@@ -406,11 +540,17 @@ describe('stock takes', () => {
       { id: WAREHOUSE, branchId: BRANCH },
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: answerEveryLine(harness, { 'item-plug': 1 }),
+      finish: true,
+    });
 
     await expect(
       harness.service.approve(COMPANY, COUNTER, harness.state.sessions[0].id),
     ).rejects.toThrow(/cannot approve/i);
-    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    // Finishing the count legitimately moves it to REVIEW; what must not
+    // happen is the counter approving their own difference.
+    expect(harness.state.sessions[0].status).toBe('REVIEW');
   });
 
   it('approves once, and tells the second approver the truth', async () => {
@@ -420,6 +560,10 @@ describe('stock takes', () => {
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
+    await harness.service.record(COMPANY, COUNTER, sessionId, {
+      lines: answerEveryLine(harness, { 'item-plug': 1 }),
+      finish: true,
+    });
 
     await harness.service.approve(COMPANY, APPROVER, sessionId);
     expect(harness.state.sessions[0]).toMatchObject({ status: 'APPROVED', approvedBy: APPROVER });
@@ -437,13 +581,18 @@ describe('stock takes', () => {
     );
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
+    await harness.service.record(COMPANY, COUNTER, sessionId, {
+      lines: answerEveryLine(harness, { 'item-plug': 1 }),
+      finish: true,
+    });
     // Someone else claimed it between our read and our write.
     (harness.tx.stockTakeSession.updateMany as jest.Mock).mockResolvedValueOnce({ count: 0 });
 
     await expect(harness.service.approve(COMPANY, APPROVER, sessionId)).rejects.toBeInstanceOf(
       ConflictException,
     );
-    expect(harness.state.sessions[0].status).toBe('COUNTING');
+    // Still awaiting approval, not approved a second time.
+    expect(harness.state.sessions[0].status).toBe('REVIEW');
   });
 
   it('posts only the differences, as an adjustment with an idempotency key, and links both ways', async () => {
@@ -465,6 +614,7 @@ describe('stock takes', () => {
         { lineId: plugLine.id, countedQuantity: 7 },
         { lineId: milkLine.id, countedQuantity: 5 },
       ],
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
 
@@ -497,7 +647,8 @@ describe('stock takes', () => {
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
     await harness.service.record(COMPANY, COUNTER, sessionId, {
-      lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 10 }],
+      lines: answerEveryLine(harness, { 'item-plug': 10 }),
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
 
@@ -528,7 +679,8 @@ describe('stock takes', () => {
     await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
     const sessionId = harness.state.sessions[0].id;
     await harness.service.record(COMPANY, COUNTER, sessionId, {
-      lines: [{ lineId: harness.state.lines[0].id, countedQuantity: 6 }],
+      lines: answerEveryLine(harness, { 'item-plug': 6 }),
+      finish: true,
     });
     await harness.service.approve(COMPANY, APPROVER, sessionId);
     harness.documents.post.mockRejectedValueOnce(new Error('the period is closed'));

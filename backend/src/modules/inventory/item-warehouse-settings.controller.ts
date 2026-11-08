@@ -3,6 +3,7 @@ import { IsNumber, IsOptional } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { ItemWarehouseSettingsService } from './item-warehouse-settings.service';
 
@@ -30,7 +31,12 @@ export class ItemWarehouseSettingsController {
     @Query()
     query: { warehouseId?: string; itemId?: string; belowMinimum?: string },
   ) {
-    return this.service.list(user.companyId, query, warehouseScopeOf(user));
+    return this.service.list(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Put(':warehouseId/:itemId')
@@ -41,6 +47,7 @@ export class ItemWarehouseSettingsController {
     @Param('itemId') itemId: string,
     @Body() dto: ThresholdDto,
   ) {
+    assertWarehouseAccess(user, warehouseId, 'view');
     return this.service.upsert(
       user.companyId,
       user.userId,

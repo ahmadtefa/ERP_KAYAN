@@ -118,8 +118,9 @@ export class StockDocumentsService {
       and.push({
         OR: [
           { fromWarehouseId: null, toWarehouseId: null },
-          { fromWarehouseId: { in: ids } },
-          { toWarehouseId: { in: ids } },
+          { fromWarehouseId: null, toWarehouseId: { in: ids } },
+          { fromWarehouseId: { in: ids }, toWarehouseId: null },
+          { fromWarehouseId: { in: ids }, toWarehouseId: { in: ids } },
         ],
       });
       where.AND = and;
@@ -827,7 +828,7 @@ export class StockDocumentsService {
   /// The claim is a conditional update, not a read-then-write: two people
   /// pressing approve at the same moment produce exactly one approval, and the
   /// loser is told so instead of silently overwriting the first name.
-  async approve(companyId: string, userId: string, id: string) {
+  async approve(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       select: {
@@ -871,7 +872,7 @@ export class StockDocumentsService {
       after: { documentNumber: document.documentNumber, approvedBy: userId },
     });
 
-    return this.findOne(companyId, document.id);
+    return this.findOne(companyId, document.id, mayReadCost);
   }
 
   /**

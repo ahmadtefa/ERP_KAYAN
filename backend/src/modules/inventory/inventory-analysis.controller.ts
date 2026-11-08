@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
@@ -62,10 +62,37 @@ export class InventoryAnalysisController {
     @Param('slug') slug: string,
     @Query() query: Record<string, string>,
   ) {
-    if (query.warehouseId) {
+    const grant = grantsOf(user);
+    if (grant !== null) {
+      const warehouseScopedReports = new Set([
+        'item-card',
+        'item-movement',
+        'balance-by-warehouse',
+        'valuation-by-warehouse',
+        'below-minimum',
+        'above-maximum',
+        'slow-moving',
+        'dead-stock',
+        'zero-stock',
+        'lots',
+        'expiring',
+        'expired',
+        'value-at-risk',
+        'cost-by-warehouse',
+      ]);
+      if (!query.warehouseId || !warehouseScopedReports.has(slug)) {
+        throw new ForbiddenException(
+          'This report must be filtered to one visible warehouse, or is not yet available for restricted warehouse access. / يجب تحديد مستودع مسموح به لهذا التقرير.',
+        );
+      }
+      assertWarehouseAccess(user, query.warehouseId, 'view');
+    } else if (query.warehouseId) {
       assertWarehouseAccess(user, query.warehouseId, 'view');
     }
-    const grant = grantsOf(user);
+    const warehouseGrant = query.warehouseId
+      ? grant?.find((row) => row.warehouseId === query.warehouseId)
+      : undefined;
+    const mayReadReportCost = canReadCost(user) && (warehouseGrant === undefined || warehouseGrant.canSeeCost);
     const filter: ReportFilter = {
       from: query.from,
       to: query.to,
@@ -77,10 +104,25 @@ export class InventoryAnalysisController {
       limit: query.limit ? Number(query.limit) : undefined,
     };
     return this.service.run(slug, user.companyId, filter, warehouseScopeOf(user)).then((report) => {
-      // A person without the cost permission sees the report without a cost
-      // column rather than not seeing the report at all.
-      if (canReadCost(user) || grant === null) return report;
-      return report;
+      if (mayReadReportCost) return report;
+      const costFields = new Set([
+        'unitCost',
+        'totalCost',
+        'averageCost',
+        'value',
+        'balanceValue',
+        'varianceValue',
+      ]);
+      const hideCosts = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(hideCosts);
+        if (value === null || typeof value !== 'object') return value;
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => !costFields.has(key))
+            .map(([key, child]) => [key, hideCosts(child)]),
+        );
+      };
+      return hideCosts(report);
     });
   }
 }

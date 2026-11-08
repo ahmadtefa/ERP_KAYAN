@@ -233,16 +233,39 @@ export class BatchesService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(
+    companyId: string,
+    id: string,
+    scope: WarehouseScope = null,
+    grants: Array<{ warehouseId: string; canView: boolean }> | null = null,
+  ) {
+    const visibleWarehouseIds = grants
+      ?.filter((grant) => grant.canView)
+      .map((grant) => grant.warehouseId);
     const row = await this.prisma.itemBatch.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(scope !== null ? { warehouse: { branchId: { in: scope } } } : {}),
+        ...(visibleWarehouseIds !== undefined
+          ? { warehouseId: { in: visibleWarehouseIds } }
+          : {}),
+      },
       include: {
         item: { select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } },
         warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         movements: {
+          where: {
+            ...(scope !== null ? { branchId: { in: scope } } : {}),
+            ...(visibleWarehouseIds !== undefined
+              ? { warehouseId: { in: visibleWarehouseIds } }
+              : {}),
+          },
           orderBy: { createdAt: 'asc' },
           select: {
             id: true,
+            warehouseId: true,
             movementDate: true,
             direction: true,
             quantity: true,
@@ -265,8 +288,13 @@ export class BatchesService {
   /// purchase that brought the lot in, every shelf it sat on, every document
   /// that took some out, and - through the reference ids - the customer it
   /// went to.
-  async trace(companyId: string, id: string) {
-    const lot = await this.findOne(companyId, id);
+  async trace(
+    companyId: string,
+    id: string,
+    scope: WarehouseScope = null,
+    grants: Array<{ warehouseId: string; canView: boolean }> | null = null,
+  ) {
+    const lot = await this.findOne(companyId, id, scope, grants);
     const movements = lot.movements;
     const references = movements
       .filter((row) => row.referenceType)
@@ -274,7 +302,7 @@ export class BatchesService {
 
     const customers: Array<{ invoiceNumber: string; customerName: string | null }> = [];
     const salesIds = movements
-      .filter((row) => row.referenceType.startsWith('SALES'))
+      .filter((row) => (row.referenceType ?? '').startsWith('SALES'))
       .map((row) => row.referenceNumber)
       .filter((value): value is string => Boolean(value));
     if (salesIds.length > 0) {
@@ -1365,6 +1393,7 @@ export class BatchesService {
       days?: string;
     } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const asOf = query.asOf ? dayOnly(query.asOf) : dayOnly(new Date());
     const days = query.days ? normalizeExpiryDays(String(query.days).split(',')) : [7, 30, 60, 90];
@@ -1376,7 +1405,16 @@ export class BatchesService {
       expiryDate: { not: null },
       status: { notIn: ['WRITTEN_OFF', 'CLOSED'] },
     };
-    if (query.warehouseId) where.warehouseId = query.warehouseId;
+    if (warehouseIds !== undefined || query.warehouseId) {
+      const allowed = warehouseIds === undefined ? undefined : warehouseIds;
+      where.warehouseId = {
+        in: allowed === undefined
+          ? [query.warehouseId!]
+          : query.warehouseId
+            ? allowed.filter((id) => id === query.warehouseId)
+            : allowed,
+      };
+    }
     if (query.itemId) where.itemId = query.itemId;
     if (query.categoryId) where.item = { categoryId: query.categoryId };
     if (scope !== null) where.warehouse = { branchId: { in: scope } };

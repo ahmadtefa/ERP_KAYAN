@@ -247,7 +247,9 @@ describe('WarehouseService.balanceReport', () => {
   it('hides costs from a caller without the cost permission', async () => {
     const { instance } = service({ warehouses: [warehouse], rows, units });
 
-    const report = await instance.balanceReport('company-1', {}, null, false);
+    // (companyId, query, scope, warehouseIds, mayReadCost): scope and the
+    // warehouse-id list both stay unrestricted here, cost visibility is false.
+    const report = await instance.balanceReport('company-1', {}, null, undefined, false);
 
     expect(report.rows.every((row) => row.value === null)).toBe(true);
     expect(report.rows.every((row) => row.averageCost === null)).toBe(true);

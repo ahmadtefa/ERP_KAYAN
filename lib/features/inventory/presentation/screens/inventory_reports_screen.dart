@@ -102,6 +102,11 @@ class _InventoryReportsScreenState
     return ModuleScaffold(
       title: _arabic ? 'تقارير المخزون' : 'Inventory reports',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
+      trailing: IconButton(
+        tooltip: _arabic ? 'تحديث' : 'Refresh',
+        onPressed: () => ref.invalidate(_catalogueProvider),
+        icon: const Icon(Icons.refresh),
+      ),
       body: AsyncStateView<List<Json>>(
         value: catalogue,
         onRetry: () => ref.invalidate(_catalogueProvider),

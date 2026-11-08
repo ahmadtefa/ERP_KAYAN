@@ -107,6 +107,11 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
             hint: _arabic ? 'بحث في الدفعات' : 'Search batches',
             onChanged: (value) => setState(() => _query = value.trim()),
           ),
+          IconButton(
+            tooltip: _arabic ? 'تحديث' : 'Refresh',
+            onPressed: () => ref.read(batchesListProvider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
         ],
       ),
       body: AsyncStateView<List<Json>>(

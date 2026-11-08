@@ -3,7 +3,23 @@ import { NestFactory, Reflector } from '@nestjs/core';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { StockDocumentsController } from './stock-documents.controller';
 import { StockDocumentsService } from './stock-documents.service';
-const service = {transitionVoucher:jest.fn().mockResolvedValue({id:'document'}),updateVoucher:jest.fn().mockResolvedValue({id:'document'})};
+// Every voucher route now re-reads the document to decide warehouse access
+// before it acts, so the double has to answer findOne with a document that
+// names its shelf and its kind. Without it the guard read is what fails, and
+// the permission assertions below would be testing a 500 instead of a 403.
+const document = {
+  id: 'doc',
+  kind: 'RECEIPT',
+  voucherKind: 'RECEIPT',
+  fromWarehouseId: null,
+  toWarehouseId: null,
+  status: 'DRAFT',
+};
+const service = {
+  findOne: jest.fn().mockResolvedValue(document),
+  transitionVoucher: jest.fn().mockResolvedValue({ id: 'document' }),
+  updateVoucher: jest.fn().mockResolvedValue({ id: 'document' }),
+};
 @Module({controllers:[StockDocumentsController],providers:[{provide:StockDocumentsService,useValue:service}]}) class Fixture {}
 describe('stock voucher workflow HTTP permissions', () => {
   it('requires read and the distinct review or approval privilege', async () => {
