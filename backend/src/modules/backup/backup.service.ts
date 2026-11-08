@@ -272,7 +272,6 @@ export const TABLES: TableSpec[] = [
   { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
-  { model: 'backupRun', scope: 'company' },
 ];
 
 /// Tables that are deliberately left out, and why. A backup file that silently
