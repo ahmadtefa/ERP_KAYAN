@@ -1386,6 +1386,7 @@ export class BatchesService {
       days?: string;
     } = {},
     scope: WarehouseScope = null,
+    warehouseIds?: string[],
   ) {
     const asOf = query.asOf ? dayOnly(query.asOf) : dayOnly(new Date());
     const days = query.days ? normalizeExpiryDays(String(query.days).split(',')) : [7, 30, 60, 90];
@@ -1397,7 +1398,16 @@ export class BatchesService {
       expiryDate: { not: null },
       status: { notIn: ['WRITTEN_OFF', 'CLOSED'] },
     };
-    if (query.warehouseId) where.warehouseId = query.warehouseId;
+    if (warehouseIds !== undefined || query.warehouseId) {
+      const allowed = warehouseIds === undefined ? undefined : warehouseIds;
+      where.warehouseId = {
+        in: allowed === undefined
+          ? [query.warehouseId!]
+          : query.warehouseId
+            ? allowed.filter((id) => id === query.warehouseId)
+            : allowed,
+      };
+    }
     if (query.itemId) where.itemId = query.itemId;
     if (query.categoryId) where.item = { categoryId: query.categoryId };
     if (scope !== null) where.warehouse = { branchId: { in: scope } };

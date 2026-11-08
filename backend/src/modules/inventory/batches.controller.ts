@@ -134,7 +134,12 @@ export class BatchesController {
       days?: string;
     },
   ) {
-    return this.service.expiryReport(user.companyId, query, warehouseScopeOf(user));
+    return this.service.expiryReport(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
   }
 
   @Get(':id/trace')
