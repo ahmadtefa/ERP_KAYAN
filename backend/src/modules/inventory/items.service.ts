@@ -14,7 +14,7 @@ import { StockLedgerService } from '../../common/warehouse/stock-ledger.service'
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
-import { isValidEan13, randomInternalBarcode, toBaseQuantity } from './barcode';
+import { isValidEan13, randomInternalBarcode } from './barcode';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -97,7 +97,8 @@ export class ItemsService {
         matched: 'item' as const,
         unit: item.unit,
         factor: '1.000000',
-        quantityPerScan: '1.0000',
+        quantityPerScan: '1.000000',
+        quantityPerScanFitsLedgerScale: true,
         salePrice: item.salePrice.toFixed(MONEY_SCALE),
         purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
         item: this.toResponse(item, mayReadCost),
@@ -120,9 +121,13 @@ export class ItemsService {
       matched: 'unit' as const,
       unit: unit.unit,
       factor: unit.factor.toFixed(6),
-      // A scan of a unit barcode is one of that unit, expressed in the base
-      // unit the stock ledger keeps.
-      quantityPerScan: toBaseQuantity(1, unit.factor).toFixed(MONEY_SCALE),
+      // Preserve the exact conversion factor for the scanner. Do not round a
+      // single scan to ledger scale here: the caller must know when one scan
+      // cannot be posted exactly, and document creation will reject rounding.
+      quantityPerScan: unit.factor.toFixed(6),
+      quantityPerScanFitsLedgerScale: unit.factor.equals(
+        unit.factor.toDecimalPlaces(MONEY_SCALE),
+      ),
       salePrice:
         unit.salePrice?.toFixed(MONEY_SCALE) ?? owner.salePrice.toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
