@@ -81,7 +81,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
 
   /// Where the goods went. A write-off or an opening balance has no
   /// destination, so the column falls back to where they left from.
-  String _movement(Json row) {
+  String? _movement(Json row) {
     String name(Object? value) {
       if (value is! Map) return '';
       final json = Map<String, dynamic>.from(value);
@@ -90,7 +90,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
 
     final from = name(row['fromWarehouse']);
     final to = name(row['toWarehouse']);
-    if (from.isEmpty && to.isEmpty) return '';
+    if (from.isEmpty && to.isEmpty) return null;
     if (to.isEmpty) return from;
     if (from.isEmpty) return '→ $to';
     return '$from → $to';
