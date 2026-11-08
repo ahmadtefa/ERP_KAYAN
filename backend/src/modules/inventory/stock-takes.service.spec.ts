@@ -356,6 +356,19 @@ describe('stock takes', () => {
     expect(harness.state.sessions).toHaveLength(0);
   });
 
+  it('rejects non-stock items in a partial count before creating a session', async () => {
+    const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
+
+    await expect(
+      harness.service.start(COMPANY, COUNTER, {
+        warehouseId: WAREHOUSE,
+        scope: 'PARTIAL',
+        itemIds: ['item-service'],
+      }),
+    ).rejects.toThrow(/only existing stock-tracked items/i);
+    expect(harness.state.sessions).toHaveLength(0);
+  });
+
   it('includes every zero-balance stock-tracked item in a full count', async () => {
     const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
 

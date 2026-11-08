@@ -161,6 +161,21 @@ export class StockTakesService {
     if (partial && itemIds.length === 0) {
       throw new BadRequestException('A partial count must name the items it covers.');
     }
+    if (partial) {
+      const uniqueItemIds = [...new Set(itemIds)];
+      const eligible = await this.prisma.item.findMany({
+        where: {
+          id: { in: uniqueItemIds },
+          companyId,
+          deletedAt: null,
+          isStockTracked: true,
+        },
+        select: { id: true },
+      });
+      if (eligible.length !== uniqueItemIds.length) {
+        throw new BadRequestException('A partial count can include only existing stock-tracked items.');
+      }
+    }
 
     // The session is created inside the transaction and read back after it
     // commits. Reading it from inside - which this used to do - asks a
@@ -259,7 +274,7 @@ export class StockTakesService {
             id: itemId,
             companyId,
             deletedAt: null,
-            ...(!partial ? { isStockTracked: true } : {}),
+            isStockTracked: true,
           },
           select: { id: true },
         });
