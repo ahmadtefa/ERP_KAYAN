@@ -64,9 +64,25 @@ export class InventoryAnalysisController {
   ) {
     const grant = grantsOf(user);
     if (grant !== null) {
-      if (!query.warehouseId) {
+      const warehouseScopedReports = new Set([
+        'item-card',
+        'item-movement',
+        'balance-by-warehouse',
+        'valuation-by-warehouse',
+        'below-minimum',
+        'above-maximum',
+        'slow-moving',
+        'dead-stock',
+        'zero-stock',
+        'lots',
+        'expiring',
+        'expired',
+        'value-at-risk',
+        'cost-by-warehouse',
+      ]);
+      if (!query.warehouseId || !warehouseScopedReports.has(slug)) {
         throw new ForbiddenException(
-          'Select a warehouse you are allowed to view before opening this report. / اختر مستودعًا مسموحًا لعرض التقرير.',
+          'This report must be filtered to one visible warehouse, or is not yet available for restricted warehouse access. / يجب تحديد مستودع مسموح به لهذا التقرير.',
         );
       }
       assertWarehouseAccess(user, query.warehouseId, 'view');
