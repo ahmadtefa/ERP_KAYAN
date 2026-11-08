@@ -180,9 +180,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
   /// The item's picture, on its own screen: an upload is not a form field.
   Future<void> _openPicture(Json row) async {
-    final id = asString(row['id']);
+    // asString answers null for a missing or non-string value, so the empty
+    // test has to come after the null one.
+    final id = asString(row['id']) ?? '';
     if (id.isEmpty) return;
-    final name = asString(row['nameEn']);
+    final name = asString(row['nameEn']) ?? '';
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => Scaffold(
@@ -674,7 +676,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           ];
           final pictures = ids.isEmpty
               ? const <String, Uint8List>{}
-              : ref.watch(itemThumbnailsProvider(_thumbnailKey(ids))).valueOrNull ??
+              : ref.watch(itemThumbnailsProvider(_thumbnailKey(ids))).value ??
                     const <String, Uint8List>{};
           return RecordsTable(
             rows: visible,

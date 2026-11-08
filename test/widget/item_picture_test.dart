@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/features/inventory/data/item_image_data_source.dart';
 import 'package:erp_kayan/features/inventory/presentation/widgets/item_picture.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';

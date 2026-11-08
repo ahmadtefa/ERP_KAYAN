@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/records_table.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// Shows the item balances for one warehouse.
 ///

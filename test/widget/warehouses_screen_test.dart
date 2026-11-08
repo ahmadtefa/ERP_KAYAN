@@ -39,7 +39,10 @@ class _WarehousesApi extends ApiClient {
     if (path != '/inventory/warehouses/balance') {
       throw StateError('UNEXPECTED_GET $path');
     }
+    // Two assertions in this file read this mock through different names;
+    // one definition records for both rather than duplicating the method.
     balanceQueries.add(query);
+    balanceRequests.add((path, query));
     return {
       'asOf': '2026-11-08',
       'rows': [
@@ -104,31 +107,6 @@ class _WarehousesApi extends ApiClient {
         'branchNameAr': 'الفرع الثاني',
       },
     ];
-  }
-
-  @override
-  Future<Map<String, dynamic>> getObject(
-    String path, {
-    Map<String, dynamic>? query,
-  }) async {
-    balanceRequests.add((path, query));
-    return {
-      'rows': [
-        {
-          'warehouseId': 'wh-1',
-          'itemId': 'item-1',
-          'itemCode': 'ITEM-001',
-          'itemNameEn': 'Coffee',
-          'itemNameAr': 'قهوة',
-          'unit': 'kg',
-          'quantity': '12.5000',
-          'quantityText': '12.5',
-        },
-      ],
-      'itemTotals': const [],
-      'warehouseTotals': const [],
-      'totals': {'rows': 1},
-    };
   }
 
   @override

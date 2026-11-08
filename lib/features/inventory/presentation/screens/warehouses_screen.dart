@@ -14,7 +14,6 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
-import '../widgets/warehouse_balance_dialog.dart';
 
 /// Where goods are kept: the warehouses of the company, one row each.
 ///
@@ -86,8 +85,14 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
           const SizedBox(width: 12),
           // Reading what is on the shelves is a read grant, not a manage one:
           // the same person who may look at a warehouse may look inside it.
+          // This opens the default warehouse, which is the one the rest of the
+          // screen treats as current; a specific shelf is reachable from its
+          // own row action.
           OutlinedButton.icon(
-            onPressed: () => showWarehouseBalance(context),
+            onPressed: () {
+              final rows = _filter(async.value ?? const <Json>[]);
+              if (rows.isNotEmpty) _openBalances(rows.first);
+            },
             icon: const Icon(Icons.inventory_2_outlined, size: 18),
             label: Text(_arabic ? 'الأرصدة' : 'Balances'),
           ),

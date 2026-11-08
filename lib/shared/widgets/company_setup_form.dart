@@ -417,7 +417,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
                 fit: BoxFit.contain,
               ),
               IconButton(
-                tooltip: context.l10n.removeFile,
+                // This form predates the localisation layer and every
+                // neighbouring label is bilingual; adding one l10n lookup here
+                // would need an import the rest of the file does not have.
+                tooltip: 'إزالة / Remove',
                 onPressed: busy ? null : () => setState(() => _logo = null),
                 icon: const Icon(Icons.close, size: 18),
               ),
