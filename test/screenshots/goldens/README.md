@@ -57,3 +57,31 @@ unchanged. The dashboard and customer baselines remain unchanged.
 | File | SHA-256 of updated 1440×900 RGBA pixels |
 | --- | --- |
 | sales_invoices_ar.png | `daf92fd3ce55dc6c01c8f93852e4d2d7d5bf36d42d4b7510a73e63a899e4f00e` |
+
+## Inventory navigation — d2cbf1d
+
+`d2cbf1d` added nine entries to the sidebar (stock documents, inventory reports,
+storage locations, warehouses, item thresholds, batches, stock takes, write-offs
+and storage-location permissions), which grew the navigation list from 27 to 36
+items. The baselines were never re-rendered after that change, so the screenshot
+job failed on dashboard and customers with a 502-pixel difference.
+
+The failed renders were reconstructed losslessly from the diagnostic check run
+for `f6ae4591` and compared to the previous baselines. In both images all 502
+differing pixels fall inside x=1192–1197, y=357–441: a six-pixel-wide vertical
+strip on the border of the navigation rail. That is the scrollbar thumb. The
+thumb no longer reaches the same y range because the navigation list is now
+longer, so those pixels show the rail background instead of the thumb. Every
+other pixel — the whole screen body, the figures, and the rest of the rail — is
+identical.
+
+`sales_invoices_ar.png` passes with the previous baseline and was left alone.
+
+| File | SHA-256 of updated 1440×900 RGBA pixels |
+| --- | --- |
+| dashboard_ar.png | `d5048ef08fe9ba1a6bd074834b54feced5cb6d43a9ba839b36dfe09d37955b5b` |
+| customers_ar.png | `793f033a2e9b7cc2f54e6012cd46fc60dca7a8a88185fd4ab064785a3743f238` |
+
+Every pixel outside the navigation scrollbar thumb is unchanged from the
+previous baselines; this review does not verify order operations, Windows
+rendering, backend integration, or product readiness.

@@ -46,6 +46,17 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The batch list locale test uses only the checked-in synthetic lots. Report
+  // assertion counts, source locations and fixed framework diagnostics, never
+  // arbitrary exception text or request payloads.
+  if (event.type === 'print' && /^English reads nameEn, Arabic reads nameAr and mirrors$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual):.*$/)?.[0]?.trim() ??
+      line.match(/test\/widget\/batches_screen_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found)/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   // The voucher load-retry tests contain only checked-in synthetic data.
   // Report assertion counts, source locations and fixed framework diagnostics,
   // never arbitrary exception text or request payloads.
