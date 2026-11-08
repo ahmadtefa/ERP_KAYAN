@@ -53,6 +53,7 @@ describe('stock takes', () => {
       ] as Session[],
       lots: (seed.lots ?? []) as Session[],
       balances: (seed.balances ?? []) as Session[],
+      stockDocuments: [] as Session[],
     };
     let sequence = 0;
 
@@ -160,7 +161,16 @@ describe('stock takes', () => {
       item: {
         findFirst: jest.fn(async ({ where }: any) => state.items.find((item) => matches(item, where)) ?? null),
       },
-      stockDocument: { updateMany: jest.fn(async () => ({ count: 1 })) },
+      stockDocument: {
+        findFirst: jest.fn(async ({ where }: any) =>
+          state.stockDocuments.find((document) => matches(document, where)) ?? null,
+        ),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          const document = state.stockDocuments.find((row) => matches(row, where));
+          if (document) Object.assign(document, data);
+          return { count: document ? 1 : 0 };
+        }),
+      },
       warehouse: { findFirst: jest.fn(async () => null as Record<string, any> | null) },
     };
 
@@ -193,11 +203,30 @@ describe('stock takes', () => {
     };
     const numbers = { next: jest.fn(async () => 'STK-2026-0001') };
     const documents = {
-      create: jest.fn(async (_companyId: string, _branchId: string, _userId: string, dto: any) => ({
-        id: 'doc-1',
-        ...dto,
-      })),
-      post: jest.fn(async () => ({ id: 'doc-1', journalEntryId: 'journal-1' })),
+      create: jest.fn(async (companyId: string, branchId: string, _userId: string, dto: any, options: any) => {
+        const document = {
+          id: 'doc-1',
+          companyId,
+          branchId,
+          kind: dto.kind,
+          toWarehouseId: dto.toWarehouseId ?? null,
+          status: 'DRAFT',
+          stockTakeSessionId: null,
+          idempotencyKey: options?.idempotencyKey,
+          lines: dto.lines.map((line: any) => ({
+            ...line,
+            quantity: D(line.quantity),
+            unitCost: D(line.unitCost),
+          })),
+        };
+        state.stockDocuments.push(document);
+        return { id: document.id, ...dto };
+      }),
+      post: jest.fn(async () => {
+        const document = state.stockDocuments[0];
+        if (document) document.status = 'POSTED';
+        return { id: 'doc-1', journalEntryId: 'journal-1' };
+      }),
     };
     const audit = { record: jest.fn(async () => undefined) };
     const service = new StockTakesService(
@@ -508,6 +537,14 @@ describe('stock takes', () => {
     );
     expect(harness.state.sessions[0].status).toBe('APPROVED');
     expect(harness.state.sessions[0].documentId).toBeNull();
+    expect(harness.state.stockDocuments[0].status).toBe('DRAFT');
+
+    // The retry must reuse the first draft, not create a second document.
+    await harness.service.post(COMPANY, APPROVER, sessionId);
+    expect(harness.documents.create).toHaveBeenCalledTimes(1);
+    expect(harness.documents.post).toHaveBeenCalledTimes(2);
+    expect(harness.state.sessions[0]).toMatchObject({ status: 'POSTED', documentId: 'doc-1' });
+    expect(harness.state.stockDocuments[0].stockTakeSessionId).toBe(sessionId);
   });
 
   it('will not cancel a posted count', async () => {
