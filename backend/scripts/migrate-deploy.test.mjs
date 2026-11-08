@@ -37,7 +37,7 @@ test('missing packaged migrator fails closed even when the Prisma CLI exists', a
 test('runs the packaged apply-migrations script and preserves success and failure exit codes', async () => {
   const ok = isolatedBackend();
   fakeCli(ok);
-  fakeMigrator(ok, "if (process.argv.length !== 3) process.exit(42);\n");
+  fakeMigrator(ok, "if (process.argv.length !== 2) process.exit(42);\n");
   assert.equal(prismaCliAvailable(ok), true);
   assert.equal(await deployMigrations(ok), 0);
 
