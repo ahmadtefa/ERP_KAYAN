@@ -2066,8 +2066,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const CancelClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
-      const delayedCancel = new CancelClass(cancelPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const delayedCancel = kind === 'sales'
+        ? new SalesInvoicesService(cancelPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(cancelPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingCancel = delayedCancel.cancelDraft(company,branch,user,raceInvoice.invoice.id);
       try {
         await waitForBarrier(cancelReadBarrier,pendingCancel);
@@ -2209,7 +2210,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const value = target[key];
         return typeof value === 'function' ? value.bind(target) : value;
       }});
-      const delayedEditor = new PostingClass(editPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const delayedEditor = kind === 'sales'
+        ? new SalesInvoicesService(editPrisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger)
+        : new PurchaseInvoicesService(editPrisma,numbers,posting,map,settings,warehouses,ledger,prices,audit);
       const pendingEdit = delayedEditor.updateDraft(company,branch,user,cancelTarget.id,{...dto,
         lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
       try {
