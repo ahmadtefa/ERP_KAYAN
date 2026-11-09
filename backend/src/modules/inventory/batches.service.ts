@@ -750,10 +750,13 @@ export class BatchesService {
           itemId: item.id,
           deletedAt: null,
           remainingQuantity: { gt: 0 },
-          ...(input.batchId ? { id: input.batchId } : {}),
-          ...(locationLotBalances !== null
-            ? { id: { in: [...locationLotBalances.keys()] } }
-            : {}),
+          ...(input.batchId && locationLotBalances !== null
+            ? { id: { equals: input.batchId, in: [...locationLotBalances.keys()] } }
+            : input.batchId
+              ? { id: input.batchId }
+              : locationLotBalances !== null
+                ? { id: { in: [...locationLotBalances.keys()] } }
+                : {}),
         },
         // Locked, so two simultaneous issues cannot both take the last unit
         // of the same lot.
