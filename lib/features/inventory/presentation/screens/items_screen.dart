@@ -606,6 +606,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   }
 
   Future<void> _toggleActive(Json row) async {
+    // Asking first, acting second. The row is not busy while the question is
+    // on screen: the button only becomes busy once the person answers, so the
+    // confirmation is never blocked by an earlier action.
+    if (_busy) return;
     final l10n = context.l10n;
     final isActive = flag(row, 'isActive', fallback: true);
     if (isActive) {

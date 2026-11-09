@@ -266,7 +266,7 @@ void main() {
     expect(find.text('ST-003'), findsOneWidget);
     expect(find.text('Main store'), findsWidgets);
     expect(find.text('Full'), findsWidgets);
-    expect(find.text('Partial'), findsOneWidget);
+    expect(find.text('Partial'), findsNWidgets(2));
     expect(find.text('12'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
