@@ -73,39 +73,6 @@ class _CellWithLeading extends StatelessWidget {
 }
 
 
-/// The value of one cell, before any optional leading widget is drawn.
-///
-/// Kept in one place so a column with a picture and a column without one
-/// produce exactly the same text: only the decoration differs.
-Widget _plainCell(ThemeData theme, ColumnSpec column, Json row) {
-  if (column.tone != null) {
-    return Align(
-      alignment: AlignmentDirectional.centerStart,
-      child: StatusPill(
-        label: column.value(row) ?? '—',
-        tone: column.tone!(row),
-        dense: true,
-      ),
-    );
-  }
-  if (column.numeric) {
-    return Text(
-      column.value(row) ?? '—',
-      textDirection: column.textDirection,
-      softWrap: false,
-      style: _cellStyle(theme, column),
-    );
-  }
-  return ConstrainedBox(
-    constraints: const BoxConstraints(minWidth: 110, maxWidth: 300),
-    child: Text(
-      column.value(row) ?? '—',
-      textDirection: column.textDirection,
-      style: _cellStyle(theme, column),
-    ),
-  );
-}
-
 /// A record list that stays readable on a phone and on a desktop.
 ///
 /// Wide screens get a real table, dense enough for financial review: 42 px
@@ -236,6 +203,39 @@ class RecordsTable extends StatelessWidget {
         : theme.textTheme.bodyMedium;
     if (!column.emphasise) return base;
     return base?.copyWith(fontWeight: FontWeight.w600);
+  }
+
+  /// One cell's value, before any optional leading widget is drawn.
+  ///
+  /// Kept in one place so a column with a picture and a column without
+  /// one produce exactly the same text: only the decoration differs.
+  Widget _plainCell(ThemeData theme, ColumnSpec column, Json row) {
+    if (column.tone != null) {
+      return Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: StatusPill(
+          label: column.value(row) ?? '—',
+          tone: column.tone!(row),
+          dense: true,
+        ),
+      );
+  }
+  if (column.numeric) {
+    return Text(
+      column.value(row) ?? '—',
+      textDirection: column.textDirection,
+      softWrap: false,
+      style: _cellStyle(theme, column),
+    );
+  }
+  return ConstrainedBox(
+    constraints: const BoxConstraints(minWidth: 110, maxWidth: 300),
+    child: Text(
+      column.value(row) ?? '—',
+      textDirection: column.textDirection,
+      style: _cellStyle(theme, column),
+    ),
+  );
   }
 
   Widget _cardList(BuildContext context, {required bool boundedHeight}) {
