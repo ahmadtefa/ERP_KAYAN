@@ -773,8 +773,28 @@ export class BatchesService {
             'هذا الصنف يتطلب دفعة. / This item is lot-controlled: no lot is available to issue from.',
           );
         }
-        // An item without lots issues from the shelf's plain balance, which is
-        // exactly how the program worked before lots existed.
+        if (input.storageLocationId) {
+          const unbatchedRows = await tx.$queryRaw<
+            Array<{ quantity: Prisma.Decimal | null }>
+          >(
+            Prisma.sql`
+              SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+                FROM "stock_movements"
+               WHERE "companyId" = ${companyId}::uuid
+                 AND "warehouseId" = ${warehouse.id}::uuid
+                 AND "itemId" = ${item.id}::uuid
+                 AND "storageLocationId" = ${input.storageLocationId}::uuid
+                 AND "batchId" IS NULL
+            `,
+          );
+          const locationQuantity = new Prisma.Decimal(unbatchedRows[0]?.quantity ?? 0);
+          if (locationQuantity.lessThan(quantity)) {
+            throw new BadRequestException(
+              `الرصيد غير كافٍ في موقع التخزين المحدد: ${locationQuantity.toFixed(MONEY_SCALE)} متاح. / ` +
+                'Not enough unbatched stock in the selected storage location.',
+            );
+          }
+        }
         return this.issueUnbatched(tx, companyId, userId, warehouse, item, quantity, input, today);
       }
 
@@ -1037,6 +1057,7 @@ export class BatchesService {
         branchId: warehouse.branchId,
         warehouseId: warehouse.id,
         itemId: item.id,
+        storageLocationId: input.storageLocationId ?? null,
         movementDate: today,
         direction: StockDirection.OUT,
         quantity,
