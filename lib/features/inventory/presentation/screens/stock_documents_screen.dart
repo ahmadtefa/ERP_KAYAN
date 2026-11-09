@@ -373,10 +373,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    // A row of fixed-width controls needs more room than a
+                    // dialog is guaranteed; side by side they overflowed. Each
+                    // one now takes the full width on its own line.
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SizedBox(
                           width: 210,

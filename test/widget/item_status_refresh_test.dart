@@ -64,7 +64,10 @@ void main() {
         initialActive ? Icons.block_outlined : Icons.check_circle_outline,
       );
       expect(toggle, findsOneWidget, reason: 'the row action must be on screen');
-      await tester.tap(toggle); await tester.pumpAndSettle();
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle, warnIfMissed: false);
+      await tester.pumpAndSettle();
       if (initialActive) {
         // The confirmation dialog carries the same word as the button tooltip.
         // Target the dialog's own confirm button, which is the last FilledButton
