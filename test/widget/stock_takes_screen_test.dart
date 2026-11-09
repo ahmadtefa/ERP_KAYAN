@@ -72,9 +72,7 @@ class _StockTakesApi extends ApiClient {
         'warehouseNameEn': 'Main store',
         'warehouseNameAr': 'المخزن الرئيسي',
         'scope': 'FULL',
-        // Reached REVIEW like st-1, but the current user opened it, so the
-        // service refuses their approval and the screen explains why.
-        'status': 'REVIEW',
+        'status': 'COUNTING',
         'frozenAt': null,
         'createdBy': 'someone-else',
         'approvedAt': null,
@@ -129,6 +127,30 @@ class _StockTakesApi extends ApiClient {
         'lineCount': 7,
         'notes': null,
         'createdAt': '2026-11-03T09:00:00.000Z',
+      },
+      {
+        'id': 'st-4',
+        'code': 'ST-004',
+        // DRAFT -> COUNTING -> REVIEW -> APPROVED -> POSTED, and only REVIEW
+        // may be approved. A session still being counted offers nothing, which
+        // is why st-1 stays COUNTING; this one carries the reviewable state.
+        'branchId': 'br-1',
+        'warehouseId': 'wh-1',
+        'warehouseCode': 'MAIN',
+        'warehouseNameEn': 'Main store',
+        'warehouseNameAr': 'المخزن الرئيسي',
+        'scope': 'FULL',
+        'status': 'REVIEW',
+        'frozenAt': null,
+        'createdBy': 'someone-else',
+        'approvedAt': null,
+        'approvedBy': null,
+        'postedAt': null,
+        'documentId': null,
+        'journalEntryId': null,
+        'lineCount': 3,
+        'notes': null,
+        'createdAt': '2026-11-02T09:00:00.000Z',
       },
     ];
   }
@@ -223,6 +245,7 @@ void main() {
   ) async {
     await pump(tester, _StockTakesApi());
     expect(find.text('Counting'), findsNWidgets(2));
+    expect(find.text('In review'), findsOneWidget);
     expect(find.text('Approved'), findsOneWidget);
     expect(find.text('COUNTING'), findsNothing);
   });
@@ -231,8 +254,9 @@ void main() {
     tester,
   ) async {
     await pump(tester, _StockTakesApi());
-    // Two sessions await review; one was opened by this user, so it shows a
-    // disabled button instead of an Approve action.
+    // One session reached REVIEW and was opened by somebody else, so it may be
+    // approved; another is APPROVED and offers Post. The sessions still being
+    // counted offer neither.
     expect(find.byTooltip('Approve'), findsOneWidget);
     expect(find.byTooltip('Post'), findsOneWidget);
   });
@@ -390,6 +414,7 @@ void main() {
     await pump(tester, _StockTakesApi(), locale: const Locale('ar'));
     expect(find.text('الجرد'), findsOneWidget);
     expect(find.text('جارٍ العد'), findsNWidgets(2));
+    expect(find.text('قيد المراجعة'), findsOneWidget);
     expect(
       Directionality.of(tester.element(find.text('جارٍ العد').first)),
       TextDirection.rtl,
