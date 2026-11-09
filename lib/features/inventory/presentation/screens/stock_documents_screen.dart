@@ -365,7 +365,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             return AlertDialog(
               title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
               content: SizedBox(
-                width: 720,
+                // The toolbar inside is a Wrap of fixed-width dropdowns plus an
+                // 'Add line' button. At 720 the button was pushed past the edge
+                // and the row overflowed; 840 fits a full row, and the Wrap
+                // still stacks the controls on a narrow screen.
+                width: 840,
                 height: 480,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

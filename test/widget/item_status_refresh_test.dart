@@ -54,7 +54,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate')); await tester.pumpAndSettle();
       if (initialActive) {
-        await tester.tap(find.widgetWithText(FilledButton,'Deactivate')); await tester.pumpAndSettle();
+        // The confirmation dialog carries the same word as the button tooltip.
+        // Target the dialog's own confirm button, which is the last FilledButton
+        // on screen once the dialog is open.
+        final confirm = find.widgetWithText(FilledButton,'Deactivate');
+        expect(confirm, findsOneWidget, reason: 'the confirmation must appear');
+        await tester.tap(confirm); await tester.pumpAndSettle();
       }
       expect(find.text('حسنًا'),findsOneWidget);
       expect(find.textContaining('PRIVATE_ITEM_STATUS'),findsNothing);
