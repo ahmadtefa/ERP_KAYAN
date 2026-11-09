@@ -21,6 +21,7 @@ import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/inventory/presentation/screens/warehouses_screen.dart';
 import '../../features/inventory/presentation/screens/batches_screen.dart';
+import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
 import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
 import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
@@ -93,6 +94,7 @@ class AppRoutes {
   // router once its screen exists, so none of these is reachable yet.
   static const warehouses = '/inventory/warehouses';
   static const batches = '/inventory/batches';
+  static const notifications = '/notifications';
   static const storageLocations = '/inventory/locations';
   static const itemThresholds = '/inventory/thresholds';
   static const stockTakes = '/inventory/stock-takes';
@@ -260,11 +262,13 @@ const _guardedShellPaths = <String>{
   AppRoutes.stockDocuments,
   AppRoutes.inventoryReports,
   AppRoutes.warehouseAccess,
+  AppRoutes.notifications,
 };
 
 /// Every authenticated screen, in the order the navigation shows them.
 const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.dashboard, child: DashboardScreen()),
+  (path: AppRoutes.notifications, child: NotificationCenterScreen()),
   (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),

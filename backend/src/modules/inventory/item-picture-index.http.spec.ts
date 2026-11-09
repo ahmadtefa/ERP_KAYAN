@@ -49,6 +49,18 @@ const pictureless: AuthUser = {
   permissions: [],
 };
 
+/// A caller whose warehouse grants exist but grant no visibility. `grantsOf`
+/// treats "no grants at all" as "the whole catalogue", so only a real, empty
+/// grant list reaches the scope guard.
+const shutOut = {
+  ...reader,
+  userId: 'user-shut-out',
+  username: 'shut-out',
+  warehouseAccess: [
+    { warehouseId: 'warehouse-1', canView: false, canReceive: false, canIssue: false },
+  ],
+} as AuthUser;
+
 /// The token is not what is under test, so the principal is attached directly.
 /// Middleware rather than an interceptor: guards run first, and a principal
 /// attached later arrives after the permission check has already failed.
@@ -180,5 +192,35 @@ describe('the catalogue picture index over HTTP', () => {
 
     expect([401, 403]).toContain(response.status);
     expect(touched).toEqual([]);
+  });
+
+  // The class doc says every route proves the item is visible to this caller's
+  // warehouse grants before answering. Reading was the only route that did:
+  // upload, delete and presence answered a caller who may see no warehouse at
+  // all, so a storekeeper restricted to one shelf could write into another's
+  // catalogue and probe which items have pictures.
+  describe('a caller whose grants show them no warehouse', () => {
+    beforeEach(() => {
+      PrincipalMiddleware.current = shutOut;
+      touched.length = 0;
+    });
+
+    it('is refused the picture index', async () => {
+      const response = await get('/inventory/items/with-picture');
+      expect(response.status).toBe(400);
+      expect(touched).toEqual([]);
+    });
+
+    it('is refused presence', async () => {
+      const response = await get('/inventory/items/item-1/image/presence');
+      expect(response.status).toBe(400);
+      expect(touched).toEqual([]);
+    });
+
+    it('is refused a picture', async () => {
+      const response = await get('/inventory/items/item-1/image');
+      expect(response.status).toBe(400);
+      expect(touched).toEqual([]);
+    });
   });
 });
