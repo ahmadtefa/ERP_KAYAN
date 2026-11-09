@@ -455,6 +455,32 @@ export class StorageLocationsService {
         );
       }
 
+      // itemBatch has one storageLocationId. Before writing the transfer,
+      // verify that this lot has positive stock on this shelf only; otherwise
+      // a single location field cannot truthfully represent the lot.
+      let lotIsOnlyAtSource = false;
+      if (input.batchId) {
+        const lotLocations = await tx.$queryRaw<
+          Array<{ storageLocationId: string; quantity: Prisma.Decimal }>
+        >(
+          Prisma.sql`
+            SELECT "storageLocationId",
+                   SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "itemId" = ${input.itemId}::uuid
+               AND "batchId" = ${input.batchId}::uuid
+             GROUP BY "storageLocationId"
+            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) > 0
+          `,
+        );
+        lotIsOnlyAtSource =
+          lotLocations.length === 1 &&
+          lotLocations[0].storageLocationId === from.id &&
+          quantity.equals(available) &&
+          quantity.equals(lotLocations[0].quantity);
+      }
+
       // The value travels with the goods at the shelf's average, so a move
       // never invents profit and never loses cost.
       const onHand = balance[0]?.quantity ?? new Prisma.Decimal(0);
@@ -497,23 +523,11 @@ export class StorageLocationsService {
       // only when this move relocates the lot's entire remaining quantity;
       // a partial move must not make the untouched remainder appear on the
       // destination shelf.
-      if (input.batchId) {
-        const lotRows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
-          Prisma.sql`
-            SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
-              FROM "stock_movements"
-             WHERE "companyId" = ${companyId}::uuid
-               AND "itemId" = ${input.itemId}::uuid
-               AND "batchId" = ${input.batchId}::uuid
-          `,
-        );
-        const lotAvailable = new Prisma.Decimal(lotRows[0]?.quantity ?? 0);
-        if (quantity.equals(available) && quantity.equals(lotAvailable)) {
-          await tx.itemBatch.updateMany({
-            where: { id: input.batchId, companyId },
-            data: { storageLocationId: to.id, updatedBy: userId },
-          });
-        }
+      if (input.batchId && lotIsOnlyAtSource) {
+        await tx.itemBatch.updateMany({
+          where: { id: input.batchId, companyId },
+          data: { storageLocationId: to.id, updatedBy: userId },
+        });
       }
 
       await this.audit.record({
