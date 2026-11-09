@@ -1267,6 +1267,12 @@ export class BatchesService {
         );
       }
 
+      // A move between shelves must not launder a quality hold. Goods that are
+      // quarantined or expired stay that way on the destination shelf; creating
+      // the pair as OPEN silently released them for sale. CLOSED is the one
+      // state that cannot travel - a closed lot is empty - so anything that
+      // arrives is open by definition.
+      const sourceHold = batch.status === 'CLOSED' ? 'OPEN' : batch.status;
       const destination = await tx.itemBatch.findFirst({
         where: {
           companyId,
@@ -1283,6 +1289,11 @@ export class BatchesService {
           data: {
             receivedQuantity: { increment: quantity },
             remainingQuantity: { increment: quantity },
+            // Merging held goods into a lot that sits OPEN would release them,
+            // so the destination copy takes the source state when it is held.
+            ...(sourceHold !== 'OPEN' && destination.status === 'OPEN'
+              ? { status: sourceHold }
+              : {}),
             updatedBy: userId,
           },
         });
@@ -1300,7 +1311,7 @@ export class BatchesService {
             receivedQuantity: quantity,
             remainingQuantity: quantity,
             unitCost: batch.unitCost,
-            status: 'OPEN',
+            status: sourceHold,
             sourceType: 'BATCH_TRANSFER',
             sourceNumber: input.reason ?? null,
             createdBy: userId,

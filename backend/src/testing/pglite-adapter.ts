@@ -520,6 +520,56 @@ export function pglitePrisma(db: PgliteLike) {
         );
         return { count: result.rows.length };
       },
+      create: async (args: Row) => {
+        const data = args.data as Row;
+        // Prisma fills @updatedAt itself; the adapter has to do the same or the
+        // NOT NULL column rejects every insert.
+        if (data.updatedAt === undefined) data.updatedAt = new Date();
+        const fields = Object.keys(data);
+        const rows = await q(
+          `INSERT INTO "item_batches" ("id"${fields
+            .map((f) => `,"${columnFor('item_batches', f)}"`)
+            .join('')}) VALUES (gen_random_uuid()${fields.map((_, i) => `,$${i + 1}`).join('')})
+           RETURNING *`,
+          fields.map((f) => {
+            const value = data[f];
+            return Prisma.Decimal.isDecimal(value)
+              ? (value as Prisma.Decimal).toString()
+              : value;
+          }),
+        );
+        return rows[0] ?? {};
+      },
+      update: async (args: Row) => {
+        const params: unknown[] = [];
+        const where = whereToSql('item_batches', args.where as Row, params);
+        const data = args.data as Row;
+        const sets: string[] = [];
+        for (const [field, value] of Object.entries(data)) {
+          const col = `"${columnFor('item_batches', field)}"`;
+          if (typeof value === 'object' && value !== null && !Prisma.Decimal.isDecimal(value)) {
+            const op = value as Record<string, number | string>;
+            if ('increment' in op) {
+              params.push(op.increment);
+              sets.push(`${col} = ${col} + $${params.length}`);
+              continue;
+            }
+            if ('decrement' in op) {
+              params.push(op.decrement);
+              sets.push(`${col} = ${col} - $${params.length}`);
+              continue;
+            }
+          }
+          params.push(Prisma.Decimal.isDecimal(value) ? (value as Prisma.Decimal).toString() : value);
+          sets.push(`${col} = $${params.length}`);
+        }
+        if (sets.length === 0) return {};
+        const rows = await q(
+          `UPDATE "item_batches" SET ${sets.join(',')}${where} RETURNING *`,
+          params,
+        );
+        return rows[0] ?? {};
+      },
     },
 
     stockMovement: {
