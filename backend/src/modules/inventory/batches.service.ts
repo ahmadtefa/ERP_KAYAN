@@ -654,6 +654,9 @@ export class BatchesService {
     }
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     const item = await this.requireItem(companyId, input.itemId);
+    if (input.storageLocationId) {
+      await this.requireLocation(companyId, warehouse.id, input.storageLocationId);
+    }
 
     return this.prisma.$transaction((tx) =>
       this.issueTx(
@@ -715,6 +718,31 @@ export class BatchesService {
       // that each read the lots first would both see the same quantity and
       // both promise it away; taken in this order the second waits here.
       const shelf = await this.shelf(tx, companyId, warehouse, item.id);
+      // A named shelf is a hard stock boundary, not merely a label on the
+      // outgoing movement. Derive each lot's available quantity from that
+      // shelf's movement ledger so FEFO cannot issue a lot stored elsewhere.
+      let locationLotBalances: Map<string, Prisma.Decimal> | null = null;
+      if (input.storageLocationId) {
+        const locationLots = await tx.$queryRaw<
+          Array<{ batchId: string; quantity: Prisma.Decimal }>
+        >(
+          Prisma.sql`
+            SELECT "batchId",
+                   SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "warehouseId" = ${warehouse.id}::uuid
+               AND "itemId" = ${item.id}::uuid
+               AND "storageLocationId" = ${input.storageLocationId}::uuid
+               AND "batchId" IS NOT NULL
+             GROUP BY "batchId"
+            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) > 0
+          `,
+        );
+        locationLotBalances = new Map(
+          locationLots.map((row) => [row.batchId, new Prisma.Decimal(row.quantity)]),
+        );
+      }
       const lots = await tx.itemBatch.findMany({
         where: {
           companyId,
@@ -723,6 +751,9 @@ export class BatchesService {
           deletedAt: null,
           remainingQuantity: { gt: 0 },
           ...(input.batchId ? { id: input.batchId } : {}),
+          ...(locationLotBalances !== null
+            ? { id: { in: [...locationLotBalances.keys()] } }
+            : {}),
         },
         // Locked, so two simultaneous issues cannot both take the last unit
         // of the same lot.
@@ -777,7 +808,7 @@ export class BatchesService {
         expiryDate: lot.expiryDate,
         productionDate: lot.productionDate,
         unitCost: lot.unitCost,
-        remainingQuantity: lot.remainingQuantity,
+        remainingQuantity: locationLotBalances?.get(lot.id) ?? lot.remainingQuantity,
         status: lot.status,
       }));
 
