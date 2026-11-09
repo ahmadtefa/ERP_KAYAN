@@ -329,11 +329,14 @@ void main() {
   ) async {
     final api = _StockTakesApi();
     await pump(tester, api);
+    // st-5 is the session in REVIEW opened by somebody else: the only row
+    // this approver is offered an Approve action on.
     await tester.tap(find.byTooltip('Approve'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
     await tester.pumpAndSettle();
-    expect(api.posts, contains('/inventory/stock-takes/st-1/approve'));
+    expect(api.posts, contains('/inventory/stock-takes/st-5/approve'));
+    expect(api.posts, isNot(contains('/inventory/stock-takes/st-1/approve')));
   });
 
   testWidgets('posting is confirmed as irreversible before it is sent', (

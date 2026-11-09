@@ -5,6 +5,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -259,12 +260,15 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     }
     if (!mounted) return;
     if (warehouses.isEmpty) {
-      showMessage(
+      // A sentence the screen wrote itself, not a server diagnostic: show it
+      // as written. Routing it through the error resolver decided it was an
+      // untrusted English sentence and replaced it with the generic Arabic
+      // fallback, so the user was never told which warehouse was missing.
+      await showAppPlainError(
         context,
         _arabic
             ? 'لا يوجد مخزن معرّف لهذا الفرع.'
             : 'This branch has no warehouse defined.',
-        error: true,
       );
       return;
     }

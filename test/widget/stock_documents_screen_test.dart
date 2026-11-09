@@ -268,12 +268,15 @@ void main() {
   });
   // The document flow the reference build has and this branch had lost:
   // counting, transferring and adjusting stock from the program itself.
-  testWidgets('offers new-document only to an account that may adjust stock', (
-    tester,
-  ) async {
+  // One screen per test. Pumping three times into the same tester kept the
+  // first ProviderScope's overrides alive, so the second and third user never
+  // took effect and the last expectation could not see the button.
+  testWidgets('hides new-document from a signed-out account', (tester) async {
     await pump(tester, _DocumentsApi());
     expect(find.text('New document'), findsNothing);
+  });
 
+  testWidgets('hides new-document from a read-only account', (tester) async {
     await pump(
       tester,
       _DocumentsApi(),
@@ -286,7 +289,11 @@ void main() {
       ),
     );
     expect(find.text('New document'), findsNothing);
+  });
 
+  testWidgets('offers new-document to an account that may adjust stock', (
+    tester,
+  ) async {
     await pump(
       tester,
       _DocumentsApi(),
@@ -350,5 +357,9 @@ void main() {
     expect(find.text('New stock document'), findsNothing);
     expect(find.text('This branch has no warehouse defined.'), findsOneWidget);
     expect(api.posts, isEmpty);
+    // An error dialog never dismisses itself: acknowledge it so it does not
+    // cover the next screen the tester pumps.
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
   });
 }

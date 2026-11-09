@@ -222,5 +222,50 @@ Future<void> showAppError(
 }
 
 /// Convenience for the many call sites that already hold a message string.
+///
+/// The sentence still goes through the resolver, which may reword or replace
+/// it: use this for a server or exception message, not for wording the screen
+/// wrote itself.
 Future<void> showAppErrorMessage(BuildContext context, String message) =>
     showAppError(context, message);
+
+/// Shows a sentence the screen wrote itself, exactly as written.
+///
+/// [showAppError] runs every message through the resolver. That resolver is
+/// Arabic-first by design, so an English sentence the screen composed on
+/// purpose - "This branch has no warehouse defined." - was classified as
+/// untrusted and replaced with the generic fallback, and the user never learnt
+/// what was actually missing. A message this code wrote is not a diagnostic:
+/// there is nothing in it to sanitise.
+Future<void> showAppPlainError(BuildContext context, String message) async {
+  if (!context.mounted) return;
+  final navigator = Navigator.maybeOf(context, rootNavigator: true);
+  if (navigator == null) return;
+  final previous = _errorDialogTails[navigator];
+  final ready = previous == null
+      ? Future<void>.value()
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+  final next = ready.then<void>((_) async {
+    if (!navigator.mounted) return;
+    await showDialog<void>(
+      context: navigator.context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AppErrorDialog(
+          message: message,
+          severity: AppErrorSeverity.warning,
+        ),
+      ),
+    );
+  });
+  _errorDialogTails[navigator] = next;
+  try {
+    await next;
+  } finally {
+    if (identical(_errorDialogTails[navigator], next)) {
+      _errorDialogTails[navigator] = null;
+    }
+  }
+}

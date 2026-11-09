@@ -687,10 +687,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             for (final row in visible)
               if (text(row, 'id').isNotEmpty) text(row, 'id'),
           ];
-          final pictures = ids.isEmpty
-              ? const <String, Uint8List>{}
-              : ref.watch(itemThumbnailsProvider(_thumbnailKey(ids))).value ??
-                    const <String, Uint8List>{};
+          // A thumbnail is decoration. Watching this provider rethrows the
+          // error it caught into the screen build, which took the whole
+          // catalogue down - no rows, no row actions - for a 32-pixel square.
+          // Reading the current value and ignoring a pending or failed future
+          // keeps the list itself independent of the picture endpoint.
+          Map<String, Uint8List> pictures = const {};
+          if (ids.isNotEmpty) {
+            final thumbnails = ref.watch(
+              itemThumbnailsProvider(_thumbnailKey(ids)),
+            );
+            if (thumbnails.hasValue) {
+              pictures = thumbnails.value ?? const {};
+            }
+          }
           return RecordsTable(
             rows: visible,
             columns: [
