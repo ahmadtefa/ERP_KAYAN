@@ -335,6 +335,63 @@ const vmLacksDynamicImport = !(
     expect(await remaining(db, nextLot)).toBe(7);
   });
 
+  it('does not issue unbatched stock from a different storage location', async () => {
+    const selectedLocation = '66666666-6666-4666-8666-666666666681';
+    const otherLocation = '66666666-6666-4666-8666-666666666682';
+    await seedLocation(db, selectedLocation, 'BIN-D');
+    await seedLocation(db, otherLocation, 'BIN-E');
+    await db.query(
+      `INSERT INTO stock_movements
+         (id,"companyId","branchId","warehouseId","itemId","storageLocationId",
+          "movementDate",direction,quantity,"unitCost","totalCost","referenceType","createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,'IN',4,5,20,'TEST_UNBATCHED',now()),
+              ($7,$2,$3,$4,$5,$8,CURRENT_DATE,'IN',20,5,100,'TEST_UNBATCHED',now())`,
+      [crypto.randomUUID(), COMPANY, BRANCH, WAREHOUSE, ITEM, selectedLocation,
+       crypto.randomUUID(), otherLocation],
+    );
+    await seedShelf(db, 24, 120);
+
+    const referenceId = '88888888-cccc-4ccc-8ccc-cccccccccccc';
+    const { service } = serviceWith(db);
+    await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      {
+        warehouse: { id: WAREHOUSE, branchId: BRANCH },
+        branchId: BRANCH,
+        item: { ...batchPolicyItem, requiresBatch: false },
+      },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        storageLocationId: selectedLocation,
+        quantity: D(3),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-UNBATCHED-LOCATION',
+      },
+      D(3),
+    );
+
+    const outgoing = await db.query<{ storageLocationId: string | null; batchId: string | null }>(
+      `SELECT "storageLocationId","batchId" FROM stock_movements
+        WHERE "referenceId"=$1 AND direction='OUT'`,
+      [referenceId],
+    );
+    expect(outgoing.rows).toEqual([
+      { storageLocationId: selectedLocation, batchId: null },
+    ]);
+    const locationBalance = await db.query<{ quantity: string }>(
+      `SELECT SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END)::text AS quantity
+         FROM stock_movements
+        WHERE "storageLocationId"=$1 AND "batchId" IS NULL`,
+      [selectedLocation],
+    );
+    expect(Number(locationBalance.rows[0].quantity)).toBe(1);
+  });
+
   it('splits one line across several lots when the first cannot cover it, and records each lot', async () => {
     const soon = await seedLot(db, 'L-SOON', 4, '2026-12-01');
     const mid = await seedLot(db, 'L-MID', 30, '2027-06-30');
