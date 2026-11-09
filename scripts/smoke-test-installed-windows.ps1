@@ -746,7 +746,7 @@ try {
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
-    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt-state refusal, trusted saved-state byte restoration and public-key missing/restore. Signed-licence reconstruction and activation were not tested.'
+    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt-state refusal, trusted saved-state byte restoration and public-key missing/restore. This is not signed-licence reconstruction or activation: neither was tested.'
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
