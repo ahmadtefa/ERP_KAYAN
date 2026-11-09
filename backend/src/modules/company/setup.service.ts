@@ -99,7 +99,13 @@ export class SetupService {
         select: { id: true },
       }),
     ]);
-    const resumingAfterReset = retiredCompany !== null && userRows <= 1;
+    // Exactly one account, not "at most one": the reset keeps the
+    // administrator who pressed the button, so a retired company with no
+    // account at all is not a reset in progress. Reusing `<= 1` here let
+    // any soft-deleted company with zero users reopen this public route
+    // and be revived, which is the recovery boundary this check exists to
+    // hold. The comment above already states both conditions.
+    const resumingAfterReset = retiredCompany !== null && userRows === 1;
     if (companyRows > 0 || (userRows > 0 && !resumingAfterReset)) {
       throw new ConflictException(
         'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
@@ -129,7 +135,7 @@ export class SetupService {
           select: { id: true },
         }),
       ]);
-      const resumeInTransaction = retiredCompany !== null && existingUsers <= 1;
+      const resumeInTransaction = retiredCompany !== null && existingUsers === 1;
       if (existingCompanies > 0 || (existingUsers > 0 && !resumeInTransaction)) {
         throw new ConflictException(
           'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',

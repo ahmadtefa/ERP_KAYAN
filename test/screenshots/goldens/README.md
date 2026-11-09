@@ -85,3 +85,31 @@ identical.
 Every pixel outside the navigation scrollbar thumb is unchanged from the
 previous baselines; this review does not verify order operations, Windows
 rendering, backend integration, or product readiness.
+
+## Sales invoice rail after inventory navigation — 163aeed
+
+`d2cbf1d` added nine inventory entries to the sidebar, growing the navigation
+list from 27 to 36 items. The dashboard and customer baselines were re-reviewed
+for that change, but `sales_invoices_ar.png` was not: a review comment in the
+previous section states it "passes with the previous baseline and was left
+alone", and the dated entry above it (`f49b42a`) predates `d2cbf1d`. It no
+longer matched. The failure is 22034 pixels (1.70%).
+
+The render was reconstructed losslessly from the check-run annotation chunks of
+commit `163aeed` and verified against the runner's own report: the decoded
+1440×900 RGBA SHA-256 is `918cda0f00083ee4a5881e960d35d93bdf7da336ee9cb6f193f408a758af410a`,
+byte-identical to the `KAYANMETA` line emitted on the runner. Every one of the
+22034 differing pixels lies inside the navigation rail (x≥1188). The invoice
+body, the header, the table, and every fixture value are pixel-identical —
+this is the sidebar moving because it holds nine more entries, not a change to
+the screen.
+
+The previous baseline is intact and still matches its documented hash
+(`daf92fd3…`); it was simply captured against the 27-entry rail.
+
+| File | SHA-256 of updated 1440×900 RGBA pixels |
+| --- | --- |
+| sales_invoices_ar.png | `918cda0f00083ee4a5881e960d35d93bdf7da336ee9cb6f193f408a758af410a` |
+
+This review does not verify order operations, Windows rendering, backend
+integration, or product readiness.
