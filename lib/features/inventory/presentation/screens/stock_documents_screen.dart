@@ -365,12 +365,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             return AlertDialog(
               title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
               content: SizedBox(
-                // The toolbar inside is a Wrap of fixed-width dropdowns plus an
-                // 'Add line' button. At 720 the button was pushed past the edge
-                // and the row overflowed; 840 fits a full row, and the Wrap
-                // still stacks the controls on a narrow screen.
-                width: 840,
-                height: 480,
+                // The dialog is as wide as the window allows, up to 840, and
+                // never taller than the window. Asking for a fixed height made
+                // the inner Column overflow when the dialog shrank.
+                width: MediaQuery.sizeOf(context).width.clamp(320.0, 840.0),
+                height: MediaQuery.sizeOf(context).height.clamp(240.0, 480.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

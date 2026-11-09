@@ -52,7 +52,13 @@ void main() {
         localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
         home:const Scaffold(body:ItemsScreen()))));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate')); await tester.pumpAndSettle();
+      // The action is disabled while the screen reports itself busy, and a
+      // disabled IconButton swallows the tap without a word. Wait for the list
+      // to finish loading before pressing it.
+      await tester.pumpAndSettle();
+      final toggle = find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate');
+      expect(toggle, findsOneWidget, reason: 'the row action must be on screen');
+      await tester.tap(toggle); await tester.pumpAndSettle();
       if (initialActive) {
         // The confirmation dialog carries the same word as the button tooltip.
         // Target the dialog's own confirm button, which is the last FilledButton
