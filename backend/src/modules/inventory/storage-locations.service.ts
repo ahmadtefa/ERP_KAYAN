@@ -471,7 +471,7 @@ export class StorageLocationsService {
                AND "itemId" = ${input.itemId}::uuid
                AND "batchId" = ${input.batchId}::uuid
              GROUP BY "storageLocationId"
-            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) > 0
+            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) <> 0
           `,
         );
         lotIsOnlyAtSource =
