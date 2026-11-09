@@ -360,7 +360,7 @@ class NotificationBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final count = ref.watch(notificationCountProvider).valueOrNull ?? 0;
+    final count = ref.watch(notificationCountProvider).asData?.value ?? 0;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return IconButton(
       tooltip: arabic ? 'التنبيهات' : 'Notifications',
