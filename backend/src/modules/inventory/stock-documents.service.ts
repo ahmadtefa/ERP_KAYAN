@@ -1622,6 +1622,11 @@ export class StockDocumentsService {
            AND "status" <> 'WRITTEN_OFF'
       `);
 
+      // The goods keep whatever hold the source lot was under. Creating the
+      // destination pair as OPEN would put quarantined or expired stock on the
+      // other shelf as sellable - a transfer would launder the hold. CLOSED is
+      // the one state that cannot travel, because a closed lot is empty.
+      const sourceHold = source.status === 'CLOSED' ? 'OPEN' : source.status;
       const destination = await tx.itemBatch.findFirst({
         where: {
           companyId: input.companyId,
@@ -1637,6 +1642,10 @@ export class StockDocumentsService {
           data: {
             receivedQuantity: { increment: allocation.quantity },
             remainingQuantity: { increment: allocation.quantity },
+            // Merging held goods into a lot sitting OPEN would release them.
+            ...(sourceHold !== 'OPEN' && destination.status === 'OPEN'
+              ? { status: sourceHold }
+              : {}),
             updatedBy: input.userId,
           },
         });
@@ -1653,7 +1662,7 @@ export class StockDocumentsService {
             receivedQuantity: allocation.quantity,
             remainingQuantity: allocation.quantity,
             unitCost: source.unitCost,
-            status: 'OPEN',
+            status: sourceHold,
             sourceType: 'BATCH_TRANSFER',
             sourceNumber: input.referenceNumber,
             createdBy: input.userId,

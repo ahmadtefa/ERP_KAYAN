@@ -34,6 +34,11 @@ AppVersion={#AppVersion}
 AppPublisher=KAYAN
 DefaultDirName={autopf}\KAYAN ERP
 DefaultGroupName=KAYAN ERP
+; The destination is not offered. The uninstaller removes what it installed,
+; but a user who picked an unrelated folder - C:\Tools, or a folder that
+; already holds other software - would have that folder's contents removed
+; with it. One fixed location avoids the question entirely.
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename={#SetupBase}-{#AppVersion}-x64
