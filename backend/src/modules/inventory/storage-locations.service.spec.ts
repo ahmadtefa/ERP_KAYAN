@@ -599,6 +599,40 @@ describe('storage locations', () => {
     });
   });
 
+  it('keeps the lot shortcut unchanged when the lot already occupies another shelf', async () => {
+    const { service, state } = makeHarness({
+      locations: [shelf(), shelf({ id: 'loc-shelf-2', code: 'S2' })],
+      movements: [
+        {
+          companyId: COMPANY,
+          storageLocationId: 'loc-shelf',
+          itemId: ITEM,
+          batchId: LOT,
+          direction: 'IN',
+          quantity: '4',
+        },
+        {
+          companyId: COMPANY,
+          storageLocationId: 'loc-shelf-2',
+          itemId: ITEM,
+          batchId: LOT,
+          direction: 'IN',
+          quantity: '6',
+        },
+      ],
+      balance: { quantity: '10', value: '100' },
+    });
+
+    await service.move(
+      COMPANY,
+      USER,
+      { fromLocationId: 'loc-shelf', toLocationId: 'loc-shelf-2', itemId: ITEM, batchId: LOT, quantity: '4' },
+      null,
+    );
+
+    expect(state.batches).toHaveLength(0);
+  });
+
   it('refuses to move more than the shelf holds', async () => {
     const { service, state } = makeHarness({
       locations: [shelf(), shelf({ id: 'loc-shelf-2', code: 'S2' })],
