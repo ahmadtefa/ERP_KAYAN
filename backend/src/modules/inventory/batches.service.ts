@@ -811,7 +811,15 @@ export class BatchesService {
         expiryDate: lot.expiryDate,
         productionDate: lot.productionDate,
         unitCost: lot.unitCost,
-        remainingQuantity: locationLotBalances?.get(lot.id) ?? lot.remainingQuantity,
+        remainingQuantity: (() => {
+          const atLocation = locationLotBalances?.get(lot.id);
+          // Other issue paths (write-offs, transfers, or issues without a
+          // selected shelf) can reduce the lot total without a shelf-tagged
+          // movement. Never let a stale shelf ledger overstate the lot itself.
+          return atLocation && atLocation.lessThan(lot.remainingQuantity)
+            ? atLocation
+            : lot.remainingQuantity;
+        })(),
         status: lot.status,
       }));
 
