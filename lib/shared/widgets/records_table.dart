@@ -72,6 +72,40 @@ class _CellWithLeading extends StatelessWidget {
   }
 }
 
+
+/// The value of one cell, before any optional leading widget is drawn.
+///
+/// Kept in one place so a column with a picture and a column without one
+/// produce exactly the same text: only the decoration differs.
+Widget _plainCell(ThemeData theme, ColumnSpec column, Json row) {
+  if (column.tone != null) {
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: StatusPill(
+        label: column.value(row) ?? '—',
+        tone: column.tone!(row),
+        dense: true,
+      ),
+    );
+  }
+  if (column.numeric) {
+    return Text(
+      column.value(row) ?? '—',
+      textDirection: column.textDirection,
+      softWrap: false,
+      style: _cellStyle(theme, column),
+    );
+  }
+  return ConstrainedBox(
+    constraints: const BoxConstraints(minWidth: 110, maxWidth: 300),
+    child: Text(
+      column.value(row) ?? '—',
+      textDirection: column.textDirection,
+      style: _cellStyle(theme, column),
+    ),
+  );
+}
+
 /// A record list that stays readable on a phone and on a desktop.
 ///
 /// Wide screens get a real table, dense enough for financial review: 42 px
@@ -165,45 +199,18 @@ class RecordsTable extends StatelessWidget {
                   cells: [
                     for (final column in columns)
                       DataCell(
-                        _CellWithLeading(
-                          column: column,
-                          row: row,
-                          child: column.tone == null
-                            ? column.numeric
-                                  // A number is shown whole or not at all:
-                                  // never wrapped at a comma, never split
-                                  // across lines into a different-looking
-                                  // figure. The column grows instead, and
-                                  // the table scrolls.
-                                  ? Text(
-                                      column.value(row) ?? '—',
-                                      textDirection: column.textDirection,
-                                      softWrap: false,
-                                      style: _cellStyle(theme, column),
-                                    )
-                                  // Descriptive text may wrap, but inside
-                                  // bounds: never crushed to a sliver,
-                                  // never stretching the table forever.
-                                  : ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        minWidth: 110,
-                                        maxWidth: 300,
-                                      ),
-                                      child: Text(
-                                        column.value(row) ?? '—',
-                                        textDirection: column.textDirection,
-                                        style: _cellStyle(theme, column),
-                                      ),
-                                    )
-                            : Align(
-                                alignment: AlignmentDirectional.centerStart,
-                                child: StatusPill(
-                                  label: column.value(row) ?? '—',
-                                  tone: column.tone!(row),
-                                  dense: true,
-                                ),
+                        // A column without a leading widget gets its cell
+                        // back untouched: wrapping every cell in a widget of
+                        // our own changed how DataTable measured them, and the
+                        // invoice screenshot drifted 1.7% on columns that have
+                        // no picture at all.
+                        column.leading == null
+                            ? _plainCell(theme, column, row)
+                            : _CellWithLeading(
+                                column: column,
+                                row: row,
+                                child: _plainCell(theme, column, row),
                               ),
-                        ),
                       ),
                     if (actions != null)
                       DataCell(
