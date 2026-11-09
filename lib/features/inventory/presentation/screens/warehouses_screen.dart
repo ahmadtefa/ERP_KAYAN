@@ -73,22 +73,23 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
       // MainAxisSize.min and a flexible search keep this toolbar inside the
       // header's Flexible: a plain Row there overflowed once a third button
-      // joined it.
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      // joined it. A Flexible inside that Row did not help either - the AppBar
+      // hands its actions an unbounded width, so the search box was squeezed to
+      // zero. A Wrap lets each action take the width it asks for and moves the
+      // rest onto a second line when the window is narrow.
+      trailing: Wrap(
+        spacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           IconButton(
             tooltip: _arabic ? 'تحديث' : 'Refresh',
             onPressed: () => ref.read(warehousesListProvider.notifier).reload(),
             icon: const Icon(Icons.refresh),
           ),
-          Flexible(
-            child: SearchField(
-              hint: _arabic ? 'بحث في المستودعات' : 'Search warehouses',
-              onChanged: (value) => setState(() => _query = value.trim()),
-            ),
+          SearchField(
+            hint: _arabic ? 'بحث في المستودعات' : 'Search warehouses',
+            onChanged: (value) => setState(() => _query = value.trim()),
           ),
-          const SizedBox(width: 12),
           // Reading what is on the shelves is a read grant, not a manage one:
           // the same person who may look at a warehouse may look inside it.
           // This opens the default warehouse, which is the one the rest of the
@@ -102,7 +103,6 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
             icon: const Icon(Icons.inventory_2_outlined, size: 18),
             label: Text(_arabic ? 'الأرصدة' : 'Balances'),
           ),
-          const SizedBox(width: 8),
           if (canManage)
             FilledButton.icon(
               onPressed: _busy ? null : () => _save(),

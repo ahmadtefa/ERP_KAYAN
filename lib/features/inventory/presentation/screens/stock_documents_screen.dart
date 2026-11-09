@@ -141,7 +141,13 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     return ModuleScaffold(
       title: _arabic ? 'مستندات المخزون' : 'Stock documents',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
-      trailing: Row(
+      // A Wrap, not a Row: the header actions sit in an AppBar, which gives
+      // them an unbounded width. A Row therefore reports "RenderFlex
+      // overflowed" instead of moving the search box onto a second line when
+      // the window is narrow. The other screens solved it the same way.
+      trailing: Wrap(
+        spacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           if (canAdjust) ...[
             FilledButton.icon(
@@ -149,7 +155,6 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               icon: const Icon(Icons.add_rounded, size: 18),
               label: Text(_arabic ? 'مستند جديد' : 'New document'),
             ),
-            const SizedBox(width: 12),
           ],
           DropdownButton<String?>(
             value: _kind,
@@ -168,7 +173,6 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             ],
             onChanged: (value) => setState(() => _kind = value),
           ),
-          const SizedBox(width: 12),
           SearchField(
             hint: _arabic ? 'بحث في المستندات' : 'Search documents',
             onChanged: (value) => setState(() => _query = value.trim()),

@@ -655,13 +655,18 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     return ModuleScaffold(
       title: l10n.items,
       actions: const [ListExportActions(list: 'items')],
-      trailing: Row(
+      // The header actions live in an AppBar, which measures them with an
+      // unbounded width. A Row there reported "RenderFlex overflowed" on a
+      // narrow window instead of moving the button below the search box; a
+      // Wrap gives each child its own width and wraps the rest.
+      trailing: Wrap(
+        spacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           SearchField(
             hint: l10n.searchItems,
             onChanged: (value) => setState(() => _query = value.trim()),
           ),
-          const SizedBox(width: 12),
           FilledButton.icon(
             onPressed: _busy ? null : () => _save(),
             icon: const Icon(Icons.add),

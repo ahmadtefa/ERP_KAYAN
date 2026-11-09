@@ -72,7 +72,9 @@ class _StockTakesApi extends ApiClient {
         'warehouseNameEn': 'Main store',
         'warehouseNameAr': 'المخزن الرئيسي',
         'scope': 'FULL',
-        'status': 'COUNTING',
+        // Reached REVIEW like st-1, but the current user opened it, so the
+        // service refuses their approval and the screen explains why.
+        'status': 'REVIEW',
         'frozenAt': null,
         'createdBy': 'someone-else',
         'approvedAt': null,
@@ -114,10 +116,10 @@ class _StockTakesApi extends ApiClient {
         'warehouseNameEn': 'Main store',
         'warehouseNameAr': 'المخزن الرئيسي',
         'scope': 'FULL',
-        'status': 'COUNTING',
+        // Reached REVIEW like st-1, but the current user opened it, so the
+        // service refuses their approval and the screen explains why.
+        'status': 'REVIEW',
         'frozenAt': null,
-        // The current user opened this one, so the backend would refuse their
-        // approval.
         'createdBy': 'u',
         'approvedAt': null,
         'approvedBy': null,
@@ -225,11 +227,12 @@ void main() {
     expect(find.text('COUNTING'), findsNothing);
   });
 
-  testWidgets('an approver sees Approve on counting sessions only', (
+  testWidgets('an approver sees Approve on sessions awaiting review only', (
     tester,
   ) async {
     await pump(tester, _StockTakesApi());
-    // Two counting sessions, but one of them was opened by this user.
+    // Two sessions await review; one was opened by this user, so it shows a
+    // disabled button instead of an Approve action.
     expect(find.byTooltip('Approve'), findsOneWidget);
     expect(find.byTooltip('Post'), findsOneWidget);
   });

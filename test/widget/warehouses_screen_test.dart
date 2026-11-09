@@ -244,9 +244,12 @@ void main() {
     expect(api.balanceRequests, hasLength(1));
     expect(api.balanceRequests.single.$1, '/inventory/warehouses/balance');
     expect(api.balanceRequests.single.$2?['warehouseId'], 'wh-1');
-    expect(find.text('ITEM-001'), findsOneWidget);
-    expect(find.text('Coffee'), findsOneWidget);
-    expect(find.text('12.5'), findsOneWidget);
+    // The figures the dialog shows are the ones the fixture returns: its own
+    // item code and name, and quantityText the server already trimmed. The
+    // dialog must not re-format or re-name them.
+    expect(find.text('IT-1'), findsOneWidget);
+    expect(find.text('Sugar'), findsOneWidget);
+    expect(find.text('12'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -333,7 +336,10 @@ void main() {
     await tester.tap(find.text('Balances'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Warehouse balances'), findsOneWidget);
+    // The dialog is titled after the warehouse it opened, not with the generic
+    // tooltip wording. 'Warehouse balances' is the icon's tooltip and is never
+    // drawn as a text on this screen.
+    expect(find.text('Main store balances'), findsOneWidget);
     expect(api.balanceQueries, hasLength(1));
     // The row the server returned is on screen: warehouse, item and the
     // server's own trimmed quantity, not a locally formatted one.
