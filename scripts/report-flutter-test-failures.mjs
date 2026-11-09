@@ -57,6 +57,21 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The stock-document, warehouse-balance and stock-take screens are driven
+  // only by the synthetic fixtures checked into their test files. Keep the
+  // fixed assertion shape, the finder counts and the source position - never
+  // the widget text or the payload - so a failing expectation names the line
+  // that disagreed without copying screen content into an annotation.
+  if (event.type === 'print' && /^(?:says why it cannot create when the branch has no warehouse|creates a stock document with the kind and warehouse chosen|offers new-document only to an account that may adjust stock|balances asks the real endpoint and shows the shelf rows|warehouse balance dialog reads the API rows and scopes request|confirming approve posts to the session, not to a list route|approving confirms first, and says that posting moves stock|the person who opened a count cannot approve it|an approver sees Approve on counting sessions only)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual):\s*(?:exactly (?:\d+|one|two|three) matching candidates?|no matching candidates?|<\d+>)/)?.[0]?.trim() ??
+      line.match(/Found (\d+) widgets?/)?.[0] ??
+      line.match(/test\/widget\/(?:stock_documents_screen|warehouses_screen|stock_takes_screen)_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found|No ScaffoldMessenger widget found|No Scaffold widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown)/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   // Inventory screen fixtures use only checked-in synthetic warehouses,
   // documents and permission grants. Capture fixed assertions and source
   // positions so failures are diagnosable without printing arbitrary payloads.

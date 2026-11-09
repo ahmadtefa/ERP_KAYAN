@@ -92,3 +92,15 @@ test('photo diagnostics include only safe assertion shape and file location', ()
   assert.match(summary,/test\/widget\/user_photo_test\.dart:91:5/);
   assert.doesNotMatch(summary,/private synthetic payload/);
 });
+
+test('stock document diagnostics keep the assertion shape and line, not the screen text', () => {
+  const log = [
+    {type:'testStart',test:{id:23,name:'says why it cannot create when the branch has no warehouse'}},
+    {type:'print',testID:23,message:'Expected: exactly one matching candidate\nActual: Found 0 widgets with text "New document": []\ntest/widget/stock_documents_screen_test.dart:343:5'},
+    {type:'error',testID:23,error:'Test failed.'},
+  ].map(JSON.stringify).join('\n');
+  const summary = summarize(log);
+  assert.match(summary,/Expected: exactly one matching candidate/);
+  assert.match(summary,/test\/widget\/stock_documents_screen_test\.dart:343:5/);
+  assert.doesNotMatch(summary,/New document/);
+});
