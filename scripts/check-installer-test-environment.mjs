@@ -1,6 +1,8 @@
 // Fail-closed guard for the destructive, disposable Windows installer smoke VM.
 // The GitHub Environment must have required reviewers (with self-review disabled)
 // and an exact deployment-branch allow-list for this test branch.
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 const REPOSITORY = 'ahmadtefa/ERP_KAYAN';
 const ENVIRONMENT = 'windows-installer-test';
 const EXPECTED_BRANCH = 'arena/56e71924-erp-kayan';
@@ -48,6 +50,6 @@ async function main() {
   console.log('Approved Windows installer-test environment and exact branch allow-list verified.');
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname.endsWith(process.argv[1].replaceAll('\\\\', '/'))) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => { console.error(`Installer smoke environment refused: ${error.message}`); process.exitCode = 1; });
 }
