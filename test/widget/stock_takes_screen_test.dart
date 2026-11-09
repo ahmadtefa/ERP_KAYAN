@@ -20,6 +20,12 @@ class _StockTakesApi extends ApiClient {
       );
 
   bool failList;
+
+  /// A list of sessions that are all still being counted. The approval tests
+  /// need a session in REVIEW next to the ones being counted, but the test
+  /// that proves "nothing is offered while counting" would then see that
+  /// session's Approve button. It asks for a list where every row is COUNTING.
+  bool countingOnly = false;
   final posts = <String>[];
   final bodies = <String, Object?>{};
   final Map<String, dynamic> detail = {
@@ -62,7 +68,7 @@ class _StockTakesApi extends ApiClient {
         {'id': 'item-1', 'code': 'ITEM-1', 'nameEn': 'Coffee', 'nameAr': 'قهوة'},
       ];
     }
-    return [
+    final list = <Map<String, dynamic>>[
       {
         'id': 'st-1',
         'code': 'ST-001',
@@ -114,8 +120,8 @@ class _StockTakesApi extends ApiClient {
         'warehouseNameEn': 'Main store',
         'warehouseNameAr': 'المخزن الرئيسي',
         'scope': 'FULL',
-        // Reached REVIEW like st-1, but the current user opened it, so the
-        // service refuses their approval and the screen explains why.
+        // Reached REVIEW but opened by the current user, so the screen offers a
+        // disabled control that says why instead of an Approve action.
         'status': 'REVIEW',
         'frozenAt': null,
         'createdBy': 'u',
@@ -131,16 +137,16 @@ class _StockTakesApi extends ApiClient {
       {
         'id': 'st-4',
         'code': 'ST-004',
-        // DRAFT -> COUNTING -> REVIEW -> APPROVED -> POSTED, and only REVIEW
-        // may be approved. A session still being counted offers nothing, which
-        // is why st-1 stays COUNTING; this one carries the reviewable state.
+        // Still being counted, like st-1. Nothing is offered on it: the flow is
+        // DRAFT -> COUNTING -> REVIEW -> APPROVED -> POSTED and only REVIEW may
+        // be approved.
         'branchId': 'br-1',
         'warehouseId': 'wh-1',
         'warehouseCode': 'MAIN',
         'warehouseNameEn': 'Main store',
         'warehouseNameAr': 'المخزن الرئيسي',
         'scope': 'FULL',
-        'status': 'REVIEW',
+        'status': 'COUNTING',
         'frozenAt': null,
         'createdBy': 'someone-else',
         'approvedAt': null,
@@ -152,7 +158,32 @@ class _StockTakesApi extends ApiClient {
         'notes': null,
         'createdAt': '2026-11-02T09:00:00.000Z',
       },
+      {
+        'id': 'st-5',
+        'code': 'ST-005',
+        // Reached REVIEW and opened by somebody else, so an approver is offered
+        // the Approve action here and nowhere among the counted sessions.
+        'branchId': 'br-1',
+        'warehouseId': 'wh-1',
+        'warehouseCode': 'MAIN',
+        'warehouseNameEn': 'Main store',
+        'warehouseNameAr': 'المخزن الرئيسي',
+        'scope': 'PARTIAL',
+        'status': 'REVIEW',
+        'frozenAt': null,
+        'createdBy': 'someone-else',
+        'approvedAt': null,
+        'approvedBy': null,
+        'postedAt': null,
+        'documentId': null,
+        'journalEntryId': null,
+        'lineCount': 2,
+        'notes': null,
+        'createdAt': '2026-11-01T09:00:00.000Z',
+      },
     ];
+    if (!countingOnly) return list;
+    return list.where((row) => row['status'] == 'COUNTING').toList();
   }
 
   @override
@@ -245,7 +276,7 @@ void main() {
   ) async {
     await pump(tester, _StockTakesApi());
     expect(find.text('Counting'), findsNWidgets(2));
-    expect(find.text('In review'), findsOneWidget);
+    expect(find.text('In review'), findsNWidgets(2));
     expect(find.text('Approved'), findsOneWidget);
     expect(find.text('COUNTING'), findsNothing);
   });
@@ -398,12 +429,14 @@ void main() {
   ) async {
     await pump(
       tester,
-      _StockTakesApi(),
+      _StockTakesApi()..countingOnly = true,
       permissions: const [
         'inventory.stocktake.read',
         'inventory.stocktake.approve',
       ],
     );
+    // Every row in this list is still being counted, so an approver is offered
+    // nothing to approve - only a session that reached REVIEW may be.
     expect(find.byTooltip('Approve'), findsNothing);
     expect(find.text('Counting'), findsNWidgets(2));
   });
@@ -414,7 +447,7 @@ void main() {
     await pump(tester, _StockTakesApi(), locale: const Locale('ar'));
     expect(find.text('الجرد'), findsOneWidget);
     expect(find.text('جارٍ العد'), findsNWidgets(2));
-    expect(find.text('قيد المراجعة'), findsOneWidget);
+    expect(find.text('قيد المراجعة'), findsNWidgets(2));
     expect(
       Directionality.of(tester.element(find.text('جارٍ العد').first)),
       TextDirection.rtl,
