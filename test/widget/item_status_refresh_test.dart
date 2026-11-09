@@ -56,7 +56,13 @@ void main() {
       // disabled IconButton swallows the tap without a word. Wait for the list
       // to finish loading before pressing it.
       await tester.pumpAndSettle();
-      final toggle = find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate');
+      // Press the IconButton itself, not the Tooltip that wraps it: tapping
+      // the tooltip works on some platforms but the button is what carries the
+      // handler.
+      final toggle = find.widgetWithIcon(
+        IconButton,
+        initialActive ? Icons.block_outlined : Icons.check_circle_outline,
+      );
       expect(toggle, findsOneWidget, reason: 'the row action must be on screen');
       await tester.tap(toggle); await tester.pumpAndSettle();
       if (initialActive) {
