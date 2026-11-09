@@ -110,8 +110,11 @@ class _SearchFieldState extends State<SearchField> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: widget.width,
+    // A fixed width overflowed whenever the header gave the toolbar less room
+    // than 300 pixels. Constraining only the maximum lets the box shrink to
+    // fit beside the other actions instead of pushing them off the row.
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: widget.width, minWidth: 120),
       child: ValueListenableBuilder<TextEditingValue>(
         valueListenable: _controller,
         builder: (context, value, _) {
