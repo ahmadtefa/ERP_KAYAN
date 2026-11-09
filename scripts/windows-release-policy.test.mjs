@@ -71,4 +71,17 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(smokeScript, /\$deadline = \[DateTime\]::UtcNow\.AddMinutes\(4\)/);
   assert.match(smokeScript, /\$missingKeyBusiness = Invoke-WebRequest[^\n]+\$base\/parties\/customers[^\n]+-Headers \$headers/);
   assert.match(smokeScript, /\[int\]\$missingKeyBusiness\.StatusCode -ne 403 -or \$missingKeyBusinessBody\.code -ne 'LICENSE_PUBLIC_KEY_MISSING'/);
+
+  // Uninstall was never exercised: the smoke ran install, upgrade, repair and
+  // reset and stopped, so 'uninstall works' was an assumption no run had
+  // tested. It now runs the registered uninstaller and checks the machine is
+  // clean, and this guard stops it quietly disappearing again.
+  assert.match(smokeScript, /\$uninstaller = Join-Path \$installRoot 'unins000\.exe'/);
+  assert.match(smokeScript, /-ArgumentList '\/VERYSILENT', '\/SUPPRESSMSGBOXES', '\/NORESTART'/);
+  assert.match(smokeScript, /PASS: uninstall removed the installed program files/);
+  assert.match(smokeScript, /PASS: uninstall unregistered the bundled PostgreSQL service/);
+  assert.match(smokeScript, /PASS: uninstall removed the install-time firewall rules/);
+  // An uninstall must not delete the company's data; losing it silently would
+  // be worse than leaving a stray file.
+  assert.match(smokeScript, /PASS: uninstall kept the company data and logs under ProgramData, as designed/);
 });

@@ -1032,4 +1032,57 @@ try {
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
 Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."
+
+# ── uninstall ────────────────────────────────────────────────────────────────
+# Nothing above proved that the program can be taken off the machine again. The
+# smoke ran install, upgrade, repair and reset but stopped there, so "uninstall
+# works" was an assumption. This exercises the real Inno uninstaller the install
+# registered, then checks the machine is actually clean: the program files, the
+# PostgreSQL service, its registration and the install-time firewall rules must
+# all be gone. Company data under ProgramData is deliberately kept - an
+# uninstall is not a data wipe, and the installer says so.
+$uninstaller = Join-Path $installRoot 'unins000.exe'
+if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+  Fail "The installed program did not register an uninstaller at $uninstaller."
+}
+Write-Host "PASS: the install registered its own uninstaller at $uninstaller."
+
+Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+$uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
+if ($uninstall.ExitCode -ne 0) {
+  Fail "The uninstaller exited with code $($uninstall.ExitCode)."
+}
+# Inno may hand the actual removal to a detached copy of itself; give it room
+# without ever claiming a pass that did not happen.
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+  if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe'))) { break }
+  Start-Sleep -Seconds 1
+}
+if (Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe')) {
+  Fail 'The uninstaller reported success but the program file is still on disk.'
+}
+Write-Host 'PASS: uninstall removed the installed program files.'
+
+$leftoverService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($leftoverService) { Fail "The PostgreSQL service $serviceName survived the uninstall." }
+$leftoverRegistration = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+if ($leftoverRegistration) { Fail "The PostgreSQL service registration $serviceName survived the uninstall." }
+Write-Host 'PASS: uninstall unregistered the bundled PostgreSQL service.'
+
+# A rule left behind would keep the port open to the LAN after the program that
+# needed it is gone.
+$leftoverRules = @(Get-NetFirewallRule -DisplayName 'KAYAN*' -ErrorAction SilentlyContinue)
+if ($leftoverRules.Count -ne 0) {
+  Fail "Uninstall left $($leftoverRules.Count) KAYAN firewall rule(s) behind."
+}
+Write-Host 'PASS: uninstall removed the install-time firewall rules.'
+
+# The uninstall keeps company data on purpose. Losing it silently would be the
+# worse failure, so assert it is still there rather than assuming.
+if (-not (Test-Path -LiteralPath (Join-Path $existingData 'logs'))) {
+  Fail 'Uninstall removed the company data and logs it is meant to keep.'
+}
+Write-Host 'PASS: uninstall kept the company data and logs under ProgramData, as designed.'
+Write-Output "::notice::Uninstall exercise passed: the registered uninstaller removed the program, unregistered the PostgreSQL service, deleted the firewall rules, and deliberately kept company data and logs."
+
 Remove-KayanOfflineRules
