@@ -296,6 +296,45 @@ const vmLacksDynamicImport = !(
     ]);
   });
 
+  it('caps selected-shelf lot availability at the lot remaining quantity', async () => {
+    const partiallyConsumedLot = await seedLot(db, 'L-PARTIAL', 2, '2026-12-01');
+    const nextLot = await seedLot(db, 'L-NEXT', 10, '2027-06-30');
+    const selectedLocation = '66666666-6666-4666-8666-666666666671';
+    await seedLocation(db, selectedLocation, 'BIN-C');
+    // Simulate older unlocated issues/write-offs: the shelf ledger still says
+    // ten, but the authoritative lot row says only two remain.
+    await seedLotAtLocation(db, partiallyConsumedLot, selectedLocation, 10);
+    await seedLotAtLocation(db, nextLot, selectedLocation, 10);
+    await seedShelf(db, 12, 60);
+
+    const referenceId = '88888888-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const { service } = serviceWith(db);
+    const result = await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      { warehouse: { id: WAREHOUSE, branchId: BRANCH }, branchId: BRANCH, item: batchPolicyItem },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        storageLocationId: selectedLocation,
+        quantity: D(5),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-LOCATION-CAP',
+      },
+      D(5),
+    );
+
+    expect(result.lots).toEqual([
+      expect.objectContaining({ batchId: partiallyConsumedLot, quantity: '2.0000' }),
+      expect.objectContaining({ batchId: nextLot, quantity: '3.0000' }),
+    ]);
+    expect(await remaining(db, partiallyConsumedLot)).toBe(0);
+    expect(await remaining(db, nextLot)).toBe(7);
+  });
+
   it('splits one line across several lots when the first cannot cover it, and records each lot', async () => {
     const soon = await seedLot(db, 'L-SOON', 4, '2026-12-01');
     const mid = await seedLot(db, 'L-MID', 30, '2027-06-30');
