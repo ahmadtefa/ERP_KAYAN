@@ -19,6 +19,14 @@ class _ItemStatusApi extends ApiClient {
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => [
     {'id':'item','code':'I','nameEn':'Synthetic item','nameAr':'صنف','unit':'piece','isActive':active}
   ];
+  /// The catalogue asks for item thumbnails once it has rows. Without this,
+  /// the request escaped to a real socket and its connect timeout outlived the
+  /// test as a pending timer. No picture here: the catalogue must draw the
+  /// placeholder and still list every item.
+  @override
+  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async =>
+    const {'pictures': <dynamic>[]};
+
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     attempts++; active=false;
