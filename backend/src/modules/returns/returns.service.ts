@@ -591,24 +591,97 @@ export class ReturnsService {
             throw new BadRequestException('A sales-return item is no longer tracked in stock');
           }
           if (item.isStockTracked) {
-            await tx.stockMovement.create({
-              data: {
-                companyId,
-                branchId: document.branchId,
-                warehouseId,
-                itemId: item.id,
-                movementDate: document.invoiceDate,
-                direction: StockDirection.IN,
-                quantity: line.quantity,
-                unitCost,
-                totalCost: returnedCost,
-                referenceType: 'SALES_RETURN',
-                referenceId: document.id,
-                referenceNumber: document.invoiceNumber,
-                notes: `Return of ${document.originalInvoice?.invoiceNumber ?? ''}`,
-                createdBy: userId,
-              },
-            });
+            // The goods came out of named lots when the invoice was posted, so
+            // a return has to put them back into those same lots. Writing one
+            // unbatched stock movement credited the shelf while the lot stayed
+            // short: the lot's remaining quantity never recovered, the next
+            // FEFO issue could not see the stock, and a lot the sale had
+            // emptied stayed closed. The original OUT movements are the record
+            // of which lot each unit left, so they are read back here.
+            const consumed = document.originalInvoiceId
+              ? await tx.stockMovement.findMany({
+                  where: {
+                    companyId,
+                    itemId: item.id,
+                    direction: StockDirection.OUT,
+                    referenceType: 'SALES_INVOICE',
+                    referenceId: document.originalInvoiceId,
+                  },
+                  select: { batchId: true, quantity: true, unitCost: true },
+                  orderBy: { createdAt: 'asc' },
+                })
+              : [];
+            const lotRows = consumed.filter((row) => row.batchId !== null);
+            // Return the quantity lot by lot in the order it left. Anything the
+            // invoice took from an unbatched shelf - or everything, when the
+            // original movements are not available - goes to the shelf as
+            // before, so an item that keeps no lots behaves unchanged.
+            let unbatched = line.quantity;
+            for (const row of lotRows) {
+              if (unbatched.lessThanOrEqualTo(0)) break;
+              const giveBack = Prisma.Decimal.min(unbatched, row.quantity);
+              const lot = await tx.itemBatch.findFirst({
+                where: { id: row.batchId!, companyId },
+                select: { id: true, unitCost: true, status: true },
+              });
+              if (!lot) {
+                throw new BadRequestException(
+                  'دفعة الفاتورة الأصلية لم تعد موجودة. / The original invoice lot no longer exists.',
+                );
+              }
+              // Reopening a lot the sale closed is the point: the sale is being
+              // undone, and refusing to reopen would silently lose the stock.
+              // A lot still in QUARANTINE or EXPIRED keeps that state - the
+              // return puts goods back, it does not clear a quality hold.
+              await tx.itemBatch.update({
+                where: { id: lot.id },
+                data: {
+                  remainingQuantity: { increment: giveBack },
+                  ...(lot.status === 'CLOSED' ? { status: 'OPEN' } : {}),
+                },
+              });
+              const lineCost = giveBack.mul(lot.unitCost).toDecimalPlaces(MONEY_SCALE);
+              await tx.stockMovement.create({
+                data: {
+                  companyId,
+                  branchId: document.branchId,
+                  warehouseId,
+                  itemId: item.id,
+                  batchId: lot.id,
+                  movementDate: document.invoiceDate,
+                  direction: StockDirection.IN,
+                  quantity: giveBack,
+                  unitCost: lot.unitCost,
+                  totalCost: lineCost,
+                  referenceType: 'SALES_RETURN',
+                  referenceId: document.id,
+                  referenceNumber: document.invoiceNumber,
+                  notes: `Return of ${document.originalInvoice?.invoiceNumber ?? ''}`,
+                  createdBy: userId,
+                },
+              });
+              unbatched = unbatched.minus(giveBack);
+            }
+            if (unbatched.greaterThan(0)) {
+              await tx.stockMovement.create({
+                data: {
+                  companyId,
+                  branchId: document.branchId,
+                  warehouseId,
+                  itemId: item.id,
+                  movementDate: document.invoiceDate,
+                  direction: StockDirection.IN,
+                  quantity: unbatched,
+                  unitCost,
+                  totalCost: returnedCost,
+                  referenceType: 'SALES_RETURN',
+                  referenceId: document.id,
+                  referenceNumber: document.invoiceNumber,
+                  notes: `Return of ${document.originalInvoice?.invoiceNumber ?? ''}`,
+                  createdBy: userId,
+                },
+              });
+            }
             await tx.stockBalance.upsert({
               where: {
                 companyId_branchId_itemId: {

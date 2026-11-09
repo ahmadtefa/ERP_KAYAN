@@ -61,6 +61,9 @@ export class ItemImageController {
     if (!file?.buffer?.length) {
       throw new BadRequestException('No image file was uploaded / لم يتم إرسال صورة.');
     }
+    // A storekeeper restricted to one shelf must not write into the catalogue
+    // of another, and the class contract promises the check on every route.
+    this.assertWarehouseScope(user);
     // The declared type and name are hints; normalizePicture re-checks the magic
     // bytes and re-encodes before anything is stored.
     const mime = logoMimeForUpload(file.mimetype, file.originalname);
@@ -70,6 +73,7 @@ export class ItemImageController {
   @Delete()
   @RequirePermissions('inventory.items.update')
   remove(@CurrentUser() user: AuthUser, @Param('itemId') itemId: string) {
+    this.assertWarehouseScope(user);
     return this.images.remove(user.companyId, user.userId, itemId);
   }
 
@@ -77,6 +81,7 @@ export class ItemImageController {
   @Get('presence')
   @RequirePermissions('inventory.items.read')
   async presence(@CurrentUser() user: AuthUser, @Query('itemIds') itemIds?: string) {
+    this.assertWarehouseScope(user);
     const ids = String(itemIds ?? '')
       .split(',')
       .map((id) => id.trim())

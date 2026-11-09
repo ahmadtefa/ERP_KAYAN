@@ -148,12 +148,33 @@ export class ItemImageService {
   /// second source of truth.
   async thumbnails(companyId: string, itemIds: string[]): Promise<Array<{ itemId: string; data: string }>> {
     if (!itemIds.length) return [];
-    const rows = await this.prisma.itemImage.findMany({
+    // Ask for the cheap columns first. Selecting `data` unconditionally pulled
+    // every stored original - up to 2 MB each - into memory on every page,
+    // even when the thumbnail was already cached and the bytes were never
+    // read. The keys are all that is needed to decide.
+    const keys = await this.prisma.itemImage.findMany({
       where: { companyId, itemId: { in: itemIds } },
-      select: { itemId: true, data: true, updatedAt: true },
+      select: { itemId: true, updatedAt: true },
     });
+    if (!keys.length) return [];
+    const missing = keys.filter((row) => !THUMBNAIL_CACHE.has(`${row.itemId}:${row.updatedAt.getTime()}`));
+    // Only the rows that actually need rendering are fetched with their bytes.
+    const originals = missing.length
+      ? await this.prisma.itemImage.findMany({
+          where: { companyId, itemId: { in: missing.map((row) => row.itemId) } },
+          select: { itemId: true, data: true, updatedAt: true },
+        })
+      : [];
+    const byItem = new Map(originals.map((row) => [row.itemId, row] as const));
     const answers: Array<{ itemId: string; data: string }> = [];
-    for (const row of rows) {
+    for (const key of keys) {
+      const cached = THUMBNAIL_CACHE.get(`${key.itemId}:${key.updatedAt.getTime()}`);
+      if (cached) {
+        answers.push({ itemId: key.itemId, data: cached });
+        continue;
+      }
+      const row = byItem.get(key.itemId);
+      if (!row) continue;
       const thumb = await this.thumbnailFor(row.itemId, row.data, row.updatedAt);
       if (thumb) answers.push({ itemId: row.itemId, data: thumb });
     }

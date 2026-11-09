@@ -94,11 +94,18 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
           // the same person who may look at a warehouse may look inside it.
           // This opens the default warehouse, which is the one the rest of the
           // screen treats as current; a specific shelf is reachable from its
-          // own row action.
+          // own row action. Taking the first visible row opened whichever
+          // warehouse happened to sort first, which is not the default one as
+          // soon as the operator sorts or filters the table.
           OutlinedButton.icon(
             onPressed: () {
               final rows = _filter(async.value ?? const <Json>[]);
-              if (rows.isNotEmpty) _openBalances(rows.first);
+              if (rows.isEmpty) return;
+              final preferred = rows.firstWhere(
+                (row) => flag(row, 'isDefault'),
+                orElse: () => rows.first,
+              );
+              _openBalances(preferred);
             },
             icon: const Icon(Icons.inventory_2_outlined, size: 18),
             label: Text(_arabic ? 'الأرصدة' : 'Balances'),

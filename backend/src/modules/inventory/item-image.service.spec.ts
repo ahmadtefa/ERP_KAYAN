@@ -193,7 +193,7 @@ describe('item pictures', () => {
     expect(select).toEqual({ itemId: true });
   });
 
-  it('answers a whole page of thumbnails from one query', async () => {
+  it('answers a whole page of thumbnails without echoing the stored bytes', async () => {
     const { service, tx } = build({ existing: true });
 
     const pictures = await service.thumbnails(COMPANY, [ITEM, 'other']);
@@ -203,7 +203,24 @@ describe('item pictures', () => {
     expect(pictures.map((p) => p.itemId)).toEqual([ITEM]);
     // The thumbnails are WebP produced here, not the stored bytes echoed back.
     expect(Buffer.from(pictures[0].data, 'base64').subarray(8, 12).toString('ascii')).toBe('WEBP');
-    expect(tx.itemImage.findMany).toHaveBeenCalledTimes(1);
+    // The first query is the cheap key-only one: a page must not pull every
+    // stored original (up to 2 MB each) just to decide what to render.
+    expect((tx.itemImage.findMany as jest.Mock).mock.calls[0][0].select)
+      .toEqual({ itemId: true, updatedAt: true });
+  });
+
+  it('does not load the originals again once a thumbnail is cached', async () => {
+    const { service, tx } = build({ existing: true });
+
+    await service.thumbnails(COMPANY, [ITEM]);
+    const callsAfterFirstPage = (tx.itemImage.findMany as jest.Mock).mock.calls.length;
+    await service.thumbnails(COMPANY, [ITEM]);
+
+    // The second page is answered from the cache: only the key query runs, and
+    // the data column is never fetched again.
+    expect((tx.itemImage.findMany as jest.Mock).mock.calls.length).toBe(callsAfterFirstPage + 1);
+    const lastSelect = (tx.itemImage.findMany as jest.Mock).mock.calls.at(-1)[0].select;
+    expect(lastSelect).toEqual({ itemId: true, updatedAt: true });
   });
 
   it('asks for nothing when the page has no items', async () => {
