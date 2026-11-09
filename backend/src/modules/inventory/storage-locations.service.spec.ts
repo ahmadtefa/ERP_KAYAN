@@ -91,15 +91,21 @@ describe('storage locations', () => {
           quantity: entry.quantity,
         }));
       }
-      // A whole-lot balance is intentionally independent of shelf location.
-      if (sql.includes('"batchId"') && !sql.includes('"storageLocationId"')) {
+      // Whole-lot shelf balances, grouped before a move is written.
+      if (sql.includes('GROUP BY "storageLocationId"')) {
         const [companyId, itemId, batchId] = values;
-        let total = D(0);
+        const grouped = new Map<string, Prisma.Decimal>();
         for (const row of state.movements) {
           if (row.companyId !== companyId || row.itemId !== itemId || row.batchId !== batchId) continue;
-          total = row.direction === 'IN' ? total.plus(D(row.quantity)) : total.minus(D(row.quantity));
+          const current = grouped.get(row.storageLocationId) ?? D(0);
+          grouped.set(
+            row.storageLocationId,
+            row.direction === 'IN' ? current.plus(D(row.quantity)) : current.minus(D(row.quantity)),
+          );
         }
-        return [{ quantity: total }];
+        return [...grouped]
+          .filter(([, quantity]) => quantity.greaterThan(0))
+          .map(([storageLocationId, quantity]) => ({ storageLocationId, quantity }));
       }
       // A sum over one location, optionally narrowed to one item and one lot.
       const [, locationId, itemId, batchId] = values;
