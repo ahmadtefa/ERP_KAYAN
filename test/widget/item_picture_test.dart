@@ -51,7 +51,9 @@ class _ImageApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path.endsWith('/items/with-picture')) {
+    // The path carries its query in the string: it ends with
+    // '?itemIds=item-1,item-2', not with the route name.
+    if (path.contains('/items/with-picture')) {
       batchRequests++;
       // Only the first id has a picture; the second must come back absent,
       // which is how the catalogue knows to draw a placeholder.

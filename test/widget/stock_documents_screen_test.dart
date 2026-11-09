@@ -357,9 +357,10 @@ void main() {
     expect(find.text('New stock document'), findsNothing);
     expect(find.text('This branch has no warehouse defined.'), findsOneWidget);
     expect(api.posts, isEmpty);
-    // An error dialog never dismisses itself: acknowledge it so it does not
-    // cover the next screen the tester pumps.
-    await tester.tap(find.text('OK'));
+    // The error dialog is Arabic-first like every other error surface: its
+    // button reads 'حسنًا' whatever the screen locale is. It never dismisses
+    // itself, so acknowledge it before the next pump.
+    await tester.tap(find.text('حسنًا'));
     await tester.pumpAndSettle();
   });
 }

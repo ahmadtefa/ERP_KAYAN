@@ -113,7 +113,12 @@ class PageHeader extends StatelessWidget {
           // A toolbar of search plus several buttons cannot share one line on
           // a narrow window without clipping; it moves under the title there.
           if (actions.isEmpty) return titleBlock;
-          if (constraints.maxWidth >= 1000) {
+          // The toolbar carries a search box and up to three buttons. Sharing
+          // one line with the title left it a sliver of the row, and a Search
+          // box is a fixed 300 pixels wide: it overflowed instead of moving.
+          // Below the breakpoint the toolbar always gets its own line, and
+          // above it still only takes what it needs.
+          if (constraints.maxWidth >= 1360) {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
