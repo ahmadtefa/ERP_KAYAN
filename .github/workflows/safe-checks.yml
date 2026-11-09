@@ -132,9 +132,9 @@ jobs:
           src/modules/company/setup-safety.spec.ts
           src/modules/company/company-profile.guard.spec.ts
           src/modules/company/company.service.spec.ts
+          src/modules/company/company-audit-atomic.spec.ts
       - name: Verify lot FEFO and storage-location issue integration on PostgreSQL engine
         run: npm run test:lots -- --runInBand
-          src/modules/company/company-audit-atomic.spec.ts
 
   licence-store-isolation:
     # The original, unmodified license-store.spec.ts requires a real HMAC key
