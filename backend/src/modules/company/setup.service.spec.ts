@@ -78,6 +78,10 @@ describe('SetupService status and public setup boundary', () => {
     // After a reset the single retained administrator does not close setup,
     // but a second account would: that one is not the operator who reset.
     ['a retained administrator plus another account', 0, 2, 'retired'],
+    // A reset always keeps its operator, so a retired company with no account
+    // is leftover data, not a reset. Completing setup over it would revive and
+    // adopt it - the boundary this public route must hold.
+    ['a retired company with no account', 0, 0, 'retired'],
   ])(
     'rejects public initial setup over %s before opening a transaction',
     async (_case, companies, users, retired) => {
