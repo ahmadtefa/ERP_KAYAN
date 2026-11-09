@@ -104,7 +104,7 @@ describe('storage locations', () => {
           );
         }
         return [...grouped]
-          .filter(([, quantity]) => quantity.greaterThan(0))
+          .filter(([, quantity]) => !quantity.isZero())
           .map(([storageLocationId, quantity]) => ({ storageLocationId, quantity }));
       }
       // A sum over one location, optionally narrowed to one item and one lot.
