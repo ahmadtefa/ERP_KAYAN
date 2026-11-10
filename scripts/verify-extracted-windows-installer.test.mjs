@@ -328,7 +328,24 @@ test('the staging rule in build-installer.ps1 skips source maps and keeps source
   // packaging script actually skips .map, and prove it did so without turning
   // off source maps for development or deleting the sources.
   const packaging = await readFile('distribution/windows/build-installer.ps1', 'utf8');
-  assert.match(packaging, /\.Extension -eq '\.map'/, 'packaging must skip .map files');
+  assert.match(packaging, /\.Extension -eq '\.map'/, 'packaging must skip .map while copying dist and prisma');
+  // Excluding dist is not enough: npm ci writes source maps into node_modules
+  // after the copy loop has already run, and 3830 of them reached the payload
+  // on run 42895714241. The dependency tree must be swept after it is installed.
+  assert.match(packaging, /Remove source maps from the staged dependency tree/,
+    'packaging must sweep source maps from the staged tree after npm ci');
+  const sweepAt = packaging.indexOf('Remove source maps from the staged dependency tree');
+  const npmAt = packaging.indexOf("'ci','--omit=dev'");
+  const prismaAt = packaging.indexOf("'generate')", packaging.indexOf('node_modules\prisma\build\index.js'));
+  assert.ok(npmAt > 0 && prismaAt > npmAt, 'the sweep must follow npm ci and prisma generate');
+  assert.ok(sweepAt > prismaAt, 'the sweep must run after the dependency tree is fully written');
+  assert.match(packaging, /Get-ChildItem[^\n]*-Filter '\*\.map'/,
+    'the sweep must find .map files at any depth, not only under dist');
+  // The sweep deletes from the staged copy; it must never repoint at the
+  // developer working tree.
+  const sweep = packaging.slice(sweepAt, packaging.indexOf('[3/8]'));
+  assert.doesNotMatch(sweep, /\$backend/, 'the sweep must not touch the original node_modules');
+  assert.match(sweep, /\$app/, 'the sweep must operate on the staged package only');
   const tsconfig = JSON.parse(await readFile('backend/tsconfig.json', 'utf8'));
   assert.equal(tsconfig.compilerOptions.sourceMap, true,
     'source maps must stay enabled for development; the payload excludes them, it does not disable them');
@@ -336,4 +353,41 @@ test('the staging rule in build-installer.ps1 skips source maps and keeps source
   // from the payload must not mean deleting them from the repository.
   const sources = await readdir('backend/src', { recursive: true });
   assert.ok(sources.some((name) => name.endsWith('main.ts')), 'backend sources must remain in the repository');
+});
+
+test('reintroducing a source map anywhere makes the inspection fail', async () => {
+  // The inverse test the packaging fix needs: prove that if the sweep is
+  // removed or misses a path, the inspection still refuses the package. The
+  // paths below are the ones that actually failed run 42895714241.
+  const offenders = [
+    'app/backend/node_modules/@fast-csv/format/build/src/formatter/rowformatter.js.map',
+    'backend/node_modules/.prisma/client/index.js.map',
+    'backend/postgres/share/timezone.js.map',
+  ];
+  for (const offender of offenders) {
+    const f = await fixture([...required, offender]);
+    try {
+      await assert.rejects(
+        () => verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+        /source map/i,
+        `${offender} must make the inspection fail`,
+      );
+    } finally {
+      await rm(f.base, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the payload inspection reports how many source maps it rejected', async () => {
+  const maps = Array.from({ length: 7 }, (_, i) => `backend/node_modules/pkg/deep/dir/file${i}.js.map`);
+  const f = await fixture([...required, ...maps]);
+  try {
+    await assert.rejects(
+      () => verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /contains 7 source map/i,
+      'the rejection must count the offenders so a regression is measurable',
+    );
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
 });

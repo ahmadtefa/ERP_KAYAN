@@ -250,6 +250,31 @@ Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $a
 Run-Native 'npm.cmd' @('install','--no-save','--omit=dev','--no-audit','--no-fund','prisma@6.19.3') (Join-Path $app 'backend')
 Run-Native 'node.exe' @((Join-Path $app 'backend\node_modules\prisma\build\index.js'),'generate') (Join-Path $app 'backend')
 
+# Source maps are a development aid. They roughly double the shipped JavaScript
+# and they embed absolute paths from the build machine. Two separate producers
+# write them: tsc for our own code, and the published packages that arrive with
+# npm. dist is filtered while it is copied above; the dependency tree can only
+# be filtered here, once npm ci and prisma generate have finished writing it.
+# Deleting from the staged copy is deliberate: the developer working tree and
+# its node_modules are never touched, and sourceMap stays on for development.
+Write-Host '[2b/8] Remove source maps from the staged dependency tree'
+$stagedRoots = @((Join-Path $app 'backend'), (Join-Path $app 'build'))
+$removedMaps = 0
+foreach ($stagedRoot in $stagedRoots) {
+  if (-not (Test-Path -LiteralPath $stagedRoot -PathType Container)) { continue }
+  foreach ($mapFile in @(Get-ChildItem -LiteralPath $stagedRoot -Filter '*.map' -File -Recurse -ErrorAction SilentlyContinue)) {
+    # Nothing that is required to run may disappear. Refuse loudly rather than
+    # quietly delete a runtime file that happens to end in .map.
+    $relativeMap = $mapFile.FullName.Substring($app.Length).TrimStart('\', '/')
+    foreach ($required in @('backend\dist\src\main.js', 'backend\dist\prisma\seed.js')) {
+      if ($relativeMap -eq $required) { throw "Refusing to remove a required runtime file: $relativeMap" }
+    }
+    Remove-Item -LiteralPath $mapFile.FullName -Force
+    $removedMaps++
+  }
+}
+if ($removedMaps -gt 0) { Write-Host "  removed $removedMaps source map file(s) from the payload" }
+
 Write-Host '[3/8] Build Flutter Windows x64 and production Web'
 Run-Native $flutterCommand @('build','windows','--release','--dart-define=APP_ENV=production') $root
 $release = Join-Path $root 'build\windows\x64\runner\Release'
@@ -374,6 +399,13 @@ $migrationFiles = @(Get-ChildItem -LiteralPath (Join-Path $app 'backend\prisma\m
 if ($migrationFiles.Count -eq 0) { throw 'Staged package has no Prisma migrations.' }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
+# Third and last line of defence: if any source map survived staging, refuse to
+# hand the package to Inno at all, rather than building something the payload
+# inspection will reject minutes later on another runner.
+$survivingMaps = @(Get-ChildItem -LiteralPath $app -Filter '*.map' -File -Recurse -ErrorAction SilentlyContinue)
+if ($survivingMaps.Count -gt 0) {
+  throw "The staged package still contains $($survivingMaps.Count) source map file(s), for example $($survivingMaps[0].FullName)."
+}
 
 Write-Host '[7/8] Write artifact manifest with exact pinned versions'
 $sourceCommit = & git -C $root rev-parse HEAD
