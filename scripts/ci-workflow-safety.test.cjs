@@ -29,7 +29,7 @@ for (const name of reviewed) {
 }
 const installer = read('windows-installer.yml');
 assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
-assert.deepEqual(installer.permissions, { contents: 'read' });
+assert.deepEqual(installer.permissions, { contents: 'read', deployments: 'read' }, 'Installer may read deployment review state but must not publish');
 const installerSource = fs.readFileSync(path.join(workflows, 'windows-installer.yml'), 'utf8');
 const installerBlocker = installer.jobs.build.steps[0];
 assert.match(installerBlocker.name, /Block installer/);
