@@ -47,10 +47,6 @@ assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-Runt
 assert.match(installerSource, /github\.event_name == 'pull_request' && 'product'/,
   'Retain the historical product-mode selection for review');
 assert.doesNotMatch(installerSource, /secrets\.(?:LICENSE_PRIVATE_KEY|KAYAN_PRIVATE_KEY)/);
-const runtimeSmoke = installer.jobs['smoke-final'];
-assert.equal(runtimeSmoke.if, "needs.build.outputs.build_mode == 'product'");
-assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-RuntimeOnly')),
-  'Retain the RuntimeOnly smoke without claiming it is release evidence');
 const publisherJob = installer.jobs['publish-windows'];
 assert.match(publisherJob.if, /github\.event_name == 'push'/);
 assert.match(publisherJob.if, /refs\/heads\/main/);
