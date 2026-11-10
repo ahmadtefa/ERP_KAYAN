@@ -116,6 +116,21 @@ void main() {
       expect(navRect.right, closeTo(1366.0, 1.0));
 
       // Scroll down to the very last item (الإعدادات / Settings) and tap it.
+      // The menu is an accordion: the administration section has to be opened
+      // before its entry exists, so this opens it the way an operator would
+      // rather than assuming the whole tree is laid out at once.
+      final settingsGroup = find.byKey(const ValueKey('nav-group-administration'));
+      await tester.scrollUntilVisible(
+        settingsGroup,
+        150.0,
+        scrollable: find.descendant(
+          of: navListFinder,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(settingsGroup);
+      await tester.pumpAndSettle();
       final lastItemFinder = find.widgetWithText(ListTile, 'الإعدادات');
       await tester.scrollUntilVisible(
         lastItemFinder,
@@ -132,7 +147,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(currentRoute, AppRoutes.settings);
 
-      // Scroll back up to the first item (لوحة التحكم / Dashboard).
+      // Scroll back up to the first item (لوحة التحكم / Dashboard), which
+      // lives in the overview section; opening it closes administration.
+      final overviewGroup = find.byKey(const ValueKey('nav-group-overview'));
+      await tester.tap(overviewGroup);
+      await tester.pumpAndSettle();
       final firstItemFinder = find.widgetWithText(ListTile, 'لوحة التحكم');
       await tester.scrollUntilVisible(
         firstItemFinder,

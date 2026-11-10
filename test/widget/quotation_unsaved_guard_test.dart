@@ -47,6 +47,11 @@ void main() {
       supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('quotation-subject')),'unsaved shell text');
+    // The shell is on a quotation, so the sales section is open and the
+    // dashboard entry is not in the tree. The menu is an accordion: open the
+    // overview section first, as an operator would.
+    await tester.tap(find.byKey(const ValueKey('nav-group-overview')));
+    await tester.pumpAndSettle();
     final dashboard = find.widgetWithText(ListTile,'Dashboard');
     await tester.ensureVisible(dashboard); await tester.tap(dashboard); await tester.pumpAndSettle();
     expect(find.text('Unsaved changes'),findsOneWidget);

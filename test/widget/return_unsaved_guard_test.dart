@@ -136,6 +136,11 @@ void main() {
     await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text,'keep this reason');
     final navigation=find.byKey(const Key('erp-shell-nav-list'));
+    // The shell is showing a sales return, so the sales section is the open
+    // one and the dashboard entry is not in the tree. The menu is an
+    // accordion, so the operator opens overview before its entry exists.
+    await tester.tap(find.byKey(const ValueKey('nav-group-overview')));
+    await tester.pumpAndSettle();
     final dashboard=find.widgetWithText(ListTile,'Dashboard');
     await tester.scrollUntilVisible(dashboard,-150,
       scrollable:find.descendant(of:navigation,matching:find.byType(Scrollable)));
