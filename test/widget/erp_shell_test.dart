@@ -150,6 +150,17 @@ void main() {
       // Scroll back up to the first item (لوحة التحكم / Dashboard), which
       // lives in the overview section; opening it closes administration.
       final overviewGroup = find.byKey(const ValueKey('nav-group-overview'));
+      // The list is scrolled to the bottom, so the first heading is off screen
+      // and a tap on it would miss. Scroll back up to it first.
+      await tester.scrollUntilVisible(
+        overviewGroup,
+        -150.0,
+        scrollable: find.descendant(
+          of: navListFinder,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(overviewGroup);
       await tester.pumpAndSettle();
       final firstItemFinder = find.widgetWithText(ListTile, 'لوحة التحكم');
@@ -219,14 +230,30 @@ void main() {
       // does not hold the separate returns.read or opening-balances.manage
       // codes; a view-only grant must still reveal the screen whose API GET is
       // allowed, and manage must not be required just to look.
-      for (final label in [
-        'الخزائن والبنوك',
-        'الأرصدة الافتتاحية',
-        'مرتجعات المبيعات',
-        'مرتجعات المشتريات',
-        'عروض الأسعار',
-      ]) {
-        expect(find.widgetWithText(ListTile, label), findsOneWidget, reason: label);
+      //
+      // The menu is an accordion, so each label is looked for inside its own
+      // section: the entries of five different sections cannot be on screen at
+      // once by design. Opening each one is what an operator does to find it.
+      // Grouped by section: the two accounting entries and the two sales ones
+      // share a heading, and tapping a heading twice would close it again.
+      const entries = <String, List<String>>{
+        'nav-group-accounting': ['الخزائن والبنوك', 'الأرصدة الافتتاحية'],
+        'nav-group-sales': ['مرتجعات المبيعات', 'عروض الأسعار'],
+        'nav-group-purchases': ['مرتجعات المشتريات'],
+      };
+      for (final MapEntry(key: group, value: labels) in entries.entries) {
+        final header = find.byKey(ValueKey(group));
+        expect(header, findsOneWidget, reason: 'section $group must exist');
+        await tester.ensureVisible(header);
+        await tester.tap(header);
+        await tester.pumpAndSettle();
+        for (final label in labels) {
+          expect(
+            find.widgetWithText(ListTile, label),
+            findsOneWidget,
+            reason: label,
+          );
+        }
       }
     },
   );
@@ -354,10 +381,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      // Customers is not active yet, so its rose stays out of its label.
+      // Customers is not active yet, and its section is closed, so its row is
+      // not on screen at all - an accordion does not list another section's
+      // entries. That is stronger than checking the rose is absent from a
+      // visible row, which is what this asserted when every section was open.
       expect(
-        titleColorOf('العملاء'),
-        isNot(SectionAccents.parties.base),
+        find.widgetWithText(ListTile, 'العملاء', skipOffstage: false),
+        findsNothing,
       );
 
       // Move to customers & suppliers: the rose section identity takes
@@ -374,9 +404,12 @@ void main() {
         ),
         findsOneWidget,
       );
+      // Moving to another section closed sales, so its rows are gone rather
+      // than merely repainted - the strongest form of "sales is no longer the
+      // active section".
       expect(
-        titleColorOf('فواتير البيع'),
-        isNot(SectionAccents.sales.base),
+        find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
+        findsNothing,
       );
     },
   );

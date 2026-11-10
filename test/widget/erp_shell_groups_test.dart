@@ -268,6 +268,11 @@ void main() {
           await tester.tap(group);
           await tester.pumpAndSettle();
           expect(invoice, findsNothing);
+          // Navigating to the invoice needs the section open again: it was
+          // just closed, and a closed section is not merely hidden - its rows
+          // are not built, so there is nothing to tap.
+          await tester.tap(group);
+          await tester.pumpAndSettle();
           await tester.tap(invoice);
           await tester.pumpAndSettle();
           expect(
@@ -359,20 +364,25 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // 1. The eight section headings, and nothing else.
+        // 1. The section headings this user may reach, and nothing else. The
+        // menu holds eight sections, but a section with no permitted entry is
+        // not drawn at all - a heading with nothing under it is a dead end the
+        // operator cannot use. Four of the eight are reachable with these
+        // permissions, so the menu shows four headings.
         const sections = <String>[
           'overview',
-          'accounting',
-          'parties',
           'inventory',
           'sales',
           'purchases',
-          'insights',
-          'administration',
         ];
         for (final section in sections) {
           expect(find.byKey(ValueKey('nav-group-$section')), findsOneWidget,
               reason: 'section $section must be in the menu');
+        }
+        // A section the user has no permission for is absent, not empty.
+        for (final hidden in ['accounting', 'parties', 'insights', 'administration']) {
+          expect(find.byKey(ValueKey('nav-group-$hidden')), findsNothing,
+              reason: 'section $hidden has no permitted entry');
         }
         // 2. Exactly one section is open - the one that owns the screen being
         // shown - and no other section's entries are on screen. This is the
