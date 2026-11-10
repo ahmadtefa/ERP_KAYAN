@@ -60,16 +60,45 @@ class _NavItem {
 /// "Accounting" heading.
 enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
 
-class _CollapsedNav extends Notifier<Set<_NavGroup>> {
+/// Which section is open. Exactly one, or none - the menu is an accordion, not
+/// a tree that happens to have headings. Opening a section closes the previous
+/// one, and nothing is open on first paint, so the operator sees the eight
+/// groups and nothing else until they choose one.
+@immutable
+class _NavOpenSection {
+  const _NavOpenSection(this.open);
+  final _NavGroup? open;
+
+  // Riverpod compares with ==, and a fresh instance holding the same section
+  // must not rebuild the whole menu (or fail to rebuild when it changes).
   @override
-  Set<_NavGroup> build() => const {};
-  void toggle(_NavGroup group) {
-    final next = {...state};
-    if (!next.add(group)) next.remove(group);
-    state = next;
-  }
+  bool operator ==(Object other) =>
+      other is _NavOpenSection && other.open == open;
+
+  @override
+  int get hashCode => open.hashCode;
 }
-final _collapsedNavProvider = NotifierProvider<_CollapsedNav, Set<_NavGroup>>(_CollapsedNav.new);
+
+class _CollapsedNav extends Notifier<_NavOpenSection> {
+  @override
+  _NavOpenSection build() => const _NavOpenSection(null);
+
+  void toggle(_NavGroup group) {
+    // Tapping the open section closes it; tapping another moves the open
+    // section rather than adding to it.
+    state = _NavOpenSection(state.open == group ? null : group);
+  }
+
+  /// Opens the section that owns an entry, used when the current route is
+  /// restored on start or reached from a deep link. Without it the menu would
+  /// show a selected screen inside a closed section.
+  void revealOf(_NavGroup group) {
+    if (state.open != group) state = _NavOpenSection(group);
+  }
+
+  bool isOpen(_NavGroup group) => state.open == group;
+}
+final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_CollapsedNav.new);
 
 /// Each section owns one colour (see [SectionAccents]): the selected entry
 /// is recognisable by its text, icon tile, background and edge indicator
@@ -117,13 +146,35 @@ class _ErpShellState extends ConsumerState<ErpShell> {
   @override
   void initState() {
     super.initState();
-    _revealSelection();
+    _openSectionOfCurrentRoute();
   }
 
   @override
   void didUpdateWidget(covariant ErpShell oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.currentPath != widget.currentPath) _revealSelection();
+    if (oldWidget.currentPath != widget.currentPath) {
+      _openSectionOfCurrentRoute();
+    }
+  }
+
+  /// The section that owns the current screen must be the open one. The menu
+  /// starts with everything closed, so without this a restored route or a deep
+  /// link would show a highlighted entry that the operator cannot see.
+  void _openSectionOfCurrentRoute() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final item in _navigationItems(context)) {
+        if (item.path == widget.currentPath ||
+            widget.currentPath.startsWith('${item.path}/')) {
+          ref.read(_collapsedNavProvider.notifier).revealOf(item.group);
+          // Opening the section schedules a rebuild; the selected entry only
+          // exists in the tree after that, so the scroll has to wait for it.
+          // Calling it in initState alongside the reveal would find nothing.
+          _revealSelection();
+          return;
+        }
+      }
+    });
   }
 
   void _revealSelection() {
@@ -571,7 +622,7 @@ class _Sidebar extends StatelessWidget {
     required this.onToggle,
   });
 
-  final Set<_NavGroup> collapsed;
+  final _NavOpenSection collapsed;
   final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String selectedPath;
@@ -634,10 +685,10 @@ class _Sidebar extends StatelessWidget {
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
                         accent: _accentForGroup(group),
-                        expanded: !collapsed.contains(group),
+                        expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (!collapsed.contains(group)) for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
                         _NavEntry(
                           key: item.path == selectedPath ? selectedKey : null,
                           item: item,
@@ -1269,7 +1320,7 @@ class _SignOutButtonState extends ConsumerState<_SignOutButton> {
 class _ModuleDrawer extends StatelessWidget {
   const _ModuleDrawer({required this.items, required this.current, required this.collapsed, required this.onToggle});
 
-  final Set<_NavGroup> collapsed;
+  final _NavOpenSection collapsed;
   final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String current;
@@ -1302,10 +1353,10 @@ class _ModuleDrawer extends StatelessWidget {
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
                         accent: _accentForGroup(group),
-                        expanded: !collapsed.contains(group),
+                        expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (!collapsed.contains(group)) for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
                         _NavEntry(
                           item: item,
                           selected: _belongsTo(item.path, current),

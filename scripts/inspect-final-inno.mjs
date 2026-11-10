@@ -28,6 +28,38 @@ export function inspectListing(text) {
     }
     files.push(fields.Path);
   }
+  // A Setup can be well-formed, unencrypted and free of private material and
+  // still install a program that cannot start its own database: exactly that
+  // shipped once, with three of the four migration scripts. The listing is the
+  // only place this can be caught before a customer runs it, because it is the
+  // one view of what the binary actually contains rather than what the build
+  // intended to stage.
+  const normalized = files.map((path) => path.replaceAll('\\', '/').toLowerCase());
+  const has = (suffix) => normalized.some((path) => path.endsWith(suffix));
+  const required = [
+    ['backend/scripts/apply-migrations.mjs', 'the migration runner'],
+    ['backend/scripts/migrate-deploy.mjs', 'the migration chain'],
+    ['backend/scripts/prepare-database.mjs', 'database preparation'],
+    ['backend/scripts/database-state.mjs', 'database state detection'],
+    ['backend/node/node.exe', 'the bundled Node runtime'],
+    ['backend/node_modules/prisma/build/index.js', 'the bundled Prisma CLI'],
+    ['backend/prisma/schema.prisma', 'the Prisma schema'],
+    ['backend/prisma/migrations/migration_lock.toml', 'the migration lock'],
+    ['backend/postgres/bin/pg_ctl.exe', 'PostgreSQL control'],
+    ['erp_kayan.exe', 'the application'],
+  ];
+  const missing = required.filter(([suffix]) => !has(suffix)).map(([suffix, why]) => `${suffix} (${why})`);
+  // The migrations themselves are many files with changing names, so they are
+  // counted rather than named: a lock file with no migration beside it would
+  // otherwise pass.
+  const migrations = normalized.filter((path) => /backend\/prisma\/migrations\/[^/]+\/migration\.sql$/.test(path));
+  if (migrations.length === 0) {
+    missing.push('backend/prisma/migrations/*/migration.sql (the schema history)');
+  }
+  if (missing.length > 0) {
+    throw new Error(`The final installer is missing required runtime files: ${missing.join(', ')}`);
+  }
+
   const keys = files.filter(path => /(?:^|[\\/])public-key\.pem$/i.test(path));
   // Setup intentionally includes a pre-install comparison copy and an app
   // copy; inspect both. Duplicate names are ambiguous and therefore refused.

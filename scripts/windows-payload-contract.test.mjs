@@ -133,3 +133,46 @@ test('install-runtime registers the database service to survive a reboot', async
   assert.doesNotMatch(install, /Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer/);
   assert.doesNotMatch(install, /https:\/\//, 'install must not reach the network');
 });
+
+test('nothing the install or the repair runs reaches the network', async () => {
+  // The requirement is that a machine with no Internet installs, upgrades,
+  // repairs and runs. Every script on those paths is checked, not just the
+  // installer: a repair that downloads a file is an installation that cannot
+  // be repaired offline, and the customer sees "Repair failed" with no reason.
+  const offline = [
+    'distribution/windows/install-runtime.ps1',
+    'distribution/windows/repair-runtime.ps1',
+    'distribution/windows/reset-kayan.ps1',
+    'distribution/windows/database-control.ps1',
+    'distribution/windows/remove-runtime.ps1',
+    'backend/scripts/prepare-database.mjs',
+    'backend/scripts/apply-migrations.mjs',
+    'backend/scripts/migrate-deploy.mjs',
+  ];
+  for (const file of offline) {
+    const text = await read(file);
+    assert.doesNotMatch(
+      text,
+      /Invoke-WebRequest|Start-BitsTransfer|DownloadFile|curl |wget /,
+      `${file} must not download anything at runtime`,
+    );
+  }
+  // The Inno script must not fetch either.
+  const inno = await read('distribution/windows/installer.iss');
+  assert.doesNotMatch(inno, /https?:\/\//, 'installer.iss must not reference a URL');
+});
+
+test('a support script prefers the bundled runtime over the network', async () => {
+  // install-vc-runtime.ps1 is not on the install path, but it is the script a
+  // person reaches for when the runtime is missing. Downloading first made an
+  // offline machine unrepairable; it now looks for the copy the product ships.
+  const text = await read('scripts/install-vc-runtime.ps1');
+  const bundledIndex = text.indexOf('Using the bundled Visual C++ Redistributable');
+  const downloadIndex = text.indexOf('Invoke-WebRequest');
+  assert.ok(bundledIndex > 0, 'the script must look for the bundled copy');
+  assert.ok(downloadIndex > 0, 'the download fallback must still exist for a bare machine');
+  assert.ok(
+    bundledIndex < downloadIndex,
+    'the bundled copy must be tried before the network',
+  );
+});

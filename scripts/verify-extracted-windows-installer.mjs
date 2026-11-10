@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePem } from './license-build-policy.mjs';
 
-const REQUIRED_SUFFIXES = [
+export const REQUIRED_SUFFIXES = [
   'erp_kayan.exe',
   'flutter_windows.dll',
   'data/icudtl.dat',
@@ -37,6 +37,12 @@ const REQUIRED_SUFFIXES = [
   'backend/scripts/prepare-database.mjs',
   'backend/scripts/database-state.mjs',
   'backend/scripts/migrate-deploy.mjs',
+  // The chain is prepare-database -> migrate-deploy -> apply-migrations. This
+  // list stopped at the second, which is why the Setup that carried three of
+  // the four scripts extracted here and passed: the check that reads the real
+  // binary did not know the last one existed. It is the file that actually
+  // writes _prisma_migrations.
+  'backend/scripts/apply-migrations.mjs',
   'prerequisites/vc_redist.x64.exe',
   'runtime-manifest.json',
   'public-key.pem',

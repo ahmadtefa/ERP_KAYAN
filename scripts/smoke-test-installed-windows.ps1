@@ -307,6 +307,14 @@ foreach ($relative in @(
   "backend\dist\src\main.js",
   "backend\scripts\prepare-database.mjs",
   "backend\scripts\database-state.mjs",
+  # The migration chain is prepare-database -> migrate-deploy -> apply-migrations.
+  # This list used to stop at the second, so a Setup that shipped three of the
+  # four scripts installed a program that could not build its own schema, and
+  # the smoke still passed the file check. The dedicated verifier below repeats
+  # these checks and also refuses an empty or placeholder runner.
+  "backend\scripts\migrate-deploy.mjs",
+  "backend\scripts\apply-migrations.mjs",
+  "backend\node_modules\prisma\build\index.js",
   "prerequisites\vc_redist.x64.exe",
   "install-runtime.ps1",
   "repair-runtime.ps1",
@@ -334,6 +342,29 @@ if ($commitUnderTest -and $manifest.sourceCommit -ne $commitUnderTest) {
   Fail "The installed payload was built from $($manifest.sourceCommit), not from the expected commit ($commitUnderTest)."
 }
 if ($commitUnderTest) { Write-Host "PASS: the installed payload matches the expected source commit ($commitUnderTest)." }
+
+# The list above is one view of the same truth; the verifier is the one that
+# also reads the runner and counts the migrations. Running it here means an
+# incomplete install is caught before anything is started, not after a customer
+# reports that the program cannot create its database.
+# This script runs from a checkout of the repository, not from the installed
+# tree, so the verifier is its sibling inside scripts\ - not under a scripts\
+# subdirectory of the install root. Both are checked so a moved file fails with
+# a message that says where it looked.
+$verifyRuntime = Join-Path $PSScriptRoot "verify-installed-runtime.mjs"
+if (-not (Test-Path -LiteralPath $verifyRuntime)) {
+  $verifyRuntime = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\verify-installed-runtime.mjs"
+}
+$bundledNode = Join-Path $installRoot "backend\node\node.exe"
+if (-not (Test-Path -LiteralPath $verifyRuntime)) { Fail "The runtime verifier is missing from the repository at $verifyRuntime." }
+if (-not (Test-Path -LiteralPath $bundledNode)) { Fail "The bundled Node runtime is missing, so the installed tree cannot be verified." }
+$verifyOutput = @(& $bundledNode $verifyRuntime $installRoot 2>&1)
+foreach ($line in $verifyOutput) { Write-Host $line }
+if ($LASTEXITCODE -ne 0) {
+  Fail ("The installed tree is incomplete: " + (($verifyOutput | Select-Object -Last 12) -join ' | '))
+}
+Write-Host "PASS: every required file, the migration runner and the migration set are present in the installed tree."
+
 if ($RuntimeOnly) { Enable-KayanOfflineSmokeRules -AfterInstall }
 
 if (-not (Test-Path $settings)) { Fail "The installer did not create $settings" }

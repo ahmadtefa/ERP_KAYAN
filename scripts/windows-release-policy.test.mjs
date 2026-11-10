@@ -84,6 +84,17 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(smokeScript, /PASS: uninstall removed the installed program files/);
   assert.match(smokeScript, /PASS: uninstall unregistered the bundled PostgreSQL service/);
   assert.match(smokeScript, /PASS: uninstall removed the install-time firewall rules/);
+  // The first real install failed because the package did not carry
+  // apply-migrations.mjs. The file list in this smoke was what should have
+  // caught it and did not - it stopped at migrate-deploy. Both the list and the
+  // verifier must now name the runner, or the same defect ships again.
+  // Anchored to a line that is only a quoted list entry. A looser pattern
+  // matched the explanatory comment above the list and stayed green even after
+  // the entry itself was deleted, which is not a guard at all.
+  assert.match(smokeScript, /^\s*"backend\\scripts\\migrate-deploy\.mjs",\s*$/m);
+  assert.match(smokeScript, /^\s*"backend\\scripts\\apply-migrations\.mjs",\s*$/m);
+  assert.match(smokeScript, /verify-installed-runtime\.mjs/);
+  assert.match(smokeScript, /The installed tree is incomplete/);
   // The smoke creates its own KAYAN-Offline-Smoke-* rules to force offline mode
   // and removes them itself. A broad KAYAN* leftover check matches those and
   // fails on the harness' bookkeeping instead of on the product - which is

@@ -57,7 +57,12 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Test licence build policy, synthetic signatures and release gates
-        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
+        # windows-payload-contract covers the files the package must carry and
+        # the rule that nothing on the install path downloads. It used to run
+        # only in code-integrity, which does not gate a manual dispatch - so the
+        # build that produced the Setup with no migration runner passed this
+        # step. It gates the build now.
+        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/windows-payload-contract.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

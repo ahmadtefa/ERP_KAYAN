@@ -95,6 +95,15 @@ class _VoucherApi extends ApiClient {
   }) async {
     if (path.startsWith('/inventory/items/by-barcode/')) {
       barcodeQueries.add(path);
+      // Only the label this fixture knows resolves. Anything else answers the
+      // way the server does - a 404 - so the test exercises the real failure
+      // path instead of a satisfied stub.
+      if (!path.endsWith('/BOX-001')) {
+        throw const ApiFailure(
+          'No item or unit carries that barcode',
+          statusCode: 404,
+        );
+      }
       final item = {
         'id': 'item',
         'code': 'IT',
@@ -830,6 +839,94 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.barcodeQueries, ['/inventory/items/by-barcode/BOX-001']);
     expect(find.text('box'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  // A USB scanner is a keyboard: it types the code and presses Enter. Some
+  // models send Enter twice, and a slow request lets the operator press it
+  // again. Both put the same item on the document twice unless the line
+  // refuses a repeat, so each of those is exercised here rather than assumed.
+  Future<_VoucherApi> scanScenario(
+    WidgetTester tester,
+    Future<void> Function(Finder barcode) act,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1400, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _VoucherApi();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          currentUserProvider.overrideWithValue(_user),
+          appConfigProvider.overrideWithValue(
+            AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+          ),
+        ],
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const StockVoucherCreateScreen(kind: 'ISSUE'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await act(
+      find.widgetWithText(TextFormField, 'Scan item or unit barcode'),
+    );
+    await tester.pumpAndSettle();
+    return api;
+  }
+
+  testWidgets('a scanner that sends Enter twice adds the item once', (
+    tester,
+  ) async {
+    final api = await scanScenario(tester, (barcode) async {
+      await tester.enterText(barcode, 'BOX-001');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      // The second Enter arrives with no new text, exactly as a duplicated
+      // keystroke from the scanner would.
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+    });
+    expect(api.barcodeQueries, ['/inventory/items/by-barcode/BOX-001'],
+        reason: 'the second Enter must not send a second lookup');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pressing Enter again while the lookup runs does not repeat it', (
+    tester,
+  ) async {
+    final api = await scanScenario(tester, (barcode) async {
+      await tester.enterText(barcode, 'BOX-001');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+    });
+    expect(api.barcodeQueries.length, 1);
+    expect(find.text('box'), findsOneWidget);
+  });
+
+  testWidgets('an unknown barcode says so and leaves the line alone', (
+    tester,
+  ) async {
+    final api = await scanScenario(tester, (barcode) async {
+      await tester.enterText(barcode, 'NOT-A-CODE');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+    });
+    expect(api.barcodeQueries, ['/inventory/items/by-barcode/NOT-A-CODE']);
+    // The dialog names the code that failed, in the interface language. The
+    // generic "record not found" the resolver would produce says nothing about
+    // what was scanned, and an operator holding a label needs the code back.
+    expect(
+      find.textContaining('No item or unit carries the barcode NOT-A-CODE'),
+      findsOneWidget,
+      reason: 'the message must name the barcode and say what to do next',
+    );
+    expect(find.textContaining('search for the item by name'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
   testWidgets(

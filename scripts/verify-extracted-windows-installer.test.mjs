@@ -5,7 +5,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { scanPrivateMaterialStream, verifyExtractedPayload } from './verify-extracted-windows-installer.mjs';
+import {
+  REQUIRED_SUFFIXES,
+  scanPrivateMaterialStream,
+  verifyExtractedPayload,
+} from './verify-extracted-windows-installer.mjs';
 
 const sourceCommit = '0123456789abcdef0123456789abcdef01234567';
 const required = [
@@ -44,6 +48,7 @@ const required = [
   'backend/scripts/prepare-database.mjs',
   'backend/scripts/database-state.mjs',
   'backend/scripts/migrate-deploy.mjs',
+  'backend/scripts/apply-migrations.mjs',
   'backend/postgres/share/extension/plpgsql.control',
   'prerequisites/vc_redist.x64.exe',
   'runtime-manifest.json',
@@ -60,13 +65,13 @@ const required = [
   'licenses/PostgreSQL-LICENSE',
 ];
 
-async function fixture() {
+async function fixture(files = required) {
   const base = await mkdtemp(join(tmpdir(), 'kayan-payload-verify-'));
   const root = join(base, 'extracted');
   await mkdir(root, { recursive: true });
   const artifact = join(base, 'candidate.exe');
   await writeFile(artifact, 'candidate executable fixture');
-  for (const relative of required) {
+  for (const relative of files) {
     const path = join(root, ...relative.split('/'));
     await mkdir(join(path, '..'), { recursive: true });
     await writeFile(path, 'fixture payload file');
@@ -249,6 +254,40 @@ test('accepts the UTF-8 BOM emitted by Windows PowerShell 5.1 manifests', async 
     const path = join(f.root, 'runtime-manifest.json');
     await writeFile(path, '\uFEFF' + await readFile(path, 'utf8'));
     assert.equal((await verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit })).result, 'payload-inspection-passed-not-install-tested');
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('the real requirement list includes every script in the migration chain', async () => {
+  // The fixture above is its own list, so it can pass while the production list
+  // is wrong - and that is exactly how a Setup carrying three of the four
+  // scripts was extracted here and accepted. This test reads the production
+  // list and builds a payload from it, so the list itself is under test.
+  for (const name of [
+    'backend/scripts/prepare-database.mjs',
+    'backend/scripts/database-state.mjs',
+    'backend/scripts/migrate-deploy.mjs',
+    'backend/scripts/apply-migrations.mjs',
+  ]) {
+    assert.ok(
+      REQUIRED_SUFFIXES.includes(name),
+      `${name} must be required: prepare-database -> migrate-deploy -> apply-migrations is the chain that creates the schema`,
+    );
+  }
+
+  // A payload built from the production list, minus the runner, must be
+  // refused. This is the failure that shipped, reproduced.
+  const files = [...required, 'backend/scripts/apply-migrations.mjs'];
+  const f = await fixture(files);
+  try {
+    const { rm: removeFile } = await import('node:fs/promises');
+    await removeFile(join(f.root, 'backend/scripts/apply-migrations.mjs'));
+    await assert.rejects(
+      verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /backend\/scripts\/apply-migrations\.mjs/,
+      'an installer without the migration runner must be refused',
+    );
   } finally {
     await rm(f.base, { recursive: true, force: true });
   }

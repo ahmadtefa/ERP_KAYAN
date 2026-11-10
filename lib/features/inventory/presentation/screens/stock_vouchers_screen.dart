@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -632,6 +633,13 @@ class _VoucherLine {
   String? itemId;
   String? unitName;
   final barcode = TextEditingController();
+
+  /// Scanning state belongs to the line, not to the screen: two lines in the
+  /// same document may legitimately hold different items, and a repeat guard
+  /// shared between them would swallow the second line's first scan.
+  String? lastScanCode;
+  DateTime? lastScanAt;
+  bool scanInFlight = false;
   final quantity = TextEditingController();
   final cost = TextEditingController();
   void dispose() {
@@ -747,6 +755,19 @@ class _StockVoucherCreateScreenState
     }
   }
 
+  /// A scanner is a keyboard: it types the code and presses Enter. Some models
+  /// send Enter twice, and a slow network lets an impatient operator press it
+  /// again while the first request is still out. Either one must not put the
+  /// same item on the document twice, so a line refuses a repeat of the code it
+  /// just accepted, and refuses any scan while one is already in flight.
+  bool _isRepeatScan(_VoucherLine line, String code) {
+    if (line.scanInFlight) return true;
+    return line.lastScanCode == code &&
+        line.lastScanAt != null &&
+        DateTime.now().difference(line.lastScanAt!) <
+            const Duration(milliseconds: 800);
+  }
+
   Future<void> _scanBarcode(
     _VoucherLine line,
     String rawCode,
@@ -754,6 +775,13 @@ class _StockVoucherCreateScreenState
   ) async {
     final code = rawCode.trim();
     if (code.isEmpty || _busy) return;
+    if (_isRepeatScan(line, code)) {
+      // Clear the field so the next scan starts clean, but do not send the
+      // request a second time or touch the line.
+      line.barcode.clear();
+      return;
+    }
+    line.scanInFlight = true;
     try {
       final payload = await ref
           .read(apiClientProvider)
@@ -786,10 +814,39 @@ class _StockVoucherCreateScreenState
           (options) => [updatedItems, options[1], options[2]],
         );
       });
+      // Remember the code as accepted only now: a failed lookup must be
+      // retryable by scanning the same label again straight away.
+      line.lastScanCode = code;
+      line.lastScanAt = DateTime.now();
       _changed();
     } catch (error) {
-      if (mounted) await showAppError(context, error);
+      // A 404 here means one specific thing: the code is not an item of this
+      // company and not one of its units. The generic "record not found" the
+      // error resolver produces would leave the operator unsure whether the
+      // scanner read the label at all, so say what was scanned and what to do.
+      if (mounted) {
+        await showAppError(
+          context,
+          _barcodeFailure(error, code),
+        );
+      }
+    } finally {
+      line.scanInFlight = false;
     }
+  }
+
+  /// Turns a barcode lookup failure into something an operator can act on.
+  /// Anything that is not "no such barcode" is passed through untouched: a
+  /// permission or network problem must not be reported as a bad label.
+  Object _barcodeFailure(Object error, String code) {
+    final isMissing = error is ApiFailure
+        ? error.statusCode == 404
+        : error.toString().contains('404');
+    if (!isMissing) return error;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    return arabic
+        ? 'لا يوجد صنف أو وحدة بهذا الباركود: $code. تحقق من الملصق أو ابحث عن الصنف يدويًا.'
+        : 'No item or unit carries the barcode $code. Check the label or search for the item by name.';
   }
 
   Future<void> _loadPending() async {
