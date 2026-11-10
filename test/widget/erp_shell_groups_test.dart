@@ -1,6 +1,7 @@
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
+import 'package:erp_kayan/app/theme/design_tokens.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -98,6 +99,95 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Screen ${AppRoutes.dashboard}'), findsOneWidget);
       expect(router.routerDelegate.currentConfiguration.matches.length, 1);
+    },
+  );
+
+  testWidgets(
+    'the inventory group is present, carries its screens and keeps its own colour',
+    (tester) async {
+      // The whole warehouse system used to be absent from the shell: the
+      // screens and routes existed, but the sidebar listed none of them, so an
+      // operator could not reach a warehouse, a lot, a stock take or the
+      // barcode work at all. This asserts the group exists, that every screen
+      // it owns is reachable from it, and that it is drawn in its own section
+      // colour rather than looking like every other group.
+      tester.view.physicalSize = const Size(1500, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final router = GoRouter(
+        initialLocation: AppRoutes.dashboard,
+        routes: [
+          for (final path in [AppRoutes.dashboard])
+            GoRoute(
+              path: path,
+              builder: (context, state) =>
+                  ErpShell(currentPath: path, child: Text('Screen $path')),
+            ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(_Api()),
+            currentUserProvider.overrideWithValue(
+              const AppUser(
+                id: 'u',
+                username: 'u',
+                fullName: 'u',
+                companyId: 'c',
+                // Every warehouse permission, so nothing is hidden by policy
+                // and a missing entry means a missing entry, not a refusal.
+                permissions: [
+                  'inventory.warehouses.read',
+                  'inventory.batches.read',
+                  'inventory.stock.read',
+                  'inventory.reports.read',
+                ],
+              ),
+            ),
+          ],
+          child: MaterialApp.router(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final inventoryGroup = find.byKey(const ValueKey('nav-group-inventory'));
+      expect(inventoryGroup, findsOneWidget,
+          reason: 'the sidebar must carry an inventory group');
+
+      // Each section owns its own colour, so the inventory header cannot be
+      // mistaken for accounting or overview. A single shared accent would make
+      // the grouped menu cosmetic rather than a way to find things.
+      expect(SectionAccents.inventory.base, isNot(SectionAccents.overview.base),
+          reason: 'sections must be visually distinguishable from each other');
+      expect(SectionAccents.inventory.base, isNot(SectionAccents.accounting.base));
+      expect(SectionAccents.inventory.base, isNot(SectionAccents.sales.base));
+      // The header is actually painted with that accent, not merely defined.
+      final header = tester.widget(find.byKey(const ValueKey('nav-group-inventory')));
+      expect(header, isNotNull);
+
+      // Opening the group reveals the screens that make it a system rather than
+      // a single list.
+      await tester.ensureVisible(inventoryGroup);
+      await tester.pumpAndSettle();
+      // The locale is the default (LTR/English), where the sidebar labels are
+      // the English names.
+      for (final label in const [
+        'Warehouses',
+        'Batches',
+        'Stock documents',
+        'Stock takes',
+        'Inventory reports',
+      ]) {
+        expect(find.text(label), findsOneWidget,
+            reason: '"$label" must be reachable from the inventory group');
+      }
     },
   );
 
