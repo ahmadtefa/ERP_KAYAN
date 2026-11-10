@@ -8,6 +8,7 @@ export function summarize(text) {
 const lines = text.split(/\r?\n/);
 const tests = new Map();
 const printed = new Map();
+const failedNames = new Map();
 const errors = [];
 for (const line of lines) {
   let event;
@@ -190,7 +191,23 @@ for (const line of lines) {
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);
     else errors.unshift(message);
   }
+  // A test can finish non-successfully without emitting a matching error
+  // event. Counting then reports more failures than any annotation names, and
+  // the extra one is invisible. Record the name from testDone too, so every
+  // counted failure can be traced to a test.
+  if (event.type === 'testDone') {
+    const name = tests.get(event.testID);
+    if (event.result && event.result !== 'success' && !event.skipped && name) {
+      failedNames.set(event.testID, name);
+    }
+  }
 }
+// Every failure the counter reports must be nameable: append the names the
+// error events did not cover, so no failure can hide behind a merged log.
+const unnamed = [...failedNames.values()].filter(
+  name => !errors.some(error => error.startsWith(`${name}:`)),
+);
+if (unnamed.length) errors.push(`also failed (no error event captured): ${unnamed.join(' | ')}`);
 const message = (errors.length ? errors.slice(0, 30).join(' | ') : lines.slice(-35).join(' | '))
   .replace(/postgres(?:ql)?:\/\/[^\s'"@]*@/gi, 'postgresql://[redacted]@')
   .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[redacted private key]')

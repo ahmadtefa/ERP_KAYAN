@@ -104,3 +104,38 @@ test('stock document diagnostics keep the assertion shape and line, not the scre
   assert.match(summary,/test\/widget\/stock_documents_screen_test\.dart:343:5/);
   assert.doesNotMatch(summary,/New document/);
 });
+
+test('a failure with no error event is still named in the summary', () => {
+  const log = [
+    {type:'testStart',test:{id:31,name:'screenshot: a golden that failed'}},
+    {type:'error',testID:31,error:'Golden "goldens/x.png": Pixel test failed, 1.00%, 10px diff detected.'},
+    {type:'testDone',testID:31,result:'failure',hidden:false,skipped:false},
+    {type:'testStart',test:{id:32,name:'a test that failed without printing an error'}},
+    {type:'testDone',testID:32,result:'failure',hidden:false,skipped:false},
+    {type:'testStart',test:{id:33,name:'a passing test'}},
+    {type:'testDone',testID:33,result:'success',hidden:false,skipped:false},
+  ].map(JSON.stringify).join('\n');
+  const summary = summarize(log);
+  // The counter would report two failures; before this, the annotation named
+  // one, and the other could not be identified from the run at all.
+  assert.match(summary, /screenshot: a golden that failed/);
+  assert.match(summary, /a test that failed without printing an error/);
+  assert.doesNotMatch(summary, /a passing test/);
+});
+
+test('a run whose failures all have error events is unchanged', () => {
+  const log = [
+    {type:'testStart',test:{id:41,name:'screenshot: only failure'}},
+    {type:'error',testID:41,error:'Golden "goldens/y.png": Pixel test failed.'},
+    {type:'testDone',testID:41,result:'failure',hidden:false,skipped:false},
+  ].map(JSON.stringify).join('\n');
+  assert.doesNotMatch(summarize(log), /also failed/);
+});
+
+test('a skipped test is not reported as a failure', () => {
+  const log = [
+    {type:'testStart',test:{id:51,name:'screenshot: skipped on purpose'}},
+    {type:'testDone',testID:51,result:'success',hidden:false,skipped:true},
+  ].map(JSON.stringify).join('\n');
+  assert.doesNotMatch(summarize(log), /also failed/);
+});
