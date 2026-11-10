@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -292,4 +292,48 @@ test('the real requirement list includes every script in the migration chain', a
   } finally {
     await rm(f.base, { recursive: true, force: true });
   }
+});
+
+test('refuses a payload that ships JavaScript source maps', async () => {
+  // Regression: 411 tsc source maps were staged into the product payload, a
+  // third of backend/dist by size, carrying build-machine paths into a release.
+  // The staging rule now skips them; this asserts the inspection refuses them
+  // anyway, so a regression cannot reach a published installer unnoticed.
+  const f = await fixture([...required, 'backend/dist/src/main.js.map']);
+  try {
+    await assert.rejects(
+      () => verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /source map/i,
+      'a payload carrying source maps must be refused',
+    );
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('refuses source maps anywhere in the payload, not only under backend/dist', async () => {
+  const f = await fixture([...required, 'build/web/main.dart.js.map']);
+  try {
+    await assert.rejects(
+      () => verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /source map/i,
+    );
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('the staging rule in build-installer.ps1 skips source maps and keeps sources', async () => {
+  // The inspection is the second line of defence. This is the first: prove the
+  // packaging script actually skips .map, and prove it did so without turning
+  // off source maps for development or deleting the sources.
+  const packaging = await readFile('distribution/windows/build-installer.ps1', 'utf8');
+  assert.match(packaging, /\.Extension -eq '\.map'/, 'packaging must skip .map files');
+  const tsconfig = JSON.parse(await readFile('backend/tsconfig.json', 'utf8'));
+  assert.equal(tsconfig.compilerOptions.sourceMap, true,
+    'source maps must stay enabled for development; the payload excludes them, it does not disable them');
+  // The sources themselves are still checked in and still build: excluding them
+  // from the payload must not mean deleting them from the repository.
+  const sources = await readdir('backend/src', { recursive: true });
+  assert.ok(sources.some((name) => name.endsWith('main.ts')), 'backend sources must remain in the repository');
 });

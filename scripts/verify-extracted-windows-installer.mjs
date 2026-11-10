@@ -170,6 +170,14 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
 
   const missing = REQUIRED_SUFFIXES.filter((suffix) => !hasSuffix(relativePaths, suffix));
   if (missing.length) throw new Error('Required runtime payload entries are missing: ' + missing.join(', '));
+  // Source maps must never ship. They are a development aid, they roughly
+  // double the shipped JavaScript, and they embed absolute paths from the build
+  // machine. If one reaches the payload the staging rule stopped working, and
+  // the package must be refused rather than silently published.
+  const sourceMaps = relativePaths.filter((path) => /\.map$/i.test(path));
+  if (sourceMaps.length) {
+    throw new Error(`The payload contains ${sourceMaps.length} source map file(s), which production must not ship: ${sourceMaps.slice(0, 5).join(', ')}`);
+  }
   if (!relativePaths.some((path) => /(^|\/)backend\/prisma\/migrations\/[^/]+\/migration\.sql$/i.test(path))) {
     throw new Error('The extracted payload contains no actual Prisma migration SQL.');
   }
