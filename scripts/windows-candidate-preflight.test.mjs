@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { summarize } from './report-flutter-test-failures.mjs';
+import { summarize, failedTestNames } from './report-flutter-test-failures.mjs';
 
 // Static safety checks only: they do not prove GitHub actually ran this job.
 const workflow = readFileSync(new URL('../.github/workflows/windows-candidate-preflight.yml', import.meta.url), 'utf8');
@@ -138,4 +138,22 @@ test('a skipped test is not reported as a failure', () => {
     {type:'testDone',testID:51,result:'success',hidden:false,skipped:true},
   ].map(JSON.stringify).join('\n');
   assert.doesNotMatch(summarize(log), /also failed/);
+});
+
+test('every failing test is named, including one that emitted no error event', () => {
+  const log = [
+    {type:'testStart',test:{id:61,name:'loading design screenshots'}},
+    {type:'testDone',testID:61,result:'failure',hidden:false,skipped:false},
+    {type:'testStart',test:{id:62,name:'screenshot: dashboard inside the shell (Arabic RTL)'}},
+    {type:'error',testID:62,error:'Golden "goldens/dashboard_ar.png": Pixel test failed.'},
+    {type:'testDone',testID:62,result:'failure',hidden:false,skipped:false},
+    {type:'testStart',test:{id:63,name:'a passing test'}},
+    {type:'testDone',testID:63,result:'success',hidden:false,skipped:false},
+    {type:'testStart',test:{id:64,name:'a skipped test'}},
+    {type:'testDone',testID:64,result:'success',hidden:false,skipped:true},
+  ].map(JSON.stringify).join('\n');
+  assert.deepEqual(failedTestNames(log), [
+    'loading design screenshots',
+    'screenshot: dashboard inside the shell (Arabic RTL)',
+  ]);
 });

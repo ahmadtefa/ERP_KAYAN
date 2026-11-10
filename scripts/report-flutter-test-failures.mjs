@@ -216,8 +216,32 @@ const message = (errors.length ? errors.slice(0, 30).join(' | ') : lines.slice(-
 return message || 'No diagnostic was captured.';
 }
 
+/// Every test the JSON reporter marked non-successfully, by name.
+export function failedTestNames(text) {
+  const tests = new Map();
+  const names = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event.type === 'testStart' && event.test) tests.set(event.test.id, event.test.name);
+    if (event.type === 'testDone' && event.result && event.result !== 'success' && !event.skipped) {
+      const name = tests.get(event.testID);
+      if (name) names.set(event.testID, name);
+    }
+  }
+  return [...names.values()];
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const path = process.argv[2];
   if (!path) throw new Error('Expected a Flutter test log path.');
-  console.log(`::error title=Flutter test failures::${summarize(readFileSync(path, 'utf8'))}`);
+  const text = readFileSync(path, 'utf8');
+  // Name every failing test in its own notice. The error annotation merges
+  // messages and truncates at the annotation limit, so a failure whose error
+  // event was dropped could not be identified from the run at all. Names are
+  // test descriptions only - never output, input or fixture data.
+  for (const name of failedTestNames(text)) {
+    console.log(`::notice title=Flutter failing test::${name.replace(/[\r\n%]/g, ' ').slice(0, 200)}`);
+  }
+  console.log(`::error title=Flutter test failures::${summarize(text)}`);
 }
