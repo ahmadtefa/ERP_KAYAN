@@ -1070,10 +1070,17 @@ if ($leftoverRegistration) { Fail "The PostgreSQL service registration $serviceN
 Write-Host 'PASS: uninstall unregistered the bundled PostgreSQL service.'
 
 # A rule left behind would keep the port open to the LAN after the program that
-# needed it is gone.
-$leftoverRules = @(Get-NetFirewallRule -DisplayName 'KAYAN*' -ErrorAction SilentlyContinue)
+# needed it is gone. The smoke's own offline rules are named KAYAN-Offline-Smoke-*
+# and are removed by this script, not by the uninstaller, so they are excluded
+# by name rather than by a broad KAYAN* pattern that matches them and would make
+# this check fail on the harness' own bookkeeping instead of on the product.
+$leftoverRules = @(
+  Get-NetFirewallRule -DisplayName '*KAYAN*' -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -notlike 'KAYAN-Offline-Smoke-*' }
+)
 if ($leftoverRules.Count -ne 0) {
-  Fail "Uninstall left $($leftoverRules.Count) KAYAN firewall rule(s) behind."
+  $names = ($leftoverRules | ForEach-Object { $_.DisplayName }) -join ', '
+  Fail "Uninstall left $($leftoverRules.Count) KAYAN firewall rule(s) behind: $names"
 }
 Write-Host 'PASS: uninstall removed the install-time firewall rules.'
 

@@ -84,6 +84,12 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(smokeScript, /PASS: uninstall removed the installed program files/);
   assert.match(smokeScript, /PASS: uninstall unregistered the bundled PostgreSQL service/);
   assert.match(smokeScript, /PASS: uninstall removed the install-time firewall rules/);
+  // The smoke creates its own KAYAN-Offline-Smoke-* rules to force offline mode
+  // and removes them itself. A broad KAYAN* leftover check matches those and
+  // fails on the harness' bookkeeping instead of on the product - which is
+  // exactly what happened in run 42792276319. The pattern must stay scoped.
+  assert.doesNotMatch(smokeScript, /Get-NetFirewallRule -DisplayName 'KAYAN\*'/);
+  assert.match(smokeScript, /-notlike 'KAYAN-Offline-Smoke-\*'/);
   // An uninstall must not delete the company's data; losing it silently would
   // be worse than leaving a stray file.
   assert.match(smokeScript, /PASS: uninstall kept the company data and logs under ProgramData, as designed/);
