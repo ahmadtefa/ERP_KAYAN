@@ -50,6 +50,7 @@ export const REQUIRED_SUFFIXES = [
   'repair-runtime.ps1',
   'reset-kayan.ps1',
   'remove-runtime.ps1',
+  'remove-everything.ps1',
   'repair-kayan.bat',
   'database-control.ps1',
   'UnelevatedProcess.cs',

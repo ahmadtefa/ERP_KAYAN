@@ -145,6 +145,7 @@ test('nothing the install or the repair runs reaches the network', async () => {
     'distribution/windows/reset-kayan.ps1',
     'distribution/windows/database-control.ps1',
     'distribution/windows/remove-runtime.ps1',
+    'distribution/windows/remove-everything.ps1',
     'backend/scripts/prepare-database.mjs',
     'backend/scripts/apply-migrations.mjs',
     'backend/scripts/migrate-deploy.mjs',

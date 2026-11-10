@@ -99,6 +99,10 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 
 [Icons]
 Name: "{group}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{app}"
+; Two ways to leave this computer, and they are separate menu entries so the
+; destructive one cannot be reached by mis-clicking the ordinary uninstall.
+Name: "{group}\Uninstall KAYAN ERP (keep company data)"; Filename: "{uninstallexe}"
+Name: "{group}\Remove everything (delete all data)"; Filename: "{uninstallexe}"; Parameters: "/REMOVEEVERYTHING"
 Name: "{group}\Repair KAYAN ERP"; Filename: "{app}\RepairTool.exe"; WorkingDir: "{app}"
 Name: "{group}\Repair KAYAN ERP (command line)"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\repair-runtime.ps1"""; WorkingDir: "{app}"
 ; Safe reset is a separate, manual tool: it is never run by Setup, by an
@@ -291,13 +295,26 @@ begin
   end;
 end;
 
-function InitializeUninstall(): Boolean;
+function CmdLineParamExists(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do begin
+    if CompareText(ParamStr(I), Value) = 0 then begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+{ Removes the program and keeps company data: the ordinary uninstall. }
+function RemoveProgramKeepData(): Boolean;
 var
   ResultCode: Integer;
   Args: String;
 begin
   Result := True;
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if FileExists(ExpandConstant('{app}\remove-runtime.ps1')) then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-runtime.ps1') + '"';
     if (not RunPowerShell(Args, ResultCode)) or (ResultCode <> 0) then begin
@@ -305,6 +322,80 @@ begin
       Result := False;
     end;
   end;
+end;
+
+{ Complete removal. Reached only when the operator passes /REMOVEEVERYTHING,
+  which the Start menu entry "Remove everything" does. The ordinary uninstall
+  never reaches it, so choosing the normal route cannot destroy data by
+  accident. }
+function RemoveEverything(): Boolean;
+var
+  ResultCode: Integer;
+  Args: String;
+begin
+  Result := False;
+  if MsgBox(
+    'Delete KAYAN ERP and ALL of your company data?' + #13#10#13#10 +
+    'This permanently deletes:' + #13#10 +
+    '  - the KAYAN database and its PostgreSQL data folder' + #13#10 +
+    '  - attachments, images and documents' + #13#10 +
+    '  - all local backups and logs' + #13#10 +
+    '  - settings and saved passwords' + #13#10 +
+    '  - the program, shortcuts, the Windows service and its registry keys' + #13#10#13#10 +
+    'This cannot be undone. There is no copy left on this computer.',
+    mbError, MB_YESNO) <> IDYES then begin
+    MsgBox('Nothing was deleted. KAYAN ERP is still installed.', mbInformation, MB_OK);
+    Exit;
+  end;
+  { A second, differently worded confirmation: one click must never destroy a
+    company's books. }
+  if MsgBox(
+    'Last confirmation.' + #13#10#13#10 +
+    'Choose Yes only if you have a backup somewhere else, or you accept that ' +
+    'every company record on this computer is lost for good.',
+    mbWarning, MB_YESNO) <> IDYES then begin
+    MsgBox('Nothing was deleted. KAYAN ERP is still installed.', mbInformation, MB_OK);
+    Exit;
+  end;
+
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-everything.ps1') + '" -ConfirmRemoval';
+  if (not RunPowerShell(Args, ResultCode)) or (ResultCode <> 0) then begin
+    MsgBox('Complete removal did not finish. Some KAYAN components could not be deleted, so this uninstall is NOT complete.' + #13#10#13#10 +
+      'A report listing each remaining path and the reason was written to:' + #13#10 +
+      ExpandConstant('{commonappdata}\KAYAN-ERP-removal-report.json') + #13#10#13#10 +
+      'Restart the computer and run "Remove everything" again; it is safe to run more than once.',
+      mbError, MB_OK);
+    Exit;
+  end;
+  Result := True;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+  Choice: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  { The ordinary route is preselected. Erasing everything requires the explicit
+    Start menu entry, not a mis-click in the standard uninstall dialog. }
+  if CmdLineParamExists('/REMOVEEVERYTHING') then begin
+    Result := RemoveEverything();
+    Exit;
+  end;
+
+  Choice := MsgBox(
+    'Remove KAYAN ERP from this computer?' + #13#10#13#10 +
+    'Yes  - Remove the program only. Your company data, database, attachments and backups are kept.' + #13#10 +
+    'No   - Cancel and change nothing.' + #13#10#13#10 +
+    'To also delete all company data permanently, use "Remove everything (delete all data)" from the Start menu.',
+    mbConfirmation, MB_YESNO);
+  if Choice = IDNO then begin
+    Result := False;
+    Exit;
+  end;
+  Result := RemoveProgramKeepData();
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
