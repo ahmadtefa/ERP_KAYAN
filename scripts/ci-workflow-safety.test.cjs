@@ -24,6 +24,10 @@ const reviewed = [
   // what is inside it; every one of those properties is pinned by
   // scripts/windows-build-only.test.mjs.
   'windows-build-only.yml',
+  // Reviewed 2026-11-06: the licence-store gap is deliberately kept out of
+  // safe-checks.yml so ordinary code CI can report a truthful result. This
+  // workflow is the visible home of that gap and cannot pass on any event.
+  'licence-store-gate.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
@@ -60,15 +64,32 @@ assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active 
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
 assert.ok(safe.on.pull_request.branches.includes('main'), 'PRs targeting main must retain code checks');
 const source = fs.readFileSync(path.join(workflows, 'safe-checks.yml'), 'utf8');
-// The unchanged HMAC test is independently blocked until an approved VM exists.
-const isolated = safe.jobs['licence-store-isolation'];
-assert.ok(isolated, 'licence-store integration must remain visible as its own job');
-assert.equal(isolated.if, undefined);
-assert.equal(isolated['continue-on-error'], undefined);
-assert.equal(isolated.needs, undefined);
+// The unchanged HMAC test is blocked until an approved VM exists. Its home
+// moved out of ordinary code CI, so a green safe-checks run now means only what
+// it actually verified. The gate keeps the gap visible and unpassable.
+assert.deepEqual(safe.jobs['licence-store-isolation'], undefined,
+  'Ordinary code CI must not host the un-runnable licence test');
+const gate = read('licence-store-gate.yml');
+assert.deepEqual(gate.on, safe.on, 'The licence gate must not drift to different events');
+assert.deepEqual(gate.permissions, { contents: 'read' }, 'The licence gate must never obtain write access');
+assert.deepEqual(Object.keys(gate.jobs), ['licence-store-integration'],
+  'The licence gate carries exactly one job and no publisher');
+const isolated = gate.jobs['licence-store-integration'];
+assert.ok(isolated, 'the licence-store gap must remain visible as its own job');
+assert.equal(isolated.if, undefined, 'The gate must not be conditional');
+assert.equal(isolated['continue-on-error'], undefined, 'The gate must never ignore its own failure');
+assert.equal(isolated.environment, undefined, 'The gate must not claim an approved environment');
 assert.match(isolated.steps[1].run, /BLOCKED.*licence store integration not run/);
 assert.match(isolated.steps[1].run, /exit 1/);
 assert.match(isolated.steps[2].run, /src\/modules\/licensing\/license-store\.spec\.ts/);
+const gateSource = fs.readFileSync(path.join(workflows, 'licence-store-gate.yml'), 'utf8');
+assert.doesNotMatch(gateSource, /secrets\./, 'The licence gate must not receive production secrets');
+assert.doesNotMatch(gateSource, /continue-on-error/, 'No step may downgrade the gate to a warning');
+// Nothing may turn the un-run test into a success: no step may exit 0, skip,
+// or soften the only blocking step.
+assert.doesNotMatch(isolated.steps[1].run, /exit 0|\|\||>> \$GITHUB/, 'The blocking step must stay unbypassable');
+assert.deepEqual(isolated.steps.map(step => step['continue-on-error']), [undefined, undefined, undefined]);
+
 const backendSteps = safe.jobs['backend-safe'].steps;
 assert.doesNotMatch(backendSteps.map(step => String(step.run || '')).join('\n'), /license-store\.spec\.ts/);
 const ordinaryJest = backendSteps.find(step => step.name === 'Run reviewed non-signing backend and authorization tests');
@@ -77,6 +98,12 @@ assert.ok(backendSteps.some(step => String(step.run || '').includes('ci-no-hmac-
 for (const [name, job] of Object.entries(safe.jobs)) {
   assert.notEqual(job.needs, 'licence-store-isolation', `${name} must run independently of VM availability`);
   assert.ok(!Array.isArray(job.needs) || !job.needs.includes('licence-store-isolation'));
+}
+// Ordinary CI must still run the licence checks that need no approved VM.
+const safeBackend = safe.jobs['backend-safe'];
+for (const kept of ['license.guard.spec.ts', 'license-status-safety.spec.ts', 'license-keyring.spec.ts']) {
+  assert.ok(String(safeBackend.steps.map(step => String(step.run || '')).join('\n')).includes(kept),
+    `Ordinary CI must keep the runnable licence check ${kept}`);
 }
 assert.doesNotMatch(source, /secrets\./, 'ordinary code CI must not receive production secrets');
 for (const forbidden of ['smoke-test-installed-windows', 'memory-flow.test', 'verify-licensing-postgres', 'publish-verified-windows', 'license-generator.spec']) {
@@ -113,11 +140,11 @@ for (const job of Object.values(safe.jobs)) {
   const checkout = job.steps.find(step => String(step.uses ?? '').startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}', 'Code checks must use the exact source head');
 }
-const gate = read('release-evidence-gate.yml');
-assert.deepEqual(gate.on, safe.on, 'Code CI and the independent evidence gate must run for the same events');
-assert.deepEqual(gate.permissions, { contents: 'read' }, 'Evidence gate must not publish or obtain write privileges');
-assert.deepEqual(Object.keys(gate.jobs), ['licence-evidence-required']);
-const gateJob = gate.jobs['licence-evidence-required'];
+const evidenceGate = read('release-evidence-gate.yml');
+assert.deepEqual(evidenceGate.on, safe.on, 'Code CI and the independent evidence gate must run for the same events');
+assert.deepEqual(evidenceGate.permissions, { contents: 'read' }, 'Evidence gate must not publish or obtain write privileges');
+assert.deepEqual(Object.keys(evidenceGate.jobs), ['licence-evidence-required']);
+const gateJob = evidenceGate.jobs['licence-evidence-required'];
 assert.equal(gateJob.if, undefined, 'Evidence gate must not be conditional');
 assert.equal(gateJob['continue-on-error'], undefined, 'Evidence gate must not ignore a failure');
 assert.equal(gateJob.steps.length, 2, 'PR notice and main blocker require review');

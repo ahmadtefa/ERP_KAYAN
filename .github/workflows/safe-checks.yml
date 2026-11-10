@@ -137,29 +137,6 @@ jobs:
           src/modules/company/company.service.spec.ts
           src/modules/company/company-audit-atomic.spec.ts
 
-  licence-store-isolation:
-    # The original, unmodified license-store.spec.ts requires a real HMAC key
-    # and intentionally is NOT executed on this general-purpose runner. This
-    # independent check fails closed, rather than silently skipping or
-    # reporting the test as passed. Do not replace this gate with a flag or a
-    # self-hosted runner until an independently approved disposable VM and
-    # runner isolation/PR-trust policy exist. It does not block other CI jobs.
-    name: Licence store integration blocked (approved VM required)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - name: Require approved isolated licence-test VM before HMAC test
-        run: |
-          echo '::error title=BLOCKED — licence store integration not run::Approved isolated test VM and runner trust controls are not configured. This is not a test pass or release approval.'
-          exit 1
-      - name: Run the unchanged licence store integration test
-        working-directory: backend
-        run: npm test -- --runInBand src/modules/licensing/license-store.spec.ts
-
   prisma-upgrade:
     name: Native Prisma and PostgreSQL 16 upgrade
     runs-on: ubuntu-24.04
