@@ -825,10 +825,18 @@ class _StockVoucherCreateScreenState
       // error resolver produces would leave the operator unsure whether the
       // scanner read the label at all, so say what was scanned and what to do.
       if (mounted) {
-        await showAppError(
-          context,
-          _barcodeFailure(error, code),
-        );
+        final missing = _barcodeFailureMessage(error, code);
+        // A message this screen composed itself is shown as written; the
+        // resolver would classify an English sentence it did not produce as
+        // untrusted and replace it with a generic sentence that does not name
+        // the barcode the operator just scanned. Anything else is a real
+        // diagnostic - a permission or network error - and still goes through
+        // the resolver.
+        if (missing != null) {
+          await showAppPlainError(context, missing);
+        } else {
+          await showAppError(context, error);
+        }
       }
     } finally {
       line.scanInFlight = false;
@@ -838,11 +846,13 @@ class _StockVoucherCreateScreenState
   /// Turns a barcode lookup failure into something an operator can act on.
   /// Anything that is not "no such barcode" is passed through untouched: a
   /// permission or network problem must not be reported as a bad label.
-  Object _barcodeFailure(Object error, String code) {
+  /// Null when the failure is not "no such barcode": a permission or network
+  /// problem must be reported as itself, not as a bad label.
+  String? _barcodeFailureMessage(Object error, String code) {
     final isMissing = error is ApiFailure
         ? error.statusCode == 404
         : error.toString().contains('404');
-    if (!isMissing) return error;
+    if (!isMissing) return null;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return arabic
         ? 'لا يوجد صنف أو وحدة بهذا الباركود: $code. تحقق من الملصق أو ابحث عن الصنف يدويًا.'

@@ -395,15 +395,27 @@ void main() {
         // because the operator is looking at it. Matched as a list row, not as
         // any text: the top bar also names the current screen, and a loose
         // match would pass even if the sidebar entry were missing.
-        expect(find.widgetWithText(ListTile, 'Dashboard'), findsOneWidget);
+        expect(
+          find.widgetWithText(
+            ListTile,
+            arabic ? 'لوحة التحكم' : 'Dashboard',
+          ),
+          findsOneWidget,
+        );
 
-        // 3. Opening a section shows its entries.
+        // 3. Opening a section shows its entries, in the interface language.
         final inventory = find.byKey(const ValueKey('nav-group-inventory'));
         await tester.ensureVisible(inventory);
         await tester.tap(inventory);
         await tester.pumpAndSettle();
-        expect(find.text('Warehouses'), findsOneWidget);
-        expect(find.text('Batches'), findsOneWidget);
+        expect(
+          find.text(arabic ? 'المستودعات' : 'Warehouses'),
+          findsOneWidget,
+        );
+        expect(
+          find.text(arabic ? 'الدفعات' : 'Batches'),
+          findsOneWidget,
+        );
 
         // 4. Opening a different section closes the previous one.
         final sales = find.byKey(const ValueKey('nav-group-sales'));
