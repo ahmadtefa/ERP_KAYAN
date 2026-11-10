@@ -5,6 +5,7 @@
 // RepairTool or Prisma migrations) and Setup still "succeeds".
 
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
@@ -32,6 +33,45 @@ test('the build script stages every runtime the product needs', async () => {
   // Prisma client and migrations are part of the payload.
   assert.match(build, /prisma/i);
   assert.match(build, /migration\.sql/, 'the build must refuse a package with no migration');
+});
+
+test('the staged scripts include every file the migration chain shells out to', async () => {
+  const build = await read('distribution/windows/build-installer.ps1');
+
+  // This is a real installer failure, not a hypothetical one: an installed
+  // build reached "applying the database upgrade" on a clean Windows runner and
+  // stopped with
+  //
+  //     migrations: ...\backend\scripts\apply-migrations.mjs is missing
+  //
+  // The staged-copy list had three of the four runtime scripts. Setup and the
+  // program prepare the database by running prepare-database.mjs, which calls
+  // migrate-deploy.mjs, which runs apply-migrations.mjs - so a package missing
+  // the last one installs a program that cannot create its own schema.
+  const staging = build.match(/foreach \(\$script in @\(([^)]*)\)\)/);
+  assert.ok(staging, 'the runtime-script staging list must exist');
+  const staged = staging[1];
+  for (const script of [
+    'prepare-database.mjs',
+    'database-state.mjs',
+    'migrate-deploy.mjs',
+    'apply-migrations.mjs',
+  ]) {
+    assert.ok(staged.includes(script), `${script} must be staged into the package`);
+  }
+
+  // Every staged script must also exist in the repository, or the copy fails at
+  // build time with a path that names nothing.
+  for (const script of ['prepare-database.mjs', 'database-state.mjs', 'migrate-deploy.mjs', 'apply-migrations.mjs']) {
+    assert.ok(existsSync(new URL(`../backend/scripts/${script}`, import.meta.url)),
+      `${script} must exist in backend/scripts`);
+  }
+
+  // The verifier must name the file too, so a package that quietly loses it is
+  // rejected before an installer is produced.
+  const requiredLine = build.split('\n').find((l) => l.includes('$required = @(')) ?? '';
+  assert.ok(requiredLine.includes('backend\\scripts\\apply-migrations.mjs'),
+    'the staged-payload gate must require the migration runner');
 });
 
 test('the staged-payload gate lists Node, PostgreSQL, VC++, RepairTool and migrations', async () => {
