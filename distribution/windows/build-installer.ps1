@@ -236,7 +236,7 @@ foreach ($relative in @('package.json','package-lock.json','nest-cli.json','tsco
 # are the runtime database preparer and its direct dependencies.
 $runtimeScripts = Join-Path $app 'backend\scripts'
 [void](New-Item -ItemType Directory -Path $runtimeScripts)
-foreach ($script in @('prepare-database.mjs', 'database-state.mjs', 'migrate-deploy.mjs')) {
+foreach ($script in @('prepare-database.mjs', 'database-state.mjs', 'migrate-deploy.mjs', 'apply-migrations.mjs')) {
   Copy-Item -LiteralPath (Join-Path $backend "scripts\$script") -Destination $runtimeScripts
 }
 Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $app 'backend')
@@ -361,7 +361,7 @@ $repairToolExe = Join-Path $app 'RepairTool.exe'
 if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\scripts\migrate-deploy.mjs','backend\node_modules\prisma\build\index.js','backend\prisma\schema.prisma','backend\prisma\migrations\migration_lock.toml','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\scripts\migrate-deploy.mjs','backend\scripts\apply-migrations.mjs','backend\node_modules\prisma\build\index.js','backend\prisma\schema.prisma','backend\prisma\migrations\migration_lock.toml','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $migrationFiles = @(Get-ChildItem -LiteralPath (Join-Path $app 'backend\prisma\migrations') -Filter 'migration.sql' -File -Recurse)
 if ($migrationFiles.Count -eq 0) { throw 'Staged package has no Prisma migrations.' }
