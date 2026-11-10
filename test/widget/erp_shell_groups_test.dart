@@ -111,7 +111,7 @@ void main() {
       // barcode work at all. This asserts the group exists, that every screen
       // it owns is reachable from it, and that it is drawn in its own section
       // colour rather than looking like every other group.
-      tester.view.physicalSize = const Size(1500, 1000);
+      tester.view.physicalSize = const Size(1500, 1600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -144,6 +144,7 @@ void main() {
                   'inventory.batches.read',
                   'inventory.stock.read',
                   'inventory.reports.read',
+                  'inventory.stocktake.read',
                 ],
               ),
             ),
