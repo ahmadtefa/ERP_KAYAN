@@ -31,12 +31,19 @@ const installer = read('windows-installer.yml');
 assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
 assert.deepEqual(installer.permissions, { contents: 'read', deployments: 'read' }, 'Installer may read deployment review state but must not publish');
 const installerSource = fs.readFileSync(path.join(workflows, 'windows-installer.yml'), 'utf8');
-const installerBlocker = installer.jobs.build.steps[0];
-assert.match(installerBlocker.name, /Block installer/);
-assert.match(installerBlocker.run, /BLOCKED.*approved isolated VM/);
-assert.match(installerBlocker.run, /exit 1/);
-assert.equal(installerBlocker.if, undefined);
-assert.equal(installerBlocker['continue-on-error'], undefined);
+const buildSteps = installer.jobs.build.steps;
+assert.equal(buildSteps[0].name, 'Checkout repository', 'Installer build must start from an explicit source checkout');
+assert.ok(buildSteps.some(step => step.name === 'Inspect the final Inno including temporary payload files') === false,
+  'Final payload inspection belongs to the independent inspection job');
+const runtimeSmoke = installer.jobs['smoke-final'];
+assert.equal(runtimeSmoke.environment, 'windows-installer-test', 'Actual offline installation must use the protected test environment');
+assert.equal(runtimeSmoke.if, "needs.build.outputs.build_mode == 'product'");
+assert.ok(runtimeSmoke.steps.some(step => step.name === 'Install the exact product Setup and perform offline runtime checks'),
+  'The protected job must install and exercise the exact inspected product Setup');
+assert.ok(runtimeSmoke.steps.some(step => step.name === 'Verify approved installer-test environment and branch allow-list'),
+  'The protected job must verify environment protection and branch allow-list');
+assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-RuntimeOnly')),
+  'Installed runtime smoke must be explicit and must not claim release evidence');
 assert.match(installerSource, /github\.event_name == 'pull_request' && 'product'/,
   'Retain the historical product-mode selection for review');
 assert.doesNotMatch(installerSource, /secrets\.(?:LICENSE_PRIVATE_KEY|KAYAN_PRIVATE_KEY)/);
