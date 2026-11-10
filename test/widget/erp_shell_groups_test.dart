@@ -374,13 +374,14 @@ void main() {
           'inventory',
           'sales',
           'purchases',
+          'administration',
         ];
         for (final section in sections) {
           expect(find.byKey(ValueKey('nav-group-$section')), findsOneWidget,
               reason: 'section $section must be in the menu');
         }
         // A section the user has no permission for is absent, not empty.
-        for (final hidden in ['accounting', 'parties', 'insights', 'administration']) {
+        for (final hidden in ['accounting', 'parties', 'insights']) {
           expect(find.byKey(ValueKey('nav-group-$hidden')), findsNothing,
               reason: 'section $hidden has no permitted entry');
         }
