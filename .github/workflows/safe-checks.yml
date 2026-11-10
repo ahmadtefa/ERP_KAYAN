@@ -43,6 +43,10 @@ jobs:
         run: node ../scripts/ci-workflow-safety.test.cjs
       - name: Check retained Windows preflight policy without running it
         run: node --test ../scripts/windows-candidate-preflight.test.mjs
+      - name: Verify the build-only path can only build and inspect
+        run: node --test ../scripts/windows-build-only.test.mjs
+      - name: Verify complete removal cannot delete what it does not own
+        run: node --test ../scripts/remove-everything-safety.test.mjs
       - name: Verify public-key transition inventory without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing

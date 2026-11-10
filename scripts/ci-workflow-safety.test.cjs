@@ -19,6 +19,11 @@ const reviewed = [
   'installer-historical-inventory.yml', 'key-generator.yml', 'licence-startup-focused.yml',
   'safe-checks.yml', 'release-evidence-gate.yml', 'windows-candidate-preflight.yml', 'windows-installer-runtime-smoke.yml',
   'windows-installer.yml', 'windows-integrated-candidate.yml', 'windows-packaging-probe.yml',
+  // Reviewed 2026-11-10: manual dispatch only, contents:read, one job, no
+  // environment, no release step, no install. It builds a package and inspects
+  // what is inside it; every one of those properties is pinned by
+  // scripts/windows-build-only.test.mjs.
+  'windows-build-only.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
