@@ -113,3 +113,46 @@ The previous baseline is intact and still matches its documented hash
 
 This review does not verify order operations, Windows rendering, backend
 integration, or product readiness.
+
+## Accordion menu — commit 81364d2a
+
+The sidebar became an exclusive accordion: eight section headings, only the
+section owning the current screen expanded, instead of every section drawn open
+with the list scrolled to the selected row. All three baselines were regenerated
+on CI by the `Full-resolution synthetic review` jobs of run `42863594410` and
+reviewed before replacement.
+
+The replacement was preceded by a measured review of all three screens:
+
+| file | differing pixels | % | content area x<1191 | sidebar x>=1191 |
+| --- | --- | --- | --- | --- |
+| dashboard_ar.png | 18,273 | 1.41% | 0 px | 18,273 px |
+| customers_ar.png | 40,154 | 3.10% | 0 px | 40,154 px |
+| sales_invoices_ar.png | 41,395 | 3.19% | 0 px | 41,395 px |
+
+Not one pixel changed outside the navigation sidebar. The eight sections, their
+order and their membership are unchanged; the only structural change in
+`erp_shell.dart` is how the open section is stored.
+
+### Current hashes (1440×900 RGBA)
+
+| File | SHA-256 |
+| --- | --- |
+| dashboard_ar.png | `8241304a77e76e78fe235d3e10b9b856547a82edf8456cf86404495140508346` |
+| customers_ar.png | `89b1f6a14254f4121100b1bdc273af16ca76a16ddaa8b2316647a9364edd428c` |
+| sales_invoices_ar.png | `f3bc1af18953028cb16d7d027b9822206ac79d33619280c6903c441f427e6fff` |
+
+### Rolling back
+
+The previous baselines are kept, unmodified, in `superseded/`. Each was
+regenerated from the same runner and verified by pixel hash before this change:
+
+| File | SHA-256 (superseded) |
+| --- | --- |
+| superseded/dashboard_ar.pre-accordion.png | `d5048ef08fe9ba1a6bd074834b54feced5cb6d43a9ba839b36dfe09d37955b5b` |
+| superseded/customers_ar.pre-accordion.png | `793f033a2e9b7cc2f54e6012cd46fc60dca7a8a88185fd4ab064785a3743f238` |
+| superseded/sales_invoices_ar.pre-accordion.png | `918cda0f00083ee4a5881e960d35d93bdf7da336ee9cb6f193f408a758af410a` |
+
+To roll back, copy the three `superseded/*.pre-accordion.png` files over the
+baselines. The review material for this change, including full-resolution
+before/after pairs and diff maps, is in `review/goldens-3be9379b/`.
