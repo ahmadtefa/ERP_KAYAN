@@ -279,7 +279,14 @@ void main() {
             await tester.tap(find.byIcon(Icons.menu_rounded));
             await tester.pumpAndSettle();
           }
+          // The route changed to the sales invoice screen, so the shell opens
+          // the section that owns it. Tapping the header closes that section;
+          // tapping it again reopens it. Before the accordion the columns were
+          // independent, and this sequence proved nothing about the route.
           await tester.ensureVisible(group);
+          await tester.pumpAndSettle();
+          expect(invoice, findsOneWidget,
+              reason: 'the section owning the current route is open');
           await tester.tap(group);
           await tester.pumpAndSettle();
           expect(invoice, findsNothing);

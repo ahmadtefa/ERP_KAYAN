@@ -916,6 +916,9 @@ void main() {
     final api = await scanScenario(tester, (barcode) async {
       await tester.enterText(barcode, 'NOT-A-CODE');
       await tester.testTextInput.receiveAction(TextInputAction.done);
+      // The error dialog is opened after the failed lookup resolves, so the
+      // frame that shows it comes after the one scanScenario settles.
+      await tester.pumpAndSettle();
     });
     expect(api.barcodeQueries, ['/inventory/items/by-barcode/NOT-A-CODE']);
     // The dialog names the code that failed, in the interface language. The
