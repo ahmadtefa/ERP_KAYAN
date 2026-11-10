@@ -208,6 +208,74 @@ def resolve_import(importing, imp):
     return os.path.normpath(os.path.join(os.path.dirname(importing), imp))
 
 
+
+def _typed_members(src):
+    """Every member declared inside a class, enum or mixin body, by type name.
+
+    This is what the checker was blind to: it could see that an identifier was
+    declared somewhere, but not that a *method* called on a value existed on
+    the value's type. `isOpen` was written on the notifier and called on the
+    state, and the file still passed every check here while `flutter analyze`
+    rejected it two jobs later.
+    """
+    types = {}
+    for match in re.finditer(
+        r"^[ \t]*(?:abstract\s+|final\s+|sealed\s+|base\s+)*"
+        r"(class|enum|mixin|extension)\s+([A-Za-z_][A-Za-z0-9_]*)"
+        r"[^{]*\{",
+        src,
+        re.M,
+    ):
+        name = match.group(2)
+        depth, index = 1, match.end()
+        while index < len(src) and depth > 0:
+            if src[index] == "{":
+                depth += 1
+            elif src[index] == "}":
+                depth -= 1
+            index += 1
+        body = src[match.end(): index - 1]
+        members = set(re.findall(r"\b(?:get\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(", body))
+        members |= set(re.findall(r"\b(?:final|var|const)\s+[A-Za-z_][A-Za-z0-9_<>,\s\?]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*[;=]", body))
+        members |= set(re.findall(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[;,]", body, re.M))
+        types[name] = members
+    return types
+
+
+def _wrong_receiver(src, types):
+    """Calls like `value.member()` where `value` is a known local type."""
+    problems = []
+    # Local variables and parameters whose type is one this file declares.
+    typed = {}
+    for name, members in types.items():
+        for match in re.finditer(
+            r"\b" + re.escape(name) + r"(?:<[^>]*>)?\s+([A-Za-z_][A-Za-z0-9_]*)\s*[;=,)]",
+            src,
+        ):
+            typed[match.group(1)] = (name, members)
+    for receiver, (name, members) in typed.items():
+        for call in re.finditer(
+            r"\b" + re.escape(receiver) + r"\.([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            src,
+        ):
+            member = call.group(1)
+            # Skip anything a Dart object still has: Object's own API, and the
+            # fluent names that appear on many types.
+            if member in members or member in _OBJECT_MEMBERS:
+                continue
+            problems.append(
+                f"{receiver}.{member}() is not declared on {name}"
+            )
+    return problems
+
+
+_OBJECT_MEMBERS = {
+    "toString", "hashCode", "runtimeType", "noSuchMethod",
+    "then", "catchError", "whenComplete", "timeout", "map", "toList",
+    "toSet", "where", "firstWhere", "fold", "any", "every", "join",
+    "add", "remove", "contains", "isEmpty", "isNotEmpty", "length",
+}
+
 def check(path, keys, symbols):
     problems, warnings = [], []
     src = read(path)
@@ -252,6 +320,7 @@ def check(path, keys, symbols):
     # was cut short by an apostrophe catches a whole class of syntax error that
     # the delimiter counts above cannot see.
     problems.extend(_apostrophes(src))
+    problems.extend(_wrong_receiver(src, _typed_members(src)))
 
     return problems, warnings
 

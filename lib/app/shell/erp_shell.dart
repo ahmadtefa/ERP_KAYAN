@@ -77,6 +77,11 @@ class _NavOpenSection {
 
   @override
   int get hashCode => open.hashCode;
+
+  /// Asked by the sidebar and the drawer, which receive this value rather than
+  /// the notifier. It lived on the notifier first, where nothing could call it:
+  /// the widgets hold the state, not the controller.
+  bool isOpen(_NavGroup group) => open == group;
 }
 
 class _CollapsedNav extends Notifier<_NavOpenSection> {
@@ -96,7 +101,6 @@ class _CollapsedNav extends Notifier<_NavOpenSection> {
     if (state.open != group) state = _NavOpenSection(group);
   }
 
-  bool isOpen(_NavGroup group) => state.open == group;
 }
 final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_CollapsedNav.new);
 
