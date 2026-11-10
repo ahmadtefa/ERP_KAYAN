@@ -102,8 +102,13 @@ test('complete removal is unreachable from the ordinary uninstall', () => {
 
 test('two confirmations, both explicit, before data is destroyed', () => {
   const fn = installer.slice(installer.indexOf('function RemoveEverything'), installer.indexOf('function InitializeUninstall'));
-  const confirmations = fn.match(/mbError, MB_YESNO|mbWarning, MB_YESNO/g) ?? [];
+  // Only constants Inno Setup actually defines count. The old pattern accepted
+  // `mbWarning`, which does not exist: it let the guard pass locally while the
+  // real compiler refused the file, so a build that looked reviewed could never
+  // produce a Setup. A confirmation that cannot compile confirms nothing.
+  const confirmations = fn.match(/(?:mbError|mbConfirmation|mbCriticalError), MB_YESNO/g) ?? [];
   assert.equal(confirmations.length, 2, 'complete removal needs two separate confirmations');
+  assert.doesNotMatch(fn, /mbWarning/, 'mbWarning is not an Inno Setup constant; it cannot compile');
   assert.match(fn, /This cannot be undone/);
 });
 

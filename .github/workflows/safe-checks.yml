@@ -47,6 +47,11 @@ jobs:
         run: node --test ../scripts/windows-build-only.test.mjs
       - name: Verify complete removal cannot delete what it does not own
         run: node --test ../scripts/remove-everything-safety.test.mjs
+      # A wrong Inno constant is a total build failure, and it cost a thirteen
+      # minute Windows build before anything local noticed. The compiler is the
+      # only real judge, but this catches the cheap spelling class it dislikes.
+      - name: Verify the installer [Code] only uses constants Inno defines
+        run: node ../scripts/inno-code-constants.test.cjs
       - name: Verify public-key transition inventory without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing

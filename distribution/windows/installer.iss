@@ -353,7 +353,7 @@ begin
     'Last confirmation.' + #13#10#13#10 +
     'Choose Yes only if you have a backup somewhere else, or you accept that ' +
     'every company record on this computer is lost for good.',
-    mbWarning, MB_YESNO) <> IDYES then begin
+    mbConfirmation, MB_YESNO) <> IDYES then begin
     MsgBox('Nothing was deleted. KAYAN ERP is still installed.', mbInformation, MB_OK);
     Exit;
   end;
