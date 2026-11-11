@@ -49,9 +49,16 @@ jobs:
           python -m pip install --disable-pip-version-check Pillow
           python scripts/generate_app_icons.py
 
+      # Pinned to the same Flutter as safe-checks.yml, code-integrity.yml and
+      # the Windows workflows. `channel: stable` floats: once stable moved to
+      # 3.48, `package:flutter/material.dart` became a deprecated member and
+      # `flutter analyze` reported ~190 infos and exited 1, so every step after
+      # Analyze was skipped. Pinning keeps this gate reproducible and equal to
+      # what the release workflows actually build with.
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
 
