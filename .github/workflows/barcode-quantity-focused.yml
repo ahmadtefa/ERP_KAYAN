@@ -1,0 +1,75 @@
+name: Barcode quantity focused check
+
+# Verifies the barcode/quantity fix in stock_vouchers_screen.dart.
+# This workflow exists because the development sandbox has no Dart or Flutter
+# SDK, so `flutter test` cannot run locally. It is deliberately narrow: the
+# two widget files that cover the change, plus `flutter analyze`. Nothing else
+# is built or deployed.
+#
+# It does not run on its own. The branch has no commit carrying this file yet
+# and pushing is not permitted, so it is exercised with workflow_dispatch once
+# the owner approves a push.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lib/features/inventory/presentation/screens/stock_vouchers_screen.dart'
+      - 'test/widget/stock_voucher_barcode_quantity_test.dart'
+      - 'test/widget/stock_voucher_flow_test.dart'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: barcode-quantity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    name: Barcode quantity and voucher flow widget tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # The app's pubspec pulls generated localizations and icons, which the
+      # build step of the main CI produces before `flutter test` can compile.
+      - name: Set up Python for branded icons
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate platform icons from 1.png
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python scripts/generate_app_icons.py
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # Same wrapper the main CI uses: it turns a failing test's own message
+      # into an annotation, because run logs are not always reachable.
+      # A bare `analyze` covers the whole package, which is what the main CI
+      # runs; narrowing it to three paths would hide a knock-on error in a
+      # file that imports the screen.
+      - name: Analyze
+        run: python scripts/ci-diagnose.py flutter analyze
+
+      - name: Run the barcode quantity widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_voucher_barcode_quantity_test.dart \
+            --reporter expanded
+
+      - name: Run the existing voucher flow widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_voucher_flow_test.dart \
+            --reporter expanded

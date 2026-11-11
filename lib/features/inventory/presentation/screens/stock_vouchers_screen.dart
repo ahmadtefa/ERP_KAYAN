@@ -799,9 +799,28 @@ class _StockVoucherCreateScreenState
       }
       final unit = text(payload, 'unit', fallback: text(item, 'unit'));
       if (!mounted) return;
+      // The quantity box always holds a number in the *selected* unit, never
+      // the base units the barcode endpoint reports. A carton label whose
+      // factor is 24 means one carton, so the box reads 1; the server
+      // multiplies by that factor when the document is created. Writing 24
+      // here would be multiplied a second time and store 576 pieces.
+      //
+      // A repeat scan of the unit already on the line adds one more of it, so
+      // scanning a carton twice gives 2 cartons. A scan that selects a
+      // different unit or item starts again at one - it is a new thing being
+      // scanned, not another copy of the old one.
+      final sameSelection = line.itemId == id && line.unitName == unit;
+      final previous = sameSelection
+          ? Decimal.tryParse(line.quantity.text.trim())
+          : null;
+      final current = previous != null && previous > Decimal.zero
+          ? previous
+          : Decimal.zero;
+      final next = current + Decimal.one;
       setState(() {
         line.itemId = id;
         line.unitName = unit;
+        line.quantity.text = _plainDecimal(next);
         line.barcode.clear();
         final updatedItems = [...items];
         final index = updatedItems.indexWhere((row) => text(row, 'id') == id);
@@ -994,6 +1013,63 @@ class _StockVoucherCreateScreenState
       line.dispose();
     }
     super.dispose();
+  }
+
+  /// The number a `Decimal` should be written back as: plain digits, with the
+  /// trailing zeros a parsed `1.000000` carries removed.
+  ///
+  /// `Decimal.toString()` keeps the scale it was built with, so writing it
+  /// straight into the quantity box would show `1.000000` as if the operator
+  /// had typed it.
+  static String _plainDecimal(Decimal value) {
+    final rounded = value.round(scale: 4);
+    var text = rounded.toString();
+    if (!text.contains('.')) return text;
+    text = text.replaceFirst(RegExp(r'0+$'), '');
+    return text.endsWith('.')
+        ? text.substring(0, text.length - 1)
+        : text;
+  }
+
+  /// The conversion factor of [unitName] on [item], or null when the item does
+  /// not describe that unit.
+  ///
+  /// This is only ever used to *show* an equivalent; it is never applied to the
+  /// quantity that is posted. The server owns the conversion.
+  static Decimal? _factorOfUnit(Json? item, String? unitName) {
+    if (item == null || unitName == null || unitName.isEmpty) return null;
+    final raw = item['units'];
+    if (raw is! List) return unitName == text(item, 'unit') ? Decimal.one : null;
+    for (final row in raw) {
+      if (row is! Map) continue;
+      if (text(row, 'unit') != unitName) continue;
+      final factor = Decimal.tryParse(text(row, 'factor').trim());
+      if (factor != null && factor > Decimal.zero) return factor;
+    }
+    // A legacy item without a units array behaves as its own base unit.
+    return unitName == text(item, 'unit') ? Decimal.one : null;
+  }
+
+  /// "1 carton = 24 pieces", or null when the line selects the base unit (there
+  /// the quantity already *is* the base quantity) or when the factor is
+  /// unknown.
+  ///
+  /// Shown, never used as the posted quantity.
+  String? _baseEquivalent(_VoucherLine line, Json? item) {
+    final quantity = Decimal.tryParse(line.quantity.text.trim());
+    final factor = _factorOfUnit(item, line.unitName);
+    if (quantity == null || quantity <= Decimal.zero) return null;
+    if (factor == null || factor == Decimal.one) return null;
+    // The factor arrives as `24.000000`; shown as it came, the equivalent would
+    // read "= 24.000000", which looks like a different number from the 24 the
+    // operator knows.
+    final base = _plainDecimal(quantity * factor);
+    // Both languages read the same way here: the unit names come from the
+    // catalogue and are not translated, so a translated frame would only
+    // half-translate the sentence.
+    final baseUnit = text(item!, 'unit', fallback: 'piece');
+    return '${line.quantity.text.trim()} ${line.unitName} = '
+        '$base $baseUnit';
   }
 
   void _changed() {
@@ -1568,6 +1644,30 @@ class _StockVoucherCreateScreenState
                                         validator: (v) =>
                                             _number(v, positive: true),
                                       ),
+                                      if (_baseEquivalent(line, item)
+                                          case final equivalent?)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                            left: 12,
+                                            right: 12,
+                                          ),
+                                          child: Align(
+                                            alignment: AlignmentDirectional
+                                                .centerStart,
+                                            child: Text(
+                                              equivalent,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
                                       if (widget.kind == 'RECEIPT')
                                         TextFormField(
                                           controller: line.cost,
