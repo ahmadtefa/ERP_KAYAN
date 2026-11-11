@@ -43,6 +43,14 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final e = tester.takeException();
-    expect(e, isNull, reason: 'DIAG<${e.runtimeType}|$e>');
+    if (e != null) {
+      // Matches ci-diagnose.py's FAILURE_MARKERS so the exception survives
+      // annotation truncation: "^The following .* was thrown".
+      // ignore: avoid_print
+      print('\nThe following diagnostic exception was thrown: $e');
+      // ignore: avoid_print
+      print('DIAG-TYPE: ${e.runtimeType}\n');
+    }
+    expect(e, isNull);
   });
 }
