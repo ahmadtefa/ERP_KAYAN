@@ -199,6 +199,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Picks an entry out of a dropdown that is already open.
+  ///
+  /// Tapping the item directly is not enough: the menu is taller than the
+  /// 460px dialog and scrolls inside itself, so the newest entry sits below
+  /// the visible area and the tap lands on whatever is painted there. An
+  /// `ensureVisible` inside the route's own scrollable brings it into view
+  /// first. Capping the wait means a broken menu surfaces as the test's own
+  /// assertion rather than as a bare pumpAndSettle timeout.
+  Future<void> tapMenuItem(WidgetTester tester, String label) async {
+    final item = find.text(label).last;
+    await tester.ensureVisible(item);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tap(item);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+  }
+
   group('the lot row', () {
     testWidgets('shows production date, expiry and the storage location', (
       tester,
@@ -229,9 +245,18 @@ void main() {
         ),
       );
 
-      // Three dashes: production, expiry and location. A fourth column would
-      // make this fail, so it also pins that nothing else disappeared.
-      expect(find.text('—'), findsNWidgets(3));
+      // Exactly three dashes in the cells: production, expiry and location.
+      // The Days column also renders a dash for this lot, so counting every
+      // dash on the screen would pin the table's column count rather than
+      // the three cells this test is about.
+      final dashes = tester.widgetList<Text>(find.text('—')).toList();
+      expect(dashes, hasLength(4));
+      expect(
+        dashes.where((widget) => widget.style?.fontSize != 10.5),
+        hasLength(3),
+        reason: 'production, expiry and location are body cells; the fourth '
+            'dash is the small caption in the Days column',
+      );
       expect(find.textContaining('null'), findsNothing);
     });
 
@@ -332,7 +357,7 @@ void main() {
         find.widgetWithText(TextFormField, 'Quantity'),
         '3',
       );
-      await tapText(tester, 'SEC • Second');
+      await tapMenuItem(tester, 'SEC • Second');
       await tapText(tester, 'Transfer');
 
       final (path, body) = api.posted.single;
@@ -352,7 +377,7 @@ void main() {
       await tapText(tester, 'Transfer');
       // Choosing the source again must not reach the server, which would
       // answer with a validation error the operator can do nothing about.
-      await tapText(tester, 'MAIN • Main store');
+      await tapMenuItem(tester, 'MAIN • Main store');
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Quantity'),
         '3',
@@ -405,7 +430,7 @@ void main() {
         find.widgetWithText(TextFormField, 'Expiry date (optional)'),
         '2027-02-01',
       );
-      await tapText(tester, 'A-01 • Aisle A shelf 1');
+      await tapMenuItem(tester, 'A-01 • Aisle A shelf 1');
       await tapText(tester, 'Receive');
 
       final (path, body) = api.posted.single;
