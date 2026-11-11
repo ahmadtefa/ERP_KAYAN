@@ -56,6 +56,10 @@ jobs:
       # it hangs until the job budget ends and reports nothing useful.
       - name: Verify the uninstall step waits with a deadline, not forever
         run: node --test ../scripts/smoke-uninstall-timeout.test.cjs
+      # Complete removal must be exercised against a real install and must
+      # check every component, never fabricate one.
+      - name: Verify the Complete Uninstall exercise cannot fake a pass
+        run: node --test ../scripts/complete-uninstall-exercise.test.cjs
       - name: Verify public-key transition inventory without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing

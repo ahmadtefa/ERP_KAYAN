@@ -537,6 +537,29 @@ jobs:
         run: |
           & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD\candidate\KAYAN-ERP-Setup.exe" -RuntimeOnly -ExpectedSourceCommit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed' }
+      # The ordinary uninstall is proved by the smoke above. Complete removal
+      # was never executed on a real machine: remove-everything.ps1 was only
+      # inspected. This runs it against the installation the smoke just made,
+      # checks every owned component before and after, plants neighbouring
+      # files it must not touch, and proves the refusals change nothing.
+      - name: Exercise Complete Uninstall against the real installation
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoLogo -NoProfile -File scripts/exercise-complete-uninstall.ps1 `
+            -SetupPath "$PWD\candidate\KAYAN-ERP-Setup.exe" `
+            -ReportPath "$PWD\candidate\complete-uninstall-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw "Complete uninstall exercise failed with exit code $LASTEXITCODE" }
+
+      - name: Upload complete uninstall evidence (not a release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complete-uninstall-evidence
+          path: candidate/complete-uninstall-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Record limitations and exact tested EXE hash
         shell: pwsh
         run: |
