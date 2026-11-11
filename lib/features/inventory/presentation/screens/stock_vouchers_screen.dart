@@ -1042,8 +1042,13 @@ class _StockVoucherCreateScreenState
     if (raw is! List) return unitName == text(item, 'unit') ? Decimal.one : null;
     for (final row in raw) {
       if (row is! Map) continue;
-      if (text(row, 'unit') != unitName) continue;
-      final factor = Decimal.tryParse(text(row, 'factor').trim());
+      // A list decoded from JSON is a List<dynamic>, so each entry is a
+      // Map<dynamic, dynamic>. `text` reads a Json (Map<String, dynamic>), so
+      // the entry is converted the way the rest of this file converts a decoded
+      // map rather than cast.
+      final unit = Map<String, dynamic>.from(row);
+      if (text(unit, 'unit') != unitName) continue;
+      final factor = Decimal.tryParse(text(unit, 'factor').trim());
       if (factor != null && factor > Decimal.zero) return factor;
     }
     // A legacy item without a units array behaves as its own base unit.
