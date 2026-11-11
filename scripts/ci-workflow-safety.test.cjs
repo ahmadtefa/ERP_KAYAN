@@ -28,6 +28,12 @@ const reviewed = [
   // safe-checks.yml so ordinary code CI can report a truthful result. This
   // workflow is the visible home of that gap and cannot pass on any event.
   'licence-store-gate.yml',
+  // Reviewed 2026-11-06: manual dispatch plus a push trigger narrowed to the
+  // inventory screens and their widget tests. contents:read, no secrets, no
+  // environment, no release or install step; it only runs `flutter analyze`
+  // and four `flutter test` files on a hosted runner. Flutter is pinned to
+  // 3.47.6, the version every other workflow here uses.
+  'barcode-quantity-focused.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
