@@ -12,6 +12,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { test } = require('node:test');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
@@ -78,3 +79,75 @@ assert.equal(/InitializeUninstall[\s\S]*remove-everything\.ps1/.test(codeSection
   'ordinary uninstall must never call remove-everything.ps1');
 
 console.log('PASS: installer [Code] uses only Inno-defined message-box constants, and removal stays behind its flag');
+
+// ── silent-run safety ────────────────────────────────────────────────────────
+// /SUPPRESSMSGBOXES answers SuppressibleMsgBox only. A plain MsgBox on a path an
+// unattended run takes waits for a click nobody gives. That is what stalled run
+// 42901077717: the offline smoke ran unins000.exe /VERYSILENT and the ordinary
+// uninstall dialog sat there until the 30 minute job budget ran out.
+// Pascal Script comments must not count as code: a comment mentioning MsgBox
+// would otherwise fail the silent-run check. Block { } and // comments are
+// removed, keeping string literals intact because they can contain neither.
+const stripComments = (text) => text
+  .replace(/\{[^}]*\}/g, ' ')
+  .replace(/\/\/[^\r\n]*/g, ' ');
+
+const routines = (source) => {
+  const out = new Map();
+  const body = source.slice(source.indexOf('[Code]'));
+  const re = /^(?:function|procedure)\s+(\w+)\s*\(([^)]*)\)\s*:\s*\w+;|^(?:function|procedure)\s+(\w+)\s*\(([^)]*)\);/gm;
+  const marks = [];
+  let m;
+  while ((m = re.exec(body)) !== null) marks.push({ name: m[1] ?? m[3], at: m.index, end: re.lastIndex });
+  for (let i = 0; i < marks.length; i++) {
+    const end = i + 1 < marks.length ? marks[i + 1].at : body.length;
+    out.set(marks[i].name, stripComments(body.slice(marks[i].end, end)));
+  }
+  return out;
+};
+
+test('no plain MsgBox can stall an unattended run', () => {
+  const bodies = routines(source);
+  // Every routine reachable while setup or uninstall runs without a person
+  // watching must use SuppressibleMsgBox. RemoveEverything is deliberately
+  // excluded: it only runs behind /REMOVEEVERYTHING, and a silent data wipe
+  // must stay impossible.
+  const reachable = ['InitializeUninstall', 'RemoveProgramKeepData', 'InitializeSetup', 'RefuseUpgrade', 'CurStepChanged'];
+  for (const name of reachable) {
+    const body = bodies.get(name);
+    if (body === undefined) continue;
+    const plain = body.match(/(?<![A-Za-z])MsgBox\s*\(/g) ?? [];
+    assert.equal(plain.length, 0,
+      `${name} must not call plain MsgBox: /SUPPRESSMSGBOXES cannot answer it and an unattended run would wait forever`);
+  }
+});
+
+test('the ordinary uninstall dialog is suppressible and keeps company data when suppressed', () => {
+  const bodies = routines(source);
+  const init = bodies.get('InitializeUninstall');
+  assert.ok(init, 'InitializeUninstall must exist');
+  assert.match(init, /SuppressibleMsgBox\(/, 'the uninstall confirmation must be suppressible');
+  // The suppressed answer must be IDYES (keep-data path), never a wipe.
+  const call = init.slice(init.indexOf('SuppressibleMsgBox('));
+  assert.match(call, /MB_YESNO,\s*IDYES\)/, 'a suppressed answer must take the keep-data branch');
+  assert.match(init, /RemoveProgramKeepData\(\)/, 'the keep-data path must remain the ordinary one');
+  // The destructive call may only sit behind the explicit flag, never on the
+  // default branch that a silent uninstall takes.
+  const flagAt = init.indexOf("CmdLineParamExists('/REMOVEEVERYTHING')");
+  const wipeAt = init.indexOf('RemoveEverything()');
+  assert.ok(wipeAt > flagAt, 'RemoveEverything must be reached only through /REMOVEEVERYTHING');
+  const defaultBranch = init.slice(init.indexOf('SuppressibleMsgBox'));
+  assert.doesNotMatch(defaultBranch, /RemoveEverything\(\)/,
+    'the silent/default branch must never reach the destructive path');
+});
+
+test('complete removal can never run unattended', () => {
+  const bodies = routines(source);
+  const wipe = bodies.get('RemoveEverything');
+  assert.ok(wipe, 'RemoveEverything must exist');
+  // Two plain MsgBox confirmations: they block only an interactive operator,
+  // and that is the point. A silent run must never reach this function at all.
+  const plainBoxes = wipe.match(/(?<![A-Za-z])MsgBox\s*\(/g) ?? [];
+  assert.ok(plainBoxes.length >= 2, 'complete removal must keep blocking confirmations');
+  assert.doesNotMatch(wipe, /SuppressibleMsgBox/, 'a silent run must never be able to confirm a wipe');
+});

@@ -137,6 +137,21 @@ end;
 { Test installers are deliberately non-installable: the runtime still uses
   customer paths and services, so a label or a clean-looking host is not
   sufficient isolation. Product upgrades must preserve the existing key. }
+{ Stops an upgrade without ever waiting for a click that will not come.
+  /SUPPRESSMSGBOXES does not answer a plain MsgBox; it only answers
+  SuppressibleMsgBox. An unattended install that hit a plain box here sat on an
+  invisible dialog until the job timed out, which is exactly what happened to
+  the offline smoke on run 42901077717. Silent runs now record the reason in the
+  log and leave; interactive runs still see the dialog. }
+procedure RefuseUpgrade(const Reason: String);
+begin
+  if WizardSilent then begin
+    Log('Upgrade refused without a dialog because setup is silent: ' + Reason);
+    Exit;
+  end;
+  SuppressibleMsgBox(Reason, mbError, MB_OK, IDOK);
+end;
+
 function InitializeSetup(): Boolean;
 #if KayanBuildKind == "product"
 var
@@ -144,7 +159,7 @@ var
 #endif
 begin
 #if KayanBuildKind != "product"
-  MsgBox('TEST/EVALUATION build: installation is disabled because its runtime is not isolated from customer paths.', mbError, MB_OK);
+  SuppressibleMsgBox('TEST/EVALUATION build: installation is disabled because its runtime is not isolated from customer paths.', mbError, MB_OK, IDOK);
   Result := False;
 #else
   Result := False;
@@ -159,11 +174,11 @@ begin
     IncomingHash := GetSHA256OfFile(IncomingKey);
     { Empty hashes must never compare equal and authorize an upgrade. }
     if (Length(ExistingHash) <> 64) or (Length(IncomingHash) <> 64) or (CompareText(ExistingHash, IncomingHash) <> 0) then begin
-      MsgBox('The installed licence verification key is unreadable or differs from this installer. Upgrade stopped before changing application or licence files; a tested transition is required.', mbError, MB_OK);
+      RefuseUpgrade('The installed licence verification key is unreadable or differs from this installer. Upgrade stopped before changing application or licence files; a tested transition is required.');
       exit;
     end;
   end else if DirExists(ExistingDir) or FileExists(Marker) or FileExists(StateFile) then begin
-    MsgBox('Existing licence state has no protected public key. Upgrade stopped; repair and a tested transition are required.', mbError, MB_OK);
+    RefuseUpgrade('Existing licence state has no protected public key. Upgrade stopped; repair and a tested transition are required.');
     exit;
   end;
   Result := True;
@@ -318,7 +333,11 @@ begin
   if FileExists(ExpandConstant('{app}\remove-runtime.ps1')) then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-runtime.ps1') + '"';
     if (not RunPowerShell(Args, ResultCode)) or (ResultCode <> 0) then begin
-      MsgBox('KAYAN could not safely stop and unregister its PostgreSQL service. The program and company data were left in place.', mbError, MB_OK);
+      { A plain MsgBox here stalls an unattended uninstall forever, because
+        /SUPPRESSMSGBOXES does not answer it. The failure is real and must stop
+        the uninstall either way; only the delivering of the news adapts. }
+      Log('Removing the KAYAN PostgreSQL service failed with exit code ' + IntToStr(ResultCode) + '.');
+      SuppressibleMsgBox('KAYAN could not safely stop and unregister its PostgreSQL service. The program and company data were left in place.', mbError, MB_OK, IDOK);
       Result := False;
     end;
   end;
@@ -385,12 +404,17 @@ begin
     Exit;
   end;
 
-  Choice := MsgBox(
+  { SuppressibleMsgBox, not MsgBox: /SUPPRESSMSGBOXES answers only the former.
+    An unattended uninstall used to stop here on an invisible dialog and never
+    finish, which is why the offline smoke timed out on run 42901077717. The
+    suppressed answer is IDYES, the same as the default button, and it takes the
+    keep-data branch: a silent uninstall still never deletes company data. }
+  Choice := SuppressibleMsgBox(
     'Remove KAYAN ERP from this computer?' + #13#10#13#10 +
     'Yes  - Remove the program only. Your company data, database, attachments and backups are kept.' + #13#10 +
     'No   - Cancel and change nothing.' + #13#10#13#10 +
     'To also delete all company data permanently, use "Remove everything (delete all data)" from the Start menu.',
-    mbConfirmation, MB_YESNO);
+    mbConfirmation, MB_YESNO, IDYES);
   if Choice = IDNO then begin
     Result := False;
     Exit;

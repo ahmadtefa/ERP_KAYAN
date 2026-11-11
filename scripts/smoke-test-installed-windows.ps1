@@ -1079,10 +1079,43 @@ if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
 Write-Host "PASS: the install registered its own uninstaller at $uninstaller."
 
 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-$uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
-if ($uninstall.ExitCode -ne 0) {
-  Fail "The uninstaller exited with code $($uninstall.ExitCode)."
+# A bounded wait, never an open one. `-Wait` with no timeout means a stuck
+# uninstaller silently eats the whole job budget and the run reports only
+# "timed out", which says nothing about why. /SUPPRESSMSGBOXES does not answer a
+# plain MsgBox, so a stray dialog in the installer can hold the process open
+# forever; that is a real failure and must be reported as one, with evidence.
+$uninstallTimeoutSeconds = 300
+$uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru
+$uninstallExited = $uninstall.WaitForExit($uninstallTimeoutSeconds * 1000)
+$uninstallExitCode = if ($uninstallExited) { $uninstall.ExitCode } else { $null }
+# Read everything before killing anything: once the process is gone the state it
+# was in is no longer observable, and a pass or fail must rest on facts.
+$uninstallEvidence = @(
+  "  uninstaller:       $uninstaller",
+  "  exited:            $uninstallExited",
+  "  exit code:         $(if ($null -ne $uninstallExitCode) { $uninstallExitCode } else { '<still running>' })",
+  "  waited:            ${uninstallTimeoutSeconds}s",
+  "  process alive:     $(-not $uninstall.HasExited)",
+  "  program file:      $(Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe'))",
+  "  install folder:    $(Test-Path -LiteralPath $installRoot)",
+  "  service:           $(if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { (Get-Service -Name $serviceName).Status } else { '<absent>' })",
+  "  service registered:$(if (Get-CimInstance Win32_Service -Filter \"Name='$serviceName'\" -ErrorAction SilentlyContinue) { 'yes' } else { 'no' })",
+  "  uninstall key:     $(if (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.InstallLocation -eq $installRoot }) { 'present' } else { 'absent' })"
+)
+$dialogChild = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+  $_.ProcessName -in @('unins000', 'unins001') -and $_.MainWindowHandle -ne 0
+})
+if ($dialogChild.Count -gt 0) {
+  $uninstallEvidence += "  dialog window:     $($dialogChild.Count) uninstaller window(s) waiting for a click"
 }
+if (-not $uninstallExited) {
+  Write-Output ('::error title=Uninstaller did not finish::The uninstaller was still running after ' + $uninstallTimeoutSeconds + ' seconds, so the run reports a failure rather than an unexplained timeout.')
+  Fail("The uninstaller did not exit within ${uninstallTimeoutSeconds}s." + [Environment]::NewLine + ($uninstallEvidence -join [Environment]::NewLine))
+}
+if ($uninstallExitCode -ne 0) {
+  Fail("The uninstaller exited with code $uninstallExitCode." + [Environment]::NewLine + ($uninstallEvidence -join [Environment]::NewLine))
+}
+Write-Host 'PASS: the uninstaller finished on its own, within the timeout, with exit code 0.'
 # Inno may hand the actual removal to a detached copy of itself; give it room
 # without ever claiming a pass that did not happen.
 for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -1090,7 +1123,7 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
   Start-Sleep -Seconds 1
 }
 if (Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe')) {
-  Fail 'The uninstaller reported success but the program file is still on disk.'
+  Fail('The uninstaller reported success but the program file is still on disk.' + [Environment]::NewLine + ($uninstallEvidence -join [Environment]::NewLine))
 }
 Write-Host 'PASS: uninstall removed the installed program files.'
 
