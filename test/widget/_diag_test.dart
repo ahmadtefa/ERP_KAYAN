@@ -22,6 +22,7 @@ void main() {
   testWidgets('diagnose shell build', (tester) async {
     final container = ProviderContainer(overrides: [
       apiClientProvider.overrideWithValue(_Api()),
+      tokenStoreProvider.overrideWithValue(FakeTokenStore()),
       currentUserProvider.overrideWithValue(const AppUser(
         id: 'u', username: 'u', fullName: 'u', companyId: 'c',
         permissions: ['inventory.warehouses.read'],
@@ -42,7 +43,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final e = tester.takeException();
-    // Force the exception text into the test name, which is what CI annotates.
-    expect('DIAG:${e ?? 'none'}', 'DIAG:none');
+    // Force the exception into the failure line CI does show.
+    if (e != null) fail('DIAG-EXCEPTION: $e');
+
   });
 }
