@@ -7,6 +7,7 @@ import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'test_harness.dart';
 
@@ -31,14 +32,19 @@ void main() {
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
+      child: MaterialApp.router(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        home: ErpShell(
-          currentPath: '/inventory/warehouses',
-          guardKey: const ValueKey('k1'),
-          child: const Scaffold(body: Text('inner')),
-        ),
+        routerConfig: GoRouter(routes: [
+          GoRoute(
+            path: '/inventory/warehouses',
+            builder: (_, state) => ErpShell(
+              currentPath: '/inventory/warehouses',
+              guardKey: state.pageKey,
+              child: const Scaffold(body: Text('inner')),
+            ),
+          ),
+        ]),
       ),
     ));
     await tester.pumpAndSettle();
