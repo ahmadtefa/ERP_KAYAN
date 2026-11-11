@@ -60,6 +60,12 @@ jobs:
       # check every component, never fabricate one.
       - name: Verify the Complete Uninstall exercise cannot fake a pass
         run: node --test ../scripts/complete-uninstall-exercise.test.cjs
+      # Nine inventory routes asked the exit guard for permission to leave
+      # while nothing had registered a guard for them, and the guard answers
+      # "no" by default. To the operator the menu simply stopped responding.
+      # The shell now holds a permissive floor for such routes.
+      - name: Verify no guarded route is left unregistered
+        run: node ../scripts/navigation-guard.test.cjs
       - name: Verify public-key transition inventory without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing

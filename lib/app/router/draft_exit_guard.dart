@@ -11,6 +11,22 @@ class DraftExitGuard {
   }
   // A missing registration is not evidence that a draft is clean.
   Future<bool> canLeave(ValueKey<String> key) => _guards[key]?.call() ?? Future.value(false);
+
+  /// Whether any guard is registered for this key.
+  ///
+  /// Needed to tell "nobody claimed this page" from "a screen claimed it and
+  /// then let go". Those two are not the same: the first is what the shell must
+  /// cover, the second must not be overwritten while the screen is still shown.
+  bool has(ValueKey<String> key) => _guards.containsKey(key);
+
+  /// How many guards are currently registered.
+  ///
+  /// Guards are keyed by page key, and go_router issues a new key per page. A
+  /// widget that registers for a key it does not later release leaves an entry
+  /// behind for every visit, so the map grows for the whole session. The count
+  /// is exposed so a test can see that growth instead of asserting it cannot
+  /// happen.
+  int get registeredCount => _guards.length;
 }
 final draftExitGuardProvider = Provider<DraftExitGuard>((ref) => DraftExitGuard());
 

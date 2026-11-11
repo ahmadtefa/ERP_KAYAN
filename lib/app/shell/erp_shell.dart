@@ -147,18 +147,99 @@ class _ErpShellState extends ConsumerState<ErpShell> {
   final ScrollController _navScrollController = ScrollController();
   final GlobalKey _selectedNavKey = GlobalKey();
 
+  /// Answers "may I leave this guard?" on behalf of screens that hold no
+  /// page-level draft.
+  ///
+  /// `DraftExitGuard.canLeave` answers false for a key nobody registered, which
+  /// is the right default: a missing registration is not evidence that a draft
+  /// is clean. But nine inventory screens are listed in `_guardedShellPaths`
+  /// and never register, so their answer was always "no" and go_router refused
+  /// to leave the route. Nothing was thrown and nothing was drawn - the menu
+  /// simply did not respond, which is the freeze the operator reported.
+  ///
+  /// The shell sits above every screen and already knows the route's
+  /// [ErpShell.guardKey], so it can hold the floor: register a guard that
+  /// permits leaving unless the screen itself registered a stricter one. The
+  /// screens that do own drafts keep their own guard, because `register` for
+  /// the same key replaces this one. Replacing is not stacking, so when such a
+  /// screen later removes its guard the floor is *not* restored - [build] has
+  /// to claim it again, or the restrictive default returns while the shell is
+  /// still on screen.
+  late Future<bool> Function() _permissiveExit;
+
+  /// Captured in initState: `ref` may no longer be usable while this state is
+  /// being disposed, and leaving a key registered is worse than a lookup.
+  late DraftExitGuard _guard;
+
+  /// The exact key this shell registered, so it can only ever release its own.
+  ValueKey<String>? _heldKey;
+
+  bool _floorCheckScheduled = false;
+
   @override
   void initState() {
     super.initState();
+    _permissiveExit = () async => true;
+    _guard = ref.read(draftExitGuardProvider);
+    _claimGuardFloor();
     _openSectionOfCurrentRoute();
+  }
+
+  /// Registers the permissive guard for the route's key. A parent's
+  /// `initState` runs before its child's, so this floor is claimed first and a
+  /// screen that owns a draft registers afterwards for the same key, replacing
+  /// it - a real draft guard always outranks this one.
+  void _claimGuardFloor() {
+    final key = widget.guardKey;
+    // Ask the map, not `_heldKey`: a screen may have replaced the floor since it
+    // was last claimed, and `_heldKey` would then be stale while the map holds
+    // somebody else's callback. Registering over that would disarm a real draft
+    // guard, so the map is the only safe question.
+    if (key == null || _guard.has(key)) return;
+    _guard.register(key, _permissiveExit);
+    _heldKey = key;
   }
 
   @override
   void didUpdateWidget(covariant ErpShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.guardKey != widget.guardKey) {
+      // Release the key we actually hold. `widget` is already the new widget
+      // here, so reading `widget.guardKey` would leave the old key registered
+      // and open for the rest of the session.
+      _releaseGuardFloor();
+      _claimGuardFloor();
+    }
     if (oldWidget.currentPath != widget.currentPath) {
       _openSectionOfCurrentRoute();
     }
+  }
+
+  void _releaseGuardFloor() {
+    final key = _heldKey;
+    if (key == null) return;
+    _guard.unregister(key, _permissiveExit);
+    _heldKey = null;
+  }
+
+  /// Re-establishes the floor if the key is free.
+  ///
+  /// A draft screen replaces the floor with its own guard and removes it again
+  /// when it closes. The map holds one callback per key, so that removal does
+  /// not restore the floor - the key would simply be gone, and the restrictive
+  /// default would take over while the shell is still on screen. That is the
+  /// original freeze, arriving late. Called from `build`, which runs whenever a
+  /// child removes its guard, so the floor is re-claimed exactly when needed.
+  void _scheduleGuardFloor() {
+    if (widget.guardKey == null || _floorCheckScheduled) return;
+    _floorCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _floorCheckScheduled = false;
+      if (!mounted) return;
+      final key = widget.guardKey;
+      if (key == null) return;
+      if (!_guard.has(key)) _claimGuardFloor();
+    });
   }
 
   /// The section that owns the current screen must be the open one. The menu
@@ -200,6 +281,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
 
   @override
   void dispose() {
+    _releaseGuardFloor();
     _navScrollController.dispose();
     super.dispose();
   }
@@ -213,6 +295,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final collapsed = ref.watch(_collapsedNavProvider);
     void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
     final selectedIndex = _selectedIndex(items);
+
+    // A draft screen that closes removes its guard, and the map keeps one
+    // callback per key, so the floor does not come back on its own. Re-claim it
+    // after this frame if the key is free, otherwise the restrictive default
+    // would take over while this shell is still on screen - the original freeze
+    // arriving late.
+    _scheduleGuardFloor();
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
