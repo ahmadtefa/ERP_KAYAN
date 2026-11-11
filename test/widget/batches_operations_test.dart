@@ -199,16 +199,36 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Picks an entry out of a dropdown that is already open.
+  /// Taps a form field by its label to open its dropdown.
   ///
-  /// Tapping the item directly is not enough: the menu is taller than the
-  /// 460px dialog and scrolls inside itself, so the newest entry sits below
-  /// the visible area and the tap lands on whatever is painted there. An
-  /// `ensureVisible` inside the route's own scrollable brings it into view
-  /// first. Capping the wait means a broken menu surfaces as the test's own
-  /// assertion rather than as a bare pumpAndSettle timeout.
-  Future<void> tapMenuItem(WidgetTester tester, String label) async {
-    final item = find.text(label).last;
+  /// The label is rendered inside the field's `InputDecorator`, so scoping the
+  /// finder to the dialog keeps it away from the table header or any other
+  /// text with the same word.
+  Future<void> tapField(WidgetTester tester, String label) async {
+    final finder = find
+        .descendant(of: find.byType(AlertDialog), matching: find.text(label))
+        .first;
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+  }
+
+  /// Picks an entry out of a dialog dropdown.
+  ///
+  /// A closed `DropdownButtonFormField` builds only the selected item, so the
+  /// entry to pick is not in the tree at all until the menu is opened. The
+  /// menu is also taller than the 460px dialog and scrolls inside itself, so
+  /// the wanted row can sit below the visible area: it is scrolled into view
+  /// before the tap. Capping the settle means a broken menu surfaces as the
+  /// test's own assertion rather than as a bare pumpAndSettle timeout.
+  Future<void> pickDropdownItem(
+    WidgetTester tester,
+    String fieldLabel,
+    String itemLabel,
+  ) async {
+    await tapField(tester, fieldLabel);
+    final item = find.text(itemLabel).last;
     await tester.ensureVisible(item);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     await tester.tap(item);
@@ -357,7 +377,7 @@ void main() {
         find.widgetWithText(TextFormField, 'Quantity'),
         '3',
       );
-      await tapMenuItem(tester, 'SEC • Second');
+      await pickDropdownItem(tester, 'To warehouse', 'SEC • Second');
       await tapText(tester, 'Transfer');
 
       final (path, body) = api.posted.single;
@@ -377,7 +397,7 @@ void main() {
       await tapText(tester, 'Transfer');
       // Choosing the source again must not reach the server, which would
       // answer with a validation error the operator can do nothing about.
-      await tapMenuItem(tester, 'MAIN • Main store');
+      await pickDropdownItem(tester, 'From warehouse', 'MAIN • Main store');
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Quantity'),
         '3',
@@ -430,7 +450,11 @@ void main() {
         find.widgetWithText(TextFormField, 'Expiry date (optional)'),
         '2027-02-01',
       );
-      await tapMenuItem(tester, 'A-01 • Aisle A shelf 1');
+      await pickDropdownItem(
+        tester,
+        'Storage location (optional)',
+        'A-01 • Aisle A shelf 1',
+      );
       await tapText(tester, 'Receive');
 
       final (path, body) = api.posted.single;
