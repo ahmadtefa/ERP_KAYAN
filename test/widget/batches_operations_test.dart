@@ -199,18 +199,26 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Taps a form field by its label to open its dropdown.
+  /// Opens a dialog dropdown by the label of the field it belongs to.
   ///
-  /// The label is rendered inside the field's `InputDecorator`, so scoping the
-  /// finder to the dialog keeps it away from the table header or any other
-  /// text with the same word.
+  /// Tapping the label text does not work: the label is a `Text` painted by
+  /// the `InputDecorator` and the hit test at its centre lands on the
+  /// decoration itself, which has no gesture recogniser, so the menu never
+  /// opens. The field's `InputDecorator` is the box the operator actually
+  /// presses, so the tap goes there.
   Future<void> tapField(WidgetTester tester, String label) async {
-    final finder = find
-        .descendant(of: find.byType(AlertDialog), matching: find.text(label))
+    final field = find
+        .ancestor(
+          of: find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.text(label),
+          ),
+          matching: find.byType(InputDecorator),
+        )
         .first;
-    await tester.ensureVisible(finder);
+    await tester.ensureVisible(field);
     await tester.pumpAndSettle();
-    await tester.tap(finder);
+    await tester.tap(field);
     await tester.pumpAndSettle();
   }
 
@@ -233,6 +241,17 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     await tester.tap(item);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    // A missed tap leaves the field on its previous value, and a later
+    // assertion about what was posted would then pass for the wrong reason.
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(itemLabel),
+      ),
+      findsOneWidget,
+      reason: 'the dropdown did not take the selection',
+    );
   }
 
   group('the lot row', () {
@@ -465,14 +484,26 @@ void main() {
       expect(body['expiryDate'], '2027-02-01');
       expect(body['storageLocationId'], 'loc-1');
       expect(body['itemId'], 'item-1');
-      // The shelf list was narrowed to the warehouse receiving the goods: a
-      // shelf from elsewhere would be refused by the server.
-      expect(api.shelfQueries, isNotEmpty);
+      // Every shelf lookup was narrowed to the warehouse receiving the goods.
+      // The dialog also prefetches the full list for the lots that already
+      // name a shelf, and that call carries no warehouse, so requiring every
+      // query to be scoped would fail on a correct dialog. What matters is
+      // that a scoped lookup happened and that no lookup asked for another
+      // warehouse's shelves.
+      final shelfWarehouses = api.shelfQueries
+          .map((query) => query?['warehouseId'])
+          .toList();
       expect(
-        api.shelfQueries.every((query) => query?['warehouseId'] == 'wh-1'),
-        isTrue,
-        reason: 'offering another warehouse shelf would let the operator pick '
-            'one the server rejects',
+        shelfWarehouses,
+        contains('wh-1'),
+        reason: 'the dialog never asked the server for this warehouse\'s '
+            'shelves, so the list could only have come from the prefetch',
+      );
+      expect(
+        shelfWarehouses.whereType<String>().toSet(),
+        {'wh-1'},
+        reason: 'offering another warehouse\'s shelf would let the operator '
+            'pick one the server rejects',
       );
     });
 
