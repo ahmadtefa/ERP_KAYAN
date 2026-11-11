@@ -43,8 +43,6 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final e = tester.takeException();
-    // Force the exception into the failure line CI does show.
-    if (e != null) fail('DIAG-EXCEPTION: $e');
-
+    expect(e, isNull, reason: 'DIAG<${e.runtimeType}|$e>');
   });
 }
