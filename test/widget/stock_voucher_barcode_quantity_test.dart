@@ -141,8 +141,15 @@ void main() {
     await tester.pumpAndSettle();
     // A rejected barcode answers with a modal that never dismisses itself; it
     // would swallow every later tap instead of letting the test continue.
-    if (find.text('OK').evaluate().isNotEmpty) {
-      await tester.tap(find.text('OK'));
+    //
+    // The button reads "حسنًا", not "OK", even though this test declares an
+    // English locale: app_error_dialog.dart builds its text from
+    // AppLocalizationsAr() directly rather than from the ambient localizations.
+    // That is the dialog's own decision and not something to change here, so
+    // the test dismisses the button it actually renders.
+    final dismiss = find.text('حسنًا');
+    if (dismiss.evaluate().isNotEmpty) {
+      await tester.tap(dismiss);
       await tester.pumpAndSettle();
     }
   }
