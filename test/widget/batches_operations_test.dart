@@ -177,9 +177,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Opens a dialog from one of the row buttons and waits for it to settle.
+  /// Taps a button by its label, preferring the open dialog over the row
+  /// behind it, then waits for the result to settle.
+  ///
+  /// The row action and the dialog's own submit button carry the same word
+  /// ("Issue", "Transfer", "Write off"…). A plain `find.text(label).first`
+  /// therefore resolves to the row button once the dialog is up, and that
+  /// button sits under the modal barrier: the tap is swallowed at an
+  /// off-screen offset, `_submit` never runs and nothing is posted. Scoping
+  /// the finder to the open `AlertDialog` makes the second tap hit what the
+  /// operator actually presses.
   Future<void> tapText(WidgetTester tester, String label) async {
-    final finder = find.text(label);
+    final inDialog = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.text(label),
+    );
+    final finder = inDialog.evaluate().isEmpty ? find.text(label) : inDialog;
     await tester.ensureVisible(finder.first);
     await tester.pumpAndSettle();
     await tester.tap(finder.first);
