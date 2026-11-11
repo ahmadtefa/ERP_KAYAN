@@ -43,7 +43,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final e = tester.takeException();
-    // ignore: avoid_print
-    print('DIAG-EXCEPTION>>> ${e ?? 'none'}');
+    // Force the exception text into the test name, which is what CI annotates.
+    expect('DIAG:${e ?? 'none'}', 'DIAG:none');
   });
 }
