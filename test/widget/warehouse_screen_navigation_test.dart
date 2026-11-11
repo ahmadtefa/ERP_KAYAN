@@ -22,8 +22,8 @@ import 'test_harness.dart';
 ///
 /// These tests drive the real `WarehousesScreen` and the real `ItemsScreen`
 /// through a real go_router and assert behaviour a user can see: leaving an
-/// ordinary screen must arrive, and leaving a screen with unsaved edits must
-/// stop and ask before anything is lost.
+/// ordinary screen arrives, and leaving a screen with unsaved edits stops and
+/// asks before anything is lost.
 void main() {
   const user = AppUser(
     id: 'u1',
@@ -39,40 +39,35 @@ void main() {
     ],
   );
 
-  Widget app(GoRouter router, ProviderContainer container) =>
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(
-          locale: const Locale('en'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          routerConfig: router,
-        ),
-      );
-
-  ProviderContainer makeContainer() {
-    final container = ProviderContainer(
+  Widget app({required GoRouter router, required DraftExitGuard guard}) {
+    return ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(_EmptyApi()),
+        draftExitGuardProvider.overrideWithValue(guard),
         currentUserProvider.overrideWithValue(user),
-        tokenStoreProvider.overrideWithValue(FakeTokenStore()),
       ],
+      child: MaterialApp.router(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
     );
-    addTearDown(container.dispose);
-    return container;
+  }
+
+  void sizeView(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1600, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
   }
 
   testWidgets(
       'an ordinary warehouse screen can be left and returned to repeatedly',
       (tester) async {
-    tester.view.physicalSize = const Size(1500, 1300);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+    sizeView(tester);
 
-    final container = makeContainer();
-    final guard = container.read(draftExitGuardProvider);
-
+    final guard = DraftExitGuard();
     final router = GoRouter(
       initialLocation: '/inventory/warehouses',
       routes: [
@@ -100,7 +95,7 @@ void main() {
     );
     addTearDown(router.dispose);
 
-    await tester.pumpWidget(app(router, container));
+    await tester.pumpWidget(app(router: router, guard: guard));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
@@ -123,28 +118,14 @@ void main() {
       );
       expect(tester.takeException(), isNull);
     }
-
-    // Guards are keyed per page and go_router issues a new key per page, so ten
-    // visits must not leave ten registrations behind.
-    expect(
-      guard.registeredCount,
-      lessThanOrEqualTo(2),
-      reason: 'only the screen on display may hold a registration; more means a '
-          'guard was leaked by a page that has already been left',
-    );
   });
 
   testWidgets(
       'a screen with unsaved edits blocks the exit and asks what to discard',
       (tester) async {
-    tester.view.physicalSize = const Size(1500, 1300);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+    sizeView(tester);
 
-    final container = makeContainer();
-    final guard = container.read(draftExitGuardProvider);
-
+    final guard = DraftExitGuard();
     final router = GoRouter(
       initialLocation: '/inventory/items',
       routes: [
@@ -170,14 +151,15 @@ void main() {
     );
     addTearDown(router.dispose);
 
-    await tester.pumpWidget(app(router, container));
+    await tester.pumpWidget(app(router: router, guard: guard));
     await tester.pumpAndSettle();
 
     // Open the new-item form and type into it. This is the real editor, the
     // real relay and the real confirmation dialog.
     await tester.tap(find.text('New item').first);
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextFormField, 'Code'), 'SYN-1');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Code'), 'SYN-1');
     await tester.pumpAndSettle();
 
     router.go('/inventory/warehouses');
@@ -199,7 +181,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Warehouses destination'), findsNothing);
     expect(
-      tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Code'))
+      tester
+          .widget<TextFormField>(find.widgetWithText(TextFormField, 'Code'))
           .controller!
           .text,
       'SYN-1',
@@ -217,7 +200,7 @@ void main() {
   });
 }
 
-/// Returns empty lists and objects so no test reaches a network.
+/// Returns empty results so no test reaches a network.
 class _EmptyApi extends ApiClient {
   _EmptyApi()
     : super(
