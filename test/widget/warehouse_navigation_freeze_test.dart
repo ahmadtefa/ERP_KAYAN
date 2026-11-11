@@ -51,11 +51,11 @@ void main() {
         GoRoute(
           path: '/inventory/warehouses',
           onExit: (_, state) => guard.canLeave(state.pageKey),
-          builder: (_, __) => const Scaffold(body: Text('Warehouses screen')),
+          builder: (_, _) => const Scaffold(body: Text('Warehouses screen')),
         ),
         GoRoute(
           path: '/inventory/batches',
-          builder: (_, __) => const Scaffold(body: Text('Batches destination')),
+          builder: (_, _) => const Scaffold(body: Text('Batches destination')),
         ),
       ],
     );
@@ -123,7 +123,7 @@ void main() {
         ),
         GoRoute(
           path: '/inventory/batches',
-          builder: (_, __) => const Scaffold(body: Text('Batches destination')),
+          builder: (_, _) => const Scaffold(body: Text('Batches destination')),
         ),
       ],
     );
@@ -179,7 +179,7 @@ void main() {
         ),
         GoRoute(
           path: '/inventory/batches',
-          builder: (_, __) => const Scaffold(body: Text('Batches destination')),
+          builder: (_, _) => const Scaffold(body: Text('Batches destination')),
         ),
       ],
     );
