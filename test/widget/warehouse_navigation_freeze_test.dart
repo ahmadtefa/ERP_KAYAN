@@ -1,4 +1,7 @@
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
+import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -23,11 +26,50 @@ import 'test_harness.dart';
 /// the *runtime* behaviour rather than the source, because the defect is a
 /// silent cancellation: nothing throws, so only an attempted navigation that
 /// should have arrived can witness it.
+const _user = AppUser(
+  id: 'u1',
+  username: 'operator',
+  fullName: 'Operator',
+  companyId: 'c1',
+  branchId: 'b1',
+  permissions: [
+    'inventory.warehouses.read',
+    'inventory.items.read',
+    'inventory.items.manage',
+  ],
+);
+
+/// Returns empty results so no test reaches a network.
+class _EmptyApi extends ApiClient {
+  _EmptyApi()
+    : super(
+        AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+        FakeTokenStore(),
+      );
+
+  @override
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => const [];
+
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => const {};
+}
+
 void main() {
+  /// ErpShell reads currentUserProvider, which watches authControllerProvider -
+  /// a real AsyncNotifier that would try to restore a session from storage and
+  /// then from the network. Overriding the selector directly is what the
+  /// existing shell tests do, and it keeps this test about navigation rather
+  /// than about sign-in.
   ProviderContainer shellOnly() => ProviderContainer(
     overrides: [
-      tokenStoreProvider.overrideWithValue(FakeTokenStore()),
-      authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
+      apiClientProvider.overrideWithValue(_EmptyApi()),
+      currentUserProvider.overrideWithValue(_user),
     ],
   );
 
