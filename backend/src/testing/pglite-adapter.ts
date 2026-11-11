@@ -487,6 +487,15 @@ export function pglitePrisma(db: PgliteLike) {
         const rows = await (client.itemBatch as any).findMany({ ...args, take: 1 });
         return rows[0] ?? null;
       },
+      // `list()` pages with a count over the same filter. Without it the page
+      // total is unknown to the caller, not zero, so it must be answered
+      // rather than left to fail as a missing method.
+      count: async (args: Row = {}) => {
+        const params: unknown[] = [];
+        const where = whereToSql('item_batches', args.where as Row, params);
+        const rows = await q(`SELECT count(*)::int AS n FROM "item_batches"${where}`, params);
+        return Number(rows[0]?.n ?? 0);
+      },
       updateMany: async (args: Row) => {
         const params: unknown[] = [];
         const where = whereToSql('item_batches', args.where as Row, params);
@@ -569,6 +578,20 @@ export function pglitePrisma(db: PgliteLike) {
           params,
         );
         return rows[0] ?? {};
+      },
+    },
+
+    // A lot points at its shelf by id alone - the schema has no relation - so
+    // `list()` resolves the ids in one query. That query needs this model.
+    storageLocation: {
+      findMany: async (args: Row = {}) => {
+        const params: unknown[] = [];
+        const where = whereToSql('storage_locations', args.where as Row, params);
+        return q(`SELECT * FROM "storage_locations"${where}`, params);
+      },
+      findFirst: async (args: Row = {}) => {
+        const rows = await (client.storageLocation as any).findMany({ ...args, take: 1 });
+        return rows[0] ?? null;
       },
     },
 

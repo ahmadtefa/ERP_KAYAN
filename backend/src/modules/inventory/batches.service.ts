@@ -216,10 +216,30 @@ export class BatchesService {
       this.prisma.itemBatch.count({ where }),
     ]);
 
+    // A lot stores only the id of the shelf it sits on: the schema keeps
+    // `storageLocationId` as a plain column, without a relation, so Prisma
+    // cannot join it. One query for every distinct id on the page keeps this
+    // to two round trips rather than one per row.
+    const locationIds = [
+      ...new Set(rows.map((row) => row.storageLocationId).filter((id): id is string => !!id)),
+    ];
+    const locations = locationIds.length
+      ? await this.prisma.storageLocation.findMany({
+          where: { id: { in: locationIds }, companyId },
+          select: { id: true, code: true, nameEn: true, nameAr: true, kind: true },
+        })
+      : [];
+    const byId = new Map(locations.map((location) => [location.id, location]));
+
     const today = new Date();
     return {
       items: rows.map((row) => ({
         ...row,
+        // The same field name the receive and issue calls accept, so a form
+        // that reads a lot back can send the shelf unchanged.
+        storageLocation: row.storageLocationId
+          ? (byId.get(row.storageLocationId) ?? null)
+          : null,
         receivedQuantity: row.receivedQuantity.toFixed(MONEY_SCALE),
         remainingQuantity: row.remainingQuantity.toFixed(MONEY_SCALE),
         unitCost: row.unitCost.toFixed(MONEY_SCALE),

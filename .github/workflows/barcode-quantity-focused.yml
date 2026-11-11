@@ -1,10 +1,10 @@
-name: Barcode quantity focused check
+name: Inventory focused checks
 
-# Verifies the barcode/quantity fix in stock_vouchers_screen.dart.
+# Verifies the barcode/quantity fix and the batch operations screens.
 # This workflow exists because the development sandbox has no Dart or Flutter
 # SDK, so `flutter test` cannot run locally. It is deliberately narrow: the
-# two widget files that cover the change, plus `flutter analyze`. Nothing else
-# is built or deployed.
+# widget files that cover the changed screens, plus `flutter analyze`. Nothing
+# else is built or deployed.
 #
 # It does not run on its own. The branch has no commit carrying this file yet
 # and pushing is not permitted, so it is exercised with workflow_dispatch once
@@ -15,8 +15,12 @@ on:
   push:
     paths:
       - 'lib/features/inventory/presentation/screens/stock_vouchers_screen.dart'
+      - 'lib/features/inventory/presentation/screens/batches_screen.dart'
+      - 'lib/features/inventory/presentation/widgets/batch_operation_dialog.dart'
       - 'test/widget/stock_voucher_barcode_quantity_test.dart'
       - 'test/widget/stock_voucher_flow_test.dart'
+      - 'test/widget/batches_operations_test.dart'
+      - 'test/widget/batches_screen_test.dart'
 
 permissions:
   contents: read
@@ -72,4 +76,16 @@ jobs:
         run: |
           python scripts/ci-diagnose.py flutter test \
             test/widget/stock_voucher_flow_test.dart \
+            --reporter expanded
+
+      - name: Run the batch operation widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/batches_operations_test.dart \
+            --reporter expanded
+
+      - name: Run the existing batches screen widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/batches_screen_test.dart \
             --reporter expanded
