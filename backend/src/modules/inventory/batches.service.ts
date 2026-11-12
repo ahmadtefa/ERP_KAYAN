@@ -26,8 +26,18 @@ import { WarehouseScope, WarehouseService } from '../../common/warehouse/warehou
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
+import {
+  STOCK_EXPIRED,
+  STOCK_EXPIRED_WRITE_OFF_PENDING,
+  STOCK_EXPIRY_SOON,
+} from '../notifications/notification-kinds';
 
 const MONEY_SCALE = 4;
+
+/// How loud each severity is, for choosing which alert a lot shows. The row
+/// also stores this number, but reading it back from the word keeps the two in
+/// step if one is ever edited by hand.
+const SEVERITY_RANK: Record<string, number> = { INFO: 1, WARNING: 2, CRITICAL: 3 };
 
 /// What a lot needs to know about its item.
 ///
@@ -1532,6 +1542,191 @@ export class BatchesService {
         .toFixed(MONEY_SCALE),
       items,
     };
+  }
+
+  /// The expiry screen's feed: one row per live lot, grouped the three ways a
+  /// person acts on it.
+  ///
+  /// `expiryReport` above answers "how much is at risk, by band" and stops at
+  /// the announcement horizon. This answers "which lots, and where are they",
+  /// from the same `itemBatch` rows, the same `expiryBand` bands and the same
+  /// warehouse/scope filters - so the screen and the report can never disagree
+  /// about what is expiring.
+  ///
+  /// It deliberately does not reuse `list()`: that one hides empty lots and
+  /// asks for a page, while this one has to add each lot's shelf, which is a
+  /// separate table. Reading it here keeps `list()`'s contract intact.
+  async expiryAlerts(
+    companyId: string,
+    query: {
+      warehouseId?: string;
+      itemId?: string;
+      asOf?: string;
+      days?: string;
+    } = {},
+    scope: WarehouseScope = null,
+    warehouseIds?: string[],
+  ) {
+    const asOf = query.asOf ? dayOnly(query.asOf) : dayOnly(new Date());
+    const days = query.days ? normalizeExpiryDays(String(query.days).split(',')) : [7, 30, 60, 90];
+    const horizon = Math.max(...days, 0);
+
+    const where: Prisma.ItemBatchWhereInput = {
+      companyId,
+      deletedAt: null,
+      // An emptied lot is history. Nothing to sell, nothing to warn about.
+      remainingQuantity: { gt: 0 },
+      expiryDate: { not: null },
+      status: { notIn: ['WRITTEN_OFF', 'CLOSED'] },
+    };
+    if (warehouseIds !== undefined || query.warehouseId) {
+      const allowed = warehouseIds === undefined ? undefined : warehouseIds;
+      where.warehouseId = {
+        in:
+          allowed === undefined
+            ? [query.warehouseId!]
+            : query.warehouseId
+              ? allowed.filter((id) => id === query.warehouseId)
+              : allowed,
+      };
+    }
+    if (query.itemId) where.itemId = query.itemId;
+    if (scope !== null) where.warehouse = { branchId: { in: scope } };
+
+    const rows = await this.prisma.itemBatch.findMany({
+      where,
+      orderBy: [{ expiryDate: 'asc' }, { batchNumber: 'asc' }],
+      take: 5000,
+      include: {
+        item: { select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } },
+        warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+      },
+    });
+
+    // The shelf is a plain column without a relation, so Prisma cannot join
+    // it. One query for the distinct ids on the page, like `list()` does.
+    const locationIds = [
+      ...new Set(rows.map((row) => row.storageLocationId).filter((id): id is string => !!id)),
+    ];
+    const locations = locationIds.length
+      ? await this.prisma.storageLocation.findMany({
+          where: { id: { in: locationIds }, companyId },
+          select: { id: true, code: true, nameEn: true, nameAr: true },
+        })
+      : [];
+    const byId = new Map(locations.map((location) => [location.id, location]));
+
+    const feed = rows.map((row) => {
+      const band = expiryBand(row.expiryDate, asOf);
+      const daysToExpiry = daysUntil(row.expiryDate!, asOf);
+      const group = band === 'EXPIRED' ? 'EXPIRED' : band === 'LATER' ? 'VALID' : 'EXPIRING_SOON';
+      const location = row.storageLocationId ? (byId.get(row.storageLocationId) ?? null) : null;
+      return {
+        id: row.id,
+        batchNumber: row.batchNumber,
+        itemId: row.item.id,
+        itemCode: row.item.code,
+        itemNameEn: row.item.nameEn,
+        itemNameAr: row.item.nameAr,
+        unit: row.item.unit,
+        warehouseId: row.warehouse.id,
+        warehouseCode: row.warehouse.code,
+        warehouseNameEn: row.warehouse.nameEn,
+        warehouseNameAr: row.warehouse.nameAr,
+        storageLocation: location
+          ? {
+              id: location.id,
+              code: location.code,
+              nameEn: location.nameEn,
+              nameAr: location.nameAr,
+            }
+          : null,
+        productionDate: row.productionDate,
+        expiryDate: row.expiryDate,
+        daysToExpiry,
+        band,
+        group,
+        status: row.status,
+        quantity: row.remainingQuantity.toFixed(MONEY_SCALE),
+        unitCost: row.unitCost.toFixed(MONEY_SCALE),
+        value: row.remainingQuantity.mul(row.unitCost).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
+      };
+    });
+
+    const countOf = (group: string) => feed.filter((row) => row.group === group).length;
+    return {
+      asOf: asOf.toISOString().slice(0, 10),
+      days,
+      // The horizon the "expiring soon" tab uses, so the screen can say it.
+      horizonDays: horizon,
+      counts: {
+        expired: countOf('EXPIRED'),
+        expiringSoon: countOf('EXPIRING_SOON'),
+        valid: countOf('VALID'),
+        total: feed.length,
+      },
+      items: feed,
+    };
+  }
+
+  /// Which alert stands against which lot, for the screen's status column.
+  ///
+  /// Read from the notification centre rather than guessed from `daysToExpiry`:
+  /// the scanner decides what was raised, whether it is still open, and how
+  /// many times it has been asked. A screen that recomputed the answer would
+  /// eventually disagree with the centre, which is the one thing an alert list
+  /// must never do.
+  async expiryAlertStates(
+    companyId: string,
+    batchIds: string[],
+  ): Promise<Map<string, { status: string; severity: string; raisedCount: number; lastRaisedAt: Date | null }>> {
+    if (batchIds.length === 0) return new Map();
+    const rows = await this.prisma.notification.findMany({
+      where: {
+        companyId,
+        entityType: 'ItemBatch',
+        entityId: { in: batchIds },
+        type: { in: [STOCK_EXPIRED, STOCK_EXPIRY_SOON, STOCK_EXPIRED_WRITE_OFF_PENDING] },
+      },
+      orderBy: { severityRank: 'desc' },
+      select: {
+        entityId: true,
+        type: true,
+        status: true,
+        severity: true,
+        severityRank: true,
+        raisedCount: true,
+        lastRaisedAt: true,
+      },
+    });
+    // The loudest alert wins, and it is chosen here rather than left to the
+    // database's ordering: "which warning does this lot show" is a fact about
+    // the alerts, and reading it off an `orderBy` would silently change the
+    // answer the day a caller adds another sort key.
+    const rank = (row: { severityRank: number; status: string }) =>
+      // An open alert outranks a read one of the same severity: it is the one
+      // still asking for something.
+      row.severityRank * 2 + (row.status === 'OPEN' ? 1 : 0);
+    const byBatch = new Map<
+      string,
+      { status: string; severity: string; raisedCount: number; lastRaisedAt: Date | null; type: string }
+    >();
+    for (const row of rows) {
+      if (!row.entityId) continue;
+      const current = byBatch.get(row.entityId);
+      const best = current
+        ? rank({ severityRank: SEVERITY_RANK[current.severity] ?? 1, status: current.status })
+        : -1;
+      if (current && rank(row) <= best) continue;
+      byBatch.set(row.entityId, {
+        type: row.type,
+        status: row.status,
+        severity: row.severity,
+        raisedCount: row.raisedCount,
+        lastRaisedAt: row.lastRaisedAt,
+      });
+    }
+    return byBatch;
   }
 
   // ───────────────────────────────────────────────────────────────── helpers

@@ -538,6 +538,20 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         permissions: const ['inventory.batches.read'],
         group: _NavGroup.inventory,
       ),
+      // The shelf list behind the alerts: what has expired, what is about to
+      // and what is still good. Same grant as the lots themselves - a person
+      // allowed to see a lot is allowed to know its date - while pressing
+      // "scan now" additionally needs the notification-management grant, which
+      // the screen checks and the server enforces.
+      _NavItem(
+        AppRoutes.expiryAlerts,
+        Icons.event_busy_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'تنبيهات الصلاحية'
+            : 'Expiry alerts',
+        permissions: const ['inventory.batches.read'],
+        group: _NavGroup.inventory,
+      ),
       // Where inside the warehouse the goods are. The backend serves these
       // under the warehouse grants, so no new permission is invented here.
       _NavItem(

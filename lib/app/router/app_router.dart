@@ -21,6 +21,7 @@ import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/inventory/presentation/screens/warehouses_screen.dart';
 import '../../features/inventory/presentation/screens/batches_screen.dart';
+import '../../features/inventory/presentation/screens/expiry_alerts_screen.dart';
 import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
 import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
@@ -94,6 +95,7 @@ class AppRoutes {
   // router once its screen exists, so none of these is reachable yet.
   static const warehouses = '/inventory/warehouses';
   static const batches = '/inventory/batches';
+  static const expiryAlerts = '/inventory/expiry-alerts';
   static const notifications = '/notifications';
   static const storageLocations = '/inventory/locations';
   static const itemThresholds = '/inventory/thresholds';
@@ -255,6 +257,7 @@ const _guardedShellPaths = <String>{
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
   AppRoutes.warehouses,
   AppRoutes.batches,
+  AppRoutes.expiryAlerts,
   AppRoutes.storageLocations,
   AppRoutes.itemThresholds,
   AppRoutes.stockTakes,
@@ -286,6 +289,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.stock, child: StockScreen()),
   (path: AppRoutes.warehouses, child: WarehousesScreen()),
   (path: AppRoutes.batches, child: BatchesScreen()),
+  (path: AppRoutes.expiryAlerts, child: ExpiryAlertsScreen()),
   (path: AppRoutes.storageLocations, child: StorageLocationsScreen()),
   (path: AppRoutes.itemThresholds, child: ItemThresholdsScreen()),
   (path: AppRoutes.stockTakes, child: StockTakesScreen()),

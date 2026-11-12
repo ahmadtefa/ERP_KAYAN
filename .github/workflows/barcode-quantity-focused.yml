@@ -21,6 +21,8 @@ on:
       - 'test/widget/stock_voucher_flow_test.dart'
       - 'test/widget/batches_operations_test.dart'
       - 'test/widget/batches_screen_test.dart'
+      - 'lib/features/inventory/presentation/screens/expiry_alerts_screen.dart'
+      - 'test/widget/expiry_alerts_screen_test.dart'
 
 permissions:
   contents: read
@@ -95,4 +97,10 @@ jobs:
         run: |
           python scripts/ci-diagnose.py flutter test \
             test/widget/batches_screen_test.dart \
+            --reporter expanded
+
+      - name: Run the expiry alert screen widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/expiry_alerts_screen_test.dart \
             --reporter expanded

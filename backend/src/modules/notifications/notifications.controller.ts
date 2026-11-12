@@ -3,6 +3,7 @@ import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } fr
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { ExpiryAlertScheduler } from './expiry-alert.scheduler';
 import { NotificationsService } from './notifications.service';
 
 class NotificationQueryDto {
@@ -29,7 +30,10 @@ class UpdateNotificationSettingDto {
 /// changing how alerts behave is a management act.
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly service: NotificationsService) {}
+  constructor(
+    private readonly service: NotificationsService,
+    private readonly scheduler: ExpiryAlertScheduler,
+  ) {}
 
   @Get()
   @RequirePermissions('notifications.read')
@@ -80,9 +84,15 @@ export class NotificationsController {
 
   /// Runs the stock scanner now instead of waiting for its interval.
   /// Idempotent: every fact it finds is deduplicated by its own key.
+  ///
+  /// The answer also carries the automatic scanner's state, so a person can
+  /// tell "nothing is expiring" from "the timer is switched off". A screen that
+  /// showed an empty list without saying which of the two it means would be
+  /// telling half the truth.
   @Post('scan')
   @RequirePermissions('notifications.manage')
-  scan(@CurrentUser() user: AuthUser) {
-    return this.service.scanStock(user.companyId);
+  async scan(@CurrentUser() user: AuthUser) {
+    const answer = await this.service.scanStock(user.companyId);
+    return { ...answer, scheduler: this.scheduler.status() };
   }
 }

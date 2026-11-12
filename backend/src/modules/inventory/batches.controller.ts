@@ -10,6 +10,7 @@ import {
   grantsOf,
 } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   BatchesService,
   IssueInput,
@@ -17,6 +18,13 @@ import {
   TransferInput,
   WriteOffInput,
 } from './batches.service';
+
+/// Who may ask the expiry screen to scan again.
+///
+/// Reading alerts is `inventory.batches.read`; causing a scan is a management
+/// act, the same grant the notification centre already requires to run the
+/// scanner by hand. Nobody gets a new permission for a button.
+const EXPIRY_ALERT_SCAN_PERMISSION = 'notifications.manage';
 
 class ReceiveLotDto implements ReceiveLotInput {
   @IsString() branchId!: string;
@@ -85,7 +93,10 @@ class TransferDto implements TransferInput {
  */
 @Controller('inventory/batches')
 export class BatchesController {
-  constructor(private readonly service: BatchesService) {}
+  constructor(
+    private readonly service: BatchesService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   @Get()
   @RequirePermissions('inventory.batches.read')
@@ -163,10 +174,68 @@ export class BatchesController {
     });
   }
 
+  /// What the expiry-alert screen lists: the expired lots, the ones about to
+  /// expire and the ones that are still good, each with its shelf and the alert
+  /// standing against it.
+  ///
+  /// Registered before `:id` for the same reason `expiry-report` is: Nest
+  /// matches in declaration order, and `GET :id` would answer `alerts` as a lot
+  /// id. `state` asks the notification centre what was raised; `scan` asks the
+  /// scanner to look again, which needs the management grant and is how a
+  /// person presses "refresh" and sees a genuinely new answer.
+  @Get('alerts')
+  @RequirePermissions('inventory.batches.read')
+  async alerts(
+    @CurrentUser() user: AuthUser,
+    @Query()
+    query: {
+      warehouseId?: string;
+      itemId?: string;
+      asOf?: string;
+      days?: string;
+      scan?: string;
+    },
+  ) {
+    const mayScan = user.permissions?.includes(EXPIRY_ALERT_SCAN_PERMISSION) ?? false;
+    const shouldScan = query.scan === 'true' && mayScan;
+    if (shouldScan) {
+      // A manual scan must never turn a readable screen into an error page: if
+      // the scanner fails, the list below is still true and still useful.
+      try {
+        await this.notifications.scanStock(user.companyId);
+      } catch {
+        // Deliberately swallowed; the read that follows is the answer.
+      }
+    }
+
+    const grants = grantsOf(user);
+    const report = await this.service.expiryAlerts(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
+    const states = await this.service.expiryAlertStates(
+      user.companyId,
+      report.items.map((row) => row.id),
+    );
+
+    const withState = {
+      ...report,
+      items: report.items.map((row) => ({
+        ...row,
+        // `alert` is what the notification centre holds right now, not what
+        // this screen guessed from the dates: OPEN means it was raised and
+        // nobody has read it, null means this lot is not alerting at all.
+        alert: states.get(row.id) ?? null,
+      })),
+    };
+    return this.redactBatchCosts(user, withState);
+  }
+
   @Get(':id/trace')
   @RequirePermissions('inventory.batches.read')
-  trace(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.trace(
+  trace(@CurrentUser() user: AuthUser, @Param('id') id: string) {    return this.service.trace(
       user.companyId,
       id,
       warehouseScopeOf(user),

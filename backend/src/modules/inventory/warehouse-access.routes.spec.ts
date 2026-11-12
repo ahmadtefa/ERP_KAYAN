@@ -60,14 +60,14 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
   describe('receiving, issuing and writing off a lot', () => {
     it('receives into the store the person is trusted with', async () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       await controller.receive(user(), { warehouseId: STORE_A, itemId: ITEM } as never);
       expect(calls).toEqual(['receive']);
     });
 
     it('refuses a receipt into a store they are not trusted with', () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       expect(() =>
         controller.receive(user(), { warehouseId: STORE_B, itemId: ITEM } as never),
       ).toThrow(ForbiddenException);
@@ -76,7 +76,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
 
     it('refuses an issue out of a store they are not trusted with', () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       expect(() =>
         controller.issue(user(), { warehouseId: STORE_B, itemId: ITEM } as never),
       ).toThrow(ForbiddenException);
@@ -85,7 +85,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
 
     it('refuses writing a lot off a store they are not trusted with', () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       expect(() =>
         controller.writeOff(user(), { warehouseId: STORE_B, itemId: ITEM } as never),
       ).toThrow(ForbiddenException);
@@ -94,7 +94,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
 
     it('lets a person with no grants at all work everywhere, as before', async () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       await controller.receive(user(null), { warehouseId: STORE_B, itemId: ITEM } as never);
       expect(calls).toEqual(['receive']);
     });
@@ -103,7 +103,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
   describe('a transfer needs both shelves', () => {
     it('refuses a transfer out of a shelf they may not transfer from', () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       expect(() =>
         controller.transfer(user(), {
           fromWarehouseId: STORE_A,
@@ -116,7 +116,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
 
     it('refuses a transfer that would arrive at a shelf they cannot see', () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       const canMove = user([
         { ...GRANTS[0], canTransfer: true },
         { ...GRANTS[0], warehouseId: STORE_B, canView: false, canReceive: true },
@@ -133,7 +133,7 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
 
     it('allows the transfer when both shelves are granted', async () => {
       const { service, calls } = batchesService();
-      const controller = new BatchesController(service as never);
+      const controller = new BatchesController(service as never, { scanStock: jest.fn() } as never);
       const both = user([
         { ...GRANTS[0], canTransfer: true },
         { ...GRANTS[0], warehouseId: STORE_B },
