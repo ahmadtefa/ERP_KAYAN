@@ -478,7 +478,9 @@ export class StockDocumentsService {
             unitQuantity = quantity;
             quantity = resolved.baseQuantity.mul(sign);
           }
-          if (countedQuantity && !countedQuantity.isZero()) {
+          // Zero is a valid physical count, but the chosen unit must still
+          // exist, be active and have a valid conversion factor.
+          if (countedQuantity !== null) {
             const resolvedCount = resolveUnitSelection({
               lineLabel: `Line ${index + 1}`,
               requestedUnitId: raw.unitId,
@@ -487,6 +489,7 @@ export class StockDocumentsService {
               baseUnitName: item.unit,
               units,
               purpose: 'stock',
+              allowZeroBaseQuantity: true,
             });
             unitName = resolvedCount.snapshot.unitName;
             unitFactor = resolvedCount.snapshot.unitFactor;
