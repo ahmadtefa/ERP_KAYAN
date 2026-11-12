@@ -1,4 +1,7 @@
-import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
+// The unit helpers are shared with the barcode/scan logic and the stock
+// voucher screen, so the test imports them from their own home rather than
+// through the invoice editor that used to declare them.
+import 'package:erp_kayan/shared/barcode/barcode_scan.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -77,5 +80,37 @@ void main() {
     };
     expect(defaultLineUnit(item, isSales: true), 'carton');
     expect(defaultLineUnit(item, isSales: false), 'box');
+  });
+
+  test('an inactive default unit is not offered as the starting unit', () {
+    // A unit switched off must not become the line's unit just because it still
+    // carries the default flag: the server would refuse the line on save.
+    final item = <String, dynamic>{
+      'unit': 'piece',
+      'units': <Map<String, dynamic>>[
+        {'unit': 'piece', 'factor': '1', 'isActive': true},
+        {
+          'unit': 'carton',
+          'factor': '12',
+          'isActive': false,
+          'isDefaultSale': true,
+        },
+      ],
+    };
+    expect(defaultLineUnit(item, isSales: true), 'piece');
+  });
+
+  test('the default unit survives a payload that omits the flag entirely', () {
+    // Every item read before this phase came back without the flags, and the
+    // editor still has to choose a valid unit for them.
+    final item = <String, dynamic>{
+      'unit': 'piece',
+      'units': <Map<String, dynamic>>[
+        {'unit': 'piece', 'factor': '1'},
+        {'unit': 'carton', 'factor': '12'},
+      ],
+    };
+    expect(defaultLineUnit(item, isSales: true), 'piece');
+    expect(defaultLineUnit(item, isSales: false), 'piece');
   });
 }

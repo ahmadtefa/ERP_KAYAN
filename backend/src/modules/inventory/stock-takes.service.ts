@@ -10,6 +10,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseScope, WarehouseService } from '../../common/warehouse/warehouse.service';
+import { resolveUnitSelection } from '../../common/units/unit-math';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -311,7 +312,16 @@ export class StockTakesService {
     userId: string,
     id: string,
     dto: {
-      lines: Array<{ lineId: string; countedQuantity: number; notes?: string }>;
+      lines: Array<{
+        lineId: string;
+        countedQuantity: number;
+        /// The unit the counted figure was entered in, when the counter counted
+        /// cartons instead of pieces. Omitted means the figure already is in
+        /// base units, which is what every client written before barcode
+        /// counting sent.
+        unitName?: string;
+        notes?: string;
+      }>;
       finish?: boolean;
     },
     scope: WarehouseScope = null,
@@ -334,12 +344,56 @@ export class StockTakesService {
       for (const entry of dto.lines) {
         const line = await tx.stockTakeLine.findFirst({
           where: { id: entry.lineId, sessionId: session.id },
-          select: { id: true, systemQuantity: true, unitCost: true },
+          select: {
+            id: true,
+            systemQuantity: true,
+            unitCost: true,
+            item: {
+              select: {
+                unit: true,
+                units: {
+                  select: {
+                    id: true,
+                    unit: true,
+                    factor: true,
+                    isActive: true,
+                  },
+                },
+              },
+            },
+          },
         });
         if (!line) {
           throw new BadRequestException(`Line ${entry.lineId} does not belong to this session.`);
         }
-        const counted = new Prisma.Decimal(entry.countedQuantity).toDecimalPlaces(MONEY_SCALE);
+        // The shelf count is compared with the frozen system figure, and that
+        // figure is in base units. A counter who scanned a carton typed "1",
+        // which is one carton and not one piece, so the conversion happens
+        // here - once - exactly as an invoice line converts. Multiplying in
+        // the screen as well would count 24 cartons of 24 pieces.
+        const entered = new Prisma.Decimal(entry.countedQuantity);
+        // A count of zero is a real answer - "the shelf is empty" - and it is
+        // accepted, but the UNIT STILL HAS TO BE VALID. The old code short-
+        // circuited the whole conversion when the figure was zero, which meant
+        // a count of `0` on a misspelled or inactive unit was stored silently:
+        // the counter believed they had counted a carton, and the session
+        // recorded a zero it never checked. Resolving the unit first and then
+        // keeping the zero keeps both properties: the answer is still zero, and
+        // an unusable unit is still refused.
+        //
+        // The helper's zero guard exists for a document line that would post
+        // nothing; a stock take has no such rule, so it is relaxed here - but
+        // ONLY that rule. The unit is still resolved, so an unknown or inactive
+        // unit is refused even when the counter typed zero.
+        const resolved = resolveUnitSelection({
+          lineLabel: `Line ${entry.lineId}`,
+          requestedUnitName: entry.unitName ?? null,
+          enteredQuantity: entered,
+          baseUnitName: line.item?.unit ?? '',
+          units: line.item?.units ?? [],
+          allowZeroBaseQuantity: true,
+        });
+        const counted = resolved.baseQuantity.toDecimalPlaces(MONEY_SCALE);
         if (counted.isNegative()) {
           throw new BadRequestException('A counted quantity cannot be negative.');
         }

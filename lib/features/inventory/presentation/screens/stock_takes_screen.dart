@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +6,8 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/barcode/barcode_scan.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -441,6 +444,42 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   final Map<String, String> _counts = {};
   bool _busy = false;
 
+  /// The scan box, plus which line the last accepted scan found and in which
+  /// unit. A scan does not add a line to a count - every line was frozen when
+  /// the session opened - it finds the line and puts a number in it.
+  final _barcode = TextEditingController();
+  String? _lastScanCode;
+  DateTime? _lastScanAt;
+  bool _scanInFlight = false;
+
+  /// Which unit each line was last counted in, so a repeat scan of a carton
+  /// line adds another carton rather than jumping back to pieces. Absent means
+  /// "as counted when the session opened", which the server explains as base
+  /// units.
+  final Map<String, String> _scanUnits = {};
+
+  /// The line the last scan touched, highlighted so the counter sees which
+  /// shelf the label belonged to.
+  String? _lastScannedLineId;
+
+  /// The conversion factor of the unit each line was scanned in, so the count
+  /// can show what the figure means in the base unit the difference is booked
+  /// in.
+  final Map<String, Decimal> _scanFactors = {};
+
+  /// "2 كرتونة = 48 علبة", or empty when the line was counted in base units.
+  String _baseEquivalentFor(Json line, String quantityText) {
+    final id = text(line, 'id');
+    final unit = _scanUnits[id];
+    final factor = _scanFactors[id];
+    final quantity = Decimal.tryParse(quantityText.trim());
+    if (unit == null || factor == null || quantity == null) return '';
+    if (factor == Decimal.one || quantity <= Decimal.zero) return '';
+    final base = plainQuantity(quantity * factor);
+    final baseUnit = text(line, 'unit', fallback: 'unit');
+    return '= $base $baseUnit';
+  }
+
   bool get _ar => widget.arabic;
   String _t(String ar, String en) => _ar ? ar : en;
 
@@ -452,6 +491,205 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
       final value = text(line, 'countedQuantity');
       if (value.isNotEmpty) _counts[text(line, 'id')] = value;
     }
+  }
+
+  @override
+  void dispose() {
+    _barcode.dispose();
+    super.dispose();
+  }
+
+  /// Puts one scanned label into the count.
+  ///
+  /// A stock take is not an invoice: its lines were frozen when the session
+  /// opened, one per item and lot, so a scan must never add a line. It locates
+  /// the line for the scanned item and raises its counted figure by one of the
+  /// unit the label names.
+  ///
+  /// The figure written into the box is in that unit, not in pieces: scanning a
+  /// carton of 24 must count ONE carton, and the server multiplies by 24 when
+  /// the count is recorded. Multiplying here as well would count 576 pieces
+  /// against a system figure of, say, 48 - a variance of 528 that nobody made.
+  ///
+  /// The variance itself is untouched by this: the server recomputes it from
+  /// the frozen system quantity when the count is saved, so scanning can never
+  /// rewrite what the difference will be reported as.
+  Future<void> _scanCountBarcode(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty || _busy) return;
+    final editable = widget.canCount &&
+        text(_session, 'status').toUpperCase() == 'COUNTING';
+    if (!editable) {
+      _barcode.clear();
+      return;
+    }
+    if (isRepeatScan(
+      lastCode: _lastScanCode,
+      lastAt: _lastScanAt,
+      code: code,
+      inFlight: _scanInFlight,
+    )) {
+      _barcode.clear();
+      return;
+    }
+    _scanInFlight = true;
+    try {
+      final scanner = BarcodeScanner(
+        lookup: (value) => widget.api.getObject(
+          '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
+        ),
+      );
+      final match = await scanner.scan(
+        code,
+        arabic: _ar,
+        onMatch: (match) async {
+          if (!mounted) return;
+          final candidates = _countLinesFor(match.itemId);
+          // The item has several lots, so the operator decides which one is
+          // being counted. Guessing the first would book the figure against a
+          // batch nobody looked at.
+          final Json? line;
+          if (candidates.length > 1) {
+            line = await _chooseCountLine(match, candidates);
+            if (line == null || !mounted) {
+              // Backing out changes nothing: the count stays as it was.
+              return;
+            }
+          } else {
+            line = candidates.isEmpty ? null : candidates.first;
+          }
+          if (line == null) {
+            // The item is not part of this count at all - a shelf label for
+            // something this session does not cover, or an item that is not
+            // stock-tracked. Saying so is the only honest answer: adding a line
+            // is not this screen's decision to make.
+            await showAppPlainError(
+              context,
+              _t(
+                'الصنف ${match.itemCode} ليس ضمن بنود هذا الجرد. ابدأ جردًا يشمله أو ابحث عنه في قائمة الجرد.',
+                'Item ${match.itemCode} is not part of this count. Start a count that covers it, or look for it in the count list.',
+              ),
+            );
+            return;
+          }
+          setState(() {
+            // A unit label names the unit it counts, so scanning a carton code
+            // counts cartons. An item label names no unit at all, and a count
+            // is compared against a figure frozen in the item's BASE unit - so
+            // the figure the counter sees next to it stays in that same unit
+            // instead of silently switching to a selling or purchasing default.
+            final target = line;
+            if (target == null) return;
+            final lineUnit = text(target, 'unit');
+            final unit = match.matched == 'unit' && match.unit.isNotEmpty
+                ? match.unit
+                : lineUnit;
+            _scanUnits[text(target, 'id')] = unit;
+            _scanFactors[text(target, 'id')] = match.factor;
+            _counts[text(target, 'id')] = plainQuantity(
+              _quantityAfterCountScan(target, unit, lineUnit),
+            );
+            _lastScannedLineId = text(target, 'id');
+            _barcode.clear();
+          });
+        },
+        onFailure: (message) async {
+          if (!mounted) return;
+          await showAppPlainError(context, message);
+        },
+      );
+      if (match == null) return;
+      _lastScanCode = code;
+      _lastScanAt = DateTime.now();
+    } finally {
+      _scanInFlight = false;
+    }
+  }
+
+  /// Every line this item is counted on, in the order the session lists them.
+  ///
+  /// A lot-controlled item has one line per lot. Zero lines means the session
+  /// does not cover the item; more than one means the label alone cannot say
+  /// which of them the counter is holding.
+  List<Json> _countLinesFor(String itemId) {
+    if (itemId.isEmpty) return const [];
+    return [
+      for (final line in listOf(_session['lines']))
+        if (text(line, 'itemId') == itemId) line,
+    ];
+  }
+
+  /// Ask which lot the counter is actually holding.
+  ///
+  /// Only called when the item has more than one line. A single line needs no
+  /// question, and this is deliberately NOT wrapped in a "return the first one"
+  /// helper: that helper is what caused the original defect, and leaving one in
+  /// place invites the next caller to use it and reintroduce the silent choice.
+  ///
+  /// Returns null when the operator backs out, which must leave the count
+  /// untouched - a cancelled question is not an answer.
+  Future<Json?> _chooseCountLine(Json match, List<Json> lines) async {
+    final chosen = await showDialog<Json>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(_t('أي دفعة تعدّها؟', 'Which batch are you counting?')),
+          content: SizedBox(
+            width: 420,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _t(
+                      'باركود ${match.itemCode} يتبع أكثر من دفعة، والملصق لا يحدد أيها. اختر الدفعة التي أمامك.',
+                      'Barcode ${match.itemCode} covers more than one batch and the label does not say which. Choose the batch in front of you.',
+                    ),
+                  ),
+                ),
+                for (final line in lines)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.qr_code_2),
+                    title: Text(
+                      '${_t('الدفعة', 'Batch')}: ${text(line, 'batchNumber', fallback: '—')}',
+                    ),
+                    subtitle: Text(
+                      '${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity', fallback: '0')}',
+                    ),
+                    onTap: () => Navigator.of(dialogContext).pop(line),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(_t('إلغاء', 'Cancel')),
+            ),
+          ],
+        );
+      },
+    );
+    return chosen;
+  }
+
+  /// What the box must read after a scan: the previous count plus one of the
+  /// scanned unit.
+  ///
+  /// A line last counted in a *different* unit starts again from the scanned
+  /// unit's one, because mixing 6 pieces and 2 cartons in one figure would
+  /// silently mean 6 pieces + 2 cartons only by accident of a factor nobody
+  /// typed. A line counted in this unit and then typed over by hand keeps the
+  /// hand-typed figure and gains one on top of it, which is what a counter
+  /// correcting a shelf expects.
+  Decimal _quantityAfterCountScan(Json line, String unit, String baseUnit) {
+    final id = text(line, 'id');
+    final previous = Decimal.tryParse((_counts[id] ?? '').trim());
+    final countedUnit = _scanUnits[id] ?? baseUnit;
+    if (countedUnit != unit || previous == null) return Decimal.one;
+    return quantityAfterScan(current: previous, sameSelection: true);
   }
 
   Future<void> _act(String suffix, {Object? body, String? success}) async {
@@ -557,7 +795,15 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
         showMessage(context, _t('أدخل كمية صحيحة غير سالبة للصنف ${text(line, 'itemCode')}.', 'Enter a valid non-negative quantity for ${text(line, 'itemCode') }.'), error: true);
         return;
       }
-      payload.add({'lineId': text(line, 'id'), 'countedQuantity': value});
+      // The figure and the unit it was counted in travel together. Without
+      // the unit the server must read 1 carton as 1 piece, and the frozen
+      // system figure it is compared with is in pieces.
+      final unit = _scanUnits[text(line, 'id')];
+      payload.add({
+        'lineId': text(line, 'id'),
+        'countedQuantity': value,
+        if (unit != null && unit.isNotEmpty) 'unitName': unit,
+      });
     }
     if (payload.isEmpty) {
       showMessage(context, _t('أدخل كمية معدودة واحدة على الأقل.', 'Enter at least one counted quantity.'), error: true);
@@ -602,6 +848,21 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
               ),
             ]),
             const SizedBox(height: 8),
+            // Scanning a shelf label finds the line it belongs to and raises
+            // its count by one, so the counter never hunts for a row in a long
+            // list while holding a scanner.
+            SizedBox(
+              width: 420,
+              child: BarcodeScanField(
+                key: const ValueKey('stock-take-barcode'),
+                controller: _barcode,
+                arabic: _ar,
+                label: _t('امسح باركود الصنف للعد', 'Scan an item barcode to count it'),
+                enabled: editable && !_busy,
+                onSubmitted: _scanCountBarcode,
+              ),
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: lines.isEmpty
                   ? Center(child: Text(_t('لا توجد بنود.', 'No lines.')))
@@ -619,14 +880,43 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                                 Text('${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity')}  •  ${_t('الدفعة', 'Batch')}: ${text(line, 'batchNumber', fallback: '—')}'),
                                 Text('${_t('الفرق', 'Variance')}: ${text(line, 'varianceQuantity')}  •  ${_t('القيمة', 'Value')}: ${text(line, 'varianceValue')}'),
                               ])),
+                              // The key carries the current figure, so a scan (or
+                              // a save that answers with a new one) recreates the
+                              // field with that value instead of leaving the old
+                              // text in the box.
                               SizedBox(width: 150, child: TextFormField(
-                                key: ValueKey('count-$id-${text(line, 'countedQuantity')}'),
-                                initialValue: _counts[id] ?? text(line, 'countedQuantity'),
+                                key: ValueKey(
+                                  'count-$id-${_counts[id] ?? text(line, 'countedQuantity')}',
+                                ),
+                                initialValue:
+                                    _counts[id] ?? text(line, 'countedQuantity'),
                                 enabled: editable && !_busy,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: InputDecoration(labelText: _t('الكمية المعدودة', 'Counted qty'), isDense: true),
+                                decoration: InputDecoration(
+                                  labelText: _t('الكمية المعدودة', 'Counted qty'),
+                                  isDense: true,
+                                  // The unit the figure is counted in, so "1"
+                                  // next to "قطعة" is not mistaken for a carton.
+                                  suffixText: _scanUnits[id],
+                                  filled: _lastScannedLineId == id,
+                                ),
                                 onChanged: (value) => _counts[id] = value,
                               )),
+                              // What the counted figure means in base units: the
+                              // exact number the frozen system figure is compared
+                              // with. Shown, never posted - the server converts
+                              // once, from the unit sent with the count.
+                              if (_scanUnits[id] != null)
+                                Padding(
+                                  padding: const EdgeInsetsDirectional.only(start: 8),
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: Text(
+                                      _baseEquivalentFor(line, _counts[id] ?? text(line, 'countedQuantity')),
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ),
+                                ),
                             ]),
                           ),
                         );

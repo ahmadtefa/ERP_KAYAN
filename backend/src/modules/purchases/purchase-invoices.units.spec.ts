@@ -243,6 +243,38 @@ describe('Purchase multi-unit — milk scenario', () => {
     expect(line.unitQuantity.toFixed(4)).toBe('5.0000');
   });
 
+  /// The purchase side of the manual-unit-change case.
+  ///
+  /// Scanned as a carton (1 x 10 = 10 pieces), then the operator changes the
+  /// unit to pieces on the same line. The server must convert the figure with
+  /// the unit finally chosen - one piece - and not reuse the carton's ten.
+  it('a unit changed by hand after a scan receives one piece, not ten or a hundred', async () => {
+    const { service, tx } = makeService();
+
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      invoiceDate: '2026-10-27',
+      supplierId: SUPPLIER,
+      lines: [{ itemId: MILK, quantity: '1', unitName: 'كرتونة', taxRate: '0' }],
+    } as any);
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      invoiceDate: '2026-10-27',
+      supplierId: SUPPLIER,
+      lines: [{ itemId: MILK, quantity: '1', unitName: 'علبة', taxRate: '0' }],
+    } as any);
+
+    const asScanned = tx.purchaseInvoice.create.mock.calls[0][0].data.lines.create[0];
+    const afterChange = tx.purchaseInvoice.create.mock.calls[1][0].data.lines.create[0];
+
+    expect(asScanned.quantity.toFixed(4)).toBe('10.0000');
+
+    // Received: one base piece. The carton's ten is gone, not carried forward
+    // and not multiplied again into a hundred.
+    expect(afterChange.quantity.toFixed(4)).toBe('1.0000');
+    expect(afterChange.unitQuantity.toFixed(4)).toBe('1.0000');
+    expect(afterChange.unitFactor.toFixed(6)).toBe('1.000000');
+    expect(afterChange.unitName).toBe('علبة');
+  });
+
   it('posting receives 50 pieces at a weighted unit cost of 7.50 each', async () => {
     const { service, prisma, tx, ledger } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {

@@ -10,6 +10,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../shared/barcode/barcode_scan.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
@@ -22,71 +23,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
-
-/// Active units a line can choose for [item], smallest factor first.
-///
-/// A legacy item that predates multi-unit and carries no `units` array is
-/// synthesised as a single base unit, so the picker always offers the item's
-/// own unit and the document stays valid. An item that has not been picked yet
-/// yields an empty list and the control is disabled.
-List<Json> lineUnitsOf(Json? item) {
-  if (item == null) return const <Json>[];
-  final raw = item['units'];
-  final stored = (raw is List ? raw.cast<Json>() : const <Json>[])
-      .where((unit) => flag(unit, 'isActive', fallback: true))
-      .toList();
-  if (stored.isNotEmpty) {
-    stored.sort((a, b) {
-      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
-      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
-      return fa.compareTo(fb);
-    });
-    return stored;
-  }
-  return <Json>[
-    <String, dynamic>{
-      'id': null,
-      'unit': text(item, 'unit'),
-      'factor': '1.000000',
-      'isBase': true,
-      'isActive': true,
-      'salePrice': item['salePrice'],
-      'purchasePrice': item['purchasePrice'],
-    },
-  ];
-}
-
-String defaultLineUnit(Json item, {required bool isSales}) {
-  final units = lineUnitsOf(item);
-  final preferredKey = isSales ? 'isDefaultSale' : 'isDefaultPurchase';
-  for (final unit in units) {
-    if (flag(unit, preferredKey)) return text(unit, 'unit');
-  }
-  final base = text(item, 'unit');
-  return units.any((unit) => text(unit, 'unit') == base)
-      ? base
-      : (units.isEmpty ? base : text(units.first, 'unit'));
-}
-
-/// The unit-specific list price, or the base-unit price converted once into
-/// the chosen unit. An unknown/invalid unit or missing cost stays empty.
-String unitListPrice(Json item, String unitName, {required bool isSales}) {
-  final key = isSales ? 'salePrice' : 'purchasePrice';
-  for (final unit in lineUnitsOf(item)) {
-    if (text(unit, 'unit') == unitName) {
-      final specific = text(unit, key);
-      if (specific.isNotEmpty) return specific;
-      final basePrice = Decimal.tryParse(text(item, key));
-      if (basePrice == null) return '';
-      final parsedFactor = Decimal.tryParse(text(unit, 'factor'));
-      final factor =
-          parsedFactor ?? (unitName == text(item, 'unit') ? Decimal.one : null);
-      if (factor == null || factor <= Decimal.zero) return '';
-      return (basePrice * factor).round(scale: moneyScale).toString();
-    }
-  }
-  return unitName == text(item, 'unit') ? text(item, key) : '';
-}
 
 /// An automatic price may follow a changed unit; a price typed by the user
 /// (including an explicit zero) must not be silently replaced.
@@ -225,6 +161,15 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   bool _loadFailed = false;
   bool _confirmingExit = false;
   late String _savedSnapshot;
+
+  /// The invoice-level scan box, and what the last accepted scan was.
+  ///
+  /// The guard lives on the document rather than on a line because a scan adds
+  /// a line: there is no line to hold the state until the scan has succeeded.
+  final _barcode = TextEditingController();
+  String? _lastScanCode;
+  DateTime? _lastScanAt;
+  bool _scanInFlight = false;
 
   String _snapshot() => jsonEncode({
     'party': _partyId,
@@ -410,6 +355,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       charge.dispose();
     }
     _documentDiscount.dispose();
+    _barcode.dispose();
     super.dispose();
   }
 
@@ -501,6 +447,144 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           // A thumbnail that cannot be fetched is not worth a dialog: the
           // picker still lists every item, just without pictures.
         });
+  }
+
+  /// Adds what a scanned label stands for to the invoice.
+  ///
+  /// The rules, in the order they matter:
+  ///   * one scan is ONE of the unit the label identifies - never its factor.
+  ///     A carton label whose factor is 24 adds one carton, and the quantity
+  ///     box reads 1; the server multiplies by 24 exactly once when the
+  ///     invoice is saved. Writing 24 here would store 576 pieces.
+  ///   * scanning the same item and unit again adds one more of it, so two
+  ///     scans of a carton give 2 cartons.
+  ///   * scanning a different item - or the same item in a different unit -
+  ///     starts a new line at 1 instead of overwriting the line above.
+  ///   * the unit the label names wins over the default sale/purchase unit,
+  ///     because the label is more specific than the catalogue default; when
+  ///     the label is the item's own barcode the default unit for this
+  ///     document decides.
+  ///   * a failed lookup changes nothing: no line is added, no quantity is
+  ///     touched, and the operator's other input stays exactly as typed.
+  Future<void> _scanInvoiceBarcode(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty || _saving || _loadingExisting) return;
+    if (isRepeatScan(
+      lastCode: _lastScanCode,
+      lastAt: _lastScanAt,
+      code: code,
+      inFlight: _scanInFlight,
+    )) {
+      // The scanner fired again for the same physical press. Clear the box so
+      // the next scan starts clean, but do not add a second carton.
+      _barcode.clear();
+      return;
+    }
+    _scanInFlight = true;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    try {
+      final scanner = BarcodeScanner(
+        lookup: (value) => ref
+            .read(apiClientProvider)
+            .getObject(
+              '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
+            ),
+      );
+      final match = await scanner.scan(
+        code,
+        arabic: arabic,
+        onMatch: (match) async {
+          if (!mounted) return;
+          setState(() {
+            _addScannedLine(match, isSales: widget.kind.isSales);
+            _barcode.clear();
+          });
+        },
+        // The wording of both failure sentences lives in the shared helper, so
+        // every screen says the same thing about the same label. It is shown
+        // as written because this screen composed it on purpose.
+        onFailure: (message) async {
+          if (!mounted) return;
+          await showAppPlainError(context, message);
+        },
+      );
+      if (match == null) return;
+      // Remembered only now: a failed lookup must stay retryable by scanning
+      // the same label again immediately.
+      _lastScanCode = code;
+      _lastScanAt = DateTime.now();
+    } finally {
+      _scanInFlight = false;
+    }
+  }
+
+  /// Puts one scanned [match] on the invoice: an existing line for the same
+  /// item and unit gains one, otherwise the empty line (or a new one) is used.
+  void _addScannedLine(BarcodeMatch match, {required bool isSales}) {
+    // Which unit this scan adds, decided once for every screen that scans.
+    final unit = defaultScannedUnit(match, isSales: isSales);
+    // A line the operator has not touched is reused rather than left behind as
+    // an empty first row: the invoice would otherwise start with a gap every
+    // time the first thing that happens is a scan.
+    var index = _lines.indexWhere(
+      (line) => line.itemId == match.itemId && line.unitName == unit,
+    );
+    // A line that already names this item in another unit is a scan of a
+    // different thing (six pieces on one line, two cartons on the next), so it
+    // is left alone. Only a line carrying nothing at all is reused.
+    if (index < 0) {
+      final blank = _lines.indexWhere((line) => _lineIsEmpty(line));
+      if (blank >= 0) {
+        index = blank;
+      } else {
+        _lines.add(_LineDraft());
+        index = _lines.length - 1;
+      }
+    }
+    final line = _lines[index];
+    final sameSelection = line.itemId == match.itemId && line.unitName == unit;
+    final current = sameSelection
+        ? Decimal.tryParse(line.quantity.text.trim())
+        : null;
+    // The item and unit are assigned before the quantity, so the price helper
+    // below prices the chosen unit rather than whatever the line held a moment
+    // ago. The box itself holds the CHOSEN unit: `quantityAfterScan` adds one
+    // to the number already there, and never multiplies by the factor.
+    line.itemId = match.itemId;
+    line.unitName = unit;
+    line.quantity.text = plainQuantity(
+      quantityAfterScan(current: current, sameSelection: sameSelection),
+    );
+    // The price follows the unit that was just selected, through the same
+    // helper the manual path uses: a scanned carton and a hand-typed carton
+    // must cost the same, and a price the operator typed themselves is never
+    // replaced. The unit is passed in already set, so the helper prices the
+    // scanned unit rather than falling back to the document default.
+    _applyItemDefaults(line, match.item);
+    // `_applyItemDefaults` honours a unit already on the line, so the scan's
+    // choice survives it. This restores it anyway if a future change there
+    // starts preferring the catalogue default: the scanned unit is the truth.
+    line.unitName = unit;
+  }
+
+  /// True when a line is still the untouched draft `_LineDraft()` builds: no
+  /// item, the default quantity of 1, no price of its own and no discount.
+  ///
+  /// A scan reuses such a line instead of leaving an empty row above the one it
+  /// just filled. Anything an operator typed disqualifies it, so a scan can
+  /// never take over a line somebody was working on.
+  bool _lineIsEmpty(_LineDraft line) {
+    if (line.itemId != null ||
+        line.unitPriceEdited ||
+        line.taxRateEdited ||
+        line.discountKind != DiscountKind.none ||
+        line.costCenterId != null) {
+      return false;
+    }
+    final quantity = line.quantity.text.trim();
+    final price = line.unitPrice.text.trim();
+    return (quantity.isEmpty || quantity == '1') &&
+        (price.isEmpty || price == '0');
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
@@ -828,6 +912,23 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                           label: Text(l10n.addLine),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    // A scanner types into a field and presses Enter. The box
+                    // sits directly above the lines it adds, so what a scan did
+                    // is visible without looking anywhere else on the screen.
+                    SizedBox(
+                      width: 420,
+                      child: BarcodeScanField(
+                        key: const ValueKey('invoice-barcode'),
+                        controller: _barcode,
+                        arabic: Localizations.localeOf(context).languageCode == 'ar',
+                        label: Localizations.localeOf(context).languageCode == 'ar'
+                            ? 'امسح الباركود لإضافة صنف'
+                            : 'Scan a barcode to add an item',
+                        enabled: !_saving && !_loadingExisting,
+                        onSubmitted: _scanInvoiceBarcode,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     _LinesTable(
@@ -1327,6 +1428,21 @@ class _LinesTable extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        // What the quantity above means in base units. Shown,
+                        // never posted: the server multiplies by the factor
+                        // once, and a second multiplication here would store a
+                        // carton of 24 as 576 pieces. The line is absent for a
+                        // base-unit line, where the two numbers are identical.
+                        SizedBox(
+                          width: 150,
+                          child: _LineBaseEquivalent(
+                            key: ValueKey('line-base-equivalent-$index'),
+                            item: selected,
+                            unitName: lines[index].unitName,
+                            quantity: lines[index].quantity,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
                           child: TextFormField(
@@ -1380,6 +1496,29 @@ class _LinesTable extends StatelessWidget {
                               : () => onRemove(index),
                         ),
                       ],
+                    ),
+                    // The item, unit and quantity in one sentence, under the
+                    // controls that hold them. A scanned label changes three
+                    // fields at once, and this is the line that says which
+                    // three, in the reader's own language.
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 12,
+                        top: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _LineScanSummary(
+                              key: ValueKey('line-scan-summary-$index'),
+                              item: selected,
+                              unitName: lines[index].unitName,
+                              quantity: lines[index].quantity,
+                              language: language,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsetsDirectional.only(
@@ -1464,6 +1603,103 @@ class _LinesTable extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "مياه — 1 كرتونة": the item, the unit and the quantity, in the reader's
+/// language, in one glance.
+///
+/// Built only from what the row already holds, so it can never disagree with
+/// the fields above it. It listens to the quantity box, so it follows typing as
+/// well as a scan.
+class _LineScanSummary extends StatelessWidget {
+  const _LineScanSummary({
+    super.key,
+    required this.item,
+    required this.unitName,
+    required this.quantity,
+    required this.language,
+  });
+
+  final Json? item;
+  final String? unitName;
+  final TextEditingController quantity;
+  final String language;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: quantity,
+      builder: (context, value, _) {
+        final current = item;
+        final qty = value.text.trim();
+        if (current == null || qty.isEmpty) return const SizedBox.shrink();
+        final arabic = language == 'ar';
+        final name = arabic
+            ? text(current, 'nameAr', fallback: text(current, 'nameEn'))
+            : text(current, 'nameEn', fallback: text(current, 'nameAr'));
+        final unit = (unitName == null || unitName!.isEmpty)
+            ? text(current, 'unit')
+            : unitName!;
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          // A single sentence, so an Arabic reader and an English one both read
+          // it in the direction their locale gives them. The base equivalent is
+          // its own line further along the row, so it is not repeated here.
+          child: Text(
+            '$name — $qty $unit',
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The base-unit equivalent of a line's quantity, next to the box that holds
+/// the chosen unit's figure.
+///
+/// It listens to the quantity controller, so typing 2 next to "carton x24"
+/// immediately reads "= 48 piece" without a rebuild of the whole table. An
+/// item or unit without a known factor shows nothing rather than a guess: a
+/// wrong equivalent is worse than none, because the operator would trust it.
+class _LineBaseEquivalent extends StatelessWidget {
+  const _LineBaseEquivalent({
+    super.key,
+    required this.item,
+    required this.unitName,
+    required this.quantity,
+  });
+
+  final Json? item;
+  final String? unitName;
+  final TextEditingController quantity;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: quantity,
+      builder: (context, value, _) {
+        final equivalent = baseEquivalentLabel(
+          item: item,
+          unitName: unitName,
+          quantityText: value.text,
+        );
+        if (equivalent == null) {
+          return const SizedBox.shrink();
+        }
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            '= $equivalent',
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      },
     );
   }
 }

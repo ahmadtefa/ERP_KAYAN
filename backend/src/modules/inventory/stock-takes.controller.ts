@@ -7,6 +7,7 @@ import {
   IsIn,
   IsNumber,
   IsOptional,
+  MaxLength,
   IsString,
   ValidateNested,
 } from 'class-validator';
@@ -28,6 +29,10 @@ class StartStockTakeDto {
 class CountedLineDto {
   @IsString() lineId!: string;
   @IsNumber() countedQuantity!: number;
+  /// The unit the counter counted in, when they counted cartons rather than
+  /// pieces. Omitted means the figure already is in base units, so every
+  /// existing client keeps behaving exactly as it did.
+  @IsOptional() @IsString() @MaxLength(40) unitName?: string;
   @IsOptional() @IsString() notes?: string;
 }
 

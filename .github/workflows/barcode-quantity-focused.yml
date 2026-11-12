@@ -23,6 +23,15 @@ on:
       - 'test/widget/batches_screen_test.dart'
       - 'lib/features/inventory/presentation/screens/expiry_alerts_screen.dart'
       - 'test/widget/expiry_alerts_screen_test.dart'
+      # Phase (د): the barcode system generalised to invoices and stock takes.
+      - 'lib/shared/barcode/barcode_scan.dart'
+      - 'lib/features/invoicing/presentation/screens/invoice_editor_screen.dart'
+      - 'lib/features/inventory/presentation/screens/stock_takes_screen.dart'
+      - 'test/shared/barcode_scan_test.dart'
+      - 'test/widget/invoice_barcode_scan_test.dart'
+      - 'test/widget/invoice_unit_selection_test.dart'
+      - 'test/widget/stock_take_barcode_scan_test.dart'
+      - 'test/widget/stock_takes_screen_test.dart'
 
 permissions:
   contents: read
@@ -103,4 +112,37 @@ jobs:
         run: |
           python scripts/ci-diagnose.py flutter test \
             test/widget/expiry_alerts_screen_test.dart \
+            --reporter expanded
+
+      # Phase (د) - the scan rules themselves, as arithmetic.
+      - name: Run the shared barcode rules
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/shared/barcode_scan_test.dart \
+            --reporter expanded
+
+      # Phase (د) - scanning a sales or purchase invoice adds the item.
+      - name: Run the invoice barcode scan tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/invoice_barcode_scan_test.dart \
+            --reporter expanded
+
+      - name: Run the existing invoice unit selection tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/invoice_unit_selection_test.dart \
+            --reporter expanded
+
+      # Phase (د) - scanning a count finds the frozen line and raises it.
+      - name: Run the stock take barcode scan tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_take_barcode_scan_test.dart \
+            --reporter expanded
+
+      - name: Run the existing stock take screen tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_takes_screen_test.dart \
             --reporter expanded

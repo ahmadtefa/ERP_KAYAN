@@ -92,6 +92,36 @@ describe('stock take warehouse access', () => {
     expect(service.cancel).not.toHaveBeenCalled();
   });
 
+  it('passes the unit a count was entered in through to the service', async () => {
+    // The counter scanned a carton, so the figure and the unit it is expressed
+    // in travel together; the service is what multiplies by the factor.
+    service.record.mockResolvedValueOnce({ id: 'take-1', lines: [] });
+    await controller.record(user({ canView: true, canCount: true }), 'take-1', {
+      lines: [{ lineId: 'line-1', countedQuantity: 2, unitName: 'carton' }],
+    });
+    expect(service.record).toHaveBeenCalledWith(
+      'company-1',
+      'user-1',
+      'take-1',
+      { lines: [{ lineId: 'line-1', countedQuantity: 2, unitName: 'carton' }] },
+      ['branch-1'],
+    );
+  });
+
+  it('still accepts a bare figure, which is already in base units', async () => {
+    service.record.mockResolvedValueOnce({ id: 'take-1', lines: [] });
+    await controller.record(user({ canView: true, canCount: true }), 'take-1', {
+      lines: [{ lineId: 'line-1', countedQuantity: 2 }],
+    });
+    expect(service.record).toHaveBeenCalledWith(
+      'company-1',
+      'user-1',
+      'take-1',
+      { lines: [{ lineId: 'line-1', countedQuantity: 2 }] },
+      ['branch-1'],
+    );
+  });
+
   it('allows cancellation only after checking the count grant', async () => {
     service.cancel.mockResolvedValueOnce({ id: 'take-1', status: 'CANCELLED' });
     await expect(

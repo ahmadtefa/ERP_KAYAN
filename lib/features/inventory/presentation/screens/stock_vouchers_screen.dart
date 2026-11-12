@@ -13,8 +13,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../orders/presentation/order_retry_store.dart';
-import '../../../invoicing/presentation/screens/invoice_editor_screen.dart'
-    show lineUnitsOf;
+import '../../../../shared/barcode/barcode_scan.dart' show lineUnitsOf;
 import '../../../data/presentation/widgets/document_export_actions.dart';
 import '../providers/stock_providers.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';

@@ -11,7 +11,7 @@ import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/providers/resource_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../invoicing/presentation/providers/invoice_providers.dart';
-import '../../invoicing/presentation/screens/invoice_editor_screen.dart' show lineUnitsOf;
+import '../../../shared/barcode/barcode_scan.dart' show lineUnitsOf;
 import 'order_retry_store.dart';
 
 class _OrderLine {

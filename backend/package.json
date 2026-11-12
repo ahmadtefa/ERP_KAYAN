@@ -15,6 +15,7 @@
     "seed": "ts-node prisma/seed.ts",
     "test": "jest",
     "test:lots": "NODE_OPTIONS=--experimental-vm-modules jest src/modules/sales/sales-batches.integration.spec.ts src/modules/sales/sales-invoice-posting.integration.spec.ts src/modules/inventory/expired-issue-policy.integration.spec.ts src/modules/inventory/batch-transfer-hold.integration.spec.ts",
+    "test:pglite": "NODE_OPTIONS=--experimental-vm-modules jest src/modules/inventory/stock-takes.barcode-count.spec.ts src/modules/inventory/stock-documents.barcode-posting.spec.ts src/modules/inventory/expired-issue-policy.integration.spec.ts src/modules/inventory/batches.operations.integration.spec.ts src/modules/inventory/batch-transfer-hold.integration.spec.ts src/modules/inventory/multi-receipt.integration.spec.ts src/modules/sales/sales-batches.integration.spec.ts src/modules/sales/sales-invoice-posting.integration.spec.ts",
     "test:integration:pg": "node scripts/pglite-integration-guard.mjs",
     "lint": "eslint \"src/**/*.ts\"",
     "seed:permissions": "ts-node prisma/seed-permissions.ts",

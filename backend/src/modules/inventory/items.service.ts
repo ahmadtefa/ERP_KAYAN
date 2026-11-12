@@ -247,7 +247,16 @@ export class ItemsService {
   }
 
   private unitResponse(
-    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null },
+    unit: {
+      id: string;
+      unit: string;
+      factor: Prisma.Decimal;
+      barcode: string | null;
+      salePrice: Prisma.Decimal | null;
+      purchasePrice: Prisma.Decimal | null;
+      isDefaultSale?: boolean;
+      isDefaultPurchase?: boolean;
+    },
     baseUnit: string,
     mayReadCost = true,
   ) {
@@ -262,6 +271,13 @@ export class ItemsService {
       purchasePrice: mayReadCost
         ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
         : null,
+      // Which unit a new sales or purchase line should start on. Without these
+      // two flags the invoice screen's default-unit rule can never fire: it
+      // reads `isDefaultSale`/`isDefaultPurchase` off this very payload, so an
+      // item whose carton is the selling unit still defaulted to the base unit
+      // and a scan had to be corrected by hand on every line.
+      isDefaultSale: unit.isDefaultSale === true,
+      isDefaultPurchase: unit.isDefaultPurchase === true,
       isBase: unit.unit === baseUnit,
     };
   }
@@ -1095,6 +1111,8 @@ export class ItemsService {
       usedInSales?: boolean;
       usedInPurchases?: boolean;
       sortOrder?: number;
+      isDefaultSale?: boolean;
+      isDefaultPurchase?: boolean;
     },
     mayReadCost = true,
   ) {
@@ -1124,6 +1142,10 @@ export class ItemsService {
       usedInSales: unit.usedInSales ?? true,
       usedInPurchases: unit.usedInPurchases ?? true,
       sortOrder: unit.sortOrder ?? 0,
+      // The invoice editor picks its starting unit from these. Absent, every
+      // item defaulted to its base unit however the catalogue was configured.
+      isDefaultSale: unit.isDefaultSale === true,
+      isDefaultPurchase: unit.isDefaultPurchase === true,
       createdAt: unit.createdAt ? unit.createdAt.toISOString() : null,
     };
   }

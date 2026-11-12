@@ -149,6 +149,15 @@ export function resolveUnitSelection(input: {
   /// Which document is asking. Omitted means "any document", which is what
   /// every caller written before unit usage flags existed meant.
   purpose?: UnitPurpose;
+  /// Keep a zero result instead of refusing it.
+  ///
+  /// A document line that converts to zero would post nothing, so the shared
+  /// rule rejects it. A stock-take count is not a posting: "the shelf is
+  /// empty" is a real answer, and the unit still has to be checked before that
+  /// answer is written down. Setting this only relaxes the zero check - every
+  /// other validation (unknown unit, inactive unit, purpose, factor) still
+  /// runs, which is exactly why the caller cannot simply skip this function.
+  allowZeroBaseQuantity?: boolean;
 }): ResolvedUnit {
   const { lineLabel, enteredQuantity, baseUnitName, units } = input;
   const requestedName = normaliseLabel(input.requestedUnitName);
@@ -209,7 +218,7 @@ export function resolveUnitSelection(input: {
 
   const factor = parseFactor(row.factor, `${lineLabel} unit factor`);
   const baseQuantity = exactBaseQuantity(enteredQuantity, factor);
-  if (baseQuantity.isZero()) {
+  if (baseQuantity.isZero() && !input.allowZeroBaseQuantity) {
     throw new BadRequestException(
       `${lineLabel}: the converted quantity is zero; check the unit factor and quantity`,
     );

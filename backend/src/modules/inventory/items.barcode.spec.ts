@@ -199,6 +199,57 @@ describe('ItemsService barcode assignment', () => {
   });
 });
 
+describe('ItemsService default units', () => {
+  /// The invoice editor chooses its starting unit from these two flags. They
+  /// were on the item-unit settings screen and in the database, but never in
+  /// the items payload the editor reads - so every item defaulted to its base
+  /// unit however the catalogue was configured, and a scan had to be corrected
+  /// by hand on every line.
+  const itemWithDefaults = {
+    ...baseItem,
+    units: [
+      { ...carton, id: 'unit-piece', unit: 'piece', factor: new Prisma.Decimal('1'), barcode: null, isActive: true, isDefaultSale: false, isDefaultPurchase: false },
+      { ...carton, isActive: true, isDefaultSale: true, isDefaultPurchase: false },
+      { ...carton, id: 'unit-pallet', unit: 'pallet', factor: new Prisma.Decimal('2400'), barcode: null, isActive: true, isDefaultSale: false, isDefaultPurchase: true },
+    ],
+  };
+
+  it('sends the default selling and purchasing unit with the item', async () => {
+    const { service, prisma } = build();
+    prisma.$transaction.mockResolvedValue([[itemWithDefaults], 1]);
+
+    const result = await service.findAll('company-1', {});
+
+    const units = (result.items[0] as { units: Array<Record<string, any>> }).units ?? [];
+    const byName = Object.fromEntries(units.map((unit) => [unit.unit, unit]));
+    expect(byName['carton'].isDefaultSale).toBe(true);
+    expect(byName['carton'].isDefaultPurchase).toBe(false);
+    expect(byName['pallet'].isDefaultPurchase).toBe(true);
+    expect(byName['piece'].isDefaultSale).toBe(false);
+  });
+
+  it('sends them on a single item read too, which the picker uses', async () => {
+    const { service, prisma } = build();
+    prisma.item.findFirst.mockResolvedValue(itemWithDefaults);
+
+    const result = await service.findOne('company-1', 'item-1');
+
+    const cartonUnit = (result.units ?? []).find((unit) => unit.unit === 'carton')!;
+    expect(cartonUnit.isDefaultSale).toBe(true);
+  });
+
+  it('sends them with a barcode lookup, so a scan knows the default', async () => {
+    const { service, prisma } = build();
+    prisma.item.findFirst.mockResolvedValue(itemWithDefaults);
+
+    const result = await service.findByBarcode('company-1', '2000000000423');
+
+    const cartonUnit = (result.units ?? []).find((unit) => unit.unit === 'carton')!;
+    expect(cartonUnit.isDefaultSale).toBe(true);
+    expect(cartonUnit.isDefaultPurchase).toBe(false);
+  });
+});
+
 describe('ItemsService cost exposure', () => {
   it('lists items without the cost for a caller without the cost permission', async () => {
     const { service, prisma } = build();

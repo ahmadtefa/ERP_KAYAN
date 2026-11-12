@@ -85,7 +85,18 @@ jobs:
         run: npx prisma validate
       - name: Type-check
         run: npx tsc --noEmit
+      # The real-PostgreSQL suites (PGlite) load an ES module, which Jest can
+      # only import when the VM has dynamic import enabled. Without this flag
+      # those suites SKIPPED silently and the job reported green while proving
+      # nothing about the SQL they exist to check. They now fail loudly instead,
+      # so the flag has to be on - not optional, not per-file.
+      - name: Prove the real-database suites are not silently skipped
+        run: |
+          node -e "const j=require('./jest.config.cjs');if(!j||!j.rootDir)process.exit(1)"
+          node -e "if(!(process.env.NODE_OPTIONS||'').includes('--experimental-vm-modules')){console.error('NODE_OPTIONS must carry --experimental-vm-modules or the PGlite suites cannot run');process.exit(1)}"
       - name: Run unit tests
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
         # `| tee` reports tee's exit status, not the test run's, so without
         # `-o pipefail` a failing suite would leave this step green and the
         # whole job would pass. The log is kept because the summary step below
@@ -102,6 +113,39 @@ jobs:
         run: |
           summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Unit tests::${summary:-summary not captured}"
+      # A green run means nothing if the real-database suites merely skipped.
+      # This reads the log and fails when the PGlite counts are absent, so the
+      # silent-skip failure mode cannot come back through a flag change.
+      - name: Prove the real-database suites actually ran
+        if: always()
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          log = pathlib.Path('/tmp/kayan-jest.log')
+          if not log.exists():
+              print('::error title=PGlite suites::the test log is missing, so nothing can be proven')
+              sys.exit(1)
+          text = log.read_text(errors='replace')
+          # Jest prints one "PASS <path>" line per suite it actually executed.
+          ran = set(re.findall(r'^PASS\s+(\S+(?:stock-takes\.barcode-count|stock-documents\.barcode-posting|expired-issue-policy\.integration|batches\.operations\.integration|batch-transfer-hold\.integration|multi-receipt\.integration|sales-batches\.integration|sales-invoice-posting\.integration)\.spec\.ts)', text, re.M))
+          expected = {
+              'stock-takes.barcode-count.spec.ts',
+              'stock-documents.barcode-posting.spec.ts',
+              'expired-issue-policy.integration.spec.ts',
+              'batches.operations.integration.spec.ts',
+              'batch-transfer-hold.integration.spec.ts',
+              'multi-receipt.integration.spec.ts',
+              'sales-batches.integration.spec.ts',
+              'sales-invoice-posting.integration.spec.ts',
+          }
+          seen = {p.split('/')[-1] for p in ran}
+          missing = sorted(expected - seen)
+          print(f'::notice title=PGlite suites::executed {len(seen)}/{len(expected)}: {sorted(seen)}')
+          if missing:
+              print('::error title=PGlite suites did not run::' + ', '.join(missing))
+              sys.exit(1)
+          print('All 8 real-database suites executed; none were skipped.')
+          PY
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma

@@ -214,6 +214,48 @@ describe('Sales multi-unit — milk scenario', () => {
     expect(line.quantity.toFixed(4)).toBe('10.0000');
   });
 
+  /// The manual-unit-change case, written where the mistake would actually
+  /// happen.
+  ///
+  /// An operator scans a carton, so the screen sends `quantity: 1` with
+  /// `unitName: "كرتونة"`. Then they change their mind on the same line and pick
+  /// the piece unit. The screen keeps the figure they own ("1") and only changes
+  /// the unit. The server must therefore multiply by the NEW factor once - 1 x 1
+  /// = one piece - and not carry the carton's 10 forward and multiply it again.
+  ///
+  /// The failure this pins was real: a screen that converted on scan and then
+  /// let the server convert the already-converted figure stores 10 x 10 = 100
+  /// pieces for a line the operator believes says one piece.
+  it('a unit changed by hand converts once, with the unit finally chosen', async () => {
+    const { service, tx } = makeService();
+
+    // The same line, sent twice: once as scanned, once after the unit changed.
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      ...baseDto,
+      lines: [{ itemId: MILK, quantity: '1', unitName: 'كرتونة' }],
+    } as any);
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      ...baseDto,
+      lines: [{ itemId: MILK, quantity: '1', unitName: 'علبة' }],
+    } as any);
+
+    const asScanned = tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0];
+    const afterChange = tx.salesInvoice.create.mock.calls[1][0].data.lines.create[0];
+
+    // Scanned as a carton: one carton, ten base pieces.
+    expect(asScanned.quantity.toFixed(4)).toBe('10.0000');
+
+    // Changed to pieces: ONE piece. Not 10 (the carton's conversion carried
+    // forward), and not 100 (that figure multiplied again by the carton).
+    expect(afterChange.quantity.toFixed(4)).toBe('1.0000');
+    expect(afterChange.unitQuantity.toFixed(4)).toBe('1.0000');
+    expect(afterChange.unitFactor.toFixed(6)).toBe('1.000000');
+    expect(afterChange.unitName).toBe('علبة');
+    // The money follows the unit that was finally chosen.
+    expect(afterChange.unitPrice.toFixed(4)).toBe('9.0000');
+    expect(afterChange.grossLineTotal.toFixed(4)).toBe('9.0000');
+  });
+
   it('derives a carton price from the base price only once when no unit price exists', async () => {
     const item = {
       ...milkItem,

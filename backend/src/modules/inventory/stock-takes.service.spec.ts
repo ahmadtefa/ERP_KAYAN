@@ -48,7 +48,22 @@ describe('stock takes', () => {
       sessions: [] as Session[],
       lines: [] as Line[],
       items: [
-        { id: itemId, code: 'MILK', nameEn: 'Milk', nameAr: 'حليب', unit: 'علبة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
+        {
+          id: itemId,
+          code: 'MILK',
+          nameEn: 'Milk',
+          nameAr: 'حليب',
+          unit: 'علبة',
+          isStockTracked: true,
+          companyId: COMPANY,
+          deletedAt: null,
+          // One carton of milk holds 24 bottles: the factor a scan relies on,
+          // and the one a count must convert with exactly once.
+          units: [
+            { id: 'u-milk-base', unit: 'علبة', factor: '1', isActive: true },
+            { id: 'u-milk-carton', unit: 'كرتونة', factor: '24', isActive: true },
+          ],
+        },
         { id: 'item-plug', code: 'PLUG', nameEn: 'Plug', nameAr: 'قابس', unit: 'قطعة', isStockTracked: true, companyId: COMPANY, deletedAt: null },
         { id: 'item-service', code: 'SERVICE', nameEn: 'Service', nameAr: 'خدمة', unit: 'مرة', isStockTracked: false, companyId: COMPANY, deletedAt: null },
       ] as Session[],
@@ -139,7 +154,31 @@ describe('stock takes', () => {
           state.lines.push(row);
           return row;
         }),
-        findFirst: jest.fn(async ({ where }: any) => state.lines.find((line) => matches(line, where)) ?? null),
+        findFirst: jest.fn(async ({ where, select }: any) => {
+          const line = state.lines.find((row) => matches(row, where));
+          if (!line) return null;
+          // `record` asks for the item so it can convert a count entered in a
+          // packing unit. The fake answers with the shape a real database
+          // would, including the item's unit table.
+          if (select?.item) {
+            const item = state.items.find((row) => row.id === line.itemId);
+            return {
+              ...line,
+              item: item
+                ? {
+                    unit: item.unit,
+                    units: (item.units ?? []).map((unit: any) => ({
+                      id: unit.id,
+                      unit: unit.unit,
+                      factor: D(unit.factor),
+                      isActive: unit.isActive !== false,
+                    })),
+                  }
+                : null,
+            };
+          }
+          return line;
+        }),
         update: jest.fn(async ({ where, data }: any) => {
           const row = state.lines.find((line) => matches(line, where));
           if (!row) throw new Error('line not found');
@@ -441,6 +480,204 @@ describe('stock takes', () => {
     expect(line.varianceValue.toFixed(4)).toBe('-30.0000');
     expect(line.countedBy).toBe(COUNTER);
     expect(line.countedAt).toBeInstanceOf(Date);
+  });
+
+  it('counts one carton as 24 bottles, once, and books the variance in base units', async () => {
+    // The scanner found a carton of milk. The counter typed 1, meaning one
+    // carton, and sent the unit with it. The shelf says one carton; the book
+    // froze 48 bottles.
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 1, unitName: 'كرتونة' }],
+    });
+
+    // Exactly 24, not 576: the factor was applied once, on the server.
+    expect(line.countedQuantity.toFixed(4)).toBe('24.0000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('-24.0000');
+    // The variance is valued at the frozen unit cost of 10.
+    expect(line.varianceValue.toFixed(4)).toBe('-240.0000');
+  });
+
+  it('two cartons counted by scan become 48 bottles with no variance', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 2, unitName: 'كرتونة' }],
+    });
+
+    expect(line.countedQuantity.toFixed(4)).toBe('48.0000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('0.0000');
+    expect(line.varianceValue.toFixed(4)).toBe('0.0000');
+  });
+
+  it('records a shelf found empty, counted in cartons as zero', async () => {
+    // "There are none left" is a real count. Zero cartons is zero bottles, and
+    // the shared conversion helper refuses a zero result because on a document
+    // line it means a posting that would move nothing - here it means the shelf
+    // is empty, which is exactly what the count has to say.
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 0, unitName: 'كرتونة' }],
+    });
+
+    expect(line.countedQuantity.toFixed(4)).toBe('0.0000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('-48.0000');
+    expect(line.varianceValue.toFixed(4)).toBe('-480.0000');
+  });
+
+  /// A zero count used to skip the unit check entirely, so a misspelled or
+  /// inactive unit was accepted the moment the figure was zero. The counter
+  /// believed they had counted a carton; the session recorded a zero it never
+  /// validated. These two pin that the unit is still checked.
+  it('refuses a zero count that names a unit the item does not have', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await expect(
+      harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+        lines: [{ lineId: line.id, countedQuantity: 0, unitName: 'صندوق' }],
+      }),
+    ).rejects.toThrow(/is not defined for this item/);
+
+    // Nothing was written: the line is still uncounted.
+    expect(line.countedQuantity).toBeNull();
+  });
+
+  it('refuses a zero count that names an inactive unit', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+    // Retire the carton after the session froze its lines. The unit lives on
+    // the seeded item, which is where the service reads it from.
+    const milk = harness.state.items.find((row) => row.id === 'item-milk')!;
+    const carton = milk.units.find((row: any) => row.unit === 'كرتونة');
+    carton.isActive = false;
+
+    await expect(
+      harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+        lines: [{ lineId: line.id, countedQuantity: 0, unitName: 'كرتونة' }],
+      }),
+    ).rejects.toThrow(/inactive/);
+
+    expect(line.countedQuantity).toBeNull();
+  });
+
+  it('still keeps a valid zero count as zero, not as a rejected read', async () => {
+    // The counterpart to the two above: a *valid* unit with a zero figure must
+    // still be accepted, or the fix would have broken "the shelf is empty".
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 0, unitName: 'كرتونة' }],
+    });
+
+    expect(line.countedQuantity.toFixed(4)).toBe('0.0000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('-48.0000');
+  });
+
+  it('counts in pieces when no unit is named, as every older client does', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 30 }],
+    });
+
+    // A bare figure is a figure in base units, so nothing was multiplied.
+    expect(line.countedQuantity.toFixed(4)).toBe('30.0000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('-18.0000');
+  });
+
+  it('refuses a unit the item does not have, and records nothing', async () => {
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-milk', quantity: D('48'), value: D('480') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-milk')!;
+
+    await expect(
+      harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+        lines: [{ lineId: line.id, countedQuantity: 1, unitName: 'شيكارة' }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    // No half-recorded count: the transaction rolled back the line.
+    expect(line.countedQuantity).toBeNull();
+  });
+
+  it('counts a cup whose unit is fractional without inflating the count', async () => {
+    // A half-litre cup is a legitimate packing unit; the conversion must keep
+    // the fraction, not round it away.
+    const harness = withWarehouse(
+      makeHarness({
+        balances: [{ companyId: COMPANY, warehouseId: WAREHOUSE, itemId: 'item-plug', quantity: D('10'), value: D('100') }],
+      }),
+      { id: WAREHOUSE, branchId: BRANCH },
+    );
+    // Give this item a float-tolerant unit table for the test.
+    harness.state.items.find((row) => row.id === 'item-plug')!.units = [
+      { id: 'u-plug-base', unit: 'قطعة', factor: '1', isActive: true },
+      { id: 'u-plug-half', unit: 'نصف', factor: '0.5', isActive: true },
+    ];
+    await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+    const line = harness.state.lines.find((row) => row.itemId === 'item-plug')!;
+
+    await harness.service.record(COMPANY, COUNTER, harness.state.sessions[0].id, {
+      lines: [{ lineId: line.id, countedQuantity: 3, unitName: 'نصف' }],
+    });
+
+    expect(line.countedQuantity.toFixed(4)).toBe('1.5000');
+    expect(line.varianceQuantity.toFixed(4)).toBe('-8.5000');
   });
 
   it('refuses a negative count and a line from another session', async () => {
