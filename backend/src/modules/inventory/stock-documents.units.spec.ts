@@ -107,6 +107,36 @@ describe('stock documents with multiple units', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('accepts a zero stock count in an active carton unit and retains the unit snapshot', async () => {
+    const { service, tx } = makeService();
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      kind: StockDocumentKind.COUNT,
+      branchId: BRANCH,
+      documentDate: '2026-10-27',
+      lines: [{ itemId: MILK, quantity: '0', countedQuantity: '0', unitName: 'كرتونة' }],
+    });
+    const line = tx.stockDocument.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.countedQuantity.toFixed(4)).toBe('0.0000');
+    expect(line.unitName).toBe('كرتونة');
+    expect(line.unitFactor.toFixed(6)).toBe('10.000000');
+  });
+
+  it('rejects a zero stock count with an inactive or unknown unit', async () => {
+    for (const [item, unitName] of [
+      [{ ...milkItem, units: [milkItem.units[0], { ...milkItem.units[1], isActive: false }] }, 'كرتونة'],
+      [milkItem, 'unknown-unit'],
+    ] as const) {
+      const { service, tx } = makeService(item);
+      await expect(service.create(COMPANY, BRANCH, 'user-1', {
+        kind: StockDocumentKind.COUNT,
+        branchId: BRANCH,
+        documentDate: '2026-10-27',
+        lines: [{ itemId: MILK, quantity: '0', countedQuantity: '0', unitName }],
+      })).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.stockDocument.create).not.toHaveBeenCalled();
+    }
+  });
+
   it('a legacy line without a unit keeps its base quantity and a null snapshot', async () => {
     const { service, tx } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {
