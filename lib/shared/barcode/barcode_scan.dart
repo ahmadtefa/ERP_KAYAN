@@ -228,7 +228,7 @@ class BarcodeMatch {
         'Barcode $code carries a conversion factor that is not a number: "$rawFactor"',
       );
     }
-    if (!parsed.isFinite || parsed <= Decimal.zero) {
+    if (parsed <= Decimal.zero) {
       throw FormatException(
         'Barcode $code carries a conversion factor that must be greater than zero, got "$rawFactor"',
       );

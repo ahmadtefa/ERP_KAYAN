@@ -584,11 +584,10 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
             final unit = match.matched == 'unit' && match.unit.isNotEmpty
                 ? match.unit
                 : lineUnit;
+            final nextCount = _quantityAfterCountScan(target, unit, lineUnit);
             _scanUnits[text(target, 'id')] = unit;
             _scanFactors[text(target, 'id')] = match.factor;
-            _counts[text(target, 'id')] = plainQuantity(
-              _quantityAfterCountScan(target, unit, lineUnit),
-            );
+            _counts[text(target, 'id')] = plainQuantity(nextCount);
             _lastScannedLineId = text(target, 'id');
             _barcode.clear();
           });
@@ -628,7 +627,7 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   ///
   /// Returns null when the operator backs out, which must leave the count
   /// untouched - a cancelled question is not an answer.
-  Future<Json?> _chooseCountLine(Json match, List<Json> lines) async {
+  Future<Json?> _chooseCountLine(BarcodeMatch match, List<Json> lines) async {
     final chosen = await showDialog<Json>(
       context: context,
       builder: (dialogContext) {

@@ -4,6 +4,7 @@ import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
+import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,25 +56,32 @@ Map<String, dynamic> waterItem({bool defaultSaleCarton = true}) => {
 };
 
 class _ScanApi extends ApiClient {
-  _ScanApi({this.unknown = false, this.truncated = false})
-    : super(
-        const AppConfig(
-          environment: AppEnvironment.development,
-          apiBaseUrl: 'https://test.invalid/api/v1',
-          connectTimeout: Duration(seconds: 1),
-          receiveTimeout: Duration(seconds: 1),
-        ),
-        FakeTokenStore(),
-      );
+  _ScanApi({
+    this.unknown = false,
+    this.truncated = false,
+    this.badFactor = false,
+    this.defaultSaleCarton = true,
+  }) : super(
+         const AppConfig(
+           environment: AppEnvironment.development,
+           apiBaseUrl: 'https://test.invalid/api/v1',
+           connectTimeout: Duration(seconds: 1),
+           receiveTimeout: Duration(seconds: 1),
+         ),
+         FakeTokenStore(),
+       );
 
   /// When true the lookup answers 404, the "no such barcode" case.
   bool unknown;
+
   /// When true the lookup answers 200 with a body that carries no item.
   bool truncated;
+
   /// When true the lookup answers 200 with a carton response whose conversion
   /// factor is unusable, which is the case the screen must refuse rather than
   /// silently treat as one base unit.
-  bool badFactor = false;
+  bool badFactor;
+  final bool defaultSaleCarton;
   final scanned = <String>[];
   Map<String, dynamic>? postedBody;
 
@@ -86,10 +94,13 @@ class _ScanApi extends ApiClient {
       final code = Uri.decodeComponent(path.split('/').last);
       scanned.add(code);
       if (unknown) {
-        throw const ApiFailure('No item or unit carries this barcode', statusCode: 404);
+        throw const ApiFailure(
+          'No item or unit carries this barcode',
+          statusCode: 404,
+        );
       }
       if (truncated) return {'matched': 'unit'};
-      final item = waterItem();
+      final item = waterItem(defaultSaleCarton: defaultSaleCarton);
       if (badFactor) {
         // A unit label whose factor is missing: the server answered, but what
         // it said cannot be converted. 24 would have been plausible; nothing
@@ -245,9 +256,13 @@ void main() {
 
     await scan(tester, 'CARTON');
     // Past the repeat guard: a real second press of the trigger.
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
 
     expect(quantityText(tester, 0), '3');
@@ -261,7 +276,9 @@ void main() {
   ) async {
     await pumpInvoice(tester);
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
 
     expect(find.byType(DropdownButtonFormField<String>), findsWidgets);
@@ -302,9 +319,13 @@ void main() {
   ) async {
     final api = await pumpInvoice(tester, kind: InvoiceKind.purchase);
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
 
     final supplier = find.byType(DropdownButtonFormField<String>).first;
@@ -327,7 +348,7 @@ void main() {
   testWidgets('an item label uses the base unit when the catalogue says so', (
     tester,
   ) async {
-    final api = _ScanApi();
+    final api = _ScanApi(defaultSaleCarton: false);
     tester.view.physicalSize = const Size(2000, 1300);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -344,7 +365,7 @@ void main() {
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: InvoiceEditorScreen(kind: kind),
+          home: const InvoiceEditorScreen(kind: InvoiceKind.sales),
         ),
       ),
     );
@@ -356,32 +377,35 @@ void main() {
     expect(quantityText(tester, 0), '1');
   });
 
-  testWidgets('changing the unit by hand does not double-convert the quantity', (
-    tester,
-  ) async {
-    await pumpInvoice(tester);
-    await scan(tester, 'CARTON');
-    expect(quantityText(tester, 0), '1');
+  testWidgets(
+    'changing the unit by hand does not double-convert the quantity',
+    (tester) async {
+      await pumpInvoice(tester);
+      await scan(tester, 'CARTON');
+      expect(quantityText(tester, 0), '1');
 
-    // Choosing "piece" by hand keeps the figure the operator owns; the server
-    // converts "1 piece" to one base unit, never 24.
-    await tester.tap(find.byKey(const ValueKey('line-unit-0')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('piece').last);
-    await tester.pumpAndSettle();
+      // Choosing "piece" by hand keeps the figure the operator owns; the server
+      // converts "1 piece" to one base unit, never 24.
+      await tester.tap(find.byKey(const ValueKey('line-unit-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('piece').last);
+      await tester.pumpAndSettle();
 
-    expect(selectedUnit(tester, 0), 'piece');
-    expect(quantityText(tester, 0), '1');
-    // A base unit has no equivalent line, because the two numbers are equal.
-    expect(find.textContaining('= 1 piece ='), findsNothing);
-  });
+      expect(selectedUnit(tester, 0), 'piece');
+      expect(quantityText(tester, 0), '1');
+      // A base unit has no equivalent line, because the two numbers are equal.
+      expect(find.textContaining('= 1 piece ='), findsNothing);
+    },
+  );
 
   testWidgets('a repeat scan adds to the figure already typed on the line', (
     tester,
   ) async {
     await pumpInvoice(tester);
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
 
     // A second, different scan must not overwrite the first line.
     await tester.tap(find.byKey(const ValueKey('line-unit-0')));
@@ -417,68 +441,71 @@ void main() {
     expect(selectedUnit(tester, 0), isNull);
   });
 
-  testWidgets('a truncated read keeps the line and says the label did not read', (
-    tester,
-  ) async {
-    final api = _ScanApi(truncated: true);
-    await pumpInvoice(tester, api: api);
+  testWidgets(
+    'a truncated read keeps the line and says the label did not read',
+    (tester) async {
+      final api = _ScanApi(truncated: true);
+      await pumpInvoice(tester, api: api);
 
-    await scan(tester, 'BROKEN');
+      await scan(tester, 'BROKEN');
 
-    expect(find.textContaining('BROKEN'), findsWidgets);
-    // The error dialog renders its button in Arabic whatever the ambient
-    // locale (app_error_dialog.dart uses AppLocalizationsAr), so the test
-    // dismisses the button it actually shows.
-    await tester.tap(find.text('حسنًا'));
-    await tester.pumpAndSettle();
-    expect(quantityText(tester, 0), '1');
-    expect(selectedUnit(tester, 0), isNull);
-  });
+      expect(find.textContaining('BROKEN'), findsWidgets);
+      // The error dialog renders its button in Arabic whatever the ambient
+      // locale (app_error_dialog.dart uses AppLocalizationsAr), so the test
+      // dismisses the button it actually shows.
+      await tester.tap(find.text('حسنًا'));
+      await tester.pumpAndSettle();
+      expect(quantityText(tester, 0), '1');
+      expect(selectedUnit(tester, 0), isNull);
+    },
+  );
 
   /// A response that arrived but cannot be trusted must not crash the screen
   /// and must not add anything. This is the runtime half of `fromResponse`:
   /// the unit tests prove the FormatException is thrown, these prove the
   /// screen survives it and tells the operator something useful.
-  testWidgets('a carton whose conversion factor is missing is rejected without adding a line', (
-    tester,
-  ) async {
-    final api = _ScanApi(badFactor: true);
-    await pumpInvoice(tester, api: api);
+  testWidgets(
+    'a carton whose conversion factor is missing is rejected without adding a line',
+    (tester) async {
+      final api = _ScanApi(badFactor: true);
+      await pumpInvoice(tester, api: api);
 
-    await scan(tester, 'CARTON');
+      await scan(tester, 'CARTON');
 
-    // The screen is still alive and still shows its own controls.
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('invoice-barcode')), findsOneWidget);
+      // The screen is still alive and still shows its own controls.
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('invoice-barcode')), findsOneWidget);
 
-    // No line was added: the invoice started with exactly one empty line, and
-    // it still holds exactly one.
-    expect(
-      find.byKey(const ValueKey('line-quantity-0')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('line-quantity-1')), findsNothing);
-    expect(quantityText(tester, 0), '1');
-    expect(selectedUnit(tester, 0), isNull);
-  });
+      // No line was added: the invoice started with exactly one empty line, and
+      // it still holds exactly one.
+      expect(find.byKey(const ValueKey('line-quantity-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('line-quantity-1')), findsNothing);
+      expect(quantityText(tester, 0), '1');
+      expect(selectedUnit(tester, 0), isNull);
+    },
+  );
 
-  testWidgets('the rejection explains the data problem, not just "scan again"', (
-    tester,
-  ) async {
-    final api = _ScanApi(badFactor: true);
-    await pumpInvoice(tester, api: api);
+  testWidgets(
+    'the rejection explains the data problem, not just "scan again"',
+    (tester) async {
+      final api = _ScanApi(badFactor: true);
+      await pumpInvoice(tester, api: api);
 
-    await scan(tester, 'CARTON');
+      await scan(tester, 'CARTON');
 
-    // Retrying produces the same broken answer, so the sentence must point at
-    // the item data instead of telling the operator to scan again.
-    expect(find.textContaining('incomplete or contradictory'), findsOneWidget);
-    expect(find.textContaining('Nothing was added'), findsOneWidget);
+      // Retrying produces the same broken answer, so the sentence must point at
+      // the item data instead of telling the operator to scan again.
+      expect(
+        find.textContaining('incomplete or contradictory'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Nothing was added'), findsOneWidget);
 
-    await tester.tap(find.text('حسنًا'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('line-quantity-1')), findsNothing);
-  });
+      await tester.tap(find.text('حسنًا'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('line-quantity-1')), findsNothing);
+    },
+  );
 
   testWidgets('a rejected scan leaves a figure already typed on the line', (
     tester,
@@ -487,10 +514,7 @@ void main() {
     await pumpInvoice(tester, api: api);
 
     // The operator typed a figure by hand before scanning.
-    await tester.enterText(
-      find.byKey(const ValueKey('line-quantity-0')),
-      '7',
-    );
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '7');
     await tester.pumpAndSettle();
 
     await scan(tester, 'CARTON');
@@ -520,7 +544,9 @@ void main() {
   ) async {
     final api = await pumpInvoice(tester);
     await scan(tester, 'CARTON');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'CARTON');
 
     // Choose the customer and save: the payload must carry 2 cartons, so the

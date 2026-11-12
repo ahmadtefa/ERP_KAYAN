@@ -2,6 +2,7 @@
 // voucher screen, so the test imports them from their own home rather than
 // through the invoice editor that used to declare them.
 import 'package:erp_kayan/shared/barcode/barcode_scan.dart';
+import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

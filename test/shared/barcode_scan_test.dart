@@ -332,6 +332,7 @@ void main() {
 
     test('purchase and sales defaults are read separately', () {
       final item = {
+        'id': 'item-default-units',
         'unit': 'piece',
         'units': [
           {'unit': 'piece', 'factor': '1'},
@@ -364,6 +365,7 @@ void main() {
 
     test('an item with no default falls back to its own base unit', () {
       final item = {
+        'id': 'item-base-unit',
         'unit': 'piece',
         'units': [
           {'unit': 'piece', 'factor': '1'},

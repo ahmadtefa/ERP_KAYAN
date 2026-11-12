@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_takes_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:erp_kayan/shared/barcode/barcode_scan.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,7 @@ class _CountApi extends ApiClient {
       );
 
   bool unknown;
+
   /// The scanned item is stocked in two lots, which is the case the screen used
   /// to resolve by silently taking the first one.
   bool multipleLots = false;
@@ -115,11 +117,25 @@ class _CountApi extends ApiClient {
   }) async {
     if (path == '/inventory/warehouses') {
       return [
-        {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'المخزن الرئيسي'},
+        {
+          'id': 'wh-1',
+          'code': 'MAIN',
+          'nameEn': 'Main store',
+          'nameAr': 'المخزن الرئيسي',
+        },
       ];
     }
     if (path == '/inventory/items') {
-      return [_water, {'id': 'item-plug', 'code': 'PLUG', 'nameEn': 'Plug', 'nameAr': 'قابس', 'unit': 'piece'}];
+      return [
+        _water,
+        {
+          'id': 'item-plug',
+          'code': 'PLUG',
+          'nameEn': 'Plug',
+          'nameAr': 'قابس',
+          'unit': 'piece',
+        },
+      ];
     }
     if (path == '/inventory/stock-takes') {
       return [
@@ -156,14 +172,22 @@ class _CountApi extends ApiClient {
       final code = Uri.decodeComponent(path.split('/').last);
       scanned.add(code);
       if (unknown) {
-        throw const ApiFailure('No item or unit carries this barcode', statusCode: 404);
+        throw const ApiFailure(
+          'No item or unit carries this barcode',
+          statusCode: 404,
+        );
       }
       if (code == 'PLUG') {
         return {
           'matched': 'item',
           'unit': 'piece',
           'factor': '1.000000',
-          'item': {'id': 'item-plug', 'code': 'PLUG', 'nameEn': 'Plug', 'unit': 'piece'},
+          'item': {
+            'id': 'item-plug',
+            'code': 'PLUG',
+            'nameEn': 'Plug',
+            'unit': 'piece',
+          },
         };
       }
       return {
@@ -256,6 +280,11 @@ void main() {
         .whereType<ValueKey<String>>()
         .map((key) => key.value)
         .where((value) => value.startsWith(prefix))
+        .where(
+          (value) =>
+              value.substring(prefix.length).isEmpty ||
+              !value.substring(prefix.length).startsWith('lot-'),
+        )
         .toList();
     expect(keys, hasLength(1), reason: 'exactly one counted box for $lineId');
     return keys.single.substring(prefix.length);
@@ -296,9 +325,13 @@ void main() {
     await openCount(tester);
 
     await scan(tester, 'WATER');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'WATER');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'WATER');
 
     expect(countedValue(tester, 'line-water'), '3');
@@ -306,9 +339,7 @@ void main() {
     expect(lineCount(tester), 2);
   });
 
-  testWidgets('scanning a different item counts its own line', (
-    tester,
-  ) async {
+  testWidgets('scanning a different item counts its own line', (tester) async {
     await openCount(tester);
 
     await scan(tester, 'WATER');
@@ -329,9 +360,13 @@ void main() {
     // lines were frozen when the session opened and the adjustment is booked
     // per line.
     await scan(tester, 'WATER');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'WATER');
-    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 850)),
+    );
     await scan(tester, 'WATER');
 
     expect(lineCount(tester), 2, reason: 'still the two frozen lines');
@@ -372,7 +407,7 @@ void main() {
     await tester.tap(find.text('ST-001').first);
     await tester.pumpAndSettle();
 
-    final field = tester.widget<TextFormField>(
+    final field = tester.widget<BarcodeScanField>(
       find.byKey(const ValueKey('stock-take-barcode')),
     );
     expect(field.enabled, isFalse);

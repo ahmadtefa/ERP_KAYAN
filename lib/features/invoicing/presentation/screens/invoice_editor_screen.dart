@@ -33,6 +33,13 @@ bool maySuggestUnitPrice(
 }) =>
     automatic || (!edited && (current.trim().isEmpty || current.trim() == '0'));
 
+Json? itemForInvoiceLine(List<Json> items, String? itemId) {
+  for (final item in items) {
+    if (text(item, 'id') == itemId) return item;
+  }
+  return null;
+}
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
@@ -1437,7 +1444,7 @@ class _LinesTable extends StatelessWidget {
                           width: 150,
                           child: _LineBaseEquivalent(
                             key: ValueKey('line-base-equivalent-$index'),
-                            item: selected,
+                            item: itemForInvoiceLine(items, lines[index].itemId),
                             unitName: lines[index].unitName,
                             quantity: lines[index].quantity,
                           ),
@@ -1511,7 +1518,7 @@ class _LinesTable extends StatelessWidget {
                           Expanded(
                             child: _LineScanSummary(
                               key: ValueKey('line-scan-summary-$index'),
-                              item: selected,
+                              item: itemForInvoiceLine(items, lines[index].itemId),
                               unitName: lines[index].unitName,
                               quantity: lines[index].quantity,
                               language: language,
