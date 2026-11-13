@@ -119,7 +119,7 @@ assert.match(source, /ci-no-signing\.cjs/);
 const integrity = read('code-integrity.yml');
 assert.deepEqual(integrity.on, safe.on, 'Additional code checks must run on the same PR and main events');
 assert.deepEqual(integrity.permissions, { contents: 'read' });
-assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build']);
+assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build', 'work-setup', 'work-setup-inspection']);
 const accounting = integrity.jobs['accounting-and-packaging-policy'];
 assert.ok(!accounting.env?.NODE_OPTIONS, 'preload guard cannot run before checkout provides it');
 for (const step of accounting.steps.filter((step) => step.run && /npm ci|prisma generate|npm test|node --test/.test(step.run))) {
@@ -131,8 +131,12 @@ assert.match(integritySource, /ci-no-signing\.cjs/);
 for (const path of ['opening-balances.controller.spec.ts', 'opening-balances.service.spec.ts', 'posting.service.spec.ts', 'year-end-close.service.spec.ts', 'migrate-deploy.test.mjs', 'windows-policy-non-signing.test.mjs']) {
   assert.ok(integritySource.includes(path), `Additional required code test missing: ${path}`);
 }
-for (const job of Object.values(integrity.jobs)) {
-  assert.equal(job.if, undefined, 'Required code job must not be skipped');
+const packageCondition = "github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances'";
+for (const [name, job] of Object.entries(integrity.jobs)) {
+  const packages = name === 'work-setup' || name === 'work-setup-inspection';
+  assert.equal(job.if, packages ? packageCondition : undefined);
+  assert.equal(job.environment, undefined);
+  assert.equal(job.permissions, undefined);
   assert.equal(job['continue-on-error'], undefined, 'Required code job must not mask failures');
   const checkout = job.steps.find(step => String(step.uses ?? '').startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
@@ -142,6 +146,10 @@ for (const job of Object.values(integrity.jobs)) {
     assert.doesNotMatch(String(step.run ?? ''), /(?:\|\|\s*true|\bexit\s+0\b)/);
   }
 }
+assert.deepEqual(integrity.jobs['work-setup'].needs, ['accounting-and-packaging-policy', 'windows-build']);
+assert.equal(integrity.jobs['work-setup-inspection'].needs, 'work-setup');
+assert.match(integrity.jobs['work-setup'].steps.find(step => step.name?.startsWith('Build offline Setup')).env.NODE_OPTIONS, /ci-no-signing\.cjs/);
+assert.doesNotMatch(integritySource, /(?:TestSignedBuild|EvaluationBuild|gh release|VERYSILENT|Restart-Computer)/);
 for (const job of Object.values(safe.jobs)) {
   const checkout = job.steps.find(step => String(step.uses ?? '').startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}', 'Code checks must use the exact source head');
