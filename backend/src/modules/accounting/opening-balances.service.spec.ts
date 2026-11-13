@@ -99,6 +99,7 @@ describe('OpeningBalancesService', () => {
     expect(tx.openingBalance.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'opening-id',
+        updatedAt: undefined,
         companyId: 'company-id',
         status: InvoiceStatus.DRAFT,
         deletedAt: null,

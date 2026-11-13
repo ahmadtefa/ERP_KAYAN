@@ -7,8 +7,8 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../dashboard/presentation/providers/dashboard_providers.dart';
-import 'journal_entries_screen.dart';
+import '../../../cash/presentation/providers/cash_providers.dart';
+import 'opening_balance_draft_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../inventory/presentation/screens/stock_screen.dart';
@@ -45,7 +45,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final client = ref.read(apiClientProvider);
     final id = widget.documentId;
     if (id != null) return client.getObject('/accounting/opening-balances/$id');
-    return client.getObject('/accounting/opening-balances').then((value) => value);
+    return client
+        .getObject('/accounting/opening-balances')
+        .then((value) => value);
   }
 
   void _refresh() {
@@ -80,170 +82,73 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         // Reload the document and all dependent ledger/stock/dashboard views.
         _refresh();
         ref.invalidate(stockListProvider);
-        ref.invalidate(journalEntriesProvider);
-        invalidateDashboardAndReports(ref);
+        invalidateMoneyViews(ref);
         setState(() => _busy = false);
       }
     }
   }
 
-  Future<void> _manualEntry() async {
-    final api = ref.read(apiClientProvider);
-    final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    final date = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
-    final amounts = <TextEditingController>[TextEditingController()];
-    final selectedAccounts = <String?>[null];
-    String? balancingAccount;
+  Future<void> _manualEntry([Map<String, dynamic>? draft]) async {
+    if (_busy) return;
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+    setState(() => _busy = true);
     try {
-      final responses = await Future.wait([
-        api.getObject('/accounting/chart-of-accounts'),
-        api.getObject('/cash/accounts'),
-      ]);
-      final accounts = (responses[0]['items'] as List? ?? const [])
-          .whereType<Map>().map(Map<String, dynamic>.from)
-          .where((a) => a['isPostable'] == true && a['isActive'] != false)
-          .toList();
-      final cashAccounts = (responses[1]['items'] as List? ?? const [])
-          .whereType<Map>().map(Map<String, dynamic>.from)
-          .where((a) => a['isActive'] != false && a['accountId'] != null)
-          .toList();
-      if (!mounted) return;
-      if (cashAccounts.isEmpty || accounts.isEmpty) {
-        showMessage(context, arabic ? 'أضف حساب بنك أو خزنة وحسابًا محاسبيًا أولًا' : 'Create a bank or cash account and ledger account first', error: true);
-        return;
-      }
-      String label(Map<String, dynamic> a) {
-        final preferred = (a[arabic ? 'nameAr' : 'nameEn'] ?? '').toString().trim();
-        final fallback = (a[arabic ? 'nameEn' : 'nameAr'] ?? '').toString().trim();
-        return '${a['code'] ?? ''} - ${preferred.isNotEmpty ? preferred : fallback}';
-      }
-      final saved = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, update) => AlertDialog(
-            title: Text(arabic ? 'الأرصدة الافتتاحية للبنوك والخزائن' : 'Bank and cash opening balances'),
-            content: SizedBox(
-              width: 550,
-              child: SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  for (var i = 0; i < amounts.length; i++) ...[
-                    Row(children: [
-                      Expanded(
-                        flex: 3,
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey('cash-account-$i'),
-                          isExpanded: true,
-                          initialValue: selectedAccounts[i],
-                          decoration: InputDecoration(labelText: arabic ? 'البنك / الخزنة' : 'Bank / cash'),
-                          items: cashAccounts.map((a) => DropdownMenuItem<String>(
-                            value: a['accountId'].toString(),
-                            child: Text(label(a), overflow: TextOverflow.ellipsis),
-                          )).toList(),
-                          onChanged: (v) => update(() => selectedAccounts[i] = v),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: amounts[i],
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: InputDecoration(labelText: arabic ? 'الرصيد' : 'Balance'),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: arabic ? 'حذف السطر' : 'Remove row',
-                        onPressed: amounts.length <= 1 ? null : () => update(() {
-                          selectedAccounts.removeAt(i);
-                          amounts.removeAt(i).dispose();
-                        }),
-                        icon: const Icon(Icons.remove_circle_outline),
-                      ),
-                    ]),
-                  ],
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton.icon(
-                      onPressed: () => update(() {
-                        selectedAccounts.add(null);
-                        amounts.add(TextEditingController());
-                      }),
-                      icon: const Icon(Icons.add),
-                      label: Text(arabic ? 'إضافة بنك أو خزنة' : 'Add bank or cash'),
-                    ),
-                  ),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: balancingAccount,
-                    decoration: InputDecoration(labelText: arabic ? 'الحساب المقابل للأرصدة' : 'Balancing account'),
-                    items: accounts.map((a) => DropdownMenuItem<String>(
-                      value: a['id'].toString(),
-                      child: Text(label(a), overflow: TextOverflow.ellipsis),
-                    )).toList(),
-                    onChanged: (v) => update(() => balancingAccount = v),
-                  ),
-                  TextField(controller: date, decoration: InputDecoration(
-                    labelText: arabic ? 'تاريخ الأرصدة (YYYY-MM-DD)' : 'Opening date (YYYY-MM-DD)')),
-                ]),
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false),
-                child: Text(arabic ? 'إلغاء' : 'Cancel')),
-              FilledButton(
-                onPressed: () async {
-                  final ids = selectedAccounts.whereType<String>().toList();
-                  final entered = amounts.map((a) => a.text.trim()).toList();
-                  final amountPattern = RegExp(r'^\d+(?:\.\d{1,4})?$');
-                  final dateText = date.text.trim();
-                  final parsedDate = DateTime.tryParse(dateText);
-                  final valid = ids.length == amounts.length &&
-                      ids.toSet().length == ids.length &&
-                      balancingAccount != null &&
-                      !ids.contains(balancingAccount) &&
-                      entered.every((value) => amountPattern.hasMatch(value) &&
-                          BigInt.parse(value.replaceAll('.', '')) > BigInt.zero) &&
-                      parsedDate != null &&
-                      parsedDate.toIso8601String().substring(0, 10) == dateText;
-                  if (!valid) {
-                    showMessage(ctx, arabic ? 'راجع الحسابات والمبالغ والتاريخ، ولا تكرر الحساب' : 'Check accounts, positive balances, duplicates and date', error: true);
-                    return;
-                  }
-                  try {
-                    final totalMinor = entered.fold<BigInt>(BigInt.zero, (sum, value) {
-                      final parts = value.split('.');
-                      final fractional = parts.length == 2 ? parts[1].padRight(4, '0') : '0000';
-                      return sum + BigInt.parse(parts[0]) * BigInt.from(10000) +
-                          BigInt.parse(fractional);
-                    });
-                    final total = '${totalMinor ~/ BigInt.from(10000)}.${(totalMinor % BigInt.from(10000)).toString().padLeft(4, '0')}';
-                    await api.post('/accounting/opening-balances', body: {
-                      'asOfDate': date.text.trim(),
-                      'description': arabic ? 'أرصدة بنوك وخزائن افتتاحية' : 'Opening bank and cash balances',
-                      'lines': [
-                        for (var i = 0; i < ids.length; i++)
-                          {'accountId': ids[i], 'debit': amounts[i].text.trim(), 'credit': '0'},
-                        {'accountId': balancingAccount, 'debit': '0', 'credit': total},
-                      ],
-                    });
-                    if (ctx.mounted) Navigator.pop(ctx, true);
-                  } catch (e) {
-                    if (ctx.mounted) showMessage(ctx, e, error: true);
-                  }
-                },
-                child: Text(arabic ? 'حفظ مسودة للمراجعة' : 'Save draft for review'),
-              ),
-            ],
-          ),
-        ),
+      final saved = await showOpeningBalanceDraft(
+        context,
+        ref.read(apiClientProvider),
+        user,
+        draft: draft,
       );
       if (saved == true && mounted) _refresh();
-    } catch (e) {
-      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
     } finally {
-      date.dispose();
-      for (final controller in amounts) {
-        controller.dispose();
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _changeDocument(String id, {required bool reverse}) async {
+    if (_busy) return;
+    final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final title = reverse
+        ? l10n.reverse
+        : (arabic ? 'حذف المسودة' : 'Delete draft');
+    final confirmed = await confirmAction(
+      context,
+      title: title,
+      message: reverse
+          ? (arabic
+                ? 'عكس القيد وحركات المخزون؟'
+                : 'Reverse the journal and stock movements?')
+          : (arabic
+                ? 'حذف مسودة الأرصدة الافتتاحية؟'
+                : 'Delete this opening balance draft?'),
+      confirmLabel: title,
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _busy = true);
+    final api = ref.read(apiClientProvider);
+    final path = '/accounting/opening-balances/$id';
+    try {
+      if (reverse) {
+        await api.post('$path/reverse');
+      } else {
+        await api.delete(path);
+        if (mounted) context.go('/accounting/opening-balances');
+      }
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+    } finally {
+      if (mounted) {
+        _refresh();
+        if (reverse) {
+          ref.invalidate(stockListProvider);
+          invalidateMoneyViews(ref);
+        }
+        setState(() => _busy = false);
       }
     }
   }
@@ -253,6 +158,10 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final l10n = context.l10n;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
     final isDetail = widget.documentId != null;
+    final user = ref.watch(currentUserProvider);
+    final canCreate =
+        user?.can('accounting.openingbalances.manage') == true &&
+        user?.can('accounting.accounts.read') == true;
 
     return ModuleScaffold(
       title: l10n.openingBalancesTitle,
@@ -260,7 +169,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         spacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          if (!isDetail)
+          if (!isDetail && canCreate)
             FilledButton.icon(
               onPressed: _busy ? null : _manualEntry,
               icon: const Icon(Icons.add),
@@ -273,7 +182,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
             OutlinedButton.icon(
               onPressed: () => runDownload(
                 context,
-                ref.read(reportLinkProvider).importTemplate(
+                ref
+                    .read(reportLinkProvider)
+                    .importTemplate(
                       kind: 'opening-balances',
                       language: Localizations.localeOf(context).languageCode,
                     ),
@@ -363,11 +274,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                       '${_localized(row['branch'], isArabic, 'nameEn', 'nameAr') ?? (row['branch'] is Map ? (row['branch'] as Map)['code'] : '')}',
                     ),
                     trailing: Chip(
-                      label: Text(_statusLabel(context, '${row['status'] ?? ''}')),
+                      label: Text(
+                        _statusLabel(context, '${row['status'] ?? ''}'),
+                      ),
                     ),
-                    onTap: () => context.go(
-                      '/accounting/opening-balances/${row['id']}',
-                    ),
+                    onTap: () =>
+                        context.go('/accounting/opening-balances/${row['id']}'),
                   ),
                 ),
             ],
@@ -381,6 +293,11 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final status = '${data['status'] ?? ''}'.toLowerCase();
+    final user = ref.watch(currentUserProvider);
+    final mayManage =
+        user?.can('accounting.openingbalances.manage') == true &&
+        (user?.isSuperAdmin == true || user?.branchId == data['branchId']);
+    final id = '${data['id']}';
     final branch = data['branch'];
     final warehouse = data['warehouse'];
     final lines = (data['lines'] as List? ?? const [])
@@ -418,7 +335,8 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   Text(
                     '${l10n.warehouse}: ${_localized(warehouse, isArabic, 'nameEn', 'nameAr') ?? warehouse['code'] ?? ''}',
                   ),
-                if (data['description'] != null && '${data['description']}'.isNotEmpty)
+                if (data['description'] != null &&
+                    '${data['description']}'.isNotEmpty)
                   Text('${l10n.description}: ${data['description']}'),
                 const SizedBox(height: 12),
                 Wrap(
@@ -426,15 +344,46 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   runSpacing: 8,
                   children: [
                     _total(context, l10n.debit, '${data['totalDebit'] ?? '0'}'),
-                    _total(context, l10n.credit, '${data['totalCredit'] ?? '0'}'),
+                    _total(
+                      context,
+                      l10n.credit,
+                      '${data['totalCredit'] ?? '0'}',
+                    ),
                   ],
                 ),
-                if (status == 'draft') ...[
+                if (mayManage && (status == 'draft' || status == 'posted')) ...[
                   const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : () => _post('${data['id']}'),
-                    icon: const Icon(Icons.publish_outlined),
-                    label: Text(_busy ? l10n.posting : l10n.post),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (status == 'draft') ...[
+                        FilledButton.icon(
+                          onPressed: _busy ? null : () => _post(id),
+                          icon: const Icon(Icons.publish_outlined),
+                          label: Text(_busy ? l10n.posting : l10n.post),
+                        ),
+                        if (user?.can('accounting.accounts.read') == true)
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _manualEntry(data),
+                            child: Text(l10n.edit),
+                          ),
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _changeDocument(id, reverse: false),
+                          child: Text(
+                            isArabic ? 'حذف المسودة' : 'Delete draft',
+                          ),
+                        ),
+                      ] else
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _changeDocument(id, reverse: true),
+                          child: Text(l10n.reverse),
+                        ),
+                    ],
                   ),
                 ],
               ],

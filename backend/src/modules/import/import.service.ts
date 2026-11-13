@@ -108,12 +108,12 @@ export class ImportService {
         },
         {
           key: 'nameen', labelEn: 'Name (English)', labelAr: 'الاسم (إنجليزي)',
-          required: true, example: 'Office supplies', maxLength: 200,
+          example: 'Office supplies', maxLength: 200,
           aliases: ['name', 'englishname', 'الاسمبالانجليزية', 'الاسمبالانجليزيه'],
         },
         {
           key: 'namear', labelEn: 'Name (Arabic)', labelAr: 'الاسم (عربي)',
-          required: true, example: 'مصروفات مكتبية', maxLength: 200,
+          example: 'مصروفات مكتبية', maxLength: 200,
           aliases: ['arabicname', 'الاسمبالعربية', 'الاسمبالعربيه'],
         },
         {
@@ -214,7 +214,6 @@ export class ImportService {
         key: 'nameen',
         labelEn: 'Name (English)',
         labelAr: 'الاسم (إنجليزي)',
-        required: true,
         example: kind === 'customers' ? 'Alfa Trading' : 'Beta Supplies',
         maxLength: 200,
         aliases: ['name', 'englishname', 'الاسمبالانجليزية', 'الاسمبالانجليزيه'],
@@ -223,7 +222,6 @@ export class ImportService {
         key: 'namear',
         labelEn: 'Name (Arabic)',
         labelAr: 'الاسم (عربي)',
-        required: true,
         example: kind === 'customers' ? 'شركة ألفا' : 'مؤسسة بيتا',
         maxLength: 200,
         aliases: ['arabicname', 'الاسمبالعربية', 'الاسمبالعربيه'],
@@ -295,7 +293,6 @@ export class ImportService {
         key: 'nameen',
         labelEn: 'Name (English)',
         labelAr: 'الاسم (إنجليزي)',
-        required: true,
         example: 'Steel chair',
         maxLength: 200,
         aliases: ['name', 'englishname'],
@@ -304,7 +301,6 @@ export class ImportService {
         key: 'namear',
         labelEn: 'Name (Arabic)',
         labelAr: 'الاسم (عربي)',
-        required: true,
         example: 'كرسي معدني',
         maxLength: 200,
         aliases: ['arabicname'],
@@ -603,7 +599,7 @@ export class ImportService {
         if (!value) {
           if (kind === 'items' && field.key === 'taxrate') {
             blankTaxCell = true;
-            if (options.clearBlankTaxRates === true) values.taxrate = '0';
+            if (options.clearBlankTaxRates !== false) values.taxrate = '0';
           }
           if (field.required) {
             errors.push({
@@ -678,8 +674,17 @@ export class ImportService {
         continue;
       }
 
+      if (!exists && !values.nameen && !values.namear) {
+        errors.push({
+          row: row.rowNumber,
+          column: 'Name',
+          message: 'Provide an Arabic or English name',
+        });
+        continue;
+      }
+
       if (exists) {
-        if (blankTaxCell && options.clearBlankTaxRates === true) clearedBlankTaxRates += 1;
+        if (blankTaxCell && options.clearBlankTaxRates !== false) clearedBlankTaxRates += 1;
         updated += 1;
         preview.push({ row: row.rowNumber, code: rowCode, action: 'updated' });
         if (!options.dryRun) {
@@ -714,7 +719,7 @@ export class ImportService {
         after: {
           fileName: file.originalname,
           mode: options.mode,
-          ...(kind === 'items' ? { clearBlankTaxRates: options.clearBlankTaxRates === true, clearedBlankTaxRates } : {}),
+          ...(kind === 'items' ? { clearBlankTaxRates: options.clearBlankTaxRates !== false, clearedBlankTaxRates } : {}),
           created,
           updated,
           skipped,
@@ -920,11 +925,17 @@ export class ImportService {
         errors.push({ row: row.rowNumber, column: 'Currency', message: 'Currency must be a three-letter code such as EGP' });
         continue;
       }
+      const nameEn = row.values.nameen || row.values.namear;
+      const nameAr = row.values.namear || row.values.nameen;
+      if (!nameEn || !nameAr) {
+        errors.push({ row: row.rowNumber, column: 'Name', message: 'Provide an Arabic or English name' });
+        continue;
+      }
       accountRows.set(code, {
         rowNumber: row.rowNumber,
         code,
-        nameEn: row.values.nameen,
-        nameAr: row.values.namear,
+        nameEn,
+        nameAr,
         type: row.values.type as AccountType,
         parentCode: row.values.parentcode?.trim() || null,
         isPostable: row.values.ispostable === undefined ? null : row.values.ispostable === 'true',
@@ -1492,15 +1503,15 @@ export class ImportService {
     // Both names are NOT NULL in the database. A file that carries only one of
     // them still imports: the name it has is used for both, which is what a
     // person would do by hand rather than leave a blank.
-    const arabicName = values.namear ?? values.nameen ?? values.code;
-    const englishName = values.nameen ?? values.namear ?? values.code;
+    const arabicName = values.namear || values.nameen;
+    const englishName = values.nameen || values.namear;
 
     if (kind === 'items') {
       await tx.item.create({
         data: {
           companyId,
           code: values.code,
-          nameEn: values.nameen ?? values.namear ?? values.code,
+          nameEn: englishName,
           nameAr: arabicName,
           unit: values.unit ?? 'piece',
           salePrice: this.decimal(values.saleprice) ?? new Prisma.Decimal(0),
@@ -1539,8 +1550,8 @@ export class ImportService {
     }
   }
 
-  /// An upsert only touches the columns the file actually carried: a blank
-  /// cell means "leave it as it is", never "erase it".
+  /// Only updates supplied values. An explicit blank tax cell can also supply
+  /// zero, according to the import policy used when preparing the row.
   private async updateOne(
     tx: Prisma.TransactionClient,
     kind: ImportKind,

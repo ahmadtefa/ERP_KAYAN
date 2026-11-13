@@ -1082,13 +1082,15 @@ class AppLocalizationsAr extends AppLocalizations {
       'الأعمدة اللي في الملف بتتكتب على السجل. الخانة الفاضية مش بتغيّر حاجة.';
 
   @override
-  String get clearBlankImportTax => "تصفير خلايا ضريبة الأصناف الفارغة";
+  String get clearBlankImportTax => 'تصفير خلايا ضريبة الأصناف الفارغة';
 
   @override
-  String get clearBlankImportTaxHint => "عند وجود عمود الضريبة، سيُصفّر هذا الخيار كل خلية فارغة لصنف موجود. احذف العمود للإبقاء على الضريبة، أو اكتب 0 لتصفير صنف محدد. راجع العدد قبل الاستيراد.";
+  String get clearBlankImportTaxHint =>
+      'عند وجود عمود الضريبة، سيُصفّر هذا الخيار كل خلية فارغة لصنف موجود. احذف العمود للإبقاء على الضريبة، أو اكتب 0 لتصفير صنف محدد. راجع العدد قبل الاستيراد.';
 
   @override
-  String get clearedBlankImportTaxCount => "أصناف موجودة ستُصفّر ضريبتها الفارغة";
+  String get clearedBlankImportTaxCount =>
+      'أصناف موجودة ستُصفّر ضريبتها الفارغة';
 
   @override
   String get readResult => 'اللي في الملف';
@@ -2194,8 +2196,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get saveSettings => 'حفظ الإعدادات';
 
   @override
-  String get readOnlySettings =>
-      'تعديل هذه الإعدادات متاح للمسؤول الأعلى فقط.';
+  String get readOnlySettings => 'تعديل هذه الإعدادات متاح للمسؤول الأعلى فقط.';
 
   @override
   String get invalidSetting => 'أدخل قيمة بين 0 و100.';

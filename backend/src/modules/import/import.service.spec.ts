@@ -131,12 +131,9 @@ describe('ImportService', () => {
     expect(report.errors[0]!.message).toContain('Code');
   });
 
-  it('refuses a file that leaves out a required column entirely', async () => {
-    // A column that is not in the file at all used to leave no value and no
-    // complaint: the record was written with nothing where its Arabic name
-    // should have been.
+  it('accepts one name language for new rows and rejects a new row without a name', async () => {
     const importer = service();
-    const csv = 'Code,Name (English)\nC-9,Alfa\n';
+    const csv = 'Code,Name (English)\nC-9,Alfa\nC-10,\n';
     const report = await importer.run(
       'customers',
       COMPANY,
@@ -144,10 +141,8 @@ describe('ImportService', () => {
       { originalname: 'x.csv', buffer: Buffer.from(csv, 'utf8') },
       { dryRun: true, mode: 'insert' },
     );
-    expect(report.created).toBe(0);
-    expect(report.errors.map((error) => error.column)).toContain(
-      'Name (Arabic)',
-    );
+    expect(report.created).toBe(1);
+    expect(report.errors.map((error) => error.column)).toEqual(['Name']);
   });
 
   it('reads a CSV with a byte-order mark, as Excel writes them', async () => {

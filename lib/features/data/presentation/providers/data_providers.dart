@@ -474,7 +474,7 @@ class ImportController extends Notifier<ImportState> {
   void chooseMode(ImportMode mode) {
     // The dry run counted what would happen in the old mode; those numbers
     // cannot vouch for the button that writes in the new one.
-    state = state.copyWith(mode: mode, clearBlankTaxRates: false, clearReport: true);
+    state = state.copyWith(mode: mode, clearReport: true);
   }
 
   void chooseBlankTaxPolicy(bool clear) => state = state.copyWith(
@@ -483,7 +483,7 @@ class ImportController extends Notifier<ImportState> {
   );
 
   void chooseFile(PickedFile? file) => state = state.copyWith(
-    clearBlankTaxRates: false,
+    clearBlankTaxRates: true,
     file: file,
     clearFile: file == null,
     clearReport: true,
@@ -505,7 +505,7 @@ class ImportState {
   const ImportState({
     this.kind = ImportKind.customers,
     this.mode = ImportMode.insert,
-    this.clearBlankTaxRates = false,
+    this.clearBlankTaxRates = true,
     this.file,
     this.busy = false,
     this.report,
@@ -573,7 +573,7 @@ class DataService {
     required PickedFile file,
     required ImportMode mode,
     required bool dryRun,
-    bool clearBlankTaxRates = false,
+    bool clearBlankTaxRates = true,
   }) async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.name),

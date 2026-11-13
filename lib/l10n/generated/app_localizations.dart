@@ -2192,13 +2192,22 @@ abstract class AppLocalizations {
   /// **'The columns the file carries are written over the record. A blank cell changes nothing.'**
   String get importModeUpdateHint;
 
-  /// Explicit opt-in to clear blank tax cells.
+  /// No description provided for @clearBlankImportTax.
+  ///
+  /// In en, this message translates to:
+  /// **'Set blank item tax cells to zero'**
   String get clearBlankImportTax;
 
-  /// Explains the effect of clearing blank cells.
+  /// No description provided for @clearBlankImportTaxHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Only when the tax column exists: every blank cell on an existing item will clear its tax. Remove the column to leave tax unchanged; enter 0 to clear an individual item. Review the count before importing.'**
   String get clearBlankImportTaxHint;
 
-  /// Number of existing items affected.
+  /// No description provided for @clearedBlankImportTaxCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Existing items with blank tax set to zero'**
   String get clearedBlankImportTaxCount;
 
   /// No description provided for @readResult.
@@ -2798,7 +2807,7 @@ abstract class AppLocalizations {
   /// No description provided for @fullBackupKind.
   ///
   /// In en, this message translates to:
-  /// **'Full backup'**
+  /// **'Database archive only'**
   String get fullBackupKind;
 
   /// No description provided for @createdAtLabel.
@@ -4316,7 +4325,7 @@ abstract class AppLocalizations {
   /// No description provided for @lanReachable.
   ///
   /// In en, this message translates to:
-  /// **'Available on the local network'**
+  /// **'LAN address candidate (connection not tested)'**
   String get lanReachable;
 
   /// No description provided for @localOnly.
@@ -4382,13 +4391,13 @@ abstract class AppLocalizations {
   /// No description provided for @lanNotEnabledHint.
   ///
   /// In en, this message translates to:
-  /// **'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.'**
+  /// **'No private LAN address is currently advertised. Check the network interface and the server binding; a local-only binding cannot accept remote connections.'**
   String get lanNotEnabledHint;
 
   /// No description provided for @lanFirewallHint.
   ///
   /// In en, this message translates to:
-  /// **'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.'**
+  /// **'An administrator must separately verify the private-network firewall and test a permitted client connection. Do not expose PostgreSQL (port 5432).'**
   String get lanFirewallHint;
 
   /// No description provided for @publicAddressTitle.

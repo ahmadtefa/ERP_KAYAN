@@ -103,9 +103,7 @@ void main() {
 
       final option = find.byType(CheckboxListTile);
       await tester.ensureVisible(option);
-      await tester.pumpAndSettle();
-      await tester.tap(option);
-      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxListTile>(option).value, isTrue);
       await tester.tap(find.text('Read it without saving'));
       await tester.pumpAndSettle();
 
