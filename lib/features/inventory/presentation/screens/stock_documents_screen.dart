@@ -297,7 +297,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     fromWarehouseId = text(defaultWarehouse, 'id');
 
     try {
-      await showDialog<void>(
+      final route = DialogRoute<void>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, setDialogState) {
@@ -642,6 +642,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           },
         ),
       );
+      await Navigator.of(context, rootNavigator: true).push(route);
+      await route.completed;
     } finally {
       for (final line in lines) {
         line.dispose();

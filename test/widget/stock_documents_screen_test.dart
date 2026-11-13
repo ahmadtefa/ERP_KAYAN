@@ -373,10 +373,7 @@ void main() {
     ));
     await tester.tap(find.text('New document'));
     await tester.pumpAndSettle();
-    final input = find.descendant(
-      of: find.byKey(const ValueKey('stock-document-barcode')),
-      matching: find.byType(TextField),
-    );
+    final input = find.byKey(const ValueKey('stock-document-barcode'));
     for (var scan = 0; scan < 2; scan++) {
       await tester.enterText(input, 'CARTON');
       await tester.testTextInput.receiveAction(TextInputAction.done);
