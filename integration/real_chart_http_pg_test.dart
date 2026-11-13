@@ -82,6 +82,7 @@ void main() {
     await tester.tap(find.byTooltip('Edit account'));
     await _waitFor(tester,find.widgetWithText(TextField,'Name in English'));
     await tester.enterText(find.widgetWithText(TextField,'Name in English'),'Integration asset revised');
+    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic'),'حساب تكامل تجريبي');
     await tester.tap(find.text('Save'));
     await _waitFor(tester,find.widgetWithText(TextField,'Name in English'),absent:true);
     await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset revised'));

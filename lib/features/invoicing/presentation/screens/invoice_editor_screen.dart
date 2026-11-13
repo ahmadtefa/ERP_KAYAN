@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -99,16 +100,22 @@ class _LineDraft {
 }
 
 class _LandedCostDraft {
-  _LandedCostDraft({String description = '', String amount = '0'})
-    : description = TextEditingController(text: description),
-      amount = TextEditingController(text: amount);
+  _LandedCostDraft({
+    String description = '',
+    String amount = '0',
+    String taxRate = '',
+  }) : description = TextEditingController(text: description),
+       amount = TextEditingController(text: amount),
+       taxRate = TextEditingController(text: taxRate);
 
   final TextEditingController description;
   final TextEditingController amount;
+  final TextEditingController taxRate;
 
   void dispose() {
     description.dispose();
     amount.dispose();
+    taxRate.dispose();
   }
 }
 
@@ -187,7 +194,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     'discount': _documentDiscount.text,
     'costs': [
       for (final cost in _landedCosts)
-        [cost.description.text, cost.amount.text],
+        [cost.description.text, cost.amount.text, cost.taxRate.text],
     ],
     'lines': [
       for (final line in _lines)
@@ -271,6 +278,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           _LandedCostDraft(
             description: text(row, 'description'),
             amount: text(row, 'amount', fallback: '0'),
+            taxRate: text(row, 'taxRate'),
           ),
         );
       }
@@ -416,8 +424,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     var landedCost = Decimal.zero;
     if (!widget.kind.isSales) {
       for (final charge in _landedCosts) {
-        landedCost +=
-            Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
+        final amount =
+            (Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero).round(
+              scale: moneyScale,
+            );
+        final rate =
+            (Decimal.tryParse(charge.taxRate.text.trim()) ?? Decimal.zero)
+                .round(scale: moneyScale);
+        landedCost += amount;
+        tax += (amount * rate / Decimal.fromInt(100))
+            .toDecimal(scaleOnInfinitePrecision: 12)
+            .round(scale: moneyScale);
       }
     }
     return (
@@ -447,13 +464,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (ids.isEmpty) return;
     ItemImageDataSource(ref.read(apiClientProvider))
         .thumbnails(ids)
-        .then<void>((pictures) {
-          if (!mounted || _itemPicturesKey != key) return;
-          setState(() => _itemPictures = pictures);
-        }, onError: (Object _) {
-          // A thumbnail that cannot be fetched is not worth a dialog: the
-          // picker still lists every item, just without pictures.
-        });
+        .then<void>(
+          (pictures) {
+            if (!mounted || _itemPicturesKey != key) return;
+            setState(() => _itemPictures = pictures);
+          },
+          onError: (Object _) {
+            // A thumbnail that cannot be fetched is not worth a dialog: the
+            // picker still lists every item, just without pictures.
+          },
+        );
   }
 
   /// Adds what a scanned label stands for to the invoice.
@@ -655,10 +675,28 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           showMessage(context, l10n.landedCostCannotBeNegative, error: true);
           return;
         }
-        landedCost += amount;
+        final rateText = charge.taxRate.text.trim();
+        final rate = rateText.isEmpty
+            ? Decimal.zero
+            : Decimal.tryParse(rateText);
+        if (rate == null ||
+            rate < Decimal.zero ||
+            rate > Decimal.fromInt(100)) {
+          showMessage(
+            context,
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
+                : 'Charge tax rate must be between 0 and 100',
+            error: true,
+          );
+          return;
+        }
+        final roundedAmount = amount.round(scale: moneyScale);
+        landedCost += roundedAmount;
         landedCostCharges.add({
           'description': description,
-          'amount': amount.toString(),
+          'amount': roundedAmount.toString(),
+          if (rate != Decimal.zero) 'taxRate': rate.toString(),
         });
       }
     }
@@ -893,6 +931,28 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                 onChanged: (_) => setState(() {}),
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                key: ValueKey('landed-cost-tax-$index'),
+                                controller: _landedCosts[index].taxRate,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText:
+                                      Localizations.localeOf(context)
+                                              .languageCode ==
+                                          'ar'
+                                      ? 'الضريبة %'
+                                      : 'Tax %',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
                             IconButton(
                               tooltip: l10n.removeLandedCost,
                               onPressed: () => setState(
@@ -929,8 +989,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       child: BarcodeScanField(
                         key: const ValueKey('invoice-barcode'),
                         controller: _barcode,
-                        arabic: Localizations.localeOf(context).languageCode == 'ar',
-                        label: Localizations.localeOf(context).languageCode == 'ar'
+                        arabic:
+                            Localizations.localeOf(context).languageCode ==
+                            'ar',
+                        label:
+                            Localizations.localeOf(context).languageCode == 'ar'
                             ? 'امسح الباركود لإضافة صنف'
                             : 'Scan a barcode to add an item',
                         enabled: !_saving && !_loadingExisting,
@@ -1240,8 +1303,7 @@ class _LinesTable extends StatelessWidget {
                                         child: Row(
                                           children: [
                                             ItemThumbnail(
-                                              bytes:
-                                                  pictures[text(item, 'id')],
+                                              bytes: pictures[text(item, 'id')],
                                               size: 24,
                                             ),
                                             const SizedBox(width: 8),
@@ -1444,7 +1506,10 @@ class _LinesTable extends StatelessWidget {
                           width: 150,
                           child: _LineBaseEquivalent(
                             key: ValueKey('line-base-equivalent-$index'),
-                            item: itemForInvoiceLine(items, lines[index].itemId),
+                            item: itemForInvoiceLine(
+                              items,
+                              lines[index].itemId,
+                            ),
                             unitName: lines[index].unitName,
                             quantity: lines[index].quantity,
                           ),
@@ -1518,7 +1583,10 @@ class _LinesTable extends StatelessWidget {
                           Expanded(
                             child: _LineScanSummary(
                               key: ValueKey('line-scan-summary-$index'),
-                              item: itemForInvoiceLine(items, lines[index].itemId),
+                              item: itemForInvoiceLine(
+                                items,
+                                lines[index].itemId,
+                              ),
                               unitName: lines[index].unitName,
                               quantity: lines[index].quantity,
                               language: language,

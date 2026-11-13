@@ -506,6 +506,7 @@ export class OpeningBalancesService {
         userId,
         entryDate: document.asOfDate,
         description: document.description ?? 'Opening balances',
+        currency: (await tx.company.findUnique({ where: { id: companyId }, select: { currency: true } }))?.currency,
         sourceType: 'OPENING_BALANCE',
         sourceId: document.id,
         sourceNumber: document.documentNumber,

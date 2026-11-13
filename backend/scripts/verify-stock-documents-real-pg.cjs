@@ -27,6 +27,8 @@ const { FiscalPeriodsService } = require('../src/modules/accounting/fiscal-perio
 const { YearEndCloseService } = require('../src/modules/accounting/year-end-close.service');
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
+const { OpeningBalancesService } = require('../src/modules/accounting/opening-balances.service');
+const { PartiesService } = require('../src/modules/parties/parties.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
 const { JournalEntriesController } = require('../src/modules/accounting/journal-entries.controller');
@@ -1334,6 +1336,58 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const prices = new PriceListsService(prisma,audit);
     const posting = new PostingService(numbers,periods,costCenters);
     const map = new AccountMapService();
+    const openingBranch = await prisma.branch.create({ data: {
+      companyId: company, code: 'SYN-OPEN', nameEn: 'Opening fixture', nameAr: 'فرع افتتاحي',
+    } });
+    const openingStock = await prisma.item.create({ data: {
+      companyId: company, code: 'SYN-OPEN-STOCK', nameEn: 'Opening stock', nameAr: 'مخزون افتتاحي',
+      unit: 'piece', isStockTracked: true,
+    } });
+    const ar = await prisma.account.upsert({
+      where: { companyId_code: { companyId: company, code: '1103' } },
+      create: { companyId: company, code: '1103', nameEn: 'Receivables', nameAr: 'العملاء', type: 'ASSET', isPostable: true },
+      update: { isActive: true, isPostable: true },
+    });
+    await prisma.account.upsert({
+      where: { companyId_code: { companyId: company, code: '3103' } },
+      create: { companyId: company, code: '3103', nameEn: 'Opening equity', nameAr: 'الأرصدة الافتتاحية', type: 'EQUITY', isPostable: true },
+      update: { isActive: true, isPostable: true },
+    });
+    const openings = new OpeningBalancesService(prisma, numbers, posting, map, audit, warehouses);
+    const parties = new PartiesService(prisma, audit);
+    const openingCurrency = (await prisma.company.findUniqueOrThrow({ where: { id: company } })).currency;
+    const draftInput = {
+      asOfDate: date, currency: openingCurrency, autoBalanceToEquity: true,
+      lines: [
+        { accountId: ar.id, customerId: customer.id, debit: '1.1234' },
+        { accountId: inventory, itemId: openingStock.id, quantity: '2', unitCost: '2.2222', debit: '4.4444' },
+      ],
+    };
+    const deletedDraft = await openings.create(company, openingBranch.id, user, draftInput);
+    await openings.removeDraft(company, user, deletedDraft.id, openingBranch.id);
+    await assert.rejects(openings.findOne(company, deletedDraft.id), /not found/);
+    const draft = await openings.create(company, openingBranch.id, user, draftInput);
+    const updated = await openings.create(company, openingBranch.id, user, {
+      ...draftInput, lines: [{ ...draftInput.lines[0], debit: '2.1234' }, draftInput.lines[1]],
+    }, draft.id);
+    assert.equal(updated.documentNumber, draft.documentNumber);
+    assert.equal(updated.totalDebit, '6.5678');
+    assert.equal(updated.totalCredit, '6.5678');
+    const results = await Promise.allSettled([
+      openings.post(company, user, draft.id, openingBranch.id),
+      openings.post(company, user, draft.id, openingBranch.id),
+    ]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(await prisma.stockMovement.count({ where: { referenceId: draft.id } }), 1);
+    assert.equal((await parties.summary(company, 'customer', customer.id)).totals.netBalance, '2.1234');
+    const statement = await parties.statement(company, 'customer', customer.id, { from: date, to: date });
+    assert.equal(statement.closingBalance, '2.1234');
+    await openings.reverse(company, user, draft.id, openingBranch.id);
+    assert.equal((await parties.summary(company, 'customer', customer.id)).totals.netBalance, '0.0000');
+    assert.equal(await prisma.auditLog.count({
+      where: { companyId: company, entity: 'opening_balances', action: { in: ['UPDATE', 'DELETE'] }, entityId: { in: [draft.id, deletedDraft.id] } },
+    }), 2);
+    console.log('PASS: PostgreSQL opening draft edit/delete, exact equity balance, concurrent post, party statement and stock reversal.');
     const batches = new BatchesService(prisma,warehouses,posting,map,numbers,audit,ledger);
     const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger);
     // Keep the fixture's runtime wiring explicit as this service gains

@@ -133,6 +133,27 @@ export class PartiesService {
     } as const;
   }
 
+  private async openingEntries(companyId: string, kind: PartyKind, id: string) {
+    return this.prisma.$queryRaw<Array<{
+      id: string; number: string; date: Date; description: string | null;
+      debit: Prisma.Decimal; credit: Prisma.Decimal; type: string;
+    }>>(Prisma.sql`
+      SELECT document.id, document."documentNumber" AS number, journal."entryDate" AS date,
+             line.description,
+             CASE WHEN journal."reversalOfId" IS NULL THEN line.debit ELSE line.credit END AS debit,
+             CASE WHEN journal."reversalOfId" IS NULL THEN line.credit ELSE line.debit END AS credit,
+             CASE WHEN journal."reversalOfId" IS NULL THEN 'OPENING_BALANCE' ELSE 'OPENING_BALANCE_REVERSAL' END AS type
+      FROM opening_balance_lines AS line
+      JOIN opening_balances AS document ON document.id = line."openingBalanceId"
+      JOIN journal_entries AS journal ON journal."companyId" = document."companyId"
+        AND (journal.id = document."journalEntryId" OR journal."reversalOfId" = document."journalEntryId")
+      WHERE document."companyId" = ${companyId}::uuid
+        AND document."deletedAt" IS NULL
+        AND document.status IN ('POSTED', 'REVERSED')
+        AND ${kind === 'customer' ? Prisma.sql`line."customerId"` : Prisma.sql`line."supplierId"`} = ${id}::uuid
+    `);
+  }
+
   /**
    * The partner's card: how much has been traded, what is still open, and the
    * last documents - everything the list screen shows when a row is opened.
@@ -284,7 +305,12 @@ export class PartiesService {
       if (!loose.isPositive()) return sum;
       return voucher.kind === creditKind ? sum.plus(loose) : sum.minus(loose);
     }, new Prisma.Decimal(0));
-    const netBalance = outstanding.minus(onAccount);
+    const openings = await this.openingEntries(companyId, kind, id);
+    const openingBalance = openings.reduce(
+      (sum, row) => sum.plus(kind === 'customer' ? row.debit.minus(row.credit) : row.credit.minus(row.debit)),
+      new Prisma.Decimal(0),
+    );
+    const netBalance = outstanding.plus(openingBalance).minus(onAccount);
 
     const recentDocuments = [
       ...invoices.slice(0, 5).map((inv) => ({
@@ -321,7 +347,8 @@ export class PartiesService {
       totals: {
         invoiced: totalInvoiced.toFixed(MONEY_SCALE),
         paid: totalPaid.toFixed(MONEY_SCALE),
-        outstanding: outstanding.toFixed(MONEY_SCALE),
+        outstanding: outstanding.plus(openingBalance).toFixed(MONEY_SCALE),
+        openingBalance: openingBalance.toFixed(MONEY_SCALE),
         /// Positive when the partner has left money with us (a customer
         /// credit or a supplier prepayment). Kept separate from `outstanding`
         /// so a reader can see both what is unpaid and what is already paid.
@@ -436,7 +463,10 @@ export class PartiesService {
       /// the row so a printed sheet says so on its face.
       status: string;
     };
-    const all: Entry[] = [];
+    const openings = await this.openingEntries(companyId, kind, id);
+    const all: Entry[] = openings.map((row) => ({
+      ...row, description: row.description ?? '', status: 'POSTED',
+    }));
     for (const invoice of invoices) {
       const isReturn = invoice.documentType !== 'INVOICE';
       const amount = invoice.totalAmount;

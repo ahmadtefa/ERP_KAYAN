@@ -164,6 +164,28 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
     expect(detail.landedCostAmount.toFixed(4)).toBe('100.0000');
   });
 
+  it('adds tax on taxable freight once and keeps recoverable tax out of stock cost', async () => {
+    const { service, tx } = makeService();
+    const invoice = await service.create(COMPANY, BRANCH, 'user-1', {
+      invoiceDate: '2026-10-18',
+      supplierId: SUPPLIER,
+      discountType: 'PERCENT',
+      discountPercent: '10',
+      landedCostCharges: [
+        { description: 'Freight', amount: '20', taxRate: '14' },
+        { description: 'Exempt charge', amount: '5', taxRate: '0' },
+      ],
+      lines: [{ itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '14' }],
+    });
+    const saved = tx.purchaseInvoice.create.mock.calls[0]![0].data;
+    expect(saved.subTotal.toFixed(4)).toBe('90.0000');
+    expect(saved.taxAmount.toFixed(4)).toBe('15.4000');
+    expect(saved.totalAmount.toFixed(4)).toBe('130.4000');
+    expect(saved.lines.create[0].inventoryCostTotal.toFixed(4)).toBe('115.0000');
+    expect(saved.lines.create[0].taxAmount.toFixed(4)).toBe('15.4000');
+    expect(invoice.landedCostCharges[0].taxRate).toBe('14.0000');
+  });
+
   it('replaces a draft charge breakdown and recalculates every line allocation on edit', async () => {
     const { service, tx } = makeService();
 
