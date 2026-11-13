@@ -225,3 +225,19 @@ describe('applyPriceVisibility on the stock list table', () => {
     expect(JSON.stringify(result)).toContain('50.0000');
   });
 });
+
+it('hides purchase unit prices and derived amounts without exposing unlisted fields', () => {
+  const purchase: ReportTable = {
+    ...table,
+    slug: 'purchase-invoice',
+    columns: [
+      { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية' },
+      { key: 'unitPrice', labelEn: 'Unit price', labelAr: 'سعر الوحدة' },
+    ],
+    rows: [{ quantity: '2', unitPrice: '12', netUnitPrice: '10', lineTotal: '20', paidAmount: '5' }],
+  };
+  const hidden = applyPriceVisibility(purchase, { showCost: false });
+  expect(hidden.columns.map(column => column.key)).toEqual(['quantity']);
+  expect(hidden.rows).toEqual([{ quantity: '2' }]);
+  expect(applyPriceVisibility(purchase, { showSalePrice: false, showCost: true }).rows).toEqual(purchase.rows);
+});

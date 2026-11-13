@@ -106,24 +106,19 @@ export function applyPriceVisibility<T extends ReportTable>(
 
   const side = moneySide(source.slug);
 
-  const hiddenKeys = new Set(
-    source.columns
-      .filter((column) => {
-        const labels = column.labelEn + ' ' + column.labelAr;
-        if ((!showSalePrice || !showCost) && (PROFIT_KEY.test(column.key) || PROFIT_LABEL.test(labels))) return true;
-        if (!showSalePrice && matchesSalePrice(column.key, labels)) return true;
-        if (!showCost && matchesCost(column.key, labels)) return true;
-        if (!showCost && SLUG_COST_KEYS[source.slug]?.has(column.key)) return true;
-        // An amount column on a document belongs to the side the document is
-        // made of: it cannot stay when that side is hidden.
-        if (MONEY_AMOUNT_COLUMN.test(column.key)) {
-          if (side === 'sale' && !showSalePrice) return true;
-          if (side === 'cost' && !showCost) return true;
-        }
-        return false;
-      })
-      .map((column) => column.key),
-  );
+  const hidden = (key: string, labels: string) => {
+    if ((!showSalePrice || !showCost) && (PROFIT_KEY.test(key) || PROFIT_LABEL.test(labels))) return true;
+    // Unit price means purchase price on purchase documents. Treat its
+    // derived amounts the same way, including fields without export columns.
+    if (side === 'cost' && /^(unitPrice|netUnitPrice|grossLineTotal|invoiceDiscountAmount)$/i.test(key)) return !showCost;
+    if (!showSalePrice && matchesSalePrice(key, labels)) return true;
+    if (!showCost && (matchesCost(key, labels) || SLUG_COST_KEYS[source.slug]?.has(key))) return true;
+    return MONEY_AMOUNT_COLUMN.test(key) &&
+      ((side === 'sale' && !showSalePrice) || (side === 'cost' && !showCost));
+  };
+  const hiddenKeys = new Set(source.columns
+    .filter(column => hidden(column.key, column.labelEn + ' ' + column.labelAr))
+    .map(column => column.key));
 
   return {
     ...source,
@@ -131,9 +126,7 @@ export function applyPriceVisibility<T extends ReportTable>(
     rows: source.rows.map((row) => {
       const next = { ...row };
       for (const key of Object.keys(next)) {
-        if (hiddenKeys.has(key) ||
-            (!showCost && matchesCost(key, '')) ||
-            ((!showCost || !showSalePrice) && PROFIT_KEY.test(key))) {
+        if (hiddenKeys.has(key) || hidden(key, '')) {
           delete next[key];
         }
       }

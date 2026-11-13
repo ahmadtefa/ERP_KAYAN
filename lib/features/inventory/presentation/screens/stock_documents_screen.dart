@@ -121,7 +121,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     String name(Object? value) {
       if (value is! Map) return '';
       final json = Map<String, dynamic>.from(value);
-      return _arabic ? text(json, 'nameAr') : text(json, 'nameEn');
+      return localizedRecordName(json, arabic: _arabic);
     }
 
     final from = name(row['fromWarehouse']);
@@ -215,7 +215,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 final branch = r['branch'];
                 if (branch is! Map) return '';
                 final json = Map<String, dynamic>.from(branch);
-                return _arabic ? text(json, 'nameAr') : text(json, 'nameEn');
+                return localizedRecordName(json, arabic: _arabic);
               },
             ),
             ColumnSpec(
@@ -294,7 +294,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   _DraftLine(
                     itemId: text(item, 'id'),
                     itemLabel:
-                        '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                        '${text(item, 'code')} — ${localizedRecordName(item, arabic: _arabic)}',
                     baseUnit: text(item, 'unit'),
                   ),
                 ),
@@ -418,9 +418,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                 DropdownMenuItem(
                                   value: text(warehouse, 'id'),
                                   child: Text(
-                                    _arabic
-                                        ? text(warehouse, 'nameAr')
-                                        : text(warehouse, 'nameEn'),
+                                    localizedRecordName(warehouse, arabic: _arabic),
                                   ),
                                 ),
                             ],
@@ -449,9 +447,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   DropdownMenuItem(
                                     value: text(warehouse, 'id'),
                                     child: Text(
-                                      _arabic
-                                          ? text(warehouse, 'nameAr')
-                                          : text(warehouse, 'nameEn'),
+                                      localizedRecordName(warehouse, arabic: _arabic),
                                     ),
                                   ),
                               ],

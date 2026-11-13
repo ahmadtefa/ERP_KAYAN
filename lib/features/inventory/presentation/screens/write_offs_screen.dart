@@ -71,7 +71,7 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     final warehouse = row['fromWarehouse'];
     if (warehouse is! Map) return '';
     final json = Map<String, dynamic>.from(warehouse);
-    return _arabic ? text(json, 'nameAr') : text(json, 'nameEn');
+    return localizedRecordName(json, arabic: _arabic);
   }
 
   /// A draft that somebody has signed is waiting only for posting. The summary

@@ -1120,6 +1120,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1183,7 +1184,7 @@ class _Header extends StatelessWidget {
                         DropdownMenuItem(
                           value: text(party, 'id'),
                           child: Text(
-                            '${text(party, 'code')} — ${text(party, 'nameEn')}',
+                            '${text(party, 'code')} — ${localizedRecordName(party, arabic: arabic)}',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -1367,7 +1368,7 @@ class _LinesTable extends StatelessWidget {
                                             const SizedBox(width: 8),
                                             Flexible(
                                               child: Text(
-                                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                                '${text(item, 'code')} — ${localizedRecordName(item, arabic: language == 'ar')}',
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
