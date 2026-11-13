@@ -308,7 +308,7 @@ void main() {
       // entry from offering something the API would refuse.
       expect(find.widgetWithText(ListTile, 'الخزائن والبنوك'), findsNothing);
       expect(find.widgetWithText(ListTile, 'عروض الأسعار'), findsNothing);
-      expect(find.widgetWithText(ListTile, 'لوحة التحكم'), findsOneWidget);
+      expect(find.widgetWithText(ListTile, 'لوحة التحكم'), findsNothing);
     },
   );
   testWidgets(
@@ -366,6 +366,8 @@ void main() {
       // Sales is active: its sidebar label carries the sales green in the
       // step mixed for the navy sidebar, and the (light) top bar names
       // the section in the base step of the same hue.
+      await tester.tap(find.byKey(const ValueKey('nav-group-sales')));
+      await tester.pumpAndSettle();
       expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
       final salesIcon = find.descendant(
         of: find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
@@ -393,6 +395,8 @@ void main() {
       // Move to customers & suppliers: the rose section identity takes
       // over the label and the top bar, and sales goes back to neutral.
       router.go(AppRoutes.customers);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('nav-group-parties')));
       await tester.pumpAndSettle();
       expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
       expect(

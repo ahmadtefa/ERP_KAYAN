@@ -94,12 +94,7 @@ class _CollapsedNav extends Notifier<_NavOpenSection> {
     state = _NavOpenSection(state.open == group ? null : group);
   }
 
-  /// Opens the section that owns an entry, used when the current route is
-  /// restored on start or reached from a deep link. Without it the menu would
-  /// show a selected screen inside a closed section.
-  void revealOf(_NavGroup group) {
-    if (state.open != group) state = _NavOpenSection(group);
-  }
+  void close() => state = const _NavOpenSection(null);
 
 }
 final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_CollapsedNav.new);
@@ -145,7 +140,6 @@ class ErpShell extends ConsumerStatefulWidget {
 
 class _ErpShellState extends ConsumerState<ErpShell> {
   final ScrollController _navScrollController = ScrollController();
-  final GlobalKey _selectedNavKey = GlobalKey();
 
   /// Answers "may I leave this guard?" on behalf of screens that hold no
   /// page-level draft.
@@ -182,7 +176,6 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     _permissiveExit = () async => true;
     _guard = ref.read(draftExitGuardProvider);
     _claimGuardFloor();
-    _openSectionOfCurrentRoute();
   }
 
   /// Registers the permissive guard for the route's key. A parent's
@@ -210,9 +203,6 @@ class _ErpShellState extends ConsumerState<ErpShell> {
       _releaseGuardFloor();
       _claimGuardFloor();
     }
-    if (oldWidget.currentPath != widget.currentPath) {
-      _openSectionOfCurrentRoute();
-    }
   }
 
   void _releaseGuardFloor() {
@@ -239,43 +229,6 @@ class _ErpShellState extends ConsumerState<ErpShell> {
       final key = widget.guardKey;
       if (key == null) return;
       if (!_guard.has(key)) _claimGuardFloor();
-    });
-  }
-
-  /// The section that owns the current screen must be the open one. The menu
-  /// starts with everything closed, so without this a restored route or a deep
-  /// link would show a highlighted entry that the operator cannot see.
-  void _openSectionOfCurrentRoute() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      for (final item in _navigationItems(context)) {
-        if (item.path == widget.currentPath ||
-            widget.currentPath.startsWith('${item.path}/')) {
-          ref.read(_collapsedNavProvider.notifier).revealOf(item.group);
-          // Opening the section schedules a rebuild; the selected entry only
-          // exists in the tree after that, so the scroll has to wait for it.
-          // Calling it in initState alongside the reveal would find nothing.
-          _revealSelection();
-          return;
-        }
-      }
-    });
-  }
-
-  void _revealSelection() {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      final target = _selectedNavKey.currentContext;
-      if (target == null) return; // A narrow viewport uses a drawer instead.
-      await Scrollable.ensureVisible(
-        target,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-      );
-      if (!mounted || !target.mounted || _selectedNavKey.currentContext != target) return;
-      await Scrollable.ensureVisible(
-        target,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
-      );
     });
   }
 
@@ -321,7 +274,6 @@ class _ErpShellState extends ConsumerState<ErpShell> {
               _Sidebar(
                 items: items,
                 selectedPath: items[selectedIndex].path,
-                selectedKey: _selectedNavKey,
                 extended: isExtended,
                 scrollController: _navScrollController,
                 collapsed:collapsed,
@@ -339,6 +291,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isWide: isWide,
                     isExtended: isExtended,
                     guardKey: widget.guardKey,
+                    onOpenMenu: ref.read(_collapsedNavProvider.notifier).close,
                   ),
                   Expanded(
                     child: LicenceGate(
@@ -722,7 +675,6 @@ class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.items,
     required this.selectedPath,
-    required this.selectedKey,
     required this.extended,
     required this.scrollController,
     required this.collapsed,
@@ -733,7 +685,6 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String selectedPath;
-  final GlobalKey selectedKey;
   final bool extended;
   final ScrollController scrollController;
 
@@ -792,12 +743,12 @@ class _Sidebar extends StatelessWidget {
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        active: groups[group]!.any((item) => item.path == selectedPath),
                         expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
                       if (collapsed.isOpen(group)) for (final item in groups[group]!)
                         _NavEntry(
-                          key: item.path == selectedPath ? selectedKey : null,
                           item: item,
                           selected: item.path == selectedPath,
                           extended: extended,
@@ -901,10 +852,12 @@ class _GroupLabel extends StatelessWidget {
     required this.label,
     required this.accent,
     required this.expanded,
+    required this.active,
     required this.onToggle,
   });
 
   final bool expanded;
+  final bool active;
   final VoidCallback onToggle;
   final bool extended;
   final bool first;
@@ -919,7 +872,11 @@ class _GroupLabel extends StatelessWidget {
       return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
         message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
           padding: EdgeInsets.fromLTRB(10, first ? 8 : 12, 10, 8),
-          child: Container(height: 1, color: AppColors.sidebarHairline),
+          child: Icon(
+            expanded ? Icons.keyboard_arrow_up_rounded : Icons.circle,
+            size: expanded ? 18 : 9,
+            color: accent.darkBase,
+          ),
         ))));
     }
     return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
@@ -946,7 +903,7 @@ class _GroupLabel extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppColors.onSidebarMuted,
+                color: active ? accent.darkBase : AppColors.onSidebarMuted,
                 fontSize: 10.5,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
@@ -962,7 +919,6 @@ class _GroupLabel extends StatelessWidget {
 
 class _NavEntry extends StatelessWidget {
   const _NavEntry({
-    super.key,
     required this.item,
     required this.selected,
     required this.extended,
@@ -1190,6 +1146,7 @@ class _TopBar extends StatelessWidget {
     required this.isWide,
     required this.isExtended,
     required this.guardKey,
+    required this.onOpenMenu,
   });
 
   final _NavItem item;
@@ -1197,6 +1154,7 @@ class _TopBar extends StatelessWidget {
   final bool isWide;
   final bool isExtended;
   final ValueKey<String>? guardKey;
+  final VoidCallback onOpenMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -1224,7 +1182,10 @@ class _TopBar extends StatelessWidget {
             Builder(
               builder: (context) => IconButton(
                 tooltip: MaterialLocalizations.of(context).openAppDrawerTooltip,
-                onPressed: () => Scaffold.of(context).openDrawer(),
+                onPressed: () {
+                  onOpenMenu();
+                  Scaffold.of(context).openDrawer();
+                },
                 icon: const Icon(Icons.menu_rounded),
               ),
             ),
@@ -1460,6 +1421,7 @@ class _ModuleDrawer extends StatelessWidget {
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        active: groups[group]!.any((item) => _belongsTo(item.path, current)),
                         expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
