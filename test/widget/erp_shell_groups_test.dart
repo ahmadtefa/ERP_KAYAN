@@ -161,6 +161,16 @@ void main() {
       final inventoryGroup = find.byKey(const ValueKey('nav-group-inventory'));
       expect(inventoryGroup, findsOneWidget,
           reason: 'the sidebar must carry an inventory group');
+      // Group headers must use recognizable icons, not decorative dots.
+      // This also guards against accidentally reverting the visual redesign.
+      expect(
+        find.descendant(
+          of: inventoryGroup,
+          matching: find.byIcon(Icons.warehouse_rounded),
+        ),
+        findsOneWidget,
+        reason: 'the inventory group must show its own warehouse icon',
+      );
 
       // Each section owns its own colour, so the inventory header cannot be
       // mistaken for accounting or overview. A single shared accent would make
