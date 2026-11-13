@@ -1,9 +1,11 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../shared/barcode/barcode_scan.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
@@ -174,6 +176,13 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             ],
             onChanged: (value) => setState(() => _kind = value),
           ),
+          IconButton(
+            tooltip: _arabic ? 'تحديث' : 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: async.isLoading
+                ? null
+                : () => ref.read(stockDocumentsProvider.notifier).reload(),
+          ),
           SearchField(
             hint: _arabic ? 'بحث في المستندات' : 'Search documents',
             onChanged: (value) => setState(() => _query = value.trim()),
@@ -246,6 +255,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     String? toWarehouseId;
     final date = DateTime.now().toIso8601String().substring(0, 10);
     final notes = TextEditingController();
+    final barcode = TextEditingController();
+    var scanning = false;
     final lines = <_DraftLine>[];
     String? error;
     var saving = false;
@@ -257,6 +268,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           .getList('/inventory/warehouses');
     } catch (_) {
       warehouses = const [];
+    }
+    if (!mounted || warehouses.isEmpty) {
+      notes.dispose();
+      barcode.dispose();
     }
     if (!mounted) return;
     if (warehouses.isEmpty) {
@@ -299,6 +314,62 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   ),
                 ),
               );
+            }
+
+            Future<void> scan(String code) async {
+              if (scanning || saving || code.trim().isEmpty) return;
+              scanning = true;
+              try {
+                final scanner = BarcodeScanner(
+                  lookup: (value) => ref.read(apiClientProvider).getObject(
+                    '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
+                  ),
+                );
+                await scanner.scan(
+                  code,
+                  arabic: _arabic,
+                  onFailure: (message) async {
+                    if (dialogContext.mounted) {
+                      await showAppPlainError(dialogContext, message);
+                    }
+                  },
+                  onMatch: (match) async {
+                    if (!dialogContext.mounted || saving) return;
+                    if (!flag(match.item, 'isStockTracked', fallback: true)) {
+                      await showAppPlainError(dialogContext, _arabic
+                          ? 'هذا الصنف غير متابع مخزنيًا.'
+                          : 'This item is not stock-tracked.');
+                      return;
+                    }
+                    final baseUnit = text(match.item, 'unit');
+                    final unit = match.matched == 'unit' ? match.unit : baseUnit;
+                    final index = lines.indexWhere((line) =>
+                      line.itemId == match.itemId &&
+                      (line.unitName ?? line.baseUnit) == unit,
+                    );
+                    if (index >= 0) {
+                      final line = lines[index];
+                      final quantity = Decimal.tryParse(line.quantity.text.trim());
+                      if (quantity == null || quantity < Decimal.zero) {
+                        await showAppPlainError(dialogContext, _arabic
+                            ? 'صحّح كمية الصنف قبل المسح مرة أخرى.'
+                            : 'Correct the item quantity before scanning again.');
+                        return;
+                      }
+                      line.quantity.text = (quantity + Decimal.one).toString();
+                    } else {
+                      setDialogState(() => lines.add(_DraftLine(
+                        itemId: match.itemId,
+                        itemLabel: '${match.itemCode} — ${localizedRecordName(match.item, arabic: _arabic)}',
+                        baseUnit: baseUnit,
+                      )..unitName = unit));
+                    }
+                    barcode.clear();
+                  },
+                );
+              } finally {
+                scanning = false;
+              }
             }
 
             Future<void> submit() async {
@@ -463,6 +534,14 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    BarcodeScanField(
+                      key: const ValueKey('stock-document-barcode'),
+                      controller: barcode,
+                      arabic: _arabic,
+                      enabled: !saving,
+                      compact: true,
+                      onSubmitted: scan,
+                    ),
                     if (error != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
@@ -493,8 +572,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   title: Text(line.itemLabel),
                                   subtitle: Text(
                                     _arabic
-                                        ? 'الوحدة الأساسية: ${line.baseUnit}'
-                                        : 'Base unit: ${line.baseUnit}',
+                                        ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
+                                        : 'Unit: ${line.unitName ?? line.baseUnit}',
                                   ),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -568,6 +647,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         line.dispose();
       }
       notes.dispose();
+      barcode.dispose();
     }
   }
 

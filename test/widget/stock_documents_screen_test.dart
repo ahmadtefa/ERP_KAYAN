@@ -120,6 +120,26 @@ class _DocumentsApi extends ApiClient {
   }
 
   @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    expect(path, '/inventory/items/by-barcode/CARTON');
+    return {
+      'matched': 'unit',
+      'unit': 'carton',
+      'factor': '24',
+      'item': {
+        'id': 'item-1',
+        'code': 'I-1',
+        'nameAr': 'صنف عربي',
+        'unit': 'piece',
+        'units': [{'unit': 'carton', 'factor': '24'}],
+      },
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> post(
     String path, {
     Object? body,
@@ -334,6 +354,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add at least one line.'), findsOneWidget);
     expect(api.posts, isEmpty);
+  });
+
+  testWidgets('refresh issues a fresh list request', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api);
+    final before = api.queries.length;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    expect(api.queries.length, before + 1);
+  });
+
+  testWidgets('posts two carton scans as two cartons and keeps the available name', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+    final input = find.descendant(
+      of: find.byKey(const ValueKey('stock-document-barcode')),
+      matching: find.byType(TextField),
+    );
+    for (var scan = 0; scan < 2; scan++) {
+      await tester.enterText(input, 'CARTON');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('I-1 — صنف عربي'), findsOneWidget);
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single['lines'], [
+      {'itemId': 'item-1', 'quantity': '2', 'unitName': 'carton', 'countedQuantity': '2'},
+    ]);
   });
 
   testWidgets('says why it cannot create when the branch has no warehouse', (
