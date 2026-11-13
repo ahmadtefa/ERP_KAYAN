@@ -894,8 +894,26 @@ class _GroupLabel extends StatelessWidget {
         ))));
     }
     return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
-      message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 10, 8, 6),
+      message:'$action $label',child:InkWell(
+      onTap:onToggle,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: Container(
+      margin: EdgeInsets.only(top: first ? 4 : 8, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+      decoration: BoxDecoration(
+        color: active
+            ? accent.darkBase.withValues(alpha: 0.18)
+            : expanded
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: BorderDirectional(
+          start: BorderSide(
+            color: active || expanded ? accent.darkBase : Colors.transparent,
+            width: 3,
+          ),
+        ),
+      ),
       child: Row(
         children: [
           Container(
