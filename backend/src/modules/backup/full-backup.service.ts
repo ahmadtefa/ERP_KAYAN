@@ -43,8 +43,8 @@ import { pgBackupConnectionEnv } from './pg-backup-connection';
  * the screen asks what this machine can do and only offers the buttons that
  * work. Where the tools are missing the reason is shown, not hidden.
  *
- * Restore currently has important limits: maintenance is process-local,
- * in-flight writes are not drained, and crash recovery is not persistent.
+ * Restore currently drains HTTP handlers within this process. Maintenance
+ * and crash recovery still do not extend across processes or restarts.
  * It must not be considered safe for production until those gaps are closed.
  * Its present checks include:
  *
@@ -825,14 +825,13 @@ export class FullBackupService {
         }
       }
 
-      // Block newly admitted writes before taking the safety snapshot.
-      // Already in-flight writes and multi-process deployments still need a
-      // shared quiescence protocol; this local switch alone cannot drain them.
+      // Block new HTTP requests and drain admitted handlers before the safety snapshot.
       this.maintenance.begin(
         `Restoring database from ${label}. The system will be back shortly.`,
       );
       maintenanceOwned = true;
       safeToReleaseMaintenance = true; // production has not yet been changed
+      await this.maintenance.waitForBusinessRequests();
       const safety = await this.createSafety();
       this.logger.log(`Safety backup taken: ${safety.name}`);
 
