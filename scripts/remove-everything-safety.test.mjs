@@ -118,12 +118,18 @@ test('two confirmations, both explicit, before data is destroyed', () => {
 });
 
 test('processes and the service are stopped before files are deleted', () => {
-  const main = source.slice(source.indexOf('Stop-KayanProcesses\nRemove-KayanService'));
-  assert.ok(main.indexOf('Stop-KayanProcesses') < main.indexOf('Remove-KayanFolder'));
+  const main = source.slice(source.search(/^Remove-KayanService$/m));
+  assert.match(main, /^Remove-KayanService[\s\S]*?^Stop-KayanProcesses[\s\S]*?^Remove-KayanFolder/m);
   assert.ok(source.includes('Stop-Service -Name $serviceName -Force'));
 });
 
 test('logs can be kept for diagnosis without blocking the removal', () => {
   assert.match(source, /\[switch\]\$KeepLogs/);
   assert.match(source, /Copy-Item -LiteralPath \$LogDirectory/);
+});
+
+test('only a process that has exited can suppress a stop error', () => {
+  const stop = source.slice(source.indexOf('function Stop-KayanProcesses'), source.indexOf('function Remove-KayanService'));
+  assert.match(stop, /Stop-Process -InputObject \$process -Force -ErrorAction Stop/);
+  assert.match(stop, /if \(\$process.HasExited\) \{ continue \}[\s\S]*?\$script.Failures.Add/);
 });

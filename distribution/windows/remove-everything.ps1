@@ -101,9 +101,11 @@ function Stop-KayanProcesses {
       Where-Object { $_.Path -and (Test-UnderRoot $_.Path @($script:InstallRoot, $script:ProgramDataRoot)) })
     foreach ($process in $processes) {
       try {
-        Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        Stop-Process -InputObject $process -Force -ErrorAction Stop
         Start-Sleep -Milliseconds 500
       } catch {
+        # The service or an earlier stop can finish while the snapshot is in use.
+        if ($process.HasExited) { continue }
         $script:Failures.Add([ordered]@{ component = 'process'; path = "PID $($process.Id) $name"; reason = $_.Exception.Message })
       }
     }
@@ -362,11 +364,8 @@ if ((Test-Path -LiteralPath $pgData) -and -not (Test-Path -LiteralPath (Join-Pat
 
 Write-Host '::notice title=KAYAN removal::Complete removal started. Company data will be deleted.'
 
-Stop-KayanProcesses
 Remove-KayanService
 Remove-KayanTasks
-# Stopping the service can leave child postgres processes for a moment.
-Start-Sleep -Seconds 2
 Stop-KayanProcesses
 
 # -KeepLogs moves the logs aside first, so a failed removal can still be
