@@ -151,7 +151,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                     return;
                   }
                   try {
-                    await api.post('/accounting/opening-balances', data: {
+                    await api.post('/accounting/opening-balances', body: {
                       'asOfDate': date.text.trim(),
                       'lines': [
                         {'accountId': debit, 'debit': amount.text.trim(), 'credit': '0'},
