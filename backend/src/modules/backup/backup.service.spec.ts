@@ -173,7 +173,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
         png.writeUInt32BE(48, 20);
         const path = join(folder, 'legacy.png');
         await writeFile(path, png);
-        const company = await prismaMock.company.findUnique();
+        const company = await prismaMock.company.findUnique({ where: { id: COMPANY_ID } });
         prismaMock.company.findUnique = jest.fn(async () => ({ ...company, logoData: null, logoPath: 'legacy.png' }));
         const backup = await service.create(COMPANY_ID);
         expect(backup.companyProfile?.logoBase64).toBe(png.toString('base64'));
