@@ -43,13 +43,19 @@ test('ownership is proven before a folder is removed', () => {
 });
 
 test('the database folder must be identifiable as PostgreSQL', () => {
-  assert.match(source, /PG_VERSION/);
-  assert.match(source, /is not a PostgreSQL data directory/);
+  const markerCheck = source.indexOf("Join-Path $pgData 'PG_VERSION'");
+  const firstMutation = source.search(/^Stop-KayanProcesses$/m);
+  assert.ok(markerCheck > 0 && markerCheck < firstMutation);
+  assert.match(source.slice(markerCheck, firstMutation), /exit 1/);
 });
 
-test('the install location comes from the registry, not a fixed guess', () => {
-  assert.match(source, /Uninstall\\\*/);
-  assert.match(source, /InstallLocation/);
+test('the install location and uninstall registry entry use the exact Inno AppId', () => {
+  const appId = installer.match(/^#define AppId "{{([A-F0-9-]+)}"/m)?.[1];
+  assert.ok(appId);
+  assert.ok(source.includes(`'{${appId}}_is1'`));
+  assert.match(source, /Get-ItemProperty -LiteralPath \(Join-Path \$key \$uninstallKeyName\)/);
+  assert.match(source, /Test-KayanOwnedFolder \$entry.InstallLocation/);
+  assert.match(source, /Join-Path \$_ \$uninstallKeyName/);
 });
 
 test('every component in the requirement is handled', () => {
@@ -57,7 +63,6 @@ test('every component in the requirement is handled', () => {
     'KayanERPPostgreSQL',        // the service
     'AppData\\Roaming\\KAYAN-ERP', // per-user settings
     'AppData\\Local\\KAYAN-ERP',   // per-user cache
-    'Uninstall\\KAYAN ERP_is1',    // registry entry
     'Get-ScheduledTask',           // scheduled tasks
     'Start Menu',                  // shortcuts
   ]) {
