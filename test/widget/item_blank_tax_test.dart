@@ -34,6 +34,39 @@ class _ItemTaxApi extends ApiClient {
 }
 
 void main() {
+  testWidgets('editing item without touching VAT preserves existing 14 percent', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ItemTaxApi(existing: true);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      apiClientProvider.overrideWithValue(api),
+      appConfigProvider.overrideWithValue(
+        AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+      ),
+      exportCapabilitiesProvider.overrideWith(
+        (ref) async => ExportCapabilities.unknown,
+      ),
+    ], child: MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: const Scaffold(body: ItemsScreen()),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit').first);
+    await tester.pumpAndSettle();
+    final tax = find.widgetWithText(TextFormField, 'Tax %');
+    expect(tester.widget<TextFormField>(tax).controller!.text, '14');
+    // Change another field, deliberately leaving the VAT input untouched.
+    await tester.enterText(find.widgetWithText(TextFormField, 'Name (English)'), 'Updated item');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+    expect(api.submitted, containsPair('taxRate', '14'));
+    expect(api.submitted, containsPair('nameEn', 'Updated item'));
+  });
+
   for (final editing in [false,true]) {
     for (final input in ['', '   ', '0', '7']) {
     final label = input.isEmpty ? 'blank' : input.trim().isEmpty ? 'whitespace' : input;
