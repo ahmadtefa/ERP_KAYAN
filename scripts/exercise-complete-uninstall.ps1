@@ -36,7 +36,7 @@ $checks = New-Object 'System.Collections.Generic.List[object]'
 
 function Record([string]$Name, [bool]$Passed, [string]$Detail) {
   $checks.Add([ordered]@{ check = $Name; passed = $Passed; detail = $Detail })
-  if ($Passed) { Write-Host "PASS: $Name" } else { Write-Host "FAIL: $Name — $Detail"; $failures.Add("$Name — $Detail") }
+  if ($Passed) { Write-Host "PASS: $Name" } else { Write-Host "FAIL: $Name - $Detail"; $failures.Add("$Name - $Detail") }
 }
 
 function Fail([string]$Reason) {
