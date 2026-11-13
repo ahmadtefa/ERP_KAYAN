@@ -90,77 +90,129 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
   Future<void> _manualEntry() async {
     final api = ref.read(apiClientProvider);
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    final amount = TextEditingController();
     final date = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
-    String? debit;
-    String? credit;
+    final amounts = <TextEditingController>[TextEditingController()];
+    final selectedAccounts = <String?>[null];
+    String? balancingAccount;
     try {
-      final response = await api.getObject('/accounting/chart-of-accounts');
-      final cashResponse = await api.getObject('/cash/accounts');
-      final cashAccounts = (cashResponse['items'] as List? ?? const [])
+      final responses = await Future.wait([
+        api.getObject('/accounting/chart-of-accounts'),
+        api.getObject('/cash/accounts'),
+      ]);
+      final accounts = (responses[0]['items'] as List? ?? const [])
+          .whereType<Map>().map(Map<String, dynamic>.from)
+          .where((a) => a['isPostable'] == true && a['isActive'] != false)
+          .toList();
+      final cashAccounts = (responses[1]['items'] as List? ?? const [])
           .whereType<Map>().map(Map<String, dynamic>.from)
           .where((a) => a['isActive'] != false && a['accountId'] != null)
           .toList();
-      final accounts = (response['items'] as List? ?? const [])
-          .whereType<Map>()
-          .map(Map<String, dynamic>.from)
-          .where((a) => a['isPostable'] == true && a['isActive'] != false)
-          .toList();
       if (!mounted) return;
+      if (cashAccounts.isEmpty || accounts.isEmpty) {
+        showMessage(context, arabic ? 'أضف حساب بنك أو خزنة وحسابًا محاسبيًا أولًا' : 'Create a bank or cash account and ledger account first', error: true);
+        return;
+      }
+      String label(Map<String, dynamic> a) {
+        final preferred = (a[arabic ? 'nameAr' : 'nameEn'] ?? '').toString().trim();
+        final fallback = (a[arabic ? 'nameEn' : 'nameAr'] ?? '').toString().trim();
+        return '${a['code'] ?? ''} - ${preferred.isNotEmpty ? preferred : fallback}';
+      }
       final saved = await showDialog<bool>(
         context: context,
         builder: (ctx) => StatefulBuilder(
           builder: (ctx, update) => AlertDialog(
-            title: Text(arabic ? 'رصيد افتتاحي يدوي' : 'Manual opening balance'),
+            title: Text(arabic ? 'الأرصدة الافتتاحية للبنوك والخزائن' : 'Bank and cash opening balances'),
             content: SizedBox(
-              width: 450,
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  decoration: InputDecoration(labelText: arabic ? 'حساب البنك أو الخزنة' : 'Bank or cash account'),
-                  items: cashAccounts.map((a) => DropdownMenuItem<String>(
-                    value: a['accountId'].toString(),
-                    child: Text((a['code'] ?? '').toString() + ' - ' +
-                      (a[arabic ? 'nameAr' : 'nameEn'] ?? a['nameEn'] ?? '').toString(),
-                      overflow: TextOverflow.ellipsis),
-                  )).toList(),
-                  onChanged: (v) => update(() => debit = v),
-                ),
-                DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  decoration: InputDecoration(labelText: arabic ? 'الحساب المقابل' : 'Balancing account'),
-                  items: accounts.map((a) => DropdownMenuItem<String>(
-                    value: a['id'].toString(),
-                    child: Text((a['code'] ?? '').toString() + ' - ' +
-                      (a[arabic ? 'nameAr' : 'nameEn'] ?? a['nameEn'] ?? '').toString(),
-                      overflow: TextOverflow.ellipsis),
-                  )).toList(),
-                  onChanged: (v) => update(() => credit = v),
-                ),
-                TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(labelText: arabic ? 'المبلغ' : 'Amount')),
-                TextField(controller: date,
-                  decoration: InputDecoration(labelText: arabic ? 'التاريخ' : 'Date')),
-              ]),
+              width: 550,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  for (var i = 0; i < amounts.length; i++) ...[
+                    Row(children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('cash-account-$i'),
+                          isExpanded: true,
+                          value: selectedAccounts[i],
+                          decoration: InputDecoration(labelText: arabic ? 'البنك / الخزنة' : 'Bank / cash'),
+                          items: cashAccounts.map((a) => DropdownMenuItem<String>(
+                            value: a['accountId'].toString(),
+                            child: Text(label(a), overflow: TextOverflow.ellipsis),
+                          )).toList(),
+                          onChanged: (v) => update(() => selectedAccounts[i] = v),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: amounts[i],
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(labelText: arabic ? 'الرصيد' : 'Balance'),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: arabic ? 'حذف السطر' : 'Remove row',
+                        onPressed: amounts.length <= 1 ? null : () => update(() {
+                          selectedAccounts.removeAt(i);
+                          amounts.removeAt(i).dispose();
+                        }),
+                        icon: const Icon(Icons.remove_circle_outline),
+                      ),
+                    ]),
+                  ],
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TextButton.icon(
+                      onPressed: () => update(() {
+                        selectedAccounts.add(null);
+                        amounts.add(TextEditingController());
+                      }),
+                      icon: const Icon(Icons.add),
+                      label: Text(arabic ? 'إضافة بنك أو خزنة' : 'Add bank or cash'),
+                    ),
+                  ),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: balancingAccount,
+                    decoration: InputDecoration(labelText: arabic ? 'الحساب المقابل للأرصدة' : 'Balancing account'),
+                    items: accounts.map((a) => DropdownMenuItem<String>(
+                      value: a['id'].toString(),
+                      child: Text(label(a), overflow: TextOverflow.ellipsis),
+                    )).toList(),
+                    onChanged: (v) => update(() => balancingAccount = v),
+                  ),
+                  TextField(controller: date, decoration: InputDecoration(
+                    labelText: arabic ? 'تاريخ الأرصدة (YYYY-MM-DD)' : 'Opening date (YYYY-MM-DD)')),
+                ]),
+              ),
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false),
                 child: Text(arabic ? 'إلغاء' : 'Cancel')),
               FilledButton(
                 onPressed: () async {
-                  final number = double.tryParse(amount.text.trim());
-                  if (debit == null || credit == null || debit == credit ||
-                      number == null || !number.isFinite || number <= 0 ||
-                      DateTime.tryParse(date.text.trim()) == null) {
-                    showMessage(ctx, arabic ? 'راجع الحسابات والمبلغ والتاريخ' : 'Check accounts, amount and date', error: true);
+                  final ids = selectedAccounts.whereType<String>().toList();
+                  final values = amounts.map((a) => double.tryParse(a.text.trim())).toList();
+                  final valid = ids.length == amounts.length &&
+                      ids.toSet().length == ids.length &&
+                      balancingAccount != null && !ids.contains(balancingAccount) &&
+                      values.every((v) => v != null && v.isFinite && v > 0) &&
+                      RegExp(r'^\\d{4}-\\d{2}-\\d{2}$').hasMatch(date.text.trim()) &&
+                      DateTime.tryParse(date.text.trim()) != null;
+                  if (!valid) {
+                    showMessage(ctx, arabic ? 'راجع الحسابات والمبالغ والتاريخ، ولا تكرر الحساب' : 'Check accounts, positive balances, duplicates and date', error: true);
                     return;
                   }
                   try {
+                    final total = values.fold<double>(0, (sum, v) => sum + v!);
                     await api.post('/accounting/opening-balances', body: {
                       'asOfDate': date.text.trim(),
+                      'description': arabic ? 'أرصدة بنوك وخزائن افتتاحية' : 'Opening bank and cash balances',
                       'lines': [
-                        {'accountId': debit, 'debit': amount.text.trim(), 'credit': '0'},
-                        {'accountId': credit, 'debit': '0', 'credit': amount.text.trim()},
+                        for (var i = 0; i < ids.length; i++)
+                          {'accountId': ids[i], 'debit': amounts[i].text.trim(), 'credit': '0'},
+                        {'accountId': balancingAccount, 'debit': '0', 'credit': total.toStringAsFixed(4)},
                       ],
                     });
                     if (ctx.mounted) Navigator.pop(ctx, true);
@@ -168,7 +220,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                     if (ctx.mounted) showMessage(ctx, e, error: true);
                   }
                 },
-                child: Text(arabic ? 'حفظ مسودة' : 'Save draft'),
+                child: Text(arabic ? 'حفظ مسودة للمراجعة' : 'Save draft for review'),
               ),
             ],
           ),
@@ -178,8 +230,10 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     } catch (e) {
       if (mounted) showMessage(context, e, error: true);
     } finally {
-      amount.dispose();
       date.dispose();
+      for (final controller in amounts) {
+        controller.dispose();
+      }
     }
   }
 
