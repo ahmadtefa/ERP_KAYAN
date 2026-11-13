@@ -1,6 +1,7 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -14,6 +15,7 @@ Future<bool?> showOpeningBalanceDraft(
   ApiClient api,
   AppUser user, {
   Map<String, dynamic>? draft,
+  DraftExitRelay? exitRelay,
 }) async {
   Future<List<_Record>> all(String path) async {
     const size = 200;
@@ -60,6 +62,7 @@ Future<bool?> showOpeningBalanceDraft(
     builder: (_) => _DraftDialog(
       api: api,
       draft: draft,
+      exitRelay: exitRelay,
       initialBranch: user.branchId,
       branches: responses[0]
           .where(
@@ -123,6 +126,7 @@ class _DraftDialog extends StatefulWidget {
   const _DraftDialog({
     required this.api,
     required this.draft,
+    this.exitRelay,
     required this.initialBranch,
     required this.branches,
     required this.accounts,
@@ -136,6 +140,7 @@ class _DraftDialog extends StatefulWidget {
 
   final ApiClient api;
   final _Record? draft;
+  final DraftExitRelay? exitRelay;
   final String? initialBranch;
   final List<_Record> branches;
   final List<_Record> accounts;
@@ -158,6 +163,7 @@ class _DraftDialogState extends State<_DraftDialog> {
   String? _warehouse;
   bool _saving = false;
   bool _dirty = false;
+  bool _confirmingExit = false;
   late bool _autoBalance;
   final _removed = <_DraftLine>[];
   static final _amount = RegExp(r'^\d{1,15}(?:\.\d{1,4})?$');
@@ -165,6 +171,7 @@ class _DraftDialogState extends State<_DraftDialog> {
   @override
   void initState() {
     super.initState();
+    widget.exitRelay?.attach(_leaveForRoute);
     final draft = widget.draft;
     _date = TextEditingController(
       text:
@@ -190,6 +197,7 @@ class _DraftDialogState extends State<_DraftDialog> {
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_leaveForRoute);
     for (final line in [..._lines, ..._removed]) {
       line.dispose();
     }
@@ -213,19 +221,31 @@ class _DraftDialogState extends State<_DraftDialog> {
     action();
   });
 
-  Future<void> _close() async {
-    if (_saving) return;
-    if (_dirty &&
-        !await confirmAction(
+  Future<bool> _leaveForRoute() async {
+    if (_saving || _confirmingExit) return false;
+    if (_dirty) {
+      _confirmingExit = true;
+      try {
+        if (!await confirmAction(
           context,
           title: _label('تغييرات غير محفوظة', 'Unsaved changes'),
           message: _label('هل تريد تجاهل التغييرات؟', 'Discard your changes?'),
           confirmLabel: _label('تجاهل التغييرات', 'Discard changes'),
           destructive: true,
         )) {
-      return;
+          return false;
+        }
+      } finally {
+        _confirmingExit = false;
+      }
     }
-    if (mounted) Navigator.of(context).pop(false);
+    if (!mounted) return false;
+    Navigator.of(context).pop(false);
+    return true;
+  }
+
+  Future<void> _close() async {
+    await _leaveForRoute();
   }
 
   DateTime? _calendarDate() {

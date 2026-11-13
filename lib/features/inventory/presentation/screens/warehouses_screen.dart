@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/data_dialog.dart';
@@ -41,7 +42,9 @@ final warehousesListProvider =
     );
 
 class WarehousesScreen extends ConsumerStatefulWidget {
-  const WarehousesScreen({super.key});
+  const WarehousesScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<WarehousesScreen> createState() => _WarehousesScreenState();
@@ -50,6 +53,23 @@ class WarehousesScreen extends ConsumerStatefulWidget {
 class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
   String _query = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
@@ -252,6 +272,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
           : (arabic ? 'مستودع جديد' : 'New warehouse'),
       fields: fields,
       initial: existing ?? const {},
+      exitRelay: _exitRelay,
       onSubmit: (entered) async {
         await _submit(entered, existing: existing);
       },

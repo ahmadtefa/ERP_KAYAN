@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -16,9 +17,10 @@ import '../../../inventory/presentation/screens/stock_screen.dart';
 /// Lists imported opening-balance drafts and gives the accountant a review
 /// screen before posting them to the ledger and stock.
 class OpeningBalancesScreen extends ConsumerStatefulWidget {
-  const OpeningBalancesScreen({super.key, this.documentId});
+  const OpeningBalancesScreen({super.key, this.documentId, this.navigationKey});
 
   final String? documentId;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<OpeningBalancesScreen> createState() =>
@@ -28,11 +30,23 @@ class OpeningBalancesScreen extends ConsumerStatefulWidget {
 class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
   late Future<Map<String, dynamic>> _load;
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
 
   @override
   void initState() {
     super.initState();
     _load = _fetch();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
   }
 
   @override
@@ -99,6 +113,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         ref.read(apiClientProvider),
         user,
         draft: draft,
+        exitRelay: _exitRelay,
       );
       if (saved == true && mounted) _refresh();
     } catch (error) {
