@@ -302,9 +302,9 @@ function Write-Report($Remaining) {
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     computerName   = $env:COMPUTERNAME
     installRoot    = $script:InstallRoot
-    removed        = @($script:Removed)
-    skipped        = @($script:Skipped)
-    failures       = @($script:Failures)
+    removed        = $script:Removed.ToArray()
+    skipped        = $script:Skipped.ToArray()
+    failures       = $script:Failures.ToArray()
     stillPresent   = @($Remaining)
     preservedLogs  = $script:PreservedLogs
     complete       = ($script:Failures.Count -eq 0 -and $Remaining.Count -eq 0)
