@@ -1489,7 +1489,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','purchases.invoices.read',...(req.headers['x-cost']==='yes'?['inventory.cost.read']:[]),'inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -1579,6 +1579,21 @@ let difference = '70000000-0000-4000-8000-000000000005';
         if (kind === 'sales') {
           assert.equal(updated.costOfGoods,null); assert.equal(updated.grossProfit,null);
           assert.ok(updated.lines.every(line=>line.unitCost===null && line.costTotal===null));
+        }
+        if (kind === 'purchase') {
+          for (const response of [body, updated]) {
+            assert.ok(response.lines.every(line => line.inventoryCostTotal === null &&
+              line.landedCostAmount === null && line.returnedCostTotal === null));
+            assert.equal(response.lines[0].unitPrice, '100.0000');
+          }
+          const path = base + route + '/' + body.id;
+          const restricted = await fetch(path,{headers:{'x-allowed':'yes'}});
+          assert.equal(restricted.status,200);
+          assert.equal((await restricted.json()).lines[0].inventoryCostTotal,null);
+          const permitted = await fetch(path,{headers:{'x-allowed':'yes','x-cost':'yes'}});
+          assert.equal(permitted.status,200);
+          assert.equal((await permitted.json()).lines[0].inventoryCostTotal,'100.0000');
+          console.log('PASS: purchase invoice valuation is redacted on create, edit and read without inventory.cost.read.');
         }
         assert.equal(await model.count({where:{companyId:company}}),before+1,kind);
         const saved=await model.findUniqueOrThrow({where:{id:body.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});

@@ -4,6 +4,7 @@ import {
   AuthUser,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
@@ -79,6 +80,7 @@ export class PurchaseOrdersController {
       user.userId,
       id,
       dto ?? {},
+      canReadCost(user),
     );
   }
 }

@@ -140,7 +140,7 @@ export class PurchaseInvoicesService {
     return { items: items.map((i) => this.toSummary(i)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -192,10 +192,10 @@ export class PurchaseInvoicesService {
         discountPercent: l.discountPercent.toFixed(RATE_SCALE),
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
-        landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
-        inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
+        landedCostAmount: mayReadCost ? l.landedCostAmount.toFixed(MONEY_SCALE) : null,
+        inventoryCostTotal: mayReadCost ? l.inventoryCostTotal.toFixed(MONEY_SCALE) : null,
         costCenterId: l.costCenterId ?? null,
-        returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
+        returnedCostTotal: mayReadCost ? l.returnedCostTotal.toFixed(MONEY_SCALE) : null,
       })),
     };
   }
@@ -206,6 +206,7 @@ export class PurchaseInvoicesService {
     userId: string,
     dto: CreatePurchaseInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
+    mayReadCost = true,
   ) {
     const created = await this.prisma.$transaction((tx) =>
       this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
@@ -223,7 +224,7 @@ export class PurchaseInvoicesService {
       },
     });
 
-    return this.findOne(companyId, created.id);
+    return this.findOne(companyId, created.id, mayReadCost);
   }
 
   /** Internal: caller owns the transaction and any required audit records. */
@@ -335,6 +336,7 @@ export class PurchaseInvoicesService {
     userId: string,
     id: string,
     dto: CreatePurchaseInvoiceDto,
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -461,11 +463,11 @@ export class PurchaseInvoicesService {
         landedCostAmount: landedCostAmount.toFixed(MONEY_SCALE),
       },
     });
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
-  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>, mayReadCost = true) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const before = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { purchaseOrderId: true },
@@ -575,7 +577,7 @@ export class PurchaseInvoicesService {
           allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
       }, tx);
     }, { maxWait: 10000, timeout: 30000 });
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /** Cancel a draft without deleting its historical identity or retry key. */
@@ -620,7 +622,7 @@ export class PurchaseInvoicesService {
     return { id, cancelled: true };
   }
 
-  async post(companyId: string, userId: string, id: string) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { status: true },
@@ -781,10 +783,10 @@ export class PurchaseInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -943,7 +945,7 @@ export class PurchaseInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /// The due date the supplier's payment terms imply, or null when they have
