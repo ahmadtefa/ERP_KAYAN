@@ -148,8 +148,8 @@ export class CashAccountsService {
     });
     if (!before) throw new NotFoundException('Cash account not found');
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
-      const enteredEn = String(dto.nameEn ?? before.nameEn).trim();
-      const enteredAr = String(dto.nameAr ?? before.nameAr).trim();
+      const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
       if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English name');
       dto.nameEn = enteredEn || enteredAr;
       dto.nameAr = enteredAr || enteredEn;

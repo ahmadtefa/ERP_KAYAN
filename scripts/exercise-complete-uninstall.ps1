@@ -115,8 +115,12 @@ $before = [ordered]@{
   firewallRules   = @(Get-NetFirewallRule -DisplayName '*KAYAN*' -ErrorAction SilentlyContinue).Count
 }
 foreach ($name in $before.Keys) {
-  if (-not $before[$name] -and $name -notin @('userConfig')) { Fail "The installation is incomplete: $name is missing before the exercise starts." }
+  if (-not $before[$name] -and $name -notin @('userConfig', 'firewallRules')) { Fail "The installation is incomplete: $name is missing before the exercise starts." }
 }
+
+# The loopback-only installer need not create a firewall rule. If any KAYAN
+# rule exists, the after-state still has to prove that none was left behind.
+Write-Host "KAYAN firewall rules present before removal: $($before.firewallRules)."
 
 # Company data and backups must exist for their removal to mean anything. The
 # PostgreSQL data directory is the company database; the archive and attachment

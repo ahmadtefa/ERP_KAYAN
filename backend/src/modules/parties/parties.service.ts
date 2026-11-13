@@ -652,8 +652,8 @@ export class PartiesService {
     const before = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!before) throw new NotFoundException(`${kind} not found`);
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
-      const nameEn = String(dto.nameEn ?? before.nameEn).trim();
-      const nameAr = String(dto.nameAr ?? before.nameAr).trim();
+      const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
       if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
       dto.nameEn = nameEn || nameAr;
       dto.nameAr = nameAr || nameEn;

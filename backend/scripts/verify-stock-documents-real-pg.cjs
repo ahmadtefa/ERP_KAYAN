@@ -2290,6 +2290,40 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:cancelTarget.id}}),0);
     }
     console.log('PASS: real Prisma/PostgreSQL post/edit stale-read, edit/cancel, post/cancel, cancel audit rollback and stock/journal invariants for sales and purchases.');
+    await prisma.companySetting.update({where:{companyId:company},data:{pricesIncludeTax:true,maxDiscountPercent:'100'}});
+    const additionalCharges = {
+      customerId: customer.id, invoiceDate: date, discountType: 'PERCENT', discountPercent: '10',
+      lines: [
+        {description:'Synthetic service',quantity:'1',unitPrice:'114',taxRate:'14'},
+        {description:'Freight',isAdditionalCharge:true,quantity:'1',unitPrice:'20',taxRate:'14'},
+        {description:'Handling',isAdditionalCharge:true,quantity:'1',unitPrice:'5',taxRate:'0'},
+      ],
+    };
+    const chargeDraft = await si.create(company,branch,user,additionalCharges);
+    assert.equal(chargeDraft.totalAmount,'130.4000');
+    const amendedCharges = {...additionalCharges,lines:[...additionalCharges.lines,
+      {description:'Insurance',isAdditionalCharge:true,quantity:'1',unitPrice:'10',taxRate:'7'}]};
+    const editedCharges = await si.updateDraft(company,branch,user,chargeDraft.id,amendedCharges);
+    assert.equal(editedCharges.subTotal,'125.0000');
+    assert.equal(editedCharges.taxAmount,'16.1000');
+    assert.equal(editedCharges.totalAmount,'141.1000');
+    assert.deepEqual(editedCharges.lines.map(line => line.isAdditionalCharge),[false,true,true,true]);
+    const postedCharges = await si.post(company,user,chargeDraft.id);
+    const chargeJournal = await prisma.journalEntry.findUniqueOrThrow({where:{id:postedCharges.journalEntryId},include:{lines:true}});
+    assert.equal(chargeJournal.totalDebit.toFixed(4),'141.1000');
+    assert.equal(chargeJournal.totalCredit.toFixed(4),'141.1000');
+    assert.equal(chargeJournal.lines.find(line => line.description === 'VAT on sales').credit.toFixed(4),'16.1000');
+    const freightReturn = await returns.createSalesReturn(company,branch,user,{
+      originalInvoiceId:postedCharges.id,returnDate:date,reason:'Synthetic freight refund',
+      lines:[{originalLineId:postedCharges.lines[1].id,quantity:'1'}],
+    });
+    assert.equal(freightReturn.taxAmount,'2.8000');
+    assert.equal(freightReturn.totalAmount,'22.8000');
+    await returns.postSalesReturn(company,user,freightReturn.id);
+    const freightJournal = await prisma.journalEntry.findFirstOrThrow({where:{companyId:company,sourceId:freightReturn.id},include:{lines:true}});
+    assert.equal(freightJournal.lines.find(line => line.description === 'VAT on sales return').debit.toFixed(4),'2.8000');
+    assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:{in:[postedCharges.id,freightReturn.id]}}}),0);
+    console.log('PASS: real PostgreSQL sales charges draft/edit/post, VAT and exact freight refund without stock movements.');
     console.log('PASS: PostgreSQL + Prisma order conversion full/partial, historical values, audit rollback, retry/competition, post/reverse, draft cancel and order-cancel race. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();

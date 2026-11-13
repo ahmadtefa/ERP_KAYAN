@@ -117,24 +117,44 @@ for (const forbidden of ['smoke-test-installed-windows', 'memory-flow.test', 've
 }
 assert.match(source, /ci-no-signing\.cjs/);
 const integrity = read('code-integrity.yml');
-assert.deepEqual(integrity.on, safe.on, 'Additional code checks must run on the same PR and main events');
+assert.deepEqual(integrity.on, { ...safe.on, push: { branches: ['main', 'work/bilingual-names-opening-balances'] } });
 assert.deepEqual(integrity.permissions, { contents: 'read' });
-assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build', 'work-setup', 'work-setup-inspection']);
+assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build', 'work-setup', 'work-setup-inspection', 'work-setup-runtime']);
 const accounting = integrity.jobs['accounting-and-packaging-policy'];
 assert.ok(!accounting.env?.NODE_OPTIONS, 'preload guard cannot run before checkout provides it');
 for (const step of accounting.steps.filter((step) => step.run && /npm ci|prisma generate|npm test|node --test/.test(step.run))) {
   assert.match(step.env?.NODE_OPTIONS || '', /ci-no-signing\.cjs/, `missing non-signing guard: ${step.name}`);
 }
 const integritySource = fs.readFileSync(path.join(workflows, 'code-integrity.yml'), 'utf8');
-assert.doesNotMatch(integritySource, /secrets\.|contents:\s*write|generateKeyPair|createPrivateKey|publish-verified-windows|smoke-test-installed-windows/);
+assert.doesNotMatch(integritySource, /secrets\.|contents:\s*write|generateKeyPair|createPrivateKey|publish-verified-windows/);
 assert.match(integritySource, /ci-no-signing\.cjs/);
 for (const path of ['opening-balances.controller.spec.ts', 'opening-balances.service.spec.ts', 'posting.service.spec.ts', 'year-end-close.service.spec.ts', 'migrate-deploy.test.mjs', 'windows-policy-non-signing.test.mjs']) {
   assert.ok(integritySource.includes(path), `Additional required code test missing: ${path}`);
 }
 const packageCondition = "github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances'";
+const workPush = "github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'";
+const sameRepo = "github.repository == 'ahmadtefa/ERP_KAYAN'";
+const runtime = integrity.jobs['work-setup-runtime'];
+assert.equal(runtime.if, `${sameRepo} && ${workPush}`);
+assert.equal(runtime.environment, 'windows-installer-test');
+assert.equal(runtime.needs, 'work-setup-inspection');
+assert.equal(runtime['runs-on'], 'windows-latest');
+assert.deepEqual(runtime.permissions, { contents: 'read', actions: 'read', deployments: 'read' });
+assert.equal(runtime.steps[0].with.ref, '${{ github.sha }}');
+assert.equal(runtime.steps[0].with['persist-credentials'], false);
+const runtimeSteps = runtime.steps.map(step => step.run ?? step.with?.name ?? '');
+const guard = runtimeSteps.findIndex(step => step.includes('check-installer-test-environment'));
+const download = runtimeSteps.findIndex(step => step.includes('KAYAN-ERP-Setup-inspected-'));
+const provenance = runtimeSteps.findIndex(step => step.includes('$report.installer.sha256 -ne $hash'));
+const smoke = runtimeSteps.findIndex(step => step.includes('smoke-test-installed-windows'));
+assert.ok(guard >= 0 && guard < download && download < provenance && provenance < smoke);
+assert.match(runtimeSteps[smoke], /-RuntimeOnly -ExpectedSourceCommit/);
+assert.ok(runtimeSteps.some(step => step.includes('exercise-complete-uninstall')));
+assert.equal(integritySource.match(/smoke-test-installed-windows/g)?.length, 1);
 for (const [name, job] of Object.entries(integrity.jobs)) {
+  if (name === 'work-setup-runtime') continue;
   const packages = name === 'work-setup' || name === 'work-setup-inspection';
-  assert.equal(job.if, packages ? packageCondition : undefined);
+  assert.equal(job.if?.trim(), packages ? `${sameRepo} && ((${packageCondition}) || (${workPush}))` : undefined);
   assert.equal(job.environment, undefined);
   assert.equal(job.permissions, undefined);
   assert.equal(job['continue-on-error'], undefined, 'Required code job must not mask failures');

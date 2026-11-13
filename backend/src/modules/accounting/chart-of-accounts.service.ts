@@ -175,8 +175,8 @@ export class ChartOfAccountsService {
       await lockChart(tx, companyId);
       const account = await this.findAccount(companyId, id, tx);
       if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
-        const nameEn = String(dto.nameEn ?? account.nameEn).trim();
-        const nameAr = String(dto.nameAr ?? account.nameAr).trim();
+        const nameEn = String(dto.nameEn ?? '').trim() || account.nameEn.trim();
+        const nameAr = String(dto.nameAr ?? '').trim() || account.nameAr.trim();
         if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English account name');
         dto.nameEn = nameEn || nameAr;
         dto.nameAr = nameAr || nameEn;

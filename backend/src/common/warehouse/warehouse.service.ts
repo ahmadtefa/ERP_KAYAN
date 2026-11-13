@@ -189,8 +189,8 @@ export class WarehouseService {
 
     const data: Prisma.WarehouseUpdateInput = {};
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
-      const enteredEn = String(dto.nameEn ?? before.nameEn).trim();
-      const enteredAr = String(dto.nameAr ?? before.nameAr).trim();
+      const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
       if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English warehouse name');
       data.nameEn = enteredEn || enteredAr;
       data.nameAr = enteredAr || enteredEn;

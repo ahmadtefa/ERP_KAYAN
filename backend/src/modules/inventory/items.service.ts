@@ -548,8 +548,8 @@ export class ItemsService {
     // Validate the effective pair, including unchanged names on partial edits.
     // A blank field is allowed if the other language has a name.
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
-      const nameEn = String(dto.nameEn ?? before.nameEn).trim();
-      const nameAr = String(dto.nameAr ?? before.nameAr).trim();
+      const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
       if (!nameEn && !nameAr) {
         throw new BadRequestException('Provide an Arabic or English item name');
       }

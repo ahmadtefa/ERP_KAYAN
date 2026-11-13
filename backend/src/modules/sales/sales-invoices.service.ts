@@ -47,6 +47,7 @@ const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
 
 interface PreparedLine {
+  isAdditionalCharge: boolean;
   lineNumber: number;
   itemId: string | null;
   description: string;
@@ -139,6 +140,11 @@ export class SalesInvoicesService {
     };
   }
 
+  async taxPricing(companyId: string) {
+    const settings = await this.settings.get(companyId);
+    return { pricesIncludeTax: settings.pricesIncludeTax };
+  }
+
   async findOne(companyId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -166,6 +172,7 @@ export class SalesInvoicesService {
         orderLineId: l.orderLineId,
         lineNumber: l.lineNumber,
         itemId: l.itemId,
+        isAdditionalCharge: l.isAdditionalCharge,
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
@@ -296,6 +303,7 @@ export class SalesInvoicesService {
             create: lines.map((l) => ({
               lineNumber: l.lineNumber,
               itemId: l.itemId,
+              isAdditionalCharge: l.isAdditionalCharge,
               description: l.description,
               quantity: l.quantity,
               unitPrice: l.unitPrice,
@@ -410,6 +418,7 @@ export class SalesInvoicesService {
             create: lines.map((line) => ({
               lineNumber: line.lineNumber,
               itemId: line.itemId,
+              isAdditionalCharge: line.isAdditionalCharge,
               description: line.description,
               quantity: line.quantity,
               unitPrice: line.unitPrice,
@@ -506,7 +515,7 @@ export class SalesInvoicesService {
       const counters = planOrderReallocation(order.lines, invoice.lines, requested);
       const prior = new Map<string, typeof invoice.lines[number]>();
       for (const old of invoice.lines) {
-        if (!old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero()) {
+        if (old.isAdditionalCharge || !old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero()) {
           throw new BadRequestException('Historical invoice lines require manual review');
         }
         prior.set(old.orderLineId, old);
@@ -1175,8 +1184,17 @@ export class SalesInvoicesService {
       throw new BadRequestException('Order invoice unit snapshots do not match its lines');
     }
     for (const [index, raw] of input.entries()) {
+      const isAdditionalCharge = raw.isAdditionalCharge === true;
+      if (isAdditionalCharge && (orderUnits || raw.itemId || raw.unitName || raw.unitId)) {
+        throw new BadRequestException('Additional charges cannot be linked to an item or an order');
+      }
       const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
       if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
+
+      if (isAdditionalCharge && (!quantity.equals(1) || raw.discountType ||
+          raw.discountAmount || raw.discountPercent)) {
+        throw new BadRequestException('An additional charge must have quantity one and no line discount');
+      }
 
       // A price typed on the line is what was charged. When nobody typed one,
       // the customer's agreed list speaks, and failing that the item's own
@@ -1294,7 +1312,7 @@ export class SalesInvoicesService {
       // before tax" means on these documents.
       // Sales orders currently store prices as tax-exclusive when created.
       // Do not reinterpret an old agreed price using today's company setting.
-      const grossLineTotal = !orderUnits && !options.pricesExcludeTax && settings.pricesIncludeTax && taxRate.greaterThan(0)
+      const grossLineTotal = !isAdditionalCharge && !orderUnits && !options.pricesExcludeTax && settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
 
@@ -1329,6 +1347,7 @@ export class SalesInvoicesService {
       prepared.push({
         lineNumber: index + 1,
         itemId: raw.itemId ?? null,
+        isAdditionalCharge,
         description,
         // Internal base-unit quantity that stock and cost operate on.
         quantity: resolved.baseQuantity,
@@ -1357,7 +1376,7 @@ export class SalesInvoicesService {
     let allocation: ReturnType<typeof allocateDocumentDiscount>;
     try {
       allocation = allocateDocumentDiscount(
-        prepared.map((line) => line.lineTotal),
+        prepared.map((line) => line.isAdditionalCharge ? new Prisma.Decimal(0) : line.lineTotal),
         documentDiscount,
       );
     } catch (error) {
@@ -1365,7 +1384,7 @@ export class SalesInvoicesService {
     }
 
     const grossTotal = prepared.reduce(
-      (sum, line) => sum.plus(line.grossLineTotal),
+      (sum, line) => line.isAdditionalCharge ? sum : sum.plus(line.grossLineTotal),
       new Prisma.Decimal(0),
     );
     const lineDiscountTotal = prepared.reduce(
@@ -1468,7 +1487,9 @@ export class SalesInvoicesService {
     scale = MONEY_SCALE,
   ): Prisma.Decimal {
     try {
-      return new Prisma.Decimal(value).toDecimalPlaces(scale);
+      const amount = new Prisma.Decimal(value);
+      if (!amount.isFinite()) throw new Error('Non-finite amount');
+      return amount.toDecimalPlaces(scale);
     } catch {
       throw new BadRequestException(`${field} is not a valid number: ${value}`);
     }

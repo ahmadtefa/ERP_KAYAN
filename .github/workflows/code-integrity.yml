@@ -1,12 +1,12 @@
 name: PR accounting and Windows build
 
-# Independent code checks. No secrets, signing, installation or publication.
+# Code checks and an independent, approval-gated Windows runtime exercise.
 # These checks deliberately do not replace the blocked release evidence gate.
 on:
   pull_request:
     branches: [main, 'arena/**']
   push:
-    branches: [main]
+    branches: [main, work/bilingual-names-opening-balances]
 
 permissions:
   contents: read
@@ -128,7 +128,10 @@ jobs:
 
   work-setup:
     name: Build product Setup for PR 79
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances'
+    if: >-
+      github.repository == 'ahmadtefa/ERP_KAYAN' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'))
     needs: [accounting-and-packaging-policy, windows-build]
     runs-on: windows-latest
     timeout-minutes: 90
@@ -155,7 +158,7 @@ jobs:
       - name: Build offline Setup with the pinned product public key
         shell: pwsh
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           $ErrorActionPreference = 'Stop'
@@ -168,14 +171,17 @@ jobs:
           Write-Host "Source: $env:EXPECTED_HEAD, bytes: $($setup.Length), SHA256: $hash"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: windows-setup-internal-${{ github.event.pull_request.head.sha }}
+          name: windows-setup-internal-${{ github.event.pull_request.head.sha || github.sha }}
           path: build/windows-installer/KAYAN-ERP-Setup.exe
           if-no-files-found: error
           retention-days: 1
 
   work-setup-inspection:
     name: Inspect PR 79 Setup payload
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances'
+    if: >-
+      github.repository == 'ahmadtefa/ERP_KAYAN' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'))
     needs: work-setup
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -217,11 +223,11 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: windows-setup-internal-${{ github.event.pull_request.head.sha }}
+          name: windows-setup-internal-${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
       - name: Inspect Setup and match payload provenance
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           node scripts/inspect-final-inno.mjs --artifact candidate/KAYAN-ERP-Setup.exe --mode product \
@@ -229,7 +235,78 @@ jobs:
             --source-commit "$EXPECTED_HEAD" --report candidate/payload-verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: KAYAN-ERP-Setup-inspected-${{ github.event.pull_request.head.sha }}
+          name: KAYAN-ERP-Setup-inspected-${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate/
           if-no-files-found: error
+          retention-days: 7
+
+  work-setup-runtime:
+    name: Exercise exact Setup offline on Windows Server
+    if: github.repository == 'ahmadtefa/ERP_KAYAN' && github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'
+    needs: work-setup-inspection
+    environment: windows-installer-test
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - name: Verify review protection and branch rule
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-installer-test-environment.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: KAYAN-ERP-Setup-inspected-${{ github.sha }}
+          path: candidate
+      - name: Verify candidate provenance
+        shell: pwsh
+        run: |
+          $report = Get-Content -LiteralPath 'candidate/payload-verification.json' -Raw | ConvertFrom-Json
+          $setup = Get-Item -LiteralPath 'candidate/KAYAN-ERP-Setup.exe'
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($report.sourceCommit -ne $env:GITHUB_SHA -or $report.installer.sha256 -ne $hash) {
+            throw 'Setup hash or source mismatch.'
+          }
+      - name: Run offline installed-runtime smoke
+        timeout-minutes: 35
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD/candidate/KAYAN-ERP-Setup.exe" -RuntimeOnly -ExpectedSourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed.' }
+      - name: Exercise complete removal and check neighboring files
+        timeout-minutes: 45
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/exercise-complete-uninstall.ps1 -SetupPath "$PWD/candidate/KAYAN-ERP-Setup.exe" -ReportPath "$PWD/candidate/complete-uninstall-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Complete removal exercise failed.' }
+      - name: Record installed runtime evidence
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            installerSha256 = (Get-FileHash -LiteralPath 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+            os = $os.Caption
+            osVersion = $os.Version
+            checks = @('offline runtime smoke', 'complete uninstall')
+            limitations = @('no licensed business use', 'no Windows 10/11 desktop UI acceptance', 'no combined database/files/licence recovery')
+          } | ConvertTo-Json | Set-Content -LiteralPath 'candidate/installation-smoke.json'
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-installer-runtime-evidence-${{ github.sha }}
+          path: |
+            candidate/installation-smoke.json
+            candidate/complete-uninstall-evidence.json
+          if-no-files-found: warn
           retention-days: 7

@@ -200,6 +200,28 @@ describe('SalesInvoicesService.reverse', () => {
 });
 
 describe('SalesInvoicesService.prepareLines tax-price options', () => {
+  it('taxes each additional charge once and applies the invoice discount to the sale', async () => {
+    const settings = { get: jest.fn().mockResolvedValue({ pricesIncludeTax: true, maxDiscountPercent: '100' }) };
+    const service = new SalesInvoicesService(
+      {} as never, {} as never, {} as never, {} as never, settings as never,
+      {} as never, {} as never, {} as never, {} as never, {} as never,
+    );
+    const input = [
+      { description: 'Sale', quantity: '1', unitPrice: '114', taxRate: '14' },
+      { isAdditionalCharge: true, description: 'Freight', quantity: '1', unitPrice: '20', taxRate: '14' },
+      { isAdditionalCharge: true, description: 'Handling', quantity: '1', unitPrice: '5', taxRate: '0' },
+      { isAdditionalCharge: true, description: 'Insurance', quantity: '1', unitPrice: '10', taxRate: '7' },
+    ];
+    const prepared = await (service as any).prepareLines(COMPANY_ID, input, null, { type: 'PERCENT', percent: '10' });
+    expect(prepared.lines.map((line: any) => [line.lineTotal.toFixed(4), line.taxAmount.toFixed(4)])).toEqual([
+      ['90.0000', '12.6000'], ['20.0000', '2.8000'], ['5.0000', '0.0000'], ['10.0000', '0.7000'],
+    ]);
+    expect((service as any).totalsOf(prepared.lines).totalAmount.toFixed(4)).toBe('141.1000');
+    await expect((service as any).prepareLines(COMPANY_ID, [
+      { ...input[1], itemId: TRACKED_ITEM_ID },
+    ], null, {})).rejects.toThrow('Additional charges cannot be linked');
+  });
+
   it('can preserve tax-exclusive quotation prices when the company includes tax in invoice prices', async () => {
     const settings = {
       get: jest.fn().mockResolvedValue({ pricesIncludeTax: true, maxDiscountPercent: '100' }),
