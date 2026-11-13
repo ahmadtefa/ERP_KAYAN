@@ -19,8 +19,8 @@ export class CreateAccountDto {
   })
   code?: string;
 
-  @IsString() @MinLength(1) @MaxLength(200) nameEn!: string;
-  @IsString() @MinLength(1) @MaxLength(200) nameAr!: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
 
   /// Defaults to EXPENSE: the expense screen creates expense accounts without
   /// naming a type (the contract the desktop client has always used).
