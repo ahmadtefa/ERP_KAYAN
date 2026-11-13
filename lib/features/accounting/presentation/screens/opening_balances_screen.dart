@@ -96,6 +96,11 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     String? credit;
     try {
       final response = await api.getObject('/accounting/chart-of-accounts');
+      final cashResponse = await api.getObject('/cash/accounts');
+      final cashAccounts = (cashResponse['items'] as List? ?? const [])
+          .whereType<Map>().map(Map<String, dynamic>.from)
+          .where((a) => a['isActive'] != false && a['accountId'] != null)
+          .toList();
       final accounts = (response['items'] as List? ?? const [])
           .whereType<Map>()
           .map(Map<String, dynamic>.from)
@@ -113,8 +118,8 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                 DropdownButtonFormField<String>(
                   isExpanded: true,
                   decoration: InputDecoration(labelText: arabic ? 'حساب البنك أو الخزنة' : 'Bank or cash account'),
-                  items: accounts.map((a) => DropdownMenuItem<String>(
-                    value: a['id'].toString(),
+                  items: cashAccounts.map((a) => DropdownMenuItem<String>(
+                    value: a['accountId'].toString(),
                     child: Text((a['code'] ?? '').toString() + ' - ' +
                       (a[arabic ? 'nameAr' : 'nameEn'] ?? a['nameEn'] ?? '').toString(),
                       overflow: TextOverflow.ellipsis),
