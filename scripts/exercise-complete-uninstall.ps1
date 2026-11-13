@@ -145,13 +145,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION'))) {
 # ── neighbours the product does not own ──────────────────────────────────────
 # Written beside the product so a wrongly broad delete is caught, not assumed.
 $neighbourFiles = @(
-  (Join-Path $programData 'NOT-KAYAN-keep.txt'),
-  (Join-Path $programData 'PostgreSQL\NOT-KAYAN-keep.txt'),
+  (Join-Path $env:ProgramData 'NOT-KAYAN-keep.txt'),
+  (Join-Path $env:ProgramFiles 'NOT-KAYAN-keep.txt'),
   (Join-Path $env:USERPROFILE 'AppData\Roaming\NOT-KAYAN-keep.txt'),
   (Join-Path $env:PUBLIC 'NOT-KAYAN-keep.txt')
 )
 $neighbourDirs = @(
-  (Join-Path $programData 'NotKayanFolder'),
+  (Join-Path $env:ProgramData 'NotKayanFolder'),
   (Join-Path $env:USERPROFILE 'AppData\Roaming\NotKayanFolder')
 )
 foreach ($dir in $neighbourDirs) {
@@ -229,8 +229,10 @@ $after = [ordered]@{
   service       = [bool](Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
   serviceReg    = [bool](Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue)
   startMenu     = Test-Path -LiteralPath (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\KAYAN ERP')
-  uninstallKey  = [bool](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -eq $productMarkerText -or $_.DisplayName -like 'KAYAN ERP*' })
+  uninstallKey  = [bool](@(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{D1B6074C-12D1-4B4A-9F2C-650A53F15D91}_is1',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{D1B6074C-12D1-4B4A-9F2C-650A53F15D91}_is1'
+  ) | Where-Object { Test-Path -LiteralPath $_ })
   firewallRules = @(Get-NetFirewallRule -DisplayName '*KAYAN*' -ErrorAction SilentlyContinue).Count
   backups       = Test-Path -LiteralPath $backupDir
   uploads       = Test-Path -LiteralPath $uploadsDir
