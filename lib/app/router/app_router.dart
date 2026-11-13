@@ -247,7 +247,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                                   : route.path == AppRoutes.writeOffs
                                     ? WriteOffsScreen()
                                     : route.path == AppRoutes.stockDocuments
-                                      ? StockDocumentsScreen()
+                                      ? StockDocumentsScreen(navigationKey: state.pageKey)
                                       : route.path == AppRoutes.inventoryReports
                                         ? InventoryReportsScreen()
                                         : route.path == AppRoutes.warehouseAccess

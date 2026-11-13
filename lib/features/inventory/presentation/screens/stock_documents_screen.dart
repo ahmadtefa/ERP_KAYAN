@@ -2,15 +2,20 @@ import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/barcode/barcode_scan.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
+import '../providers/stock_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -67,14 +72,16 @@ class StockDocumentsController extends JsonListController {
 /// approver who is not its author, so it has its own screen (write_offs_screen)
 /// rather than being one more choice in a count dialog. The filter above still
 /// lists existing write-offs, because they are stock documents.
-const _creatableKinds = ['ADJUSTMENT', 'TRANSFER', 'COUNT', 'OPENING'];
+const _creatableKinds = ['ADJUSTMENT', 'TRANSFER', 'COUNT'];
 
 /// Every kind this screen lists. Write-off is included because it is a stock
 /// document; it is created and approved on its own screen.
-const _kinds = [..._creatableKinds, 'WRITE_OFF'];
+const _kinds = [..._creatableKinds, 'OPENING', 'WRITE_OFF'];
 
 class StockDocumentsScreen extends ConsumerStatefulWidget {
-  const StockDocumentsScreen({super.key});
+  const StockDocumentsScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<StockDocumentsScreen> createState() =>
@@ -84,6 +91,59 @@ class StockDocumentsScreen extends ConsumerStatefulWidget {
 class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   String _query = '';
   String? _kind;
+
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+  bool _changingStatus = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
+
+  Future<void> _changeStatus(Json row, {required bool reverse}) async {
+    if (_changingStatus) return;
+    final action = reverse ? 'reverse' : 'post';
+    final label = reverse ? (_arabic ? 'عكس' : 'Reverse') : (_arabic ? 'ترحيل' : 'Post');
+    setState(() => _changingStatus = true);
+    try {
+      final confirmed = await confirmAction(
+        context,
+        title: label,
+        message: _arabic
+            ? 'هل تريد تنفيذ العملية على المستند ${text(row, 'documentNumber')}؟'
+            : 'Apply this action to document ${text(row, 'documentNumber')}?',
+        confirmLabel: label,
+        destructive: reverse,
+      );
+      if (!confirmed || !mounted) return;
+      try {
+        await ref.read(apiClientProvider).post('/inventory/stock-documents/${text(row, 'id')}/$action');
+        if (mounted) showMessage(context, _arabic ? 'تم تحديث المستند.' : 'Document updated.');
+      } catch (error) {
+        if (mounted) await showAppError(context, error);
+      } finally {
+        if (mounted) {
+          ref.invalidate(stockListProvider);
+          ref.invalidate(journalEntriesProvider);
+          invalidateDashboardAndReports(ref);
+          await ref.read(stockDocumentsProvider.notifier).refreshQuietly();
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _changingStatus = false);
+    }
+  }
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
@@ -198,6 +258,19 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             : 'No stock documents.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
+          actions: canAdjust ? (row) {
+            final kind = text(row, 'kind').toUpperCase();
+            final status = text(row, 'status');
+            if (!_creatableKinds.contains(kind) || (status != 'draft' && status != 'posted')) return [];
+            final reverse = status == 'posted';
+            return [
+              IconButton(
+                tooltip: reverse ? (_arabic ? 'عكس' : 'Reverse') : (_arabic ? 'ترحيل' : 'Post'),
+                icon: Icon(reverse ? Icons.undo : Icons.play_arrow_outlined),
+                onPressed: _changingStatus ? null : () => _changeStatus(row, reverse: reverse),
+              ),
+            ];
+          } : null,
           columns: [
             ColumnSpec(
               _arabic ? 'الرقم' : 'Number',
@@ -296,14 +369,46 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     toWarehouseId = text(defaultWarehouse, 'id');
     fromWarehouseId = text(defaultWarehouse, 'id');
 
+    final initialWarehouseId = text(defaultWarehouse, 'id');
+    var confirmingExit = false;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    late final DialogRoute<void> route;
+    Future<bool> closeDraft() async {
+      if (saving || confirmingExit) return false;
+      final changed = lines.isNotEmpty || notes.text.trim().isNotEmpty ||
+          kind != 'COUNT' || fromWarehouseId != initialWarehouseId ||
+          toWarehouseId != initialWarehouseId;
+      if (changed) {
+        confirmingExit = true;
+        try {
+          if (!await confirmAction(
+            context,
+            title: _arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+            message: _arabic ? 'هل تريد تجاهل المستند؟' : 'Discard this draft?',
+            confirmLabel: _arabic ? 'تجاهل التغييرات' : 'Discard changes',
+            destructive: true,
+          )) {
+            return false;
+          }
+        } finally {
+          confirmingExit = false;
+        }
+      }
+      if (!navigator.mounted || !route.isCurrent) return false;
+      navigator.pop();
+      return true;
+    }
+
+    _exitRelay.attach(closeDraft);
     try {
-      final route = DialogRoute<void>(
+      route = DialogRoute<void>(
+        barrierDismissible: false,
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, setDialogState) {
             Future<void> addLine() async {
               final item = await showItemPicker(context);
-              if (item == null || !mounted) return;
+              if (item == null || !dialogContext.mounted || saving) return;
               setDialogState(
                 () => lines.add(
                   _DraftLine(
@@ -433,83 +538,59 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               }
             }
 
-            return AlertDialog(
-              title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
-              content: SizedBox(
-                // The dialog is as wide as the window allows, up to 840, and
-                // never taller than the window. Asking for a fixed height made
-                // the inner Column overflow when the dialog shrank.
-                width: MediaQuery.sizeOf(context).width.clamp(320.0, 840.0),
-                height: MediaQuery.sizeOf(context).height.clamp(240.0, 480.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // A row of fixed-width controls needs more room than a
-                    // dialog is guaranteed; side by side they overflowed. Each
-                    // one now takes the full width on its own line.
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          width: 210,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: kind,
-                            decoration: InputDecoration(
-                              labelText: _arabic ? 'نوع المستند' : 'Kind',
-                              border: const OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: [
-                              for (final entry in _creatableKinds)
-                                DropdownMenuItem(
-                                  value: entry,
-                                  child: Text(_kindLabel(entry)),
-                                ),
-                            ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                setDialogState(() => kind = value);
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: fromWarehouseId,
-                            decoration: InputDecoration(
-                              labelText: kind == 'TRANSFER'
-                                  ? (_arabic ? 'من مخزن' : 'From store')
-                                  : (_arabic ? 'المخزن' : 'Store'),
-                              border: const OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: [
-                              for (final warehouse in warehouses)
-                                DropdownMenuItem(
-                                  value: text(warehouse, 'id'),
-                                  child: Text(
-                                    localizedRecordName(warehouse, arabic: _arabic),
+            return PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, _) {
+                if (!didPop) closeDraft();
+              },
+              child: AlertDialog(
+                title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
+                content: SizedBox(
+                  // The dialog is as wide as the window allows, up to 840, and
+                  // never taller than the window. Asking for a fixed height made
+                  // the inner Column overflow when the dialog shrank.
+                  width: MediaQuery.sizeOf(context).width.clamp(320.0, 840.0),
+                  height: MediaQuery.sizeOf(context).height.clamp(240.0, 480.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // A row of fixed-width controls needs more room than a
+                      // dialog is guaranteed; side by side they overflowed. Each
+                      // one now takes the full width on its own line.
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: 210,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: kind,
+                              decoration: InputDecoration(
+                                labelText: _arabic ? 'نوع المستند' : 'Kind',
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: [
+                                for (final entry in _creatableKinds)
+                                  DropdownMenuItem(
+                                    value: entry,
+                                    child: Text(_kindLabel(entry)),
                                   ),
-                                ),
-                            ],
-                            onChanged: (value) => setDialogState(() {
-                              if (kind == 'TRANSFER') {
-                                fromWarehouseId = value;
-                              } else {
-                                toWarehouseId = value;
-                                fromWarehouseId = value;
-                              }
-                            }),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setDialogState(() => kind = value);
+                                }
+                              },
+                            ),
                           ),
-                        ),
-                        if (kind == 'TRANSFER')
                           SizedBox(
                             width: 200,
                             child: DropdownButtonFormField<String>(
-                              initialValue: toWarehouseId,
+                              initialValue: fromWarehouseId,
                               decoration: InputDecoration(
-                                labelText: _arabic ? 'إلى مخزن' : 'To store',
+                                labelText: kind == 'TRANSFER'
+                                    ? (_arabic ? 'من مخزن' : 'From store')
+                                    : (_arabic ? 'المخزن' : 'Store'),
                                 border: const OutlineInputBorder(),
                                 isDense: true,
                               ),
@@ -522,129 +603,160 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     ),
                                   ),
                               ],
-                              onChanged: (value) =>
-                                  setDialogState(() => toWarehouseId = value),
+                              onChanged: (value) => setDialogState(() {
+                                if (kind == 'TRANSFER') {
+                                  fromWarehouseId = value;
+                                } else {
+                                  toWarehouseId = value;
+                                  fromWarehouseId = value;
+                                }
+                              }),
                             ),
                           ),
-                        TextButton.icon(
-                          onPressed: addLine,
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: Text(_arabic ? 'إضافة سطر' : 'Add line'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    BarcodeScanField(
-                      key: const ValueKey('stock-document-barcode'),
-                      controller: barcode,
-                      arabic: _arabic,
-                      enabled: !saving,
-                      compact: true,
-                      onSubmitted: scan,
-                    ),
-                    if (error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+                          if (kind == 'TRANSFER')
+                            SizedBox(
+                              width: 200,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: toWarehouseId,
+                                decoration: InputDecoration(
+                                  labelText: _arabic ? 'إلى مخزن' : 'To store',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                items: [
+                                  for (final warehouse in warehouses)
+                                    DropdownMenuItem(
+                                      value: text(warehouse, 'id'),
+                                      child: Text(
+                                        localizedRecordName(warehouse, arabic: _arabic),
+                                      ),
+                                    ),
+                                ],
+                                onChanged: (value) =>
+                                    setDialogState(() => toWarehouseId = value),
+                              ),
+                            ),
+                          TextButton.icon(
+                            onPressed: addLine,
+                            icon: const Icon(Icons.add_rounded, size: 18),
+                            label: Text(_arabic ? 'إضافة سطر' : 'Add line'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      BarcodeScanField(
+                        key: const ValueKey('stock-document-barcode'),
+                        controller: barcode,
+                        arabic: _arabic,
+                        enabled: !saving,
+                        compact: true,
+                        onSubmitted: scan,
+                      ),
+                      if (error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                           ),
                         ),
-                      ),
-                    Expanded(
-                      child: lines.isEmpty
-                          ? Center(
-                              child: Text(
-                                _arabic
-                                    ? 'لا توجد سطور بعد.'
-                                    : 'No lines yet.',
-                              ),
-                            )
-                          : ListView.separated(
-                              itemCount: lines.length,
-                              separatorBuilder: (_, _) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final line = lines[index];
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(line.itemLabel),
-                                  subtitle: Text(
-                                    _arabic
-                                        ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
-                                        : 'Unit: ${line.unitName ?? line.baseUnit}',
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SizedBox(
-                                        width: 110,
-                                        child: TextField(
-                                          controller: line.quantity,
-                                          keyboardType:
-                                              const TextInputType.numberWithOptions(
-                                                decimal: true,
-                                              ),
-                                          decoration: InputDecoration(
-                                            labelText: _arabic
-                                                ? 'الكمية'
-                                                : 'Quantity',
-                                            isDense: true,
-                                            border: const OutlineInputBorder(),
+                      Expanded(
+                        child: lines.isEmpty
+                            ? Center(
+                                child: Text(
+                                  _arabic
+                                      ? 'لا توجد سطور بعد.'
+                                      : 'No lines yet.',
+                                ),
+                              )
+                            : ListView.separated(
+                                itemCount: lines.length,
+                                separatorBuilder: (_, _) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final line = lines[index];
+                                  return ListTile(
+                                    dense: true,
+                                    title: Text(line.itemLabel),
+                                    subtitle: Text(
+                                      _arabic
+                                          ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
+                                          : 'Unit: ${line.unitName ?? line.baseUnit}',
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          width: 110,
+                                          child: TextField(
+                                            controller: line.quantity,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            decoration: InputDecoration(
+                                              labelText: _arabic
+                                                  ? 'الكمية'
+                                                  : 'Quantity',
+                                              isDense: true,
+                                              border: const OutlineInputBorder(),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      IconButton(
-                                        tooltip:
-                                            _arabic ? 'حذف' : 'Remove line',
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          size: 20,
+                                        IconButton(
+                                          tooltip:
+                                              _arabic ? 'حذف' : 'Remove line',
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            size: 20,
+                                          ),
+                                          onPressed: () => setDialogState(() {
+                                            lines.removeAt(index).dispose();
+                                          }),
                                         ),
-                                        onPressed: () => setDialogState(() {
-                                          lines.removeAt(index).dispose();
-                                        }),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: notes,
-                      decoration: InputDecoration(
-                        labelText: _arabic ? 'ملاحظات' : 'Notes',
-                        border: const OutlineInputBorder(),
-                        isDense: true,
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: saving ? null : () => Navigator.of(dialogContext).pop(),
-                  child: Text(_arabic ? 'إلغاء' : 'Cancel'),
-                ),
-                FilledButton(
-                  onPressed: saving ? null : submit,
-                  child: Text(
-                    saving
-                        ? (_arabic ? 'جارٍ الحفظ…' : 'Saving…')
-                        : (_arabic ? 'إنشاء' : 'Create'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: notes,
+                        decoration: InputDecoration(
+                          labelText: _arabic ? 'ملاحظات' : 'Notes',
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+                actions: [
+                  TextButton(
+                    onPressed: saving ? null : closeDraft,
+                    child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: saving ? null : submit,
+                    child: Text(
+                      saving
+                          ? (_arabic ? 'جارٍ الحفظ…' : 'Saving…')
+                          : (_arabic ? 'إنشاء' : 'Create'),
+                    ),
+                  ),
+                ],
+              ),
             );
           },
         ),
       );
-      await Navigator.of(context, rootNavigator: true).push(route);
+      await navigator.push(route);
       await route.completed;
     } finally {
+      _exitRelay.detach(closeDraft);
       for (final line in lines) {
         line.dispose();
       }

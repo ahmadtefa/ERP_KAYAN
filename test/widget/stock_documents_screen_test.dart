@@ -387,6 +387,44 @@ void main() {
     ]);
   });
 
+  testWidgets('posts a draft and reloads the stock documents', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    final before = api.queries.length;
+    await tester.tap(find.byTooltip('Post'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Post'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-2/post');
+    expect(api.queries.length, before + 1);
+  });
+
+  testWidgets('stock document cancel retains the draft until discard is confirmed', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Notes'), 'Draft notes');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard this draft?'), findsOneWidget);
+    await tester.tap(find.text('Cancel').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Draft notes'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('New stock document'), findsNothing);
+    expect(api.posts, isEmpty);
+  });
+
   testWidgets('says why it cannot create when the branch has no warehouse', (
     tester,
   ) async {
