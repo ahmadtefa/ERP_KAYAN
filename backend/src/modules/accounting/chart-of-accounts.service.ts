@@ -133,6 +133,9 @@ export class ChartOfAccountsService {
     userId: string,
     dto: CreateAccountDto,
   ): Promise<AccountResponse> {
+    const nameEn = String(dto.nameEn ?? '').trim();
+    const nameAr = String(dto.nameAr ?? '').trim();
+    if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English account name');
     const type = (dto.type ?? 'EXPENSE') as AccountType;
     const parentId = dto.parentId ?? null;
     const created = await this.prisma.$transaction(async (tx) => {
@@ -143,7 +146,7 @@ export class ChartOfAccountsService {
       const isPostable = dto.isPostable ?? (parentId ? true : false);
       const row = await tx.account.create({
         data: {
-          companyId, code, nameEn: dto.nameEn, nameAr: dto.nameAr, type, parentId,
+          companyId, code, nameEn: nameEn || nameAr, nameAr: nameAr || nameEn, type, parentId,
           isPostable, currency: dto.currency ?? null, cashFlowClass: dto.cashFlowClass ?? null,
           description: dto.description?.trim() || null, createdBy: userId, updatedBy: userId,
         },
@@ -171,6 +174,13 @@ export class ChartOfAccountsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockChart(tx, companyId);
       const account = await this.findAccount(companyId, id, tx);
+      if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+        const nameEn = String(dto.nameEn ?? account.nameEn).trim();
+        const nameAr = String(dto.nameAr ?? account.nameAr).trim();
+        if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English account name');
+        dto.nameEn = nameEn || nameAr;
+        dto.nameAr = nameAr || nameEn;
+      }
       if (dto.expectedParentId !== undefined && dto.expectedParentId !== account.parentId) {
         throw new ConflictException('The account parent changed since it was loaded. Refresh and review it before saving.');
       }
