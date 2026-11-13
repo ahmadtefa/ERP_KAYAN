@@ -72,6 +72,7 @@ test('every component in the requirement is handled', () => {
 
 test('success is never claimed while anything remains', () => {
   assert.match(source, /function Assert-NothingLeft/);
+  assert.match(source, /\$remaining = @\(Assert-NothingLeft\)/);
   assert.match(source, /complete       = \(\$script:Failures\.Count -eq 0 -and \$Remaining\.Count -eq 0\)/);
   assert.match(source, /did not finish/);
   assert.match(source, /exit 1/);

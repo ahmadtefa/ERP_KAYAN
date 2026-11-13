@@ -393,7 +393,7 @@ Remove-KayanShortcuts
 Remove-KayanRegistry
 
 $script:PreservedLogs = $preservedLogs
-$remaining = Assert-NothingLeft
+$remaining = @(Assert-NothingLeft)
 $report = Write-Report $remaining
 
 if ($report.complete) {
