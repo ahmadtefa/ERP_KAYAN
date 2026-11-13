@@ -419,53 +419,46 @@ export class QuotationsService {
   // -------------------------------------------------------------- lifecycle
 
   async send(companyId: string, userId: string, id: string, note?: string) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: QUOTATION_INCLUDE,
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.status !== QuotationStatus.DRAFT) {
-      throw new BadRequestException('Only a draft quotation can be issued');
-    }
-    const content = await this.snapshotContent(companyId, quotation);
-    const now = new Date();
-    const changed = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.quotation.updateMany({
+    await this.prisma.$transaction(async (tx) => {
+      // Claim the draft row before reading the content to freeze. A concurrent
+      // editor is serialized on this row, not allowed to change lines between
+      // the snapshot and the status transition.
+      const claim = await tx.quotation.updateMany({
         where: { id, companyId, status: QuotationStatus.DRAFT, deletedAt: null },
-        data: {
-          status: QuotationStatus.SENT,
-          issuedAt: now,
-          sentAt: now,
-          contentSnapshot: content as unknown as Prisma.InputJsonValue,
-          snapshotAt: now,
-          showTaxId: content.showTaxId,
-          updatedBy: userId,
-        },
+        data: { updatedBy: userId },
       });
-      if (claimed.count !== 1) {
+      if (claim.count !== 1) {
+        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
+        if (!existing) throw new NotFoundException('Quotation not found');
         throw new BadRequestException('Only a draft quotation can be issued');
       }
-      await tx.quotationEvent.create({
+      const quotation = await tx.quotation.findFirst({
+        where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
+      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
+      const content = await this.snapshotContent(companyId, quotation, tx);
+      const now = new Date();
+      await tx.quotation.update({
+        where: { id },
         data: {
-          quotationId: id,
-          type: QuotationEventType.SENT,
-          fromStatus: QuotationStatus.DRAFT,
-          toStatus: QuotationStatus.SENT,
-          note: this.text(note),
-          userId,
+          status: QuotationStatus.SENT, issuedAt: now, sentAt: now,
+          contentSnapshot: content as unknown as Prisma.InputJsonValue,
+          snapshotAt: now, showTaxId: content.showTaxId, updatedBy: userId,
         },
       });
-      return true;
+      await tx.quotationEvent.create({
+        data: {
+          quotationId: id, type: QuotationEventType.SENT,
+          fromStatus: QuotationStatus.DRAFT, toStatus: QuotationStatus.SENT,
+          note: this.text(note), userId,
+        },
+      });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'quotations', entityId: id,
+        after: { status: QuotationStatus.SENT, quotationNumber: quotation.quotationNumber },
+      }, tx);
     });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'quotations',
-      entityId: id,
-      after: { status: QuotationStatus.SENT, quotationNumber: quotation.quotationNumber },
-    });
-    return changed ? this.findOne(companyId, id) : null;
+    return this.findOne(companyId, id);
   }
 
   async accept(companyId: string, userId: string, id: string, note?: string) {
@@ -483,39 +476,32 @@ export class QuotationsService {
     outcome: QuotationStatus,
     note?: string,
   ) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: QUOTATION_INCLUDE,
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.status === QuotationStatus.CONVERTED) {
-      throw new BadRequestException('A converted quotation can no longer change status');
-    }
-    if (
-      quotation.status !== QuotationStatus.DRAFT &&
-      quotation.status !== QuotationStatus.SENT
-    ) {
-      throw new BadRequestException(`This quotation is already ${quotation.status.toLowerCase()}`);
-    }
-
-    // An offer that is being accepted or rejected without having been sent is
-    // still issued: capture what was agreed, not what the draft says later.
-    const snapshot =
-      quotation.contentSnapshot ?? ((await this.snapshotContent(companyId, quotation)) as unknown as Prisma.InputJsonValue);
-    const now = new Date();
-
     await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.quotation.updateMany({
-        where: {
-          id,
-          companyId,
-          status: { in: [QuotationStatus.DRAFT, QuotationStatus.SENT] },
-          deletedAt: null,
-        },
+      // Lock the row before selecting its status, lines and snapshot. If it
+      // was sent just before this request, reuse that exact issued snapshot.
+      const claim = await tx.quotation.updateMany({
+        where: { id, companyId, status: { in: [QuotationStatus.DRAFT, QuotationStatus.SENT] }, deletedAt: null },
+        data: { updatedBy: userId },
+      });
+      if (claim.count !== 1) {
+        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { status: true } });
+        if (!existing) throw new NotFoundException('Quotation not found');
+        if (existing.status === QuotationStatus.CONVERTED) {
+          throw new BadRequestException('A converted quotation can no longer change status');
+        }
+        throw new BadRequestException(`This quotation is already ${existing.status.toLowerCase()}`);
+      }
+      const quotation = await tx.quotation.findFirst({
+        where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
+      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
+      const snapshot = quotation.contentSnapshot ??
+        ((await this.snapshotContent(companyId, quotation, tx)) as unknown as Prisma.InputJsonValue);
+      const now = new Date();
+      await tx.quotation.update({
+        where: { id },
         data: {
-          status: outcome,
-          contentSnapshot: snapshot,
-          snapshotAt: quotation.snapshotAt ?? now,
+          status: outcome, contentSnapshot: snapshot, snapshotAt: quotation.snapshotAt ?? now,
           showTaxId: (snapshot as unknown as { showTaxId?: boolean }).showTaxId ?? quotation.showTaxId,
           issuedAt: quotation.issuedAt ?? now,
           acceptedAt: outcome === QuotationStatus.ACCEPTED ? now : quotation.acceptedAt,
@@ -523,28 +509,17 @@ export class QuotationsService {
           updatedBy: userId,
         },
       });
-      if (claimed.count !== 1) {
-        throw new BadRequestException('This quotation changed while the decision was being saved');
-      }
       await tx.quotationEvent.create({
         data: {
           quotationId: id,
           type: outcome === QuotationStatus.ACCEPTED ? QuotationEventType.ACCEPTED : QuotationEventType.REJECTED,
-          fromStatus: quotation.status,
-          toStatus: outcome,
-          note: this.text(note),
-          userId,
+          fromStatus: quotation.status, toStatus: outcome, note: this.text(note), userId,
         },
       });
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'quotations',
-      entityId: id,
-      after: { status: outcome },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'UPDATE', entity: 'quotations', entityId: id,
+        after: { status: outcome },
+      }, tx);
     });
     return this.findOne(companyId, id);
   }
@@ -581,11 +556,16 @@ export class QuotationsService {
           terms: quotation.terms,
           subject: quotation.subject,
           columns: quotation.columns === null ? Prisma.DbNull : (quotation.columns as Prisma.InputJsonValue),
+          design: quotation.design == null ? Prisma.DbNull : (quotation.design as Prisma.InputJsonValue),
           discountType: quotation.discountType,
           discountPercent: quotation.discountPercent,
           discountAmount: quotation.discountAmount,
           subTotal: quotation.subTotal,
           discountTotal: quotation.discountTotal,
+          // A revision starts from the issued price snapshot, not today's
+          // company settings. Copy the VAT alongside the total it explains.
+          taxRate: quotation.taxRate,
+          taxAmount: quotation.taxAmount,
           totalAmount: quotation.totalAmount,
           managerName: quotation.managerName,
           responsibleName: quotation.responsibleName,
@@ -675,17 +655,24 @@ export class QuotationsService {
 
   async remove(companyId: string, userId: string, id: string) {
     const quotation = await this.draft(companyId, id);
-    await this.prisma.quotation.update({
-      where: { id },
-      data: { deletedAt: new Date(), updatedBy: userId },
-    });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'quotations',
-      entityId: id,
-      before: { quotationNumber: quotation.quotationNumber },
+    await this.prisma.$transaction(async (tx) => {
+      // The draft may have been issued after the earlier read. Claim only a
+      // still-live draft, so concurrent send/accept can never be hidden.
+      const deleted = await tx.quotation.updateMany({
+        where: { id, companyId, status: QuotationStatus.DRAFT, deletedAt: null },
+        data: { deletedAt: new Date(), updatedBy: userId },
+      });
+      if (deleted.count !== 1) {
+        throw new BadRequestException('Only a draft quotation can be deleted');
+      }
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'DELETE',
+        entity: 'quotations',
+        entityId: id,
+        before: { quotationNumber: quotation.quotationNumber },
+      }, tx);
     });
     return { id, deleted: true };
   }
@@ -702,8 +689,9 @@ export class QuotationsService {
    *
    * Table discounts become line discounts (their exact allocated share), and
    * the quotation-wide discount becomes the invoice's document discount, so
-   * the net the customer accepted is the net the invoice starts from. Tax is
-   * then applied by the invoice's own rules - the quotation is a net offer.
+   * the net the customer accepted is the net the invoice starts from. The
+   * stored offer tax is carried into each line. If invoice pricing, rounding
+   * or discounts cannot reproduce the accepted totals, conversion is refused.
    */
   async convert(
     companyId: string,
@@ -733,120 +721,107 @@ export class QuotationsService {
       throw new BadRequestException('This quotation has no lines to convert');
     }
 
-    // Claim it first. The guard on status and convertedInvoiceId is the whole
-    // duplicate-conversion defence: exactly one caller can win.
-    const claimed = await this.prisma.quotation.updateMany({
-      where: {
-        id,
-        companyId,
-        status: QuotationStatus.ACCEPTED,
-        convertedInvoiceId: null,
-        deletedAt: null,
-      },
-      data: { status: QuotationStatus.CONVERTED, convertedAt: new Date(), updatedBy: userId },
-    });
-    if (claimed.count !== 1) {
-      throw new BadRequestException('This quotation was converted by someone else a moment ago');
-    }
+    const lines: Array<{
+      itemId?: string;
+      description: string;
+      quantity: string;
+      unitPrice: string;
+      taxRate: string;
+      discountType: 'AMOUNT';
+      discountAmount: string;
+    }> = [];
 
-    try {
-      const lines: Array<{
-        itemId?: string;
-        description: string;
-        quantity: string;
-        unitPrice: string;
-        discountType: 'AMOUNT';
-        discountAmount: string;
-      }> = [];
-
-      for (const table of quotation.tables) {
-        const tableDiscount = table.discountAmount;
-        if (tableDiscount.greaterThan(0)) {
-          const shares = allocateDocumentDiscount(
-            table.lines.map((line) => line.lineTotal),
-            { type: 'AMOUNT', amount: tableDiscount.toFixed(MONEY_SCALE) },
-          ).shares;
-          table.lines.forEach((line, index) => {
-            lines.push({
-              itemId: line.itemId ?? undefined,
-              description: line.description,
-              quantity: line.quantity.toFixed(MONEY_SCALE),
-              unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
-              discountType: 'AMOUNT',
-              discountAmount: shares[index].toFixed(MONEY_SCALE),
-            });
+    for (const table of quotation.tables) {
+      const tableDiscount = table.discountAmount;
+      if (tableDiscount.greaterThan(0)) {
+        const shares = allocateDocumentDiscount(
+          table.lines.map((line) => line.lineTotal),
+          { type: 'AMOUNT', amount: tableDiscount.toFixed(MONEY_SCALE) },
+        ).shares;
+        table.lines.forEach((line, index) => {
+          lines.push({
+            itemId: line.itemId ?? undefined,
+            description: line.description,
+            quantity: line.quantity.toFixed(MONEY_SCALE),
+            unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+            taxRate: quotation.taxRate.toFixed(RATE_SCALE),
+            discountType: 'AMOUNT',
+            discountAmount: shares[index].toFixed(MONEY_SCALE),
           });
-        } else {
-          for (const line of table.lines) {
-            lines.push({
-              itemId: line.itemId ?? undefined,
-              description: line.description,
-              quantity: line.quantity.toFixed(MONEY_SCALE),
-              unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
-              discountType: 'AMOUNT',
-              discountAmount: '0.0000',
-            });
-          }
+        });
+      } else {
+        for (const line of table.lines) {
+          lines.push({
+            itemId: line.itemId ?? undefined,
+            description: line.description,
+            quantity: line.quantity.toFixed(MONEY_SCALE),
+            unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+            taxRate: quotation.taxRate.toFixed(RATE_SCALE),
+            discountType: 'AMOUNT',
+            discountAmount: '0.0000',
+          });
         }
       }
+    }
 
-      // Free-text lines are allowed on a quotation, and on a sales invoice
-      // too; an item-less line is described by its text.
-      if (lines.length === 0) throw new BadRequestException('This quotation has no lines to convert');
+    // Free-text lines are allowed on a quotation, and on a sales invoice
+    // too; an item-less line is described by its text.
+    if (lines.length === 0) throw new BadRequestException('This quotation has no lines to convert');
 
-      const invoice = await this.invoices.create(companyId, branchId, userId, {
+    // Claim, create the draft invoice, link it, and write both audit records
+    // under one database transaction. In particular, do not release the
+    // claim after a separately committed invoice has already been created.
+    const created = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.quotation.updateMany({
+        where: { id, companyId, status: QuotationStatus.ACCEPTED, convertedInvoiceId: null, deletedAt: null },
+        data: { status: QuotationStatus.CONVERTED, convertedAt: new Date(), updatedBy: userId },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This quotation was converted by someone else a moment ago');
+      }
+      const invoice = await this.invoices.createInTransaction(companyId, branchId, userId, {
         invoiceDate: dto.invoiceDate ? this.date(dto.invoiceDate, 'invoiceDate').toISOString() : new Date().toISOString(),
         customerId: quotation.customerId,
         warehouseId: dto.warehouseId,
-        notes:
-          this.text(dto.notes) ??
-          `From quotation ${quotation.quotationNumber}` +
-            (quotation.tables.length
-              ? ` — tables: ${quotation.tables.map((table) => table.title).join(' | ')}`
-              : ''),
+        notes: this.text(dto.notes) ?? `From quotation ${quotation.quotationNumber}` +
+          (quotation.tables.length ? ` — tables: ${quotation.tables.map((table) => table.title).join(' | ')}` : ''),
         discountType: quotation.discountType ?? undefined,
         discountPercent: quotation.discountType === 'PERCENT' ? quotation.discountPercent.toFixed(RATE_SCALE) : undefined,
         discountAmount: quotation.discountAmount.toFixed(MONEY_SCALE),
         lines,
+      }, tx, undefined, { pricesExcludeTax: true });
+      // Do not silently create a different debt if prices-including-tax,
+      // discount allocation, or line rounding changes the accepted offer.
+      // A discrepancy aborts the entire transaction for explicit correction.
+      const acceptedNet = quotation.subTotal.minus(quotation.discountTotal);
+      const tolerance = new Prisma.Decimal('0.0001').mul(lines.length);
+      const off = (a: Prisma.Decimal, b: Prisma.Decimal) => a.minus(b).abs().greaterThan(tolerance);
+      if (!invoice.subTotal.equals(acceptedNet) || off(invoice.taxAmount, quotation.taxAmount) ||
+          off(invoice.totalAmount, quotation.totalAmount)) {
+        throw new BadRequestException('Invoice totals differ from the accepted quotation; review tax and discounts before conversion');
+      }
+      await tx.quotation.update({
+        where: { id },
+        data: { convertedInvoiceId: invoice.id, convertedAt: new Date(), updatedBy: userId },
       });
-
-      await this.prisma.$transaction(async (tx) => {
-        await tx.quotation.update({
-          where: { id },
-          data: { convertedInvoiceId: invoice.id, convertedAt: new Date(), updatedBy: userId },
-        });
-        await tx.quotationEvent.create({
-          data: {
-            quotationId: id,
-            type: QuotationEventType.CONVERTED,
-            note: `Invoice ${invoice.invoiceNumber}`,
-            userId,
-          },
-        });
+      await tx.quotationEvent.create({
+        data: { quotationId: id, type: QuotationEventType.CONVERTED, note: `Invoice ${invoice.invoiceNumber}`, userId },
       });
-
-      await this.audit.record({
-        companyId,
-        userId,
-        action: 'UPDATE',
-        entity: 'quotations',
-        entityId: id,
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'sales_invoices', entityId: invoice.id,
+        after: { invoiceNumber: invoice.invoiceNumber, totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE) },
+      }, tx);
+      await this.audit.recordRequired({
+        companyId, userId, action: 'UPDATE', entity: 'quotations', entityId: id,
         after: { convertedInvoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
-      });
-      return {
-        quotation: await this.findOne(companyId, id),
-        invoice,
-        note:
-          'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.',
-      };
-    } catch (error) {
-      // Put the offer back so the person can fix the cause and try again.
-      await this.prisma.quotation.updateMany({
-        where: { id, status: QuotationStatus.CONVERTED, convertedInvoiceId: null },
-        data: { status: QuotationStatus.ACCEPTED, convertedAt: null },
-      });
-      throw error;
-    }
+      }, tx);
+      return invoice;
+    });
+    return {
+      quotation: await this.findOne(companyId, id),
+      invoice: await this.invoices.findOne(companyId, created.id),
+      note: 'Draft invoice created. Review its tax and totals before posting.',
+    };
   }
 
   // --------------------------------------------------------------- printing
@@ -893,8 +868,8 @@ export class QuotationsService {
     return document.html;
   }
 
-  private async companyHeader(companyId: string) {
-    const company = await this.prisma.company.findUnique({
+  private async companyHeader(companyId: string, client: Pick<Prisma.TransactionClient, 'company'> = this.prisma) {
+    const company = await client.company.findUnique({
       where: { id: companyId },
       select: {
         nameEn: true,
@@ -920,27 +895,28 @@ export class QuotationsService {
   private async expireOverdue(companyId: string) {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
+    // Avoid a write transaction on the common path with no overdue rows.
     const overdue = await this.prisma.quotation.findMany({
-      where: {
-        companyId,
-        status: QuotationStatus.SENT,
-        validUntil: { lt: today },
-        deletedAt: null,
-      },
+      where: { companyId, status: QuotationStatus.SENT, validUntil: { lt: today }, deletedAt: null },
       select: { id: true },
+      take: 1,
     });
     if (overdue.length === 0) return;
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.quotation.findMany({
-        where: { id: { in: overdue.map((row) => row.id) }, status: QuotationStatus.SENT },
-        select: { id: true },
-      });
+      // The returned ids are exactly the rows PostgreSQL changed. A separate
+      // pre-read can become stale while another transaction accepts a quote,
+      // producing an EXPIRED event for a quotation that was never expired.
+      const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        UPDATE "quotations"
+        SET "status" = 'EXPIRED'::"QuotationStatus", "expiredAt" = ${now}, "updatedAt" = ${now}
+        WHERE "companyId" = ${companyId}::uuid
+          AND "status" = 'SENT'::"QuotationStatus"
+          AND "validUntil" < ${today}
+          AND "deletedAt" IS NULL
+        RETURNING "id"
+      `);
       if (updated.length === 0) return;
-      await tx.quotation.updateMany({
-        where: { id: { in: updated.map((row) => row.id) }, status: QuotationStatus.SENT },
-        data: { status: QuotationStatus.EXPIRED, expiredAt: now },
-      });
       await tx.quotationEvent.createMany({
         data: updated.map((row) => ({
           quotationId: row.id,
@@ -1122,8 +1098,8 @@ export class QuotationsService {
   }
 
   /// The exact content of an issued offer. Built once and stored.
-  private async snapshotContent(companyId: string, quotation: QuotationWithRelations): Promise<QuotationSnapshot> {
-    const company = await this.companyHeader(companyId);
+  private async snapshotContent(companyId: string, quotation: QuotationWithRelations, client: Pick<Prisma.TransactionClient, 'company'> = this.prisma): Promise<QuotationSnapshot> {
+    const company = await this.companyHeader(companyId, client);
     return {
       quotationNumber: quotation.quotationNumber,
       quotationDate: quotation.quotationDate.toISOString().slice(0, 10),
@@ -1314,16 +1290,18 @@ export class QuotationsService {
 
   private decimal(value: string, field: string): Prisma.Decimal {
     try {
-      return new Prisma.Decimal(value);
+      const number = new Prisma.Decimal(value);
+      if (!number.isFinite()) throw new Error('non-finite decimal');
+      return number;
     } catch {
       throw new BadRequestException(`${field} must be a number`);
     }
   }
 
   private positive(value: string, field: string): Prisma.Decimal {
-    const number = this.decimal(value, field);
+    const number = this.decimal(value, field).toDecimalPlaces(MONEY_SCALE);
     if (number.lessThanOrEqualTo(0)) throw new BadRequestException(`${field} must be greater than zero`);
-    return number.toDecimalPlaces(MONEY_SCALE);
+    return number;
   }
 
   private nonNegative(value: string, field: string): Prisma.Decimal {

@@ -41,6 +41,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# This legacy packaging path can create a production-looking installer/ZIP
+# without the licence build policy. It is disabled before any build writes.
+throw 'Legacy Windows packaging is disabled: it does not enforce the approved licence build policy. Use the guarded candidate build; production release is blocked.'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 

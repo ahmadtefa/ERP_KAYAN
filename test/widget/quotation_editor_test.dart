@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:erp_kayan/app/router/app_router.dart';
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -27,6 +30,7 @@ class _FakeApiClient extends ApiClient {
   String? postPath;
   Map<String, dynamic>? postBody;
   Map<String, dynamic>? objectResponse;
+  Completer<Map<String, dynamic>>? pendingPost;
 
   @override
   Future<Map<String, dynamic>> getObject(
@@ -42,7 +46,7 @@ class _FakeApiClient extends ApiClient {
   }) async {
     postPath = path;
     postBody = Map<String, dynamic>.from(body! as Map);
-    return {'id': 'quotation-id'};
+    return pendingPost == null ? {'id': 'quotation-id'} : await pendingPost!.future;
   }
 
   @override
@@ -63,7 +67,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeApiClient();
+    final api = _FakeApiClient()..pendingPost = Completer<Map<String, dynamic>>();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -99,7 +103,8 @@ void main() {
             routes: [
               GoRoute(
                 path: '/new',
-                builder: (context, state) => const QuotationEditorScreen(),
+                onExit: (context,state) => ProviderScope.containerOf(context).read(draftExitGuardProvider).canLeave(state.pageKey),
+                builder: (context, state) => QuotationEditorScreen(navigationKey:state.pageKey),
               ),
               GoRoute(
                 path: AppRoutes.quotations,
@@ -177,8 +182,23 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.text('Save'));
+    await tester.pump();
+    final formLock = find.byKey(const Key('quotation-edit-lock'));
+    expect(tester.widget<AbsorbPointer>(formLock).absorbing,isTrue);
+    expect(api.postPath, '/sales/quotations');
+    // The fake transport throws before sending; a real unknown outcome still
+    // requires reconciliation rather than assuming a retry is safe.
+    api.pendingPost!.completeError(StateError('internal diagnostic must not be displayed'));
     await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('internal diagnostic'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<AbsorbPointer>(formLock).absorbing,isFalse);
+    expect(find.byType(QuotationEditorScreen),findsOneWidget);
+    api.pendingPost = null;
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
 
+    expect(find.text('quotation list'),findsOneWidget);
     expect(api.postPath, '/sales/quotations');
     final body = api.postBody!;
     expect(body['subject'], 'Renewal offer');

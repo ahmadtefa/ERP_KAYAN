@@ -1,0 +1,37 @@
+shot_id,target_file,screen_ref,shot_title_ar,precondition_demo_data,annotations_required,priority,source
+SH01,01-login.png,S01,شاشة تسجيل الدخول,خادم الاختبار يعمل بالبذرة الافتراضية admin/Admin@12345 (لا تظهر كلمة المرور في اللقطة),الحقول المطلوبة وزر الدخول ورسالة الخطاء,P1,flutter-window
+SH02,02-dashboard.png,S02,لوحة التحكم بعد الدخول,وجود فواتير وحركات مخزون من بيانات البذرة,بطاقات الإحصائيات والقائمة الجانبية والتنقل,P1,flutter-window
+SH03,03-users-list.png,S03,قائمة المستخدمين,مستخدمان: admin ومندوب مبيعات بلا تكلفة,زر جديد وتعطيل وتغيير كلمة المرور,P1,flutter-window
+SH04,04-roles-permissions.png,S03,محرر الأدوار ومصفوفة الصلاحيات,دور SALES_CLERK بدون inventory.cost.read,مصفوفة الصلاحيات ومفتاح inventory.cost.read,P1,flutter-window
+SH05,05-company-settings.png,S04,إعدادات الشركة,شركة Kayan التجريبية,الشعار والضريبة 14% وإعدادات المخزون السالب,P2,flutter-window
+SH06,06-licence.png,S06,شاشة الترخيص,وضع warn بدون مفتاح (بيئة تدقيق),بصمة الجهاز وحالة الترخيص والرسائل,P1,flutter-window
+SH07,07-customers.png,S07,العملاء,عميل CUS-1 من البذرة,حقول الكود والاسم وحد الائتمان,P2,flutter-window
+SH08,08-suppliers.png,S07,الموردون,مورد واحد على الأقل,نفس بنية بطاقة الشريك,P2,flutter-window
+SH09,09-items-list.png,S08,قائمة الأصناف,صنفان MILK وCABLE,شريط البحث وحقل تتبع المخزون,P1,flutter-window
+SH10,10-item-units.png,S08,كاتالوج الوحدات المتعددة للصنف,MILK بوحدتين (علبة 1، كرتونة 10),المعامل وسعر البيع والشراء المستقل لكل وحدة وحالة النشاط,P1,flutter-window
+SH11,11-item-barcode.png,S08,ربط الباركود بالوحدة,باركود 62210001 و62210010,صلاحية inventory.barcodes.manage ورسالة منع التكرار,P1,flutter-window
+SH12,12-stock-balances.png,S09,أرصدة المخزون بالمخازن,أرصدة بعد عمليات بيع وتحويل,الكمية وخانة القيمة المخفية لغير المصرح,P1,flutter-window
+SH13,13-stock-ledger.png,S09,دفتر حركة الصنف,حركات IN/OUT للصنف,اتجاه الحركة والمرجع وعدد الحركات,P1,flutter-window
+SH14,14-transfer-document.png,S09,مستند تحويل بين مخزنين,مخزن MAIN-MAIN وWH-AUDIT,المصدر والوجهة ومنع الترحيل المزدوج,P2,flutter-window
+SH15,15-sales-invoices.png,S10,قائمة فواتير البيع,فواتير مسودة ومرحّلة,الرقم والحالة والإجمالي,P1,flutter-window
+SH16,16-sales-invoice-editor.png,S11,محرر فاتورة بيع,عميل CUS-1 وصنف MILK بالكرتونة,الوحدة والكمية والسعر المستقل والخصم والضريبة,P1,flutter-window
+SH17,17-posted-invoice.png,S11,فاتورة مرحّلة غير قابلة للتعديل,فاتورة مرحلة,رسابة عدم قابلية التعديل وزر العكس,P2,flutter-window
+SH18,18-purchase-invoices.png,S10,قائمة فواتير الشراء,فاتورة شراء واحدة,ظهورها للمصرح فقط ومنع 403 للمندوب,P2,flutter-window
+SH19,19-sales-returns.png,S12,مرتجعات المبيعات,مرتجع جزئي,الكمية المتبقية للمرتجع والكمية المرتجعة,P2,flutter-window
+SH20,20-quotation-list.png,S14,قائمة عروض الأسعار,عرض سعر واحد,حالات دورة العرض (إرسال/قبول/رفض/تحويل),P2,flutter-window
+SH21,21-quotation-editor.png,S15,محرر عرض السعر,بنود وأسس وشروط,القوالب والأعمدة والشروط,P2,flutter-window
+SH22,22-quotation-preview.png,S16,معاينة عرض السعر للطباعة,خلفية الشركة المكررة وترقيم الصفحات,RTL والشعار وأرقام الصفحات (يلتقط بعد توفر المتصفح),P2,flutter-window
+SH23,23-reports.png,S17,شاشة التقارير,تقرير مبيعات وتقييم مخزون,زر اعرض ومنافذ التصدير,P1,flutter-window
+SH24,24-export-excel.png,S17,تصدير Excel بعد فتح الملف,تقرير بيع وتقرير مخزون,غياب أعمدة التكلفة لغير المصرح,P2,desktop-app
+SH25,25-backup.png,S18,النسخ الاحتياطي والاستعادة,نسخة احتياطية واحدة,جدول النسخ وزر الاستعادة وصلاحية admin.backup,P1,flutter-window
+SH26,26-import.png,S19,استيراد البيانات,قالب استيراد أصناف,تنزيل القالب ورفع الملف,P3,flutter-window
+SH27,27-chart-of-accounts.png,S20,دليل الحسابات,32 حسابًا من البذرة,الشجرة وأنواع الحسابات,P2,flutter-window
+SH28,28-journal-entry.png,S23,قيد يومية,قيد مسودة,إعداد approvalRequiredForJournal,P2,flutter-window
+SH29,29-opening-balances.png,S25,الأرصدة الافتتاحية,مستند افتتاحي,ربط الأرصدة بالمخزون والمحاسبة,P2,flutter-window
+SH30,30-cash.png,S26,الخزائن والبنوك وسندات القبض والصرف,خزينة رئيسية,سند قبض وسند صرف والتسوية البنكية,P2,flutter-window
+SH31,31-fixed-assets.png,S27,الأصول الثابتة والإهلاك,أصل واحد مع إهلاك,معادلة الإهلاك والقيود الناتجة,P3,flutter-window
+SH32,32-cost-redaction-dialog.png,S08,بطاقة الصنف لمندوب بلا صلاحية تكلفة,تسجيل دخول مندوب المبيعات,سعر البيع ظاهر وكل حقول التكلفة null,P1,flutter-window
+SH33,33-barcode-labels-html.png,S08/S09,ملصقات الباركود (HTML خادم حقيقي),استجابة endpoint الموجودة حاليًا,السعر الظاهر وغياب التكلفة وكود SVG — متاح من الخادم الآن,P1,server-html
+SH34,34-fiscal-periods.png,S24,الفترات المالية والإقفال السنوي,فترة FY2026 مفتوحة,زر الإقفال وصلاحية periods.close,P3,flutter-window
+SH35,35-budgets.png,S22,الموازنات,موازنة واحدة,ربطها بمركز تكلفة/حساب,P3,flutter-window
+SH36,36-cost-centers.png,S21,مراكز التكلفة,مركز واحد,منع مركز التكلفة على التحويل المخزني,P3,flutter-window

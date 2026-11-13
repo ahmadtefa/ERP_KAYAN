@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,13 +8,26 @@ import {
   InvoiceDocumentType,
   InvoiceStatus,
   JournalStatus,
+  OrderStatus,
   Prisma,
   StockDirection,
 } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { historicalOrderUnit, orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
+import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
+import { planOrderReallocation } from '../../common/units/order-reallocation';
+import { createHash } from 'node:crypto';
+import { releaseOrderAllocations } from '../../common/units/order-invoice-reconciliation';
+import {
+  defaultUnitPrice,
+  parseDocumentQuantity,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -61,6 +75,11 @@ interface PreparedLine {
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
   costCenterId: string | null;
+  // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` is
+  // always the internal base-unit quantity stock actually receives.
+  unitName: string | null;
+  unitFactor: Prisma.Decimal | null;
+  unitQuantity: Prisma.Decimal | null;
 }
 
 interface PreparedInvoice {
@@ -78,6 +97,7 @@ export class PurchaseInvoicesService {
     private readonly accounts: AccountMapService,
     private readonly settings: CompanySettingsService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
   ) {}
@@ -136,6 +156,8 @@ export class PurchaseInvoicesService {
     return {
       ...this.toSummary(invoice),
       branch: invoice.branch,
+      orderId: invoice.purchaseOrderId,
+      updatedAt: invoice.updatedAt.toISOString(),
       notes: invoice.notes,
       supplierReference: invoice.supplierReference,
       landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
@@ -143,14 +165,22 @@ export class PurchaseInvoicesService {
       postedAt: invoice.postedAt?.toISOString() ?? null,
       lines: invoice.lines.map((l) => ({
         id: l.id,
+        orderLineId: l.orderLineId,
         lineNumber: l.lineNumber,
         itemId: l.itemId,
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
-        unit: l.item?.unit ?? null,
+        // Chosen unit with legacy fallback to the item base unit.
+        unit: l.unitName ?? l.item?.unit ?? null,
+        unitName: l.unitName ?? null,
+        unitFactor: l.unitFactor === null || l.unitFactor === undefined ? null : l.unitFactor.toFixed(6),
+        // Entered quantity in the chosen unit; legacy rows fall back to stored.
+        unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
         description: l.description,
+        // Internal base-unit quantity received into stock.
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: l.quantity.toFixed(MONEY_SCALE),
         returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
@@ -174,12 +204,41 @@ export class PurchaseInvoicesService {
     branchId: string | null,
     userId: string,
     dto: CreatePurchaseInvoiceDto,
+    orderUnits?: readonly TrustedOrderUnit[],
+  ) {
+    const created = await this.prisma.$transaction((tx) =>
+      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
+    );
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'purchase_invoices',
+      entityId: created.id,
+      after: {
+        invoiceNumber: created.invoiceNumber,
+        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
+      },
+    });
+
+    return this.findOne(companyId, created.id);
+  }
+
+  /** Internal: caller owns the transaction and any required audit records. */
+  async createInTransaction(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    dto: CreatePurchaseInvoiceDto,
+    tx: Prisma.TransactionClient,
+    orderUnits?: readonly TrustedOrderUnit[],
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
 
-    const supplier = await this.prisma.supplier.findFirst({
+    const supplier = await tx.supplier.findFirst({
       where: { id: dto.supplierId, companyId, deletedAt: null },
       select: { id: true, isActive: true },
     });
@@ -194,13 +253,14 @@ export class PurchaseInvoicesService {
       dto.supplierId,
       landedCostAmount,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      orderUnits,
+      tx,
     );
     const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((s, l) => s.plus(l.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
 
-    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.numbers.next(
         tx,
         companyId,
@@ -218,7 +278,7 @@ export class PurchaseInvoicesService {
           invoiceDate: new Date(dto.invoiceDate),
           dueDate: dto.dueDate
             ? new Date(dto.dueDate)
-            : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate))),
+            : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate), tx)),
           supplierId: dto.supplierId,
           status: InvoiceStatus.DRAFT,
           discountType: prepared.documentDiscount.type,
@@ -250,25 +310,15 @@ export class PurchaseInvoicesService {
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
+              unitName: l.unitName,
+              unitFactor: l.unitFactor,
+              unitQuantity: l.unitQuantity,
             })),
           },
         },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-    });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'purchase_invoices',
-      entityId: created.id,
-      after: {
-        invoiceNumber: created.invoiceNumber,
-        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, created.id);
   }
 
   /**
@@ -292,6 +342,7 @@ export class PurchaseInvoicesService {
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (invoice.purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as purchase invoices');
     }
@@ -328,10 +379,10 @@ export class PurchaseInvoicesService {
       : await this.dueDateFromTerms(companyId, dto.supplierId, invoiceDate);
 
     await this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
-        SELECT status
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; purchaseOrderId: string | null }>>(Prisma.sql`
+        SELECT status, "purchaseOrderId"
           FROM purchase_invoices
-         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
@@ -339,6 +390,8 @@ export class PurchaseInvoicesService {
           'This invoice was posted or changed by someone else. Reload it before editing.',
         );
       }
+
+      if (locked[0].purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
 
       await tx.purchaseInvoice.update({
         where: { id },
@@ -377,6 +430,9 @@ export class PurchaseInvoicesService {
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -403,13 +459,166 @@ export class PurchaseInvoicesService {
     return this.findOne(companyId, id);
   }
 
+  /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
+  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const before = await this.prisma.purchaseInvoice.findFirst({
+      where: { id, companyId, branchId, deletedAt: null }, select: { purchaseOrderId: true },
+    });
+    if (!before?.purchaseOrderId) throw new BadRequestException('Invoice is not linked to an order');
+    const orderId = before.purchaseOrderId;
+    if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
+      throw new BadRequestException('expectedUpdatedAt is required');
+    }
+    const expectedUpdatedAt = dto.expectedUpdatedAt;
+    await this.prisma.$transaction(async (tx) => {
+      // Lock in the same order as conversion, cancellation and reversal.
+      const lockedOrder = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM purchase_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedOrder.length !== 1) throw new NotFoundException('Purchase order not found');
+      const lockedInvoice = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM purchase_invoices WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedInvoice.length !== 1) throw new NotFoundException('Purchase invoice not found');
+      const invoice = await tx.purchaseInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      const order = await tx.purchaseOrder.findFirst({
+        where: { id: orderId, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice || !order || invoice.purchaseOrderId !== orderId) throw new BadRequestException('Order allocation changed; reload');
+      const requested = selectedOrderLineQuantities(dto.lines, order.lines);
+      const identity = orderConversionIdentity(dto, requested);
+      const hash = createHash('sha256').update(JSON.stringify({ selection: identity.hash, expectedUpdatedAt })).digest('hex');
+      const previous = await tx.auditLog.findFirst({
+        where: { companyId, entity: 'purchase_invoices', entityId: id, action: 'AMEND_ORDER_ALLOCATION',
+          afterJson: { path: ['amendmentKey'], equals: identity.key } },
+      });
+      if (previous) {
+        const after = previous.afterJson as { amendmentHash?: string } | null;
+        if (after?.amendmentHash !== hash) throw new ConflictException('The idempotency key was used for a different amendment');
+        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('The amended invoice is no longer a draft');
+        return;
+      }
+      if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
+        throw new BadRequestException('Only an active draft invoice can be amended');
+      }
+      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
+      if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero() || !invoice.landedCostAmount.isZero()) {
+        throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
+      }
+      const counters = planOrderReallocation(order.lines, invoice.lines, requested);
+      const prior = new Map<string, typeof invoice.lines[number]>();
+      for (const old of invoice.lines) {
+        if (!old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero() || !old.landedCostAmount.isZero() || !old.inventoryCostTotal.equals(old.lineTotal)) {
+          throw new BadRequestException('Historical invoice lines require manual review');
+        }
+        prior.set(old.orderLineId, old);
+      }
+      const selected = order.lines.filter((line) => requested.has(line.id));
+      const units: TrustedOrderUnit[] = [];
+      const rawLines = selected.map((line) => {
+        const existing = prior.get(line.id);
+        if (existing && existing.itemId !== line.itemId) throw new BadRequestException('Historical order item changed; manual review required');
+        // Existing lines keep the invoice snapshot even if the order was
+        // changed later. Newly selected lines use the agreed order snapshot.
+        const source = existing ?? line;
+        const historical = historicalOrderUnit({ label: `Line ${line.lineNumber}`, unitName: source.unitName,
+          unitFactor: source.unitFactor, baseQuantity: requested.get(line.id)! });
+        units.push({ itemId: line.itemId, resolved: historical });
+        return { itemId: line.itemId, description: source.description,
+          quantity: (historical.snapshot.unitQuantity ?? historical.baseQuantity).toFixed(MONEY_SCALE),
+          unitPrice: source.unitPrice.toFixed(MONEY_SCALE), taxRate: source.taxRate.toFixed(MONEY_SCALE),
+          discountPercent: source.discountPercent.toFixed(MONEY_SCALE), unitName: source.unitName ?? undefined,
+          costCenterId: existing?.costCenterId ?? undefined };
+      });
+      const prepared = await this.prepareLines(companyId, rawLines, invoice.supplierId, new Prisma.Decimal(0), {}, units, tx);
+      const subTotal = prepared.lines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
+      const taxAmount = prepared.lines.reduce((sum, line) => sum.plus(line.taxAmount), new Prisma.Decimal(0));
+      const totalAmount = subTotal.plus(taxAmount);
+      await tx.purchaseInvoice.update({
+        where: { id }, data: { subTotal, taxAmount, totalAmount,
+          discountType: prepared.documentDiscount.type, discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount, lineDiscountTotal: prepared.lineDiscountTotal,
+          lines: { deleteMany: {}, create: prepared.lines.map((line, index) => ({
+            orderLineId: selected[index].id, lineNumber: line.lineNumber, itemId: line.itemId,
+            description: line.description, quantity: line.quantity, unitPrice: line.unitPrice,
+            taxRate: line.taxRate, taxAmount: line.taxAmount, lineTotal: line.lineTotal,
+            grossLineTotal: line.grossLineTotal, discountType: line.discountType,
+            discountPercent: line.discountPercent, discountAmount: line.discountAmount,
+            invoiceDiscountAmount: line.invoiceDiscountAmount, landedCostAmount: line.landedCostAmount, inventoryCostTotal: line.inventoryCostTotal,
+            costCenterId: line.costCenterId, unitName: line.unitName, unitFactor: line.unitFactor, unitQuantity: line.unitQuantity,
+          })) },
+        },
+      });
+      for (const line of order.lines) await tx.purchaseOrderLine.update({
+        where: { id: line.id }, data: { invoicedQuantity: counters.get(line.id)! },
+      });
+      const complete = order.lines.every((line) => counters.get(line.id)!.greaterThanOrEqualTo(line.quantity));
+      const none = order.lines.every((line) => counters.get(line.id)!.isZero());
+      await tx.purchaseOrder.update({ where: { id: orderId }, data: {
+        status: none ? OrderStatus.APPROVED : complete ? OrderStatus.FULFILLED : OrderStatus.PARTIALLY_FULFILLED,
+      } });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'AMEND_ORDER_ALLOCATION', entity: 'purchase_invoices', entityId: id,
+        before: { totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE), allocations: invoice.lines.map((line) => ({ orderLineId: line.orderLineId, quantity: line.quantity.toFixed(MONEY_SCALE) })) },
+        after: { amendmentKey: identity.key, amendmentHash: hash, totalAmount: totalAmount.toFixed(MONEY_SCALE),
+          allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
+      }, tx);
+    }, { maxWait: 10000, timeout: 30000 });
+    return this.findOne(companyId, id);
+  }
+
+  /** Cancel a draft without deleting its historical identity or retry key. */
+  async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    await this.prisma.$transaction(async (tx) => {
+      let invoice = await tx.purchaseInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice) throw new NotFoundException('Purchase invoice not found');
+      if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
+        throw new BadRequestException('Only a draft invoice can be cancelled');
+      }
+      if (invoice.purchaseOrderId) {
+        // An amendment can commit while we wait for the order lock. Reload
+        // its allocation afterwards; releasing the pre-lock snapshot corrupts
+        // the order counters even though both operations are transactions.
+        const orderId = invoice.purchaseOrderId;
+        const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM purchase_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+            AND "deletedAt" IS NULL FOR UPDATE
+        `);
+        if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+        invoice = await tx.purchaseInvoice.findFirst({
+          where: { id, companyId, branchId, deletedAt: null },
+          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        });
+        if (!invoice || invoice.purchaseOrderId !== orderId || invoice.status !== InvoiceStatus.DRAFT) {
+          throw new BadRequestException('Invoice was posted or cancelled concurrently');
+        }
+        await releaseOrderAllocations(tx, 'purchase', companyId, orderId, invoice.lines);
+      }
+      const claimed = await tx.purchaseInvoice.updateMany({
+        where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new BadRequestException('Invoice was posted or cancelled concurrently');
+      await this.audit.recordRequired({ companyId, userId, action: 'CANCEL_DRAFT',
+        entity: 'purchase_invoices', entityId: id, after: { invoiceNumber: invoice.invoiceNumber } }, tx);
+    });
+    return { id, cancelled: true };
+  }
+
   async post(companyId: string, userId: string, id: string) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
-      include: {
-        lines: { orderBy: { lineNumber: 'asc' } },
-        supplier: { select: { code: true, nameEn: true } },
-      },
+      select: { status: true },
     });
     if (!invoice) throw new NotFoundException('Purchase invoice not found');
     if (invoice.status !== InvoiceStatus.DRAFT) {
@@ -418,11 +627,11 @@ export class PurchaseInvoicesService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       // Claim the document before anything else happens: two simultaneous
       // posts must not both receive the same goods into stock.
       const claimed = await tx.purchaseInvoice.updateMany({
-        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: { id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
@@ -430,6 +639,18 @@ export class PurchaseInvoicesService {
           'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
         );
       }
+
+      // The draft may have been edited while this request waited for the row
+      // lock. Read both the header and lines only after the guarded claim, on
+      // the same transaction, so stock and journal use the committed version.
+      const invoice = await tx.purchaseInvoice.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: {
+          lines: { orderBy: { lineNumber: 'asc' } },
+          supplier: { select: { code: true, nameEn: true } },
+        },
+      });
+      if (!invoice) throw new NotFoundException('Purchase invoice not found');
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsPayable',
@@ -492,25 +713,21 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: costTotal },
-          },
+        // The branch book and the shelf book are moved by the one ledger every
+        // other stock-writing path uses. Writing `stock_balances` by hand here
+        // - which is what this code used to do - left `warehouse_stock_balances`
+        // without a row, so a purchase put 10 on the branch and 0 on the shelf.
+        // Every later transfer or sale out of that shelf was then refused with
+        // "0.0000 available" while the warehouse report said 10. The ledger
+        // writes both levels in the same transaction, so the two can no longer
+        // disagree.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: costTotal,
         });
       }
 
@@ -548,21 +765,15 @@ export class PurchaseInvoicesService {
         data: { journalEntryId: journal.id },
       });
 
-      return journal;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'purchase_invoices',
-      entityId: id,
-      before: { status: InvoiceStatus.DRAFT },
-      after: {
-        status: InvoiceStatus.POSTED,
-        journalEntryId: result.id,
-        journalNumber: result.entryNumber,
-      },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'purchase_invoices', entityId: id,
+        before: { status: InvoiceStatus.DRAFT },
+        after: {
+          status: InvoiceStatus.POSTED,
+          journalEntryId: journal.id,
+          journalNumber: journal.entryNumber,
+        },
+      }, tx);
     });
 
     return this.findOne(companyId, id);
@@ -595,7 +806,10 @@ export class PurchaseInvoicesService {
       throw new BadRequestException('This invoice has already been reversed');
     }
 
-    const reversal = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
+      if (invoice.purchaseOrderId) {
+        await releaseOrderAllocations(tx, 'purchase', companyId, invoice.purchaseOrderId, invoice.lines);
+      }
       const claimedInvoice = await tx.purchaseInvoice.updateMany({
         where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
         data: { status: InvoiceStatus.REVERSED },
@@ -660,6 +874,22 @@ export class PurchaseInvoicesService {
           );
         }
 
+        // The shelf must be able to give the goods back, not just the branch.
+        // A purchase reversed after its stock was moved to another warehouse
+        // would otherwise take the branch to zero while driving this shelf
+        // negative. The same guard the transfer and sale paths use answers
+        // here, and it locks the warehouse row so a concurrent transfer
+        // cannot pass the check at the same time.
+        await this.warehouses.assertWarehouseAvailable({
+          tx,
+          companyId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          allowNegative: false,
+          reference: invoice.invoiceNumber,
+        });
+
         await tx.stockMovement.create({
           data: {
             companyId,
@@ -679,18 +909,15 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
-          },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: inventoryCostTotal },
-          },
+        // Same ledger as the receipt, in the opposite direction, so the shelf
+        // book is decremented by exactly the amount the receipt incremented it.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity.negated(),
+          value: inventoryCostTotal.negated(),
         });
       }
 
@@ -698,22 +925,17 @@ export class PurchaseInvoicesService {
       // refuses a closed period with a readable message (instead of the
       // database trigger surfacing as a 500), and stamps the mirror with
       // the invoice as its source so a ledger reader can drill back to it.
-      return this.posting.reverse(
+      const reversal = await this.posting.reverse(
         tx,
         companyId,
         userId,
         original.id,
         `Reversal of purchase invoice ${invoice.invoiceNumber}`,
       );
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'REVERSE',
-      entity: 'purchase_invoices',
-      entityId: id,
-      after: { reversalJournalNumber: reversal.entryNumber },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'REVERSE', entity: 'purchase_invoices', entityId: id,
+        after: { reversalJournalNumber: reversal.entryNumber },
+      }, tx);
     });
 
     return this.findOne(companyId, id);
@@ -725,8 +947,9 @@ export class PurchaseInvoicesService {
     companyId: string,
     supplierId: string,
     invoiceDate: Date,
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<Date | null> {
-    const supplier = await this.prisma.supplier.findFirst({
+    const supplier = await client.supplier.findFirst({
       where: { id: supplierId, companyId },
       select: { paymentTermDays: true },
     });
@@ -793,12 +1016,17 @@ export class PurchaseInvoicesService {
     supplierId: string | null | undefined,
     landedCostAmount: Prisma.Decimal,
     documentDiscount: DiscountInput,
+    orderUnits?: readonly TrustedOrderUnit[],
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
-    const settings = await this.settings.get(companyId);
+    const settings = await this.settings.get(companyId, client);
 
+    if (orderUnits && orderUnits.length !== input.length) {
+      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+    }
     for (const [index, raw] of input.entries()) {
-      const item = await this.prisma.item.findFirst({
+      const item = await client.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
         select: {
           code: true,
@@ -808,6 +1036,7 @@ export class PurchaseInvoicesService {
           isActive: true,
           purchasePrice: true,
           unit: true,
+          units: true,
         },
       });
       if (!item) {
@@ -817,47 +1046,65 @@ export class PurchaseInvoicesService {
         throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
       }
 
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
 
-      // A price typed on the line is the cost. When nobody typed one, the
-      // supplier's agreed list speaks, and failing that the item's own
-      // purchase price - resolved once the item is known.
+      // Resolve the chosen unit. The entered quantity is expressed in it; the
+      // base quantity is what is received into stock and drives unit cost.
+      const resolved = orderUnitForInvoiceLine(orderUnits, index, raw.itemId, quantity) ?? resolveUnitSelection({
+        lineLabel: `Line ${index + 1}`,
+        requestedUnitId: raw.unitId,
+        requestedUnitName: raw.unitName,
+        enteredQuantity: quantity,
+        baseUnitName: item.unit,
+        units: (item as { units?: any[] }).units ?? [],
+      });
+      const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;
+
+      // A price typed on the line is the cost of one CHOSEN unit. When nobody
+      // typed one, the supplier's agreed list speaks (for the chosen unit),
+      // then the unit's own purchase price, then the item's purchase price.
       let unitPrice =
         raw.unitPrice === undefined || raw.unitPrice === null || raw.unitPrice === ''
           ? null
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
       if (unitPrice === null) {
-        const listed = await this.prices.resolvePrice(this.prisma, companyId, {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
+        const listed = await this.prices.resolvePrice(client, companyId, {
           partyId: supplierId ?? null,
           partyKind: 'SUPPLIER',
           itemId: raw.itemId,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed?.price ?? item.purchasePrice;
+        unitPrice = listed
+          ? listed.price
+          : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
-      // Line, then item, then the company's own rate - an item with no rate
-      // of its own follows the company rather than silently becoming exempt.
+      // Missing or cleared tax is zero. Conversion callers pass the stored
+      // rate explicitly so historical document snapshots are preserved.
       const taxRate: Prisma.Decimal =
-        raw.taxRate !== undefined
-          ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
-          : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
+        raw.taxRate === undefined || raw.taxRate === null || (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
+          ? new Prisma.Decimal(0)
+          : this.rate(String(raw.taxRate), `Line ${index + 1} taxRate`);
 
       // The discount is taken from the goods value, before tax, and the tax
-      // is then charged on what is actually being paid for the goods.
-      const grossLineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // is then charged on what is actually being paid for the goods. Money
+      // follows the entered quantity in the chosen unit; stock uses the base
+      // quantity computed above.
+      const grossLineTotal = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const lineDiscount = this.lineDiscount(
         grossLineTotal,
         raw,
         index,
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
       );
 
       // The centre must exist, belong to this company and still be active.
       let costCenterId: string | null = raw.costCenterId ?? null;
       if (costCenterId) {
-        const center = await this.prisma.costCenter.findFirst({
+        const center = await client.costCenter.findFirst({
           where: { id: costCenterId, companyId, deletedAt: null },
           select: { id: true, isActive: true, code: true },
         });
@@ -877,7 +1124,8 @@ export class PurchaseInvoicesService {
         lineNumber: index + 1,
         itemId: raw.itemId,
         description: raw.description ?? `${item.code} ${item.nameEn}`,
-        quantity,
+        // Internal base-unit quantity received into stock.
+        quantity: resolved.baseQuantity,
         unitPrice,
         taxRate,
         taxAmount: new Prisma.Decimal(0),
@@ -890,6 +1138,9 @@ export class PurchaseInvoicesService {
         landedCostAmount: new Prisma.Decimal(0),
         inventoryCostTotal: lineDiscount.net,
         costCenterId,
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
       });
     }
 
@@ -917,7 +1168,7 @@ export class PurchaseInvoicesService {
           grossTotal,
           lineDiscountTotal.plus(allocation.discount.amount),
         ),
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
         'Document',
       );
     } catch (error) {

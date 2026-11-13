@@ -25,9 +25,11 @@ class NetworkFailure extends Failure {
 
 /// The server rejected the request (4xx) with a business-level reason.
 class ApiFailure extends Failure {
-  const ApiFailure(super.message, {this.statusCode, super.cause});
+  const ApiFailure(super.message, {this.statusCode, this.code, super.cause});
 
   final int? statusCode;
+  /// A validated, non-secret machine-readable reason from the server.
+  final String? code;
 }
 
 /// Authentication is missing, expired or rejected.

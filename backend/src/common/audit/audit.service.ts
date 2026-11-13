@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface AuditInput {
@@ -16,8 +17,8 @@ export interface AuditInput {
 /**
  * Writes the append-only audit trail.
  *
- * Audit failures are logged but never propagated: a bookkeeping problem must
- * not abort a legitimate business operation.
+ * record() is best-effort for legacy callers. Security-critical callers should
+ * use recordRequired() inside the same database transaction as their mutation.
  */
 @Injectable()
 export class AuditService {
@@ -27,24 +28,33 @@ export class AuditService {
 
   async record(input: AuditInput): Promise<void> {
     try {
-      await this.prisma.auditLog.create({
-        data: {
-          companyId: input.companyId ?? null,
-          userId: input.userId ?? null,
-          action: input.action,
-          entity: input.entity,
-          entityId: input.entityId ?? null,
-          beforeJson: (input.before ?? undefined) as never,
-          afterJson: (input.after ?? undefined) as never,
-          ipAddress: input.ipAddress ?? null,
-          userAgent: input.userAgent ?? null,
-        },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to write audit record for ${input.action} ${input.entity}`,
-        error instanceof Error ? error.stack : String(error),
-      );
+      await this.recordRequired(input, this.prisma);
+    } catch {
+      // Database errors and stack traces can contain connection strings,
+      // bound values or customer data. Keep the failure visible without
+      // copying any database or caller-supplied content into logs.
+      this.logger.error('Failed to write an audit record');
     }
   }
+
+  /** Write within a caller-owned transaction; failures must abort that transaction. */
+  async recordRequired(
+    input: AuditInput,
+    transaction: Pick<Prisma.TransactionClient, 'auditLog'>,
+  ): Promise<void> {
+    await transaction.auditLog.create({
+      data: {
+        companyId: input.companyId ?? null,
+        userId: input.userId ?? null,
+        action: input.action,
+        entity: input.entity,
+        entityId: input.entityId ?? null,
+        beforeJson: (input.before ?? undefined) as never,
+        afterJson: (input.after ?? undefined) as never,
+        ipAddress: input.ipAddress ?? null,
+        userAgent: input.userAgent ?? null,
+      },
+    });
+  }
+
 }

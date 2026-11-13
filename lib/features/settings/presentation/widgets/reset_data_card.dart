@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/reset_data_source.dart';
 import '../providers/reset_providers.dart';
@@ -125,7 +125,11 @@ class ResetDataCard extends ConsumerWidget {
       builder: (dialogContext) =>
           _ResetDialog(preview: preview, ref: ref),
     );
-    if (result == null || !context.mounted) return;
+    if (!context.mounted) return;
+    // Even a cancelled dialog may follow a request whose response was lost.
+    // Re-read the preview rather than reusing the pre-request counts.
+    ref.invalidate(resetPreviewProvider);
+    if (result == null) return;
 
     final l10n = context.l10n;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -136,7 +140,6 @@ class ResetDataCard extends ConsumerWidget {
         duration: const Duration(seconds: 8),
       ),
     );
-    ref.invalidate(resetPreviewProvider);
     // The reset revokes every refresh token and returns the company to its
     // first-run state. Drop the local JWT as well, so the router opens the
     // setup/login flow instead of leaving a signed-in screen on empty books.
@@ -162,7 +165,7 @@ class _ResetDialogState extends State<_ResetDialog> {
   final _password = TextEditingController();
   final _word = TextEditingController();
   bool _busy = false;
-  String? _failure;
+  bool _uncertain = false;
   bool _warned = false;
 
   @override
@@ -173,21 +176,18 @@ class _ResetDialogState extends State<_ResetDialog> {
   }
 
   bool get _canSubmit =>
-      !_busy &&
+      !_busy && !_uncertain &&
       _password.text.isNotEmpty &&
       _word.text.trim() == widget.preview.confirmationWord;
 
   Future<void> _submit() async {
     final l10n = context.l10n;
     if (!_canSubmit) {
-      setState(
-        () => _failure = l10n.resetWrongWord(widget.preview.confirmationWord),
-      );
+      showAppError(context, l10n.resetWrongWord(widget.preview.confirmationWord));
       return;
     }
     setState(() {
       _busy = true;
-      _failure = null;
     });
     try {
       final result = await widget.ref
@@ -198,18 +198,15 @@ class _ResetDialogState extends State<_ResetDialog> {
           );
       if (!mounted) return;
       Navigator.of(context).pop(result);
-    } on Failure catch (failure) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _failure = failure.message;
-      });
     } catch (error) {
       if (!mounted) return;
+      // The server could have committed before the response was lost. Do not
+      // repeat this destructive operation from the same confirmation dialog.
       setState(() {
         _busy = false;
-        _failure = '$error';
+        _uncertain = true;
       });
+      showAppError(context, error);
     }
   }
 
@@ -274,7 +271,9 @@ class _ResetDialogState extends State<_ResetDialog> {
       );
     }
 
-    return AlertDialog(
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
       title: Text(l10n.resetConfirmTitle),
       content: SingleChildScrollView(
         child: Column(
@@ -304,19 +303,13 @@ class _ResetDialogState extends State<_ResetDialog> {
               ),
               onChanged: (_) => setState(() {}),
             ),
-            if (_failure != null) ...[
+            if (_uncertain) ...[
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(Icons.error_outline, color: scheme.error, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _failure!,
-                      style: TextStyle(color: scheme.error),
-                    ),
-                  ),
-                ],
+              Text(
+                Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'قد تكون العملية اكتملت رغم خطأ الاتصال. أغلق النافذة وتحقق من حالة الشركة والنسخة الاحتياطية قبل أي محاولة جديدة.'
+                    : 'The operation may have completed despite the error. Close this dialog and check the company and backup before trying again.',
+                style: TextStyle(color: scheme.error),
               ),
             ],
           ],
@@ -342,7 +335,7 @@ class _ResetDialogState extends State<_ResetDialog> {
               : Text(l10n.resetButton),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -363,6 +356,8 @@ class _Counts extends StatelessWidget {
       'items' => l10n.resetCountItems,
       'salesInvoices' => l10n.resetCountSalesInvoices,
       'purchaseInvoices' => l10n.resetCountPurchaseInvoices,
+      'quotations' => l10n.resetCountQuotations,
+      'cashVouchers' => l10n.resetCountCashVouchers,
       'stockMovements' => l10n.resetCountStockMovements,
       'fiscalPeriods' => l10n.resetCountFiscalPeriods,
       'branches' => l10n.resetCountBranches,

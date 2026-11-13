@@ -27,9 +27,9 @@ check(
   'empty',
 );
 check(
-  'a company without users is incomplete, not empty',
+  'a company without users requires recovery, never first-run setup',
   classifyDatabaseState({ companies: 1, users: 0 }),
-  'incomplete',
+  'recovery_required',
 );
 check(
   'users without a company is incomplete, not empty',
@@ -52,9 +52,13 @@ check(
   'unknown',
 );
 
+check('users in dormant companies do not make the active company ready', classifyDatabaseState({ companies: 1, users: 2, activeCompanyUsers: 0 }), 'recovery_required');
+check('negative counts are unknown', classifyDatabaseState({ companies: -1, users: 0 }), 'unknown');
+
 assert.equal(needsFirstAdministrator('empty'), true);
 assert.equal(needsFirstAdministrator('incomplete'), true);
 assert.equal(needsFirstAdministrator('ready'), false);
+assert.equal(needsFirstAdministrator('recovery_required'), false);
 assert.equal(needsFirstAdministrator('unknown'), false);
 console.log('PASS  only empty and incomplete need a first administrator');
 

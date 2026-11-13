@@ -36,10 +36,10 @@ import { RESET_CONFIRMATION_WORD } from './dto/reset.dto';
  *  2. **The password, verified on the server.** Argon2id against the stored
  *     hash. A stolen token alone cannot wipe the books.
  *  3. **A typed confirmation.** `RESET`, checked here too.
- *  4. **A backup first, and a verified one.** `pg_dump` writes the file, then
- *     `pg_restore --list` proves the archive can actually be read back. If
- *     either step fails the reset does not happen — a reset without a way
- *     back is data destruction, not a reset.
+ *  4. **A backup attempt first.** `pg_restore --list` checks an archive index,
+ *     not a complete restore. A company-only JSON fallback can also be used;
+ *     neither proves external files or license recovery. If both backup checks
+ *     fail, the reset is aborted; passing them does not prove recovery.
  *  5. **One transaction.** Everything is deleted inside it, so a failure
  *     half way leaves the company exactly as it was.
  *  6. **Nothing structural is touched.** No database is dropped, no
@@ -108,6 +108,8 @@ export class ResetService {
       items,
       salesInvoices,
       purchaseInvoices,
+      quotations,
+      cashVouchers,
       stockMovements,
       fiscalPeriods,
       branches,
@@ -120,6 +122,11 @@ export class ResetService {
       this.prisma.item.count({ where: { companyId } }),
       this.prisma.salesInvoice.count({ where: { companyId } }),
       this.prisma.purchaseInvoice.count({ where: { companyId } }),
+      // The offers go too (they hold restrictive links to the invoices they
+      // became), and so does every receipt and payment. A confirmation screen
+      // that does not name them undersells what the button does.
+      this.prisma.quotation.count({ where: { companyId } }),
+      this.prisma.cashVoucher.count({ where: { companyId } }),
       this.prisma.stockMovement.count({ where: { companyId } }),
       this.prisma.fiscalPeriod.count({ where: { companyId } }),
       this.prisma.branch.count({ where: { companyId } }),
@@ -139,6 +146,8 @@ export class ResetService {
         items,
         salesInvoices,
         purchaseInvoices,
+        quotations,
+        cashVouchers,
         stockMovements,
         fiscalPeriods,
         branches,
@@ -222,8 +231,8 @@ export class ResetService {
     );
 
     try {
-      // 4. A verified backup first — and one that is proven readable, not merely a
-      //    file that exists. No backup, no reset.
+      // 4. Check the archive index or company JSON format before resetting.
+      //    This does not prove a complete restore or include external files.
       let verified: { name: string; sizeBytes: number; entries: number };
 
       const fullCapabilities =
@@ -310,6 +319,39 @@ export class ResetService {
             where: { companyId: me.companyId },
             data: { originalInvoiceId: null },
           });
+
+          // Offers point at the invoice they became, at their customer, at
+          // their items and at each other, every one of them with a
+          // restrictive constraint. A company that ever wrote an offer could
+          // therefore not be reset at all: the transaction died on
+          // `quotations_convertedInvoiceId_fkey` (or on the customer, or on
+          // the item) and the reset was refused with a 500. Break the two
+          // self-links, then remove the offers before the invoices and the
+          // parties they name. Tables, lines and events follow by cascade.
+          await tx.quotation.updateMany({
+            where: { companyId: me.companyId },
+            data: { convertedInvoiceId: null, revisionOfId: null },
+          });
+          await step('quotations', async () => {
+            const { count } = await tx.quotation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // Rows written before the offers were rebuilt live in two tables no
+          // model knows about any more, but the same restrictive constraints
+          // still apply to them. They belong to the company being cleared.
+          await step('legacyQuotationLines', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotation_lines_legacy
+               WHERE "quotationId" IN (
+                 SELECT id FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid
+               )`,
+          );
+          await step('legacyQuotations', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid`,
+          );
 
           // Cash vouchers/transfers and reconciliations all hold restrictive
           // references to cash accounts and other business masters.
@@ -413,6 +455,119 @@ export class ResetService {
             return count;
           });
 
+          // The inventory tables added with batches, shelf balances and
+          // storage locations. They point at items, warehouses and branches,
+          // so they must be cleared first: without these steps the reset
+          // aborted with P2003 on the first warehouse it tried to delete.
+          await step('stockTakeLine', async () => {
+            const { count } = await tx.stockTakeLine.deleteMany({
+              where: { session: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('stockTakeSession', async () => {
+            const { count } = await tx.stockTakeSession.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemCostHistory', async () => {
+            const { count } = await tx.itemCostHistory.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('warehouseStockBalance', async () => {
+            const { count } = await tx.warehouseStockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemBatch', async () => {
+            const { count } = await tx.itemBatch.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemWarehouseSetting', async () => {
+            const { count } = await tx.itemWarehouseSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userWarehouseAccess', async () => {
+            const { count } = await tx.userWarehouseAccess.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('storageLocation', async () => {
+            const { count } = await tx.storageLocation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notification', async () => {
+            const { count } = await tx.notification.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notificationSetting', async () => {
+            const { count } = await tx.notificationSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('printPriceSetting', async () => {
+            const { count } = await tx.printPriceSetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('budget', async () => {
+            const { count } = await tx.budget.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('quotationTermTemplate', async () => {
+            const { count } = await tx.quotationTermTemplate.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('quotationColumnTemplate', async () => {
+            const { count } = await tx.quotationColumnTemplate.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('stockDocumentCreationRequest', async () => {
+            const { count } = await tx.stockDocumentCreationRequest.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('orderCreationRequest', async () => {
+            const { count } = await tx.orderCreationRequest.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('backupRun', async () => {
+            const { count } = await tx.backupRun.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userProfilePhoto', async () => {
+            const { count } = await tx.userProfilePhoto.deleteMany({
+              where: { user: { companyId: me.companyId } },
+            });
+            return count;
+          });
+
           await step('stockMovements', async () => {
             const { count } = await tx.stockMovement.deleteMany({
               where: { companyId: me.companyId },
@@ -465,6 +620,14 @@ export class ResetService {
           });
           await step('suppliers', async () => {
             const { count } = await tx.supplier.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // Pictures are cleared before the items they hang from, so the reset
+          // does not depend on cascade behaviour to remove a company's images.
+          await step('itemImage', async () => {
+            const { count } = await tx.itemImage.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;
@@ -687,7 +850,7 @@ export class ResetService {
 
       this.logger.warn(
         `Reset finished for company ${me.company?.code ?? me.companyId}: ` +
-          `${verified.name} holds the old data`,
+          `backup ${verified.name} was created; full restoration was not verified`,
       );
 
       return {
@@ -728,7 +891,19 @@ export class ResetService {
       const name = `kayan-backup-${companyCode || 'company'}-${stamp}.json`;
       const filePath = join(dir, name);
 
-      const content = Buffer.from(JSON.stringify(backupData, null, 2), 'utf8');
+      // Prisma hands back JS BigInt for wide integer columns. Plain
+      // JSON.stringify throws on those, which aborted the safety backup and
+      // therefore the whole reset. Serialise them as exact decimal strings so
+      // no precision is lost on the way back in.
+      const content = Buffer.from(
+        JSON.stringify(
+          backupData,
+          (_key, value: unknown) =>
+            typeof value === 'bigint' ? value.toString() : value,
+          2,
+        ),
+        'utf8',
+      );
       await writeFile(filePath, content, { mode: 0o600 });
 
       // Verify the file was written and can be read back cleanly

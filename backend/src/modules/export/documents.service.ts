@@ -11,6 +11,7 @@ export const DOCUMENT_KINDS = [
   'purchase-order',
   'sales-quotation',
   'cash-voucher',
+  'stock-voucher',
   'journal-entry',
 ] as const;
 
@@ -42,6 +43,11 @@ export const DOCUMENT_SPECS: Record<DocumentKind, DocumentSpec> = {
     kind: 'purchase-order',
     readPermission: 'purchases.orders.read',
     exportPermission: 'purchases.invoices.export',
+  },
+  'stock-voucher': {
+    kind: 'stock-voucher',
+    readPermission: 'inventory.stock.read',
+    exportPermission: 'inventory.export',
   },
   'cash-voucher': {
     kind: 'cash-voucher',
@@ -75,7 +81,7 @@ export class DocumentsService {
     return DOCUMENT_SPECS[kind as DocumentKind];
   }
 
-  async build(kind: DocumentKind, companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  async build(kind: DocumentKind, companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
     switch (kind) {
       case 'sales-invoice':
         return this.salesInvoice(companyId, id, lang);
@@ -89,9 +95,52 @@ export class DocumentsService {
         return this.salesQuotation(companyId, id, lang);
       case 'cash-voucher':
         return this.cashVoucher(companyId, id, lang);
+      case 'stock-voucher':
+        return this.stockVoucher(companyId, id, lang, voucherBranchId);
       case 'journal-entry':
         return this.journalEntry(companyId, id, lang);
     }
+  }
+
+  private async stockVoucher(companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
+    if (voucherBranchId === null) throw new NotFoundException('Stock voucher not found');
+    const doc = await this.prisma.stockDocument.findFirst({
+      where: { id, companyId, deletedAt:null, voucherKind:{not:null}, ...(voucherBranchId !== undefined ? {branchId:voucherBranchId} : {}) },
+      include: { toWarehouse:true, costCenter:true, branch:true,
+        lines:{orderBy:{lineNumber:'asc'},include:{item:true}} },
+    });
+    if (!doc) throw new NotFoundException('Stock voucher not found');
+    const name = (row:{nameAr:string;nameEn:string} | null) =>
+      row ? (lang === 'ar' ? row.nameAr || row.nameEn : row.nameEn || row.nameAr) : '';
+    return {
+      slug:'stock-voucher',
+      titleEn:`${doc.voucherKind === 'RECEIPT' ? 'Stock receipt' : 'Stock issue'} ${doc.documentNumber}`,
+      titleAr:`${doc.voucherKind === 'RECEIPT' ? 'إذن إضافة' : 'إذن صرف'} ${doc.documentNumber}`,
+      meta:[
+        {labelEn:'Number',labelAr:'الرقم',value:doc.documentNumber},
+        {labelEn:'Date',labelAr:'التاريخ',value:doc.documentDate.toISOString().slice(0,10)},
+        {labelEn:'Status',labelAr:'الحالة',value:doc.status},
+        {labelEn:'Branch',labelAr:'الفرع',value:name(doc.branch)},
+        {labelEn:'Warehouse',labelAr:'المخزن',value:name(doc.toWarehouse)},
+        {labelEn:'Counterparty',labelAr:'الجهة',value:doc.counterpartyName ?? ''},
+        {labelEn:'Reason',labelAr:'السبب',value:doc.reason ?? ''},
+        {labelEn:'Cost center',labelAr:'مركز التكلفة',value:name(doc.costCenter)},
+        {labelEn:'Reviewed',labelAr:'المراجعة',value:doc.reviewedAt?.toISOString() ?? ''},
+        {labelEn:'Approved',labelAr:'الاعتماد',value:doc.approvedAt?.toISOString() ?? ''},
+      ],
+      columns:[
+        {key:'lineNumber',labelEn:'#',labelAr:'م'},
+        {key:'itemCode',labelEn:'Item code',labelAr:'كود الصنف'},
+        {key:'itemName',labelEn:'Item',labelAr:'الصنف'},
+        {key:'unit',labelEn:'Unit',labelAr:'الوحدة'},
+        {key:'quantity',labelEn:'Quantity',labelAr:'الكمية',numeric:true},
+        {key:'unitCost',labelEn:'Base unit cost',labelAr:'تكلفة الوحدة الأساسية',numeric:true},
+      ],
+      rows:doc.lines.map(line => ({lineNumber:line.lineNumber,itemCode:line.item.code,itemName:name(line.item),
+        unit:line.unitName ?? line.item.unit,quantity:(line.unitQuantity ?? line.quantity).toFixed(MONEY),
+        unitCost:line.unitCost.toFixed(MONEY)})),
+      totals:[], notes:doc.notes ? [{en:doc.notes,ar:doc.notes}] : [],
+    };
   }
 
   private async salesInvoice(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
@@ -129,8 +178,10 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        // Show the unit the user chose and the quantity they typed, not the
+        // internal base-unit conversion. Legacy rows fall back to item unit.
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: l.taxAmount.toFixed(MONEY),
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -178,8 +229,9 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        // Chosen unit and entered quantity; legacy rows fall back to base unit.
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: l.taxAmount.toFixed(MONEY),
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -222,8 +274,8 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: '0.0000',
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -262,8 +314,8 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: '0.0000',
         lineTotal: l.lineTotal.toFixed(MONEY),

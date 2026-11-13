@@ -55,7 +55,7 @@ function stored(overrides: Record<string, unknown> = {}) {
 
 function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
   let row = options.existing === undefined ? null : options.existing;
-  const prisma = {
+  const prisma: any = {
     company: {
       findUnique: jest
         .fn()
@@ -87,14 +87,14 @@ function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
         return row;
       }),
     },
-    $transaction: jest.fn(async (operations: Array<Promise<unknown>>) =>
-      Promise.all(operations),
+    $transaction: jest.fn(async (operations: Array<Promise<unknown>> | ((tx: any) => Promise<unknown>)) =>
+      typeof operations === 'function' ? operations(prisma) : Promise.all(operations),
     ),
     $queryRaw: jest.fn().mockResolvedValue([
       { budgetId: '44444444-4444-4444-8444-444444444444', actual: new Prisma.Decimal('1200.0000') },
     ]),
   };
-  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const audit = { recordRequired: jest.fn().mockResolvedValue(undefined) };
   const service = new BudgetsService(prisma as any, audit as any);
   return { service, prisma, audit, get row() { return row; } };
 }
@@ -116,10 +116,27 @@ describe('BudgetsService', () => {
     expect(created.amount).toBe('1000.0000');
     expect(created.costCenter?.code).toBe('PRJ-1');
     expect(created.account?.type).toBe('EXPENSE');
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ entity: 'budgets', action: 'CREATE' }),
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: 'budgets', action: 'CREATE' }), expect.anything(),
     );
   });
+
+  it.each(['CREATE', 'UPDATE', 'DELETE'] as const)(
+    'propagates a failed required audit for %s',
+    async (action) => {
+      const { service, audit } = build({ existing: action === 'CREATE' ? null : stored() });
+      audit.recordRequired.mockRejectedValue(new Error('synthetic audit failure'));
+      const operation = action === 'CREATE'
+        ? service.create('company', 'user', base)
+        : action === 'UPDATE'
+          ? service.update('company', 'user', stored().id, { amount: '1500' })
+          : service.retire('company', 'user', stored().id);
+      await expect(operation).rejects.toThrow('synthetic audit failure');
+      expect(audit.recordRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ action, entity: 'budgets' }), expect.anything(),
+      );
+    },
+  );
 
   it('refuses a balance-sheet account: a budget compares spending, not balances', async () => {
     const { service } = build({ existing: null });

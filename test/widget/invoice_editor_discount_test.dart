@@ -69,7 +69,18 @@ void main() {
               'unit': 'piece',
               'isActive': true,
               'isStockTracked': true,
-              'taxRate': '0.0000',
+              'taxRate': '14.0000',
+              'salePrice': '100.0000',
+            },
+            {
+              'id': 'item-2',
+              'code': 'ITEM-2',
+              'nameEn': 'Other item',
+              'nameAr': 'صنف آخر',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': '19.0000',
               'salePrice': '100.0000',
             },
           ]),
@@ -121,9 +132,36 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+      reason: 'a blank rate stays blank and is saved as zero',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '7');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-2 — Other item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '7',
+      reason: 'changing item must not override a user-entered rate',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+      reason: 'changing item must not replace an intentionally blank rate',
+    );
 
     await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '2');
     await tester.enterText(find.byKey(const ValueKey('line-price-0')), '100');
+    // An explicitly cleared tax field must be sent as zero, not omitted.
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
     await tester.pump();
 
     // Line discount: 10 %.
@@ -153,9 +191,108 @@ void main() {
 
     expect(api.postPath, '/sales/invoices');
     final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single['taxRate'], '0');
     expect(lines.single['discountType'], 'PERCENT');
     expect(lines.single['discountPercent'], '10');
     expect(api.postBody?['discountType'], 'AMOUNT');
     expect(api.postBody?['discountAmount'], '20');
   });
+
+  for (final kind in [InvoiceKind.sales, InvoiceKind.purchase]) {
+    for (final whitespace in [false, true]) {
+      testWidgets('${kind.name} ${whitespace ? 'whitespace' : 'untouched blank'} tax is sent as zero', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          activeItemsProvider.overrideWith((ref) async => [
+            {
+              'id': 'item-1',
+              'code': 'ITEM-1',
+              'nameEn': 'Tracked item',
+              'nameAr': 'صنف مخزني',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': '14.0000',
+              'salePrice': '100.0000',
+              'purchasePrice': '100.0000',
+            },
+          ]),
+          activeCustomersProvider.overrideWith((ref) async => [
+            {
+              'id': 'customer-1',
+              'code': 'CUS-1',
+              'nameEn': 'Test customer',
+              'nameAr': 'عميل تجريبي',
+              'isActive': true,
+            },
+          ]),
+          activeSuppliersProvider.overrideWith((ref) async => [
+            {
+              'id': 'customer-1',
+              'code': 'CUS-1',
+              'nameEn': 'Test customer',
+              'nameAr': 'مورد تجريبي',
+              'isActive': true,
+            },
+          ]),
+        ],
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          InvoiceEditorScreen(kind: kind),
+                    ),
+                  ),
+                  child: const Text('Open editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    final dropdowns = find.byType(DropdownButtonFormField<String>);
+    await tester.tap(dropdowns.at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-1 — Test customer').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+    );
+
+    if (whitespace) {
+      await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '   ');
+      await tester.pump();
+    }
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.postPath, kind == InvoiceKind.sales ? '/sales/invoices' : '/purchases/invoices');
+    final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single['taxRate'], '0');
+      });
+    }
+  }
 }

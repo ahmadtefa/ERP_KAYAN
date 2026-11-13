@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_error_text.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -78,6 +79,10 @@ class ReportLinkBuilder {
     String? to,
     String? accountId,
     String? branchId,
+    /// A partner statement carries who it is about; every other report
+    /// ignores the two.
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'format': format,
@@ -86,6 +91,8 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -100,12 +107,20 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
@@ -121,13 +136,21 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';
@@ -162,9 +185,13 @@ class ReportLinkBuilder {
     required String list,
     required String language,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       ...filters,
       'ticket': await _downloadTicket(),
     };
@@ -179,9 +206,13 @@ class ReportLinkBuilder {
     required String language,
     bool auto = true,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       ...filters,
       'ticket': await _downloadTicket(),
@@ -209,9 +240,13 @@ class ReportLinkBuilder {
     required String kind,
     required String id,
     required String language,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -224,9 +259,13 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool auto = true,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),
     };
@@ -301,6 +340,54 @@ class ReportLinkBuilder {
     );
   }
 
+  /// Printable barcode label sheet for one item's units. Each spec is a
+  /// `unitId:copies` pair and repeats as its own query entry, so a unit never
+  /// has to share a line with another unit's barcode.
+  Future<String> barcodeLabelPrint({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+    bool auto = true,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      if (auto) 'auto=1',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return '$_base/inventory/items/$itemId/barcode-labels/print?${query.join('&')}';
+  }
+
+  /// The same label sheet rendered to PDF by the server's browser pipeline.
+  Future<DownloadRequest> barcodeLabelPdf({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return DownloadRequest(
+      url: '$_base/inventory/items/$itemId/barcode-labels/pdf?${query.join('&')}',
+    );
+  }
+
   String _encode(Map<String, String> query) => query.entries
       .map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}')
       .join('&');
@@ -350,6 +437,7 @@ class ImportReport {
   int get created => _int('created');
   int get updated => _int('updated');
   int get skipped => _int('skipped');
+  int get clearedBlankTaxRates => _int('clearedBlankTaxRates');
 
   List<Map<String, dynamic>> get errors => (raw['errors'] as List? ?? const [])
       .whereType<Map>()
@@ -386,10 +474,16 @@ class ImportController extends Notifier<ImportState> {
   void chooseMode(ImportMode mode) {
     // The dry run counted what would happen in the old mode; those numbers
     // cannot vouch for the button that writes in the new one.
-    state = state.copyWith(mode: mode, clearReport: true);
+    state = state.copyWith(mode: mode, clearBlankTaxRates: false, clearReport: true);
   }
 
+  void chooseBlankTaxPolicy(bool clear) => state = state.copyWith(
+    clearBlankTaxRates: clear,
+    clearReport: true,
+  );
+
   void chooseFile(PickedFile? file) => state = state.copyWith(
+    clearBlankTaxRates: false,
     file: file,
     clearFile: file == null,
     clearReport: true,
@@ -411,6 +505,7 @@ class ImportState {
   const ImportState({
     this.kind = ImportKind.customers,
     this.mode = ImportMode.insert,
+    this.clearBlankTaxRates = false,
     this.file,
     this.busy = false,
     this.report,
@@ -419,6 +514,7 @@ class ImportState {
 
   final ImportKind kind;
   final ImportMode mode;
+  final bool clearBlankTaxRates;
   final PickedFile? file;
   final bool busy;
   final ImportReport? report;
@@ -437,6 +533,7 @@ class ImportState {
   ImportState copyWith({
     ImportKind? kind,
     ImportMode? mode,
+    bool? clearBlankTaxRates,
     PickedFile? file,
     bool clearFile = false,
     bool? busy,
@@ -447,6 +544,7 @@ class ImportState {
     return ImportState(
       kind: kind ?? this.kind,
       mode: mode ?? this.mode,
+      clearBlankTaxRates: clearBlankTaxRates ?? this.clearBlankTaxRates,
       file: clearFile ? null : (file ?? this.file),
       busy: busy ?? this.busy,
       // A report can be replaced, and it can be thrown away - but it must
@@ -475,6 +573,7 @@ class DataService {
     required PickedFile file,
     required ImportMode mode,
     required bool dryRun,
+    bool clearBlankTaxRates = false,
   }) async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
@@ -482,7 +581,7 @@ class DataService {
     final response = await _dio.post<Map<String, dynamic>>(
       '/import/${kind.slug}',
       data: form,
-      queryParameters: {'dryRun': dryRun, 'mode': mode.slug},
+      queryParameters: {'dryRun': dryRun, 'mode': mode.slug, 'clearBlankTaxRates': clearBlankTaxRates},
       options: Options(contentType: 'multipart/form-data'),
     );
     return ImportReport(Map<String, dynamic>.from(response.data ?? const {}));
@@ -556,7 +655,7 @@ class FullBackupService {
     // the default, the request was aborted on the client while the server
     // was still working, which looked like a backup that hangs forever.
     final response = await _dio.post<Map<String, dynamic>>(
-      _path,
+      '$_path/database-archive',
       options: Options(receiveTimeout: const Duration(minutes: 15)),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
@@ -602,15 +701,13 @@ final fullBackupServiceProvider = Provider<FullBackupService>(
 
 /// Turns whatever was thrown into something worth reading.
 ///
-/// The API answers errors as Problem Details - a title and a `detail` written
-/// to be read by a person, e.g. why a file was refused. That message is shown
-/// as it is; anything else falls back to the exception's own text rather than
-/// pretending nothing went wrong.
+/// Preserve the transport status and do not render an arbitrary response body.
+/// Known business rules may be translated; unknown internals stay hidden.
 String describeApiError(Object error) {
   final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
     final detail = _detailOf(error.response?.data);
-    if (detail != null) return _safeMessage(detail, status);
+    if (detail != null) return _safeMessage(ApiFailure(detail, statusCode: status), status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -622,7 +719,10 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return _safeMessage(error.toString(), status);
+  if (error is DownloadFailure) {
+    return _safeMessage(ApiFailure(error.message, statusCode: error.statusCode), error.statusCode);
+  }
+  return _safeMessage(error, status);
 }
 
 String? _detailOf(Object? data) {
@@ -639,7 +739,7 @@ String? _detailOf(Object? data) {
 /// screen cannot print a DTO field name or a stack frame either. It answers
 /// in English because these panels are read by administrators next to the
 /// server log.
-String _safeMessage(String raw, int? status) {
+String _safeMessage(Object raw, int? status) {
   final resolved = AppErrorMessageResolver(
     isArabic: false,
   ).resolve(raw, statusCode: status);

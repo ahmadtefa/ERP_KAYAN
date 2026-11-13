@@ -8,6 +8,7 @@ import { AccountType, Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { lockChart } from './chart-lock';
 import {
   CreateAccountDto,
   ListAccountsQueryDto,
@@ -98,13 +99,14 @@ export class ChartOfAccountsService {
   async suggestCode(
     companyId: string,
     parentId: string | null,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
   ): Promise<{ code: string }> {
     let prefix = '';
     if (parentId) {
-      const parent = await this.findAccount(companyId, parentId);
+      const parent = await this.findAccount(companyId, parentId, client);
       prefix = parent.code;
     }
-    const siblings = await this.prisma.account.findMany({
+    const siblings = await client.account.findMany({
       where: { companyId, parentId, deletedAt: null },
       select: { code: true },
     });
@@ -133,65 +135,27 @@ export class ChartOfAccountsService {
   ): Promise<AccountResponse> {
     const type = (dto.type ?? 'EXPENSE') as AccountType;
     const parentId = dto.parentId ?? null;
-
-    // The parent is checked first: an account cannot be planned under a
-    // parent that will not accept it, and guessing a code for one is wasted.
-    if (parentId) {
-      await this.assertParentUsable(companyId, parentId, type);
-    }
-
-    let code = dto.code?.trim();
-    if (!code) {
-      code = (await this.suggestCode(companyId, parentId)).code;
-    }
-    await this.assertCodeFree(companyId, code);
-
-    // A grouping account collects children; a final account receives
-    // postings. The two are never mixed in one row's intent.
-    const isPostable = dto.isPostable ?? (parentId ? true : false);
-
     const created = await this.prisma.$transaction(async (tx) => {
+      await lockChart(tx, companyId);
+      if (parentId) await this.assertParentUsable(companyId, parentId, type, undefined, tx);
+      const code = dto.code?.trim() || (await this.suggestCode(companyId, parentId, tx)).code;
+      await this.assertCodeFree(companyId, code, undefined, tx);
+      const isPostable = dto.isPostable ?? (parentId ? true : false);
       const row = await tx.account.create({
         data: {
-          companyId,
-          code,
-          nameEn: dto.nameEn,
-          nameAr: dto.nameAr,
-          type,
-          parentId,
-          isPostable,
-          currency: dto.currency ?? null,
-          cashFlowClass: dto.cashFlowClass ?? null,
-          description: dto.description?.trim() || null,
-          createdBy: userId,
-          updatedBy: userId,
+          companyId, code, nameEn: dto.nameEn, nameAr: dto.nameAr, type, parentId,
+          isPostable, currency: dto.currency ?? null, cashFlowClass: dto.cashFlowClass ?? null,
+          description: dto.description?.trim() || null, createdBy: userId, updatedBy: userId,
         },
       });
-
-      // The moment an account gains a child, it becomes a grouping account —
-      // unless it already carries postings, which must never be rewritten.
-      if (parentId) {
-        await this.demoteParentToGrouping(tx, companyId, parentId);
-      }
+      if (parentId) await this.demoteParentToGrouping(tx, companyId, parentId);
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'accounts', entityId: row.id,
+        after: { code: row.code, nameEn: row.nameEn, nameAr: row.nameAr,
+          type: row.type, parentId: row.parentId, isPostable: row.isPostable },
+      }, tx);
       return row;
     });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'accounts',
-      entityId: created.id,
-      after: {
-        code: created.code,
-        nameEn: created.nameEn,
-        nameAr: created.nameAr,
-        type: created.type,
-        parentId: created.parentId,
-        isPostable: created.isPostable,
-      },
-    });
-
     return toResponse(created);
   }
 
@@ -201,96 +165,61 @@ export class ChartOfAccountsService {
     id: string,
     dto: UpdateAccountDto,
   ): Promise<AccountResponse> {
-    const account = await this.findAccount(companyId, id);
-
-    // Deactivating a grouping account would leave its active children orphaned
-    // in the tree; the subaccounts are deactivated first.
-    if (dto.isActive === false && account.isActive) {
-      const activeChildren = await this.prisma.account.count({
-        where: { parentId: id, companyId, deletedAt: null, isActive: true },
-      });
-      if (activeChildren > 0) {
-        throw new BadRequestException(
-          'Deactivate active subaccounts before deactivating their parent',
-        );
-      }
+    if (dto.expectedParentId !== undefined && dto.parentId === undefined) {
+      throw new BadRequestException('The expected parent requires a requested parent change');
     }
-
-    if (dto.code !== undefined && dto.code !== account.code) {
-      const movements = await this.prisma.journalLine.count({
-        where: { accountId: id },
-      });
-      if (movements > 0) {
-        throw new BadRequestException(
-          'This account already has journal movements. Its code cannot be changed — ' +
-            'deactivate it and create a new account instead.',
-        );
-      }
-      await this.assertCodeFree(companyId, dto.code, id);
-    }
-
-    let parentChanged = false;
-    if (dto.parentId !== undefined && dto.parentId !== account.parentId) {
-      parentChanged = true;
-      if (dto.parentId === id) {
-        throw new BadRequestException('An account cannot be its own parent');
-      }
-      await this.assertParentUsable(
-        companyId,
-        dto.parentId,
-        account.type as AccountType,
-        id,
-      );
-    }
-
-    // An account with children is a grouping account: it may not claim to be
-    // postable while it still collects others.
-    if (dto.isPostable === true) {
-      const children = await this.prisma.account.count({
-        where: { parentId: id, deletedAt: null },
-      });
-      if (children > 0) {
-        throw new BadRequestException(
-          'This account has sub-accounts, so it is a grouping account and cannot ' +
-            'receive postings. Remove the sub-accounts first.',
-        );
-      }
-    }
-
     const updated = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.account.update({
-        where: { id },
-        data: {
-          code: dto.code,
-          nameEn: dto.nameEn,
-          nameAr: dto.nameAr,
-          parentId: dto.parentId,
-          isPostable: dto.isPostable,
-          isActive: dto.isActive,
-          currency: dto.currency,
-          cashFlowClass: dto.cashFlowClass,
-          description:
-            dto.description === undefined ? undefined : dto.description?.trim() || null,
-          updatedBy: userId,
-        },
-      });
-
-      if (parentChanged && dto.parentId) {
-        await this.demoteParentToGrouping(tx, companyId, dto.parentId);
+      await lockChart(tx, companyId);
+      const account = await this.findAccount(companyId, id, tx);
+      if (dto.expectedParentId !== undefined && dto.expectedParentId !== account.parentId) {
+        throw new ConflictException('The account parent changed since it was loaded. Refresh and review it before saving.');
       }
+      const parentChanged = dto.parentId !== undefined && dto.parentId !== account.parentId;
+      if (parentChanged && dto.parentId === id) throw new BadRequestException('An account cannot be its own parent');
+      if (parentChanged && dto.parentId) {
+        await this.assertParentUsable(companyId, dto.parentId, account.type as AccountType, id, tx);
+      }
+      if (dto.isActive === true && !account.isActive) {
+        const parentId = dto.parentId === undefined ? account.parentId : dto.parentId;
+        if (parentId) await this.assertParentUsable(companyId, parentId, account.type as AccountType, id, tx);
+      }
+      if (dto.isActive === false && account.isActive) {
+        const activeChildren = await tx.account.count({where:{parentId:id,companyId,deletedAt:null,isActive:true}});
+        if (activeChildren > 0) throw new BadRequestException('Deactivate active subaccounts before deactivating their parent');
+      }
+      if (dto.code !== undefined && dto.code !== account.code) {
+        // Block a concurrent FK insert before checking whether the code is
+        // already part of journal history.
+        await this.lockSubtree(tx, companyId, id);
+        if (await tx.journalLine.count({where:{accountId:id}})) {
+          throw new BadRequestException('This account already has journal movements. Its code cannot be changed — deactivate it and create a new account instead.');
+        }
+        await this.assertCodeFree(companyId, dto.code, id, tx);
+      }
+      if (dto.isPostable === true && await tx.account.count({where:{parentId:id,companyId,deletedAt:null}})) {
+        throw new BadRequestException('This account has sub-accounts, so it is a grouping account and cannot receive postings. Remove the sub-accounts first.');
+      }
+      if (parentChanged) {
+        // Report groups are calculated from the current tree. Changing the
+        // parent of a subtree with even a draft journal line could silently
+        // reclassify existing or subsequently posted history. Lock every
+        // descendant before checking, so concurrent FK inserts cannot slip
+        // between the check and the move. Chart writers use lockChart first.
+        const descendants = await this.lockSubtree(tx, companyId, id);
+        if (await tx.journalLine.count({where:{accountId:{in:descendants}}})) {
+          throw new BadRequestException('An account or its subaccounts have journal movements; moving them would change historical reports.');
+        }
+      }
+      const row = await tx.account.update({
+        where:{id}, data:{code:dto.code,nameEn:dto.nameEn,nameAr:dto.nameAr,parentId:dto.parentId,
+          isPostable:dto.isPostable,isActive:dto.isActive,currency:dto.currency,cashFlowClass:dto.cashFlowClass,
+          description:dto.description === undefined ? undefined : dto.description?.trim() || null,updatedBy:userId},
+      });
+      if (parentChanged && dto.parentId) await this.demoteParentToGrouping(tx, companyId, dto.parentId);
+      await this.audit.recordRequired({companyId,userId,action:'UPDATE',entity:'accounts',entityId:id,
+        before:toResponse(account),after:toResponse(row)}, tx);
       return row;
     });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'accounts',
-      entityId: id,
-      before: toResponse(account),
-      after: toResponse(updated),
-    });
-
     return toResponse(updated);
   }
 
@@ -302,46 +231,42 @@ export class ChartOfAccountsService {
    * instead, which the screen offers in the same place.
    */
   async remove(companyId: string, userId: string, id: string): Promise<void> {
-    const account = await this.findAccount(companyId, id);
-
-    const [movements, children] = await Promise.all([
-      this.prisma.journalLine.count({ where: { accountId: id } }),
-      this.prisma.account.count({
-        where: { parentId: id, deletedAt: null },
-      }),
-    ]);
-
-    if (movements > 0) {
-      throw new BadRequestException(
-        'This account has journal movements and cannot be deleted. ' +
-          'Deactivate it instead so the past stays readable.',
-      );
-    }
-    if (children > 0) {
-      throw new BadRequestException(
-        'This account has sub-accounts. Move or delete them first, or deactivate this account.',
-      );
-    }
-
-    await this.prisma.account.update({
-      where: { id },
-      data: { deletedAt: new Date(), updatedBy: userId },
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'accounts',
-      entityId: id,
-      before: toResponse(account),
+    await this.prisma.$transaction(async (tx) => {
+      await lockChart(tx, companyId);
+      // Wait for already-inserted FK references before checking history.
+      // An in-flight posting that validated the account but has not yet
+      // inserted its line still needs its own locked revalidation after this
+      // soft delete; this alone does not solve that posting race.
+      await this.lockSubtree(tx, companyId, id);
+      const account = await this.findAccount(companyId, id, tx);
+      const [movements, children] = await Promise.all([
+        tx.journalLine.count({where:{accountId:id}}),
+        tx.account.count({where:{parentId:id,companyId,deletedAt:null}}),
+      ]);
+      if (movements > 0) throw new BadRequestException('This account has journal movements and cannot be deleted. Deactivate it instead so the past stays readable.');
+      if (children > 0) throw new BadRequestException('This account has sub-accounts. Move or delete them first, or deactivate this account.');
+      await tx.account.update({where:{id},data:{deletedAt:new Date(),updatedBy:userId}});
+      await this.audit.recordRequired({companyId,userId,action:'DELETE',entity:'accounts',entityId:id,before:toResponse(account)},tx);
     });
   }
 
   /// ────────────────────────────────────────────────────────────── helpers
 
-  private async findAccount(companyId: string, id: string) {
-    const account = await this.prisma.account.findFirst({
+  private async lockSubtree(tx: Prisma.TransactionClient, companyId: string, id: string): Promise<string[]> {
+    const rows = await tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      WITH RECURSIVE subtree(id) AS (
+        SELECT id FROM accounts WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+        UNION
+        SELECT child.id FROM accounts child JOIN subtree parent ON child."parentId" = parent.id
+         WHERE child."companyId" = ${companyId}::uuid
+      )
+      SELECT a.id FROM accounts a WHERE a.id IN (SELECT id FROM subtree) ORDER BY a.id FOR UPDATE
+    `);
+    return rows.map((row) => row.id);
+  }
+
+  private async findAccount(companyId: string, id: string, client: PrismaService | Prisma.TransactionClient = this.prisma) {
+    const account = await client.account.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!account) throw new NotFoundException('Account not found');
@@ -352,12 +277,14 @@ export class ChartOfAccountsService {
     companyId: string,
     code: string,
     exceptId?: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
-    const clash = await this.prisma.account.findFirst({
+    const clash = await client.account.findFirst({
       where: {
         companyId,
         code,
-        deletedAt: null,
+        // The database unique constraint includes soft-deleted accounts.
+        // Do not promise a code is free if inserting it will fail there.
         ...(exceptId ? { id: { not: exceptId } } : {}),
       },
       select: { id: true },
@@ -380,8 +307,9 @@ export class ChartOfAccountsService {
     parentId: string,
     type: AccountType,
     movingId?: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
-    const parent = await this.prisma.account.findFirst({
+    const parent = await client.account.findFirst({
       where: { id: parentId, companyId, deletedAt: null },
     });
     if (!parent) {
@@ -412,9 +340,11 @@ export class ChartOfAccountsService {
             'This would make the account its own ancestor. Choose another parent.',
           );
         }
-        if (seen.has(cursor)) break;
+        if (seen.has(cursor)) {
+          throw new BadRequestException('The proposed parent has a circular hierarchy and cannot be used');
+        }
         seen.add(cursor);
-        const next = await this.prisma.account.findUnique({
+        const next = await client.account.findUnique({
           where: { id: cursor },
           select: { parentId: true },
         });
@@ -434,6 +364,15 @@ export class ChartOfAccountsService {
     companyId: string,
     parentId: string,
   ): Promise<void> {
+    // Wait for an in-flight posting before deciding whether the parent has
+    // journal history. The posting service holds a conflicting shared lock
+    // until its journal line commits. Checking first then updating can demote
+    // a parent while its first journal is being inserted.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM accounts
+      WHERE id = ${parentId}::uuid AND "companyId" = ${companyId}::uuid
+      FOR UPDATE
+    `);
     const parent = await tx.account.findFirst({
       where: { id: parentId, companyId, deletedAt: null },
       select: { isPostable: true },

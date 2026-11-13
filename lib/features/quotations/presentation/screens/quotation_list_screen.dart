@@ -94,7 +94,7 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
       ref.invalidate(quotationsProvider);
       if (mounted) showMessage(context, l10n.quotationDeleted);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

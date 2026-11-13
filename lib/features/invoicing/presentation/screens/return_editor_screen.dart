@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/error/failure.dart';
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
@@ -18,13 +20,29 @@ class _ReturnLineDraft {
   final Json source;
   final TextEditingController quantity;
 
+  /// A return must use the same unit the original invoice line used. Legacy
+  /// lines have no snapshot and fall back to the item's base unit with a
+  /// factor of one, so the arithmetic is unchanged for old documents.
+  String get unitName => text(source, 'unitName').isEmpty
+      ? text(source, 'unit')
+      : text(source, 'unitName');
+
+  Decimal get _factor =>
+      Decimal.tryParse(text(source, 'unitFactor', fallback: '1')) ??
+      Decimal.one;
+
+  /// Still returnable, expressed in the original unit. The stock figures are
+  /// base units, so the base remainder is converted back through the factor.
   Decimal get remaining {
-    final quantityValue = Decimal.tryParse(text(source, 'quantity')) ?? Decimal.zero;
+    final quantityValue =
+        Decimal.tryParse(text(source, 'quantity')) ?? Decimal.zero;
     final alreadyReturned =
         Decimal.tryParse(text(source, 'returnedQuantity', fallback: '0')) ??
         Decimal.zero;
-    final result = quantityValue - alreadyReturned;
-    return result < Decimal.zero ? Decimal.zero : result;
+    final baseRemaining = quantityValue - alreadyReturned;
+    final clamped =
+        baseRemaining < Decimal.zero ? Decimal.zero : baseRemaining;
+    return (clamped / _factor).toDecimal(scaleOnInfinitePrecision: 10);
   }
 
   void dispose() => quantity.dispose();
@@ -32,9 +50,10 @@ class _ReturnLineDraft {
 
 /// Creates a draft credit/debit note against a posted invoice.
 class ReturnEditorScreen extends ConsumerStatefulWidget {
-  const ReturnEditorScreen({super.key, required this.kind});
+  const ReturnEditorScreen({super.key, required this.kind, required this.navigationKey});
 
   final InvoiceKind kind;
+  final ValueKey<String> navigationKey;
 
   @override
   ConsumerState<ReturnEditorScreen> createState() => _ReturnEditorScreenState();
@@ -48,15 +67,35 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
   late String _returnDate;
   bool _loadingSource = false;
   bool _saving = false;
+  bool _confirmingExit = false;
+  bool _saved = false;
+  late final DraftExitGuard _exitGuard;
+
+  Future<bool> _confirmExit() async {
+    if (_saved) return true;
+    if (_saving || _confirmingExit) return false;
+    if (_invoiceId == null && _reason.text.isEmpty && _lines.every((line) => line.quantity.text.isEmpty)) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ المرتجع؟' : 'Leave without saving the return?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
+    } finally { _confirmingExit = false; }
+  }
 
   @override
   void initState() {
     super.initState();
     _returnDate = _formatDate(DateTime.now());
+    _exitGuard = ref.read(draftExitGuardProvider);
+    _exitGuard.register(widget.navigationKey, _confirmExit);
   }
 
   @override
   void dispose() {
+    _exitGuard.unregister(widget.navigationKey, _confirmExit);
     _reason.dispose();
     for (final line in _lines) {
       line.dispose();
@@ -96,10 +135,10 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
           _returnDate = _formatDate(invoiceDate);
         }
       });
-    } on Failure catch (error) {
+    } catch (error) {
       if (!mounted) return;
       setState(() => _loadingSource = false);
-      showMessage(context, error.message, error: true);
+      showAppError(context, error);
     }
   }
 
@@ -153,6 +192,9 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       lines.add({
         'originalLineId': text(draft.source, 'id'),
         'quantity': raw,
+        // Echo the original unit; the server rejects any mismatch.
+        if (text(draft.source, 'unitName').isNotEmpty)
+          'unitName': text(draft.source, 'unitName'),
       });
     }
     if (lines.isEmpty) {
@@ -174,9 +216,14 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       await ref.read(returnListProvider(widget.kind).notifier).reload();
       if (!mounted) return;
       showMessage(context, l10n.returnCreated);
-      context.pop(true);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      _saved = true;
+      if (context.canPop()) {
+        context.pop(true);
+      } else {
+        context.go(widget.kind.returnsRoute);
+      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -187,15 +234,19 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
     final l10n = context.l10n;
     final user = ref.watch(currentUserProvider);
     final invoices = ref.watch(invoiceListProvider(widget.kind));
-    final canCreate = user?.branchId != null &&
+    final canCreate = !_saved && user?.branchId != null &&
         (user!.can(widget.kind.isSales ? 'sales.invoices.create' : 'purchases.invoices.create'));
 
     return ModuleScaffold(
+      leading: IconButton(key:const Key('return-editor-back'),tooltip:MaterialLocalizations.of(context).backButtonTooltip,
+        icon:const Icon(Icons.arrow_back),onPressed:_saving ? null : () {
+          if (context.canPop()) { context.pop(); } else { context.go(widget.kind.returnsRoute); }
+        }),
       title: widget.kind.isSales ? l10n.newSalesReturn : l10n.newPurchaseReturn,
       body: invoices.when(
         loading: () => const LoadingView(),
         error: (error, _) => ErrorView(
-          message: error.toString(),
+          message: error,
           onRetry: () => ref.read(invoiceListProvider(widget.kind).notifier).reload(),
         ),
         data: (rows) {
@@ -248,7 +299,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                           '${text(partyOf(_invoice!, widget.kind), 'nameEn', fallback: '—')}',
                         ),
                         TextButton.icon(
-                          onPressed: _saving ? null : _chooseDate,
+                          onPressed: _saving || _saved ? null : _chooseDate,
                           icon: const Icon(Icons.calendar_today_outlined),
                           label: Text('${l10n.returnDate}: $_returnDate'),
                         ),
@@ -259,7 +310,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _reason,
-                  enabled: !_saving,
+                  enabled: !_saving && !_saved,
                   decoration: InputDecoration(
                     labelText: l10n.returnReason,
                     prefixIcon: const Icon(Icons.info_outline),
@@ -324,7 +375,8 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                   Text(code.isEmpty ? name : '$code · $name'),
                   const SizedBox(height: 4),
                   Text(
-                    '${l10n.remainingToReturn}: ${line.remaining.toString()}',
+                    '${l10n.remainingToReturn}: ${line.remaining.toString()} '
+                    '${line.unitName}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -335,13 +387,14 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
               width: 150,
               child: TextField(
                 controller: line.quantity,
-                enabled: line.remaining > Decimal.zero && !_saving,
+                enabled: line.remaining > Decimal.zero && !_saving && !_saved,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                 ],
                 decoration: InputDecoration(
                   labelText: l10n.quantityToReturn,
+                  helperText: line.unitName,
                   isDense: true,
                 ),
               ),

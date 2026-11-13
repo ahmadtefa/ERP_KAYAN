@@ -17,6 +17,7 @@ describe('CompanyService default warehouse invariant', () => {
     };
     const tx = {
       branch: {
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(branch),
       },
       warehouse: {
@@ -40,7 +41,7 @@ describe('CompanyService default warehouse invariant', () => {
       ),
     } as unknown as PrismaService;
     const audit = {
-      record: jest.fn().mockResolvedValue(undefined),
+      recordRequired: jest.fn().mockResolvedValue(undefined),
     } as unknown as AuditService;
     const service = new CompanyService(prisma, audit);
 
@@ -66,8 +67,8 @@ describe('CompanyService default warehouse invariant', () => {
         isActive: true,
       }),
     });
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ entity: 'branches', entityId: branch.id }),
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: 'branches', entityId: branch.id }), tx,
     );
   });
 });

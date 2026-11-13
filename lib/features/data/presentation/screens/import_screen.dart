@@ -13,7 +13,7 @@ import '../../../inventory/presentation/screens/items_screen.dart'
     show itemsListProvider;
 import '../../../inventory/presentation/screens/stock_screen.dart'
     show stockListProvider;
-import '../../../parties/presentation/screens/parties_screen.dart'
+import '../../../parties/presentation/providers/party_providers.dart'
     show customersListProvider, suppliersListProvider;
 import '../providers/data_providers.dart';
 
@@ -36,7 +36,7 @@ class ImportScreen extends ConsumerWidget {
       trailing: IconButton(
         tooltip: l10n.startOver,
         icon: const Icon(Icons.restart_alt),
-        onPressed: controller.reset,
+        onPressed: state.busy ? null : controller.reset,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -49,37 +49,61 @@ class ImportScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(l10n.whatAreYouImporting,
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    l10n.whatAreYouImporting,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ImportKind>(
                     initialValue: state.kind,
-                    decoration: InputDecoration(labelText: l10n.whatAreYouImporting),
+                    decoration: InputDecoration(
+                      labelText: l10n.whatAreYouImporting,
+                    ),
                     items: [
-                      DropdownMenuItem(value: ImportKind.customers, child: Text(l10n.customers)),
-                      DropdownMenuItem(value: ImportKind.suppliers, child: Text(l10n.suppliers)),
-                      DropdownMenuItem(value: ImportKind.items, child: Text(l10n.items)),
-                      DropdownMenuItem(value: ImportKind.chartOfAccounts, child: Text(l10n.chartOfAccounts)),
-                      DropdownMenuItem(value: ImportKind.openingBalances, child: Text(l10n.openingBalancesTitle)),
+                      DropdownMenuItem(
+                        value: ImportKind.customers,
+                        child: Text(l10n.customers),
+                      ),
+                      DropdownMenuItem(
+                        value: ImportKind.suppliers,
+                        child: Text(l10n.suppliers),
+                      ),
+                      DropdownMenuItem(
+                        value: ImportKind.items,
+                        child: Text(l10n.items),
+                      ),
+                      DropdownMenuItem(
+                        value: ImportKind.chartOfAccounts,
+                        child: Text(l10n.chartOfAccounts),
+                      ),
+                      DropdownMenuItem(
+                        value: ImportKind.openingBalances,
+                        child: Text(l10n.openingBalancesTitle),
+                      ),
                     ],
-                    onChanged: (choice) {
-                      if (choice != null) controller.chooseKind(choice);
-                    },
+                    onChanged: state.busy
+                        ? null
+                        : (choice) {
+                            if (choice != null) controller.chooseKind(choice);
+                          },
                   ),
                   if (state.kind == ImportKind.openingBalances) ...[
                     const SizedBox(height: 10),
                     Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: TextButton.icon(
-                        onPressed: () => context.go('/accounting/opening-balances'),
+                        onPressed: () =>
+                            context.go('/accounting/opening-balances'),
                         icon: const Icon(Icons.fact_check_outlined),
                         label: Text(l10n.reviewOpeningBalances),
                       ),
                     ),
                   ],
                   const SizedBox(height: 20),
-                  Text(l10n.templateFirst,
-                      style: Theme.of(context).textTheme.titleSmall),
+                  Text(
+                    l10n.templateFirst,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     l10n.templateExplains,
@@ -88,11 +112,13 @@ class ImportScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: () {
-                      final language =
-                          Localizations.localeOf(context).languageCode;
+                      final language = Localizations.localeOf(context)
+                          .languageCode;
                       runDownload(
                         context,
-                        ref.read(reportLinkProvider).importTemplate(
+                        ref
+                            .read(reportLinkProvider)
+                            .importTemplate(
                               kind: state.kind.slug,
                               language: language,
                             ),
@@ -130,7 +156,12 @@ class _Steps extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final steps = [l10n.importStep1, l10n.importStep2, l10n.importStep3, l10n.importStep4];
+    final steps = [
+      l10n.importStep1,
+      l10n.importStep2,
+      l10n.importStep3,
+      l10n.importStep4,
+    ];
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -177,13 +208,18 @@ class _FileCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(l10n.chooseFile, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              l10n.chooseFile,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             if (file != null)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  file.isSpreadsheet ? Icons.table_chart_outlined : Icons.insert_drive_file_outlined,
+                  file.isSpreadsheet
+                      ? Icons.table_chart_outlined
+                      : Icons.insert_drive_file_outlined,
                 ),
                 title: Text(file.name),
                 subtitle: Text(file.readableSize),
@@ -205,7 +241,9 @@ class _FileCard extends ConsumerWidget {
                 FilledButton.icon(
                   onPressed: state.busy ? null : choose,
                   icon: const Icon(Icons.upload_file_outlined),
-                  label: Text(file == null ? l10n.chooseFile : l10n.chooseAnotherFile),
+                  label: Text(
+                    file == null ? l10n.chooseFile : l10n.chooseAnotherFile,
+                  ),
                 ),
                 if (file != null)
                   OutlinedButton.icon(
@@ -237,11 +275,14 @@ class _FileCard extends ConsumerWidget {
 
     controller.beginning();
     try {
-      final report = await ref.read(dataServiceProvider).import(
+      final report = await ref
+          .read(dataServiceProvider)
+          .import(
             kind: state.kind,
             file: file,
             mode: state.mode,
             dryRun: dryRun,
+            clearBlankTaxRates: state.clearBlankTaxRates,
           );
       controller.succeeded(report);
     } catch (error) {
@@ -265,22 +306,30 @@ class _ModeCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(l10n.whatAboutExisting,
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              l10n.whatAboutExisting,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             RadioGroup<ImportMode>(
               groupValue: state.mode,
-              onChanged: (value) => controller.chooseMode(value ?? ImportMode.insert),
+              onChanged: (value) {
+                if (!state.busy) {
+                  controller.chooseMode(value ?? ImportMode.insert);
+                }
+              },
               child: Column(
                 children: [
                   RadioListTile<ImportMode>(
                     value: ImportMode.insert,
+                    enabled: !state.busy,
                     title: Text(l10n.importModeSkip),
                     subtitle: Text(l10n.importModeSkipHint),
                     contentPadding: EdgeInsets.zero,
                   ),
                   RadioListTile<ImportMode>(
                     value: ImportMode.upsert,
+                    enabled: !state.busy,
                     title: Text(l10n.importModeUpdate),
                     subtitle: Text(l10n.importModeUpdateHint),
                     contentPadding: EdgeInsets.zero,
@@ -288,6 +337,18 @@ class _ModeCard extends ConsumerWidget {
                 ],
               ),
             ),
+            if (state.kind == ImportKind.items &&
+                state.mode == ImportMode.upsert)
+              CheckboxListTile(
+                value: state.clearBlankTaxRates,
+                onChanged: state.busy
+                    ? null
+                    : (value) =>
+                          controller.chooseBlankTaxPolicy(value ?? false),
+                contentPadding: EdgeInsets.zero,
+                title: Text(l10n.clearBlankImportTax),
+                subtitle: Text(l10n.clearBlankImportTaxHint),
+              ),
           ],
         ),
       ),
@@ -345,7 +406,9 @@ class _ResultCard extends ConsumerWidget {
             Row(
               children: [
                 Icon(
-                  report.hasErrors ? Icons.warning_amber_outlined : Icons.check_circle_outline,
+                  report.hasErrors
+                      ? Icons.warning_amber_outlined
+                      : Icons.check_circle_outline,
                   color: report.hasErrors ? scheme.error : scheme.primary,
                 ),
                 const SizedBox(width: 8),
@@ -364,6 +427,11 @@ class _ResultCard extends ConsumerWidget {
                 _Count(label: l10n.willBeAdded, value: report.created),
                 _Count(label: l10n.willBeUpdated, value: report.updated),
                 _Count(label: l10n.willBeSkipped, value: report.skipped),
+                if (state.kind == ImportKind.items && state.clearBlankTaxRates)
+                  _Count(
+                    label: l10n.clearedBlankImportTaxCount,
+                    value: report.clearedBlankTaxRates,
+                  ),
               ],
             ),
             if (report.unknownColumns.isNotEmpty) ...[
@@ -382,12 +450,16 @@ class _ResultCard extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Text(
                     '• ${l10n.row} ${error['row']} — ${error['column']}: ${error['message']}',
-                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.error,
+                    ),
                   ),
                 ),
               if (report.errors.length > 20)
-                Text('… ${report.errors.length - 20} ${l10n.moreRows}',
-                    style: theme.textTheme.bodySmall),
+                Text(
+                  '… ${report.errors.length - 20} ${l10n.moreRows}',
+                  style: theme.textTheme.bodySmall,
+                ),
               const SizedBox(height: 8),
               Text(l10n.fixErrorsThenRetry, style: theme.textTheme.bodySmall),
             ],
@@ -401,7 +473,12 @@ class _ResultCard extends ConsumerWidget {
                 label: Text(l10n.importForReal),
               )
             else if (report.hasErrors)
-              Text(l10n.fixErrorsThenRetry, style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error))
+              Text(
+                l10n.fixErrorsThenRetry,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.error,
+                ),
+              )
             else
               Wrap(
                 spacing: 12,
@@ -417,7 +494,8 @@ class _ResultCard extends ConsumerWidget {
                   ),
                   if (report.raw['draft'] is Map)
                     OutlinedButton.icon(
-                      onPressed: () => context.go('/accounting/opening-balances'),
+                      onPressed: () =>
+                          context.go('/accounting/opening-balances'),
                       icon: const Icon(Icons.fact_check_outlined),
                       label: Text(l10n.reviewOpeningBalances),
                     ),
@@ -437,11 +515,14 @@ class _ResultCard extends ConsumerWidget {
 
     controller.beginning();
     try {
-      final report = await ref.read(dataServiceProvider).import(
+      final report = await ref
+          .read(dataServiceProvider)
+          .import(
             kind: current.kind,
             file: file,
             mode: current.mode,
             dryRun: false,
+            clearBlankTaxRates: current.clearBlankTaxRates,
           );
       // An import writes records other screens have already cached. Refresh
       // them now, so a customer, item or opening stock imported here appears

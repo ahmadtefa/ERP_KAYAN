@@ -110,6 +110,7 @@ export class JwtAuthGuard implements CanActivate {
           select: {
             role: {
               select: {
+                code: true,
                 rolePermissions: {
                   select: { permission: { select: { code: true } } },
                 },
@@ -132,6 +133,22 @@ export class JwtAuthGuard implements CanActivate {
           },
           select: { branchId: true },
           orderBy: { branchId: 'asc' },
+        },
+        // Which shelves this person is trusted with, loaded with the session
+        // so a request never has to ask twice - and so a screen that hides a
+        // warehouse and the API that refuses it agree on the same rows.
+        warehouseAccess: {
+          where: { warehouse: { companyId: payload.companyId, deletedAt: null } },
+          select: {
+            warehouseId: true,
+            canView: true,
+            canReceive: true,
+            canIssue: true,
+            canTransfer: true,
+            canCount: true,
+            canApprove: true,
+            canSeeCost: true,
+          },
         },
       },
     });
@@ -162,12 +179,28 @@ export class JwtAuthGuard implements CanActivate {
         ?.branchId ??
       principal.branches[0]?.branchId ??
       null;
+    // The role codes, so an alert addressed to a role can find the people who
+    // hold it without a second query per notification.
+    const roles = [
+      ...new Set(
+        principal.userRoles
+          .map((userRole) => (userRole.role as { code?: string }).code)
+          .filter((code): code is string => typeof code === 'string' && code.length > 0),
+      ),
+    ];
 
     request.user = {
       userId: principal.id,
       username: principal.username,
       companyId: principal.companyId,
       branchId,
+      // The full assignment list, so a screen can show every branch the
+      // person actually works in without a second round trip.
+      branchIds: principal.branches.map((branch) => branch.branchId),
+      roles,
+      warehouseAccess: (principal as { warehouseAccess?: unknown[] }).warehouseAccess
+        ? ((principal as { warehouseAccess?: unknown[] }).warehouseAccess as never)
+        : [],
       isSuperAdmin: principal.isSuperAdmin,
       permissions,
     };

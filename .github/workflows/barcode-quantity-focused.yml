@@ -1,0 +1,148 @@
+name: Inventory focused checks
+
+# Verifies the barcode/quantity fix and the batch operations screens.
+# This workflow exists because the development sandbox has no Dart or Flutter
+# SDK, so `flutter test` cannot run locally. It is deliberately narrow: the
+# widget files that cover the changed screens, plus `flutter analyze`. Nothing
+# else is built or deployed.
+#
+# It does not run on its own. The branch has no commit carrying this file yet
+# and pushing is not permitted, so it is exercised with workflow_dispatch once
+# the owner approves a push.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lib/features/inventory/presentation/screens/stock_vouchers_screen.dart'
+      - 'lib/features/inventory/presentation/screens/batches_screen.dart'
+      - 'lib/features/inventory/presentation/widgets/batch_operation_dialog.dart'
+      - 'test/widget/stock_voucher_barcode_quantity_test.dart'
+      - 'test/widget/stock_voucher_flow_test.dart'
+      - 'test/widget/batches_operations_test.dart'
+      - 'test/widget/batches_screen_test.dart'
+      - 'lib/features/inventory/presentation/screens/expiry_alerts_screen.dart'
+      - 'test/widget/expiry_alerts_screen_test.dart'
+      # Phase (د): the barcode system generalised to invoices and stock takes.
+      - 'lib/shared/barcode/barcode_scan.dart'
+      - 'lib/features/invoicing/presentation/screens/invoice_editor_screen.dart'
+      - 'lib/features/inventory/presentation/screens/stock_takes_screen.dart'
+      - 'test/shared/barcode_scan_test.dart'
+      - 'test/widget/invoice_barcode_scan_test.dart'
+      - 'test/widget/invoice_unit_selection_test.dart'
+      - 'test/widget/stock_take_barcode_scan_test.dart'
+      - 'test/widget/stock_takes_screen_test.dart'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: barcode-quantity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    name: Barcode quantity and voucher flow widget tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # The app's pubspec pulls generated localizations and icons, which the
+      # build step of the main CI produces before `flutter test` can compile.
+      - name: Set up Python for branded icons
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate platform icons from 1.png
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python scripts/generate_app_icons.py
+
+      # Pinned to the same Flutter as safe-checks.yml, code-integrity.yml and
+      # the Windows workflows. `channel: stable` floats: once stable moved to
+      # 3.48, `package:flutter/material.dart` became a deprecated member and
+      # `flutter analyze` reported ~190 infos and exited 1, so every step after
+      # Analyze was skipped. Pinning keeps this gate reproducible and equal to
+      # what the release workflows actually build with.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # Same wrapper the main CI uses: it turns a failing test's own message
+      # into an annotation, because run logs are not always reachable.
+      # A bare `analyze` covers the whole package, which is what the main CI
+      # runs; narrowing it to three paths would hide a knock-on error in a
+      # file that imports the screen.
+      - name: Analyze
+        run: python scripts/ci-diagnose.py flutter analyze
+
+      - name: Run the barcode quantity widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_voucher_barcode_quantity_test.dart \
+            --reporter expanded
+
+      - name: Run the existing voucher flow widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_voucher_flow_test.dart \
+            --reporter expanded
+
+      - name: Run the batch operation widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/batches_operations_test.dart \
+            --reporter expanded
+
+      - name: Run the existing batches screen widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/batches_screen_test.dart \
+            --reporter expanded
+
+      - name: Run the expiry alert screen widget tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/expiry_alerts_screen_test.dart \
+            --reporter expanded
+
+      # Phase (د) - the scan rules themselves, as arithmetic.
+      - name: Run the shared barcode rules
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/shared/barcode_scan_test.dart \
+            --reporter expanded
+
+      # Phase (د) - scanning a sales or purchase invoice adds the item.
+      - name: Run the invoice barcode scan tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/invoice_barcode_scan_test.dart \
+            --reporter expanded
+
+      - name: Run the existing invoice unit selection tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/invoice_unit_selection_test.dart \
+            --reporter expanded
+
+      # Phase (د) - scanning a count finds the frozen line and raises it.
+      - name: Run the stock take barcode scan tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_take_barcode_scan_test.dart \
+            --reporter expanded
+
+      - name: Run the existing stock take screen tests
+        run: |
+          python scripts/ci-diagnose.py flutter test \
+            test/widget/stock_takes_screen_test.dart \
+            --reporter expanded
