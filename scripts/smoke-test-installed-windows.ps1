@@ -3,6 +3,7 @@
 param(
   [string]$SetupPath = "build\windows-installer\KAYAN-ERP-Setup.exe",
   [switch]$RuntimeOnly,
+  [switch]$PublicDiagnostics,
   [string]$ExpectedSourceCommit = ""
 )
 
@@ -504,6 +505,33 @@ try {
   Remove-Item Env:PGPASSWORD,Env:PGCONNECT_TIMEOUT -ErrorAction SilentlyContinue
 }
 
+if ($PublicDiagnostics) {
+  # The installed database is disposable. Rehearse a table restore using
+  # only the synthetic probe, in a single transaction, with the bundled tools.
+  $env:PGPASSWORD = $databasePassword
+  $env:PGCONNECT_TIMEOUT = '20'
+  try {
+    & $psql -X -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c "UPDATE kayan_installer_upgrade_probe SET value='changed' WHERE id=1" *> $null
+    if ($LASTEXITCODE -ne 0) { Fail 'Could not mutate the disposable backup probe.' }
+    $restoredSql = Join-Path $env:TEMP ("kayan-probe-{0}.sql" -f [guid]::NewGuid().ToString('N'))
+    try {
+      & $pgRestore --data-only --schema=public --table=kayan_installer_upgrade_probe --file=$restoredSql $preUpgradeBackup *> $null
+      if ($LASTEXITCODE -ne 0 -or -not (Select-String -LiteralPath $restoredSql -Pattern '^COPY public.kayan_installer_upgrade_probe ' -Quiet)) {
+        Fail 'The disposable archive did not yield the expected probe data.'
+      }
+      & $psql -X -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 --single-transaction -c "TRUNCATE TABLE public.kayan_installer_upgrade_probe" -f $restoredSql *> $null
+      if ($LASTEXITCODE -ne 0) { Fail 'The disposable database probe could not be restored.' }
+      $recovered = @(& $psql -X -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -v ON_ERROR_STOP=1 -c "SELECT value FROM public.kayan_installer_upgrade_probe WHERE id=1")
+      if ($LASTEXITCODE -ne 0 -or ($recovered -join '').Trim() -ne 'preserved') { Fail 'The restored database probe does not match the original.' }
+      Write-Host 'PASS: bundled PostgreSQL tools restored the original synthetic row from the installed database archive.'
+    } finally {
+      Remove-Item -LiteralPath $restoredSql -Force -ErrorAction SilentlyContinue
+    }
+  } finally {
+    Remove-Item Env:PGPASSWORD,Env:PGCONNECT_TIMEOUT -ErrorAction SilentlyContinue
+  }
+}
+
 Write-Output '::notice title=Windows smoke phase::Pre-upgrade backup verified; starting upgrade.'
 $upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
 $upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
@@ -683,103 +711,109 @@ try {
       Fail 'Complete backup/restore capability flags are inconsistent or missing; refusing to infer recovery readiness.'
     }
 
-    $licenseDirectory = Join-Path $env:ProgramData "KAYAN-ERP\license"
-    $statePath = Join-Path $licenseDirectory "license-state.json"
-    $publicKeyPath = Join-Path $licenseDirectory "public-key.pem"
-    $publicKeyBackupPath = Join-Path $env:TEMP "kayan-public-key-smoke-backup.pem"
-    if (-not (Test-Path $statePath)) { Fail "The installed license state file is missing: $statePath" }
-    if (-not (Test-Path $publicKeyPath)) { Fail "The installed public key is missing: $publicKeyPath" }
-    if (Test-Path $publicKeyBackupPath) { Remove-Item $publicKeyBackupPath -Force }
-    $originalStateBytes = [IO.File]::ReadAllBytes($statePath)
-    $originalStateHash = (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash
-    $originalPublicKeyHash = (Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash
-    try {
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      [IO.File]::WriteAllText($statePath, 'not-json', [Text.Encoding]::ASCII)
-      $restart = Start-KayanSmokeClient -Stage 'corrupt-state'
-      $client = $restart.Process
-      $apiPort = $restart.Port
-      $base = "http://127.0.0.1:$apiPort/api/v1"
-      $healthAfterCorruption = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
-      if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
-      $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
-      $damagedBody = $damagedResponse.Content | ConvertFrom-Json
-      if ([int]$damagedResponse.StatusCode -ne 503 -or $damagedBody.code -ne 'LICENSE_STATE_DAMAGED') {
-        Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
-      }
-      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
-      # Use the already authenticated synthetic administrator on a real
-      # business route: health and license/status alone do not prove fail-closed.
+    if ($PublicDiagnostics) {
       $businessResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
-      $businessBody = $businessResponse.Content | ConvertFrom-Json
-      if ([int]$businessResponse.StatusCode -ne 503 -or $businessBody.code -ne 'LICENSE_STATE_DAMAGED') {
-        Fail ("Corrupted license state did not block the installed business route (HTTP $([int]$businessResponse.StatusCode)).")
-      }
-      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The blocked business request altered the corrupt license state.' }
-      Write-Host 'PASS: health recovered and an authenticated business route failed closed without rewriting corrupt license state.'
+      if ([int]$businessResponse.StatusCode -ne 403) { Fail 'An unlicensed business request was not blocked.' }
+      Write-Host 'PASS: unlicensed startup and login work, and a business request is blocked.'
+    } else {
+      $licenseDirectory = Join-Path $env:ProgramData "KAYAN-ERP\license"
+      $statePath = Join-Path $licenseDirectory "license-state.json"
+      $publicKeyPath = Join-Path $licenseDirectory "public-key.pem"
+      $publicKeyBackupPath = Join-Path $env:TEMP "kayan-public-key-smoke-backup.pem"
+      if (-not (Test-Path $statePath)) { Fail "The installed license state file is missing: $statePath" }
+      if (-not (Test-Path $publicKeyPath)) { Fail "The installed public key is missing: $publicKeyPath" }
+      if (Test-Path $publicKeyBackupPath) { Remove-Item $publicKeyBackupPath -Force }
+      $originalStateBytes = [IO.File]::ReadAllBytes($statePath)
+      $originalStateHash = (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash
+      $originalPublicKeyHash = (Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash
+      try {
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
+        [IO.File]::WriteAllText($statePath, 'not-json', [Text.Encoding]::ASCII)
+        $restart = Start-KayanSmokeClient -Stage 'corrupt-state'
+        $client = $restart.Process
+        $apiPort = $restart.Port
+        $base = "http://127.0.0.1:$apiPort/api/v1"
+        $healthAfterCorruption = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
+        if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
+        $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+        $damagedBody = $damagedResponse.Content | ConvertFrom-Json
+        if ([int]$damagedResponse.StatusCode -ne 503 -or $damagedBody.code -ne 'LICENSE_STATE_DAMAGED') {
+          Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
+        }
+        if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
+        # Use the already authenticated synthetic administrator on a real
+        # business route: health and license/status alone do not prove fail-closed.
+        $businessResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
+        $businessBody = $businessResponse.Content | ConvertFrom-Json
+        if ([int]$businessResponse.StatusCode -ne 503 -or $businessBody.code -ne 'LICENSE_STATE_DAMAGED') {
+          Fail ("Corrupted license state did not block the installed business route (HTTP $([int]$businessResponse.StatusCode)).")
+        }
+        if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The blocked business request altered the corrupt license state.' }
+        Write-Host 'PASS: health recovered and an authenticated business route failed closed without rewriting corrupt license state.'
 
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
-      $restart = Start-KayanSmokeClient -Stage 'saved-state-restored'
-      $client = $restart.Process
-      $apiPort = $restart.Port
-      $base = "http://127.0.0.1:$apiPort/api/v1"
-      $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
-      if ($restoredLicense.state -ne 'UNLICENSED' -or $restoredLicense.configured -ne $true -or $restoredLicense.blocked -ne $true) {
-        Fail ("Restoring the original license state did not recover the expected unlicensed state: " + ($restoredLicense | ConvertTo-Json -Compress))
-      }
-      Write-Host 'PASS: restoring the original license-state bytes restores normal license-status reporting.'
-
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      Move-Item -LiteralPath $publicKeyPath -Destination $publicKeyBackupPath
-      $restart = Start-KayanSmokeClient -Stage 'public-key-missing'
-      $client = $restart.Process
-      $apiPort = $restart.Port
-      $base = "http://127.0.0.1:$apiPort/api/v1"
-      $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
-      if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
-        Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
-      }
-      # A health/status response is not evidence that business access is blocked.
-      # Verify a real authenticated installed route fails closed with the expected
-      # missing-key error while this owned diagnostics-only backend is running.
-      $missingKeyBusiness = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
-      $missingKeyBusinessBody = $missingKeyBusiness.Content | ConvertFrom-Json
-      if ([int]$missingKeyBusiness.StatusCode -ne 403 -or $missingKeyBusinessBody.code -ne 'LICENSE_PUBLIC_KEY_MISSING') {
-        Fail ("Missing public key did not block the installed business route (HTTP $([int]$missingKeyBusiness.StatusCode)).")
-      }
-      Write-Host 'PASS: a missing public key keeps the diagnostics runtime available while the authenticated business route remains blocked.'
-
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath
-      $restart = Start-KayanSmokeClient -Stage 'public-key-restored'
-      $client = $restart.Process
-      $apiPort = $restart.Port
-      $base = "http://127.0.0.1:$apiPort/api/v1"
-      $restoredKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
-      if ($restoredKeyStatus.configured -ne $true -or $restoredKeyStatus.blocked -ne $true -or $restoredKeyStatus.state -ne 'UNLICENSED') {
-        Fail ("Restoring the installed public key did not recover normal product license enforcement: " + ($restoredKeyStatus | ConvertTo-Json -Compress))
-      }
-      if ((Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash -ne $originalPublicKeyHash) {
-        Fail 'The restored public key bytes differ from the original installed key.'
-      }
-      Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement.'
-    } finally {
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      if (Test-Path $publicKeyBackupPath) {
-        if (Test-Path $publicKeyPath) { Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction SilentlyContinue }
-        Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath -Force
-      }
-      if (-not (Test-Path $statePath) -or (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
+        $restart = Start-KayanSmokeClient -Stage 'saved-state-restored'
+        $client = $restart.Process
+        $apiPort = $restart.Port
+        $base = "http://127.0.0.1:$apiPort/api/v1"
+        $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+        if ($restoredLicense.state -ne 'UNLICENSED' -or $restoredLicense.configured -ne $true -or $restoredLicense.blocked -ne $true) {
+          Fail ("Restoring the original license state did not recover the expected unlicensed state: " + ($restoredLicense | ConvertTo-Json -Compress))
+        }
+        Write-Host 'PASS: restoring the original license-state bytes restores normal license-status reporting.'
+
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
+        Move-Item -LiteralPath $publicKeyPath -Destination $publicKeyBackupPath
+        $restart = Start-KayanSmokeClient -Stage 'public-key-missing'
+        $client = $restart.Process
+        $apiPort = $restart.Port
+        $base = "http://127.0.0.1:$apiPort/api/v1"
+        $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+        if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
+          Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
+        }
+        # A health/status response is not evidence that business access is blocked.
+        # Verify a real authenticated installed route fails closed with the expected
+        # missing-key error while this owned diagnostics-only backend is running.
+        $missingKeyBusiness = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
+        $missingKeyBusinessBody = $missingKeyBusiness.Content | ConvertFrom-Json
+        if ([int]$missingKeyBusiness.StatusCode -ne 403 -or $missingKeyBusinessBody.code -ne 'LICENSE_PUBLIC_KEY_MISSING') {
+          Fail ("Missing public key did not block the installed business route (HTTP $([int]$missingKeyBusiness.StatusCode)).")
+        }
+        Write-Host 'PASS: a missing public key keeps the diagnostics runtime available while the authenticated business route remains blocked.'
+
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
+        Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath
+        $restart = Start-KayanSmokeClient -Stage 'public-key-restored'
+        $client = $restart.Process
+        $apiPort = $restart.Port
+        $base = "http://127.0.0.1:$apiPort/api/v1"
+        $restoredKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+        if ($restoredKeyStatus.configured -ne $true -or $restoredKeyStatus.blocked -ne $true -or $restoredKeyStatus.state -ne 'UNLICENSED') {
+          Fail ("Restoring the installed public key did not recover normal product license enforcement: " + ($restoredKeyStatus | ConvertTo-Json -Compress))
+        }
+        if ((Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash -ne $originalPublicKeyHash) {
+          Fail 'The restored public key bytes differ from the original installed key.'
+        }
+        Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement.'
+      } finally {
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
+        if (Test-Path $publicKeyBackupPath) {
+          if (Test-Path $publicKeyPath) { Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction SilentlyContinue }
+          Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath -Force
+        }
+        if (-not (Test-Path $statePath) -or (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
+          [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
+        }
       }
+      Write-Output "::notice::Runtime-only Windows diagnostics passed: installation, PostgreSQL, Prisma, API startup/login, ${backupEvidence}, corrupt-state refusal and public-key recovery. This is not signed-licence reconstruction or activation."
     }
-    Write-Output "::notice::Runtime-only Windows diagnostics passed: installation, PostgreSQL, Prisma, API startup/login, ${backupEvidence}, corrupt-state refusal and public-key recovery. Signed-licence activation and reconstruction were not exercised."
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress

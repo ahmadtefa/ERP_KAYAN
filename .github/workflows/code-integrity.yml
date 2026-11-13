@@ -1,6 +1,6 @@
 name: PR accounting and Windows build
 
-# Code checks and an independent, approval-gated Windows runtime exercise.
+# Code checks and two Windows runtime exercises with distinct scopes.
 # These checks deliberately do not replace the blocked release evidence gate.
 on:
   pull_request:
@@ -305,6 +305,68 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-installer-runtime-evidence-${{ github.sha }}
+          path: |
+            candidate/installation-smoke.json
+            candidate/complete-uninstall-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  work-setup-public-runtime:
+    name: Test unlicensed Setup offline on Windows Server
+    if: github.repository == 'ahmadtefa/ERP_KAYAN' && github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'
+    needs: work-setup-inspection
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: KAYAN-ERP-Setup-inspected-${{ github.sha }}
+          path: candidate
+      - name: Verify candidate provenance
+        shell: pwsh
+        run: |
+          $report = Get-Content -LiteralPath 'candidate/payload-verification.json' -Raw | ConvertFrom-Json
+          $setup = Get-Item -LiteralPath 'candidate/KAYAN-ERP-Setup.exe'
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($report.sourceCommit -ne $env:GITHUB_SHA -or $report.installer.sha256 -ne $hash) {
+            throw 'Setup hash or source mismatch.'
+          }
+      - name: Run offline installed-runtime smoke
+        timeout-minutes: 35
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD/candidate/KAYAN-ERP-Setup.exe" -RuntimeOnly -PublicDiagnostics -ExpectedSourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed.' }
+      - name: Exercise complete removal and check neighboring files
+        timeout-minutes: 45
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/exercise-complete-uninstall.ps1 -SetupPath "$PWD/candidate/KAYAN-ERP-Setup.exe" -ReportPath "$PWD/candidate/complete-uninstall-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Complete removal exercise failed.' }
+      - name: Record installed runtime evidence
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            installerSha256 = (Get-FileHash -LiteralPath 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+            os = $os.Caption
+            osVersion = $os.Version
+            checks = @('offline runtime smoke', 'database archive and SQL sentinel restore', 'complete uninstall')
+            limitations = @('no licensed business use', 'no Windows 10/11 desktop UI acceptance', 'no combined database/files/licence recovery')
+          } | ConvertTo-Json | Set-Content -LiteralPath 'candidate/installation-smoke.json'
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-public-runtime-evidence-${{ github.sha }}
           path: |
             candidate/installation-smoke.json
             candidate/complete-uninstall-evidence.json
