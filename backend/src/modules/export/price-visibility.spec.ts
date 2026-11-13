@@ -123,6 +123,26 @@ describe('applyPriceVisibility on the finished output', () => {
   });
 });
 
+it('removes profit, cost values outside the column list, and derived purchase totals', () => {
+  const report: ReportTable = {
+    slug: 'sales',
+    titleEn: 'Sales', titleAr: 'المبيعات', meta: [], notes: [],
+    columns: [
+      { key: 'grossProfit', labelEn: 'Gross profit', labelAr: 'مجمل الربح' },
+      { key: 'totalAmount', labelEn: 'Total', labelAr: 'الإجمالي' },
+    ],
+    rows: [{ grossProfit: '99', costOfGoods: '101', totalAmount: '200' }],
+    totals: [{ labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: '99' }],
+  };
+  const sales = applyPriceVisibility(report, { showCost: false });
+  expect(sales.columns.map(column => column.key)).toEqual(['totalAmount']);
+  expect(sales.rows).toEqual([{ totalAmount: '200' }]);
+  expect(sales.totals).toEqual([]);
+  const purchases = applyPriceVisibility({ ...report, slug: 'purchases' }, { showCost: false });
+  expect(purchases.columns).toEqual([]);
+  expect(purchases.rows).toEqual([{}]);
+});
+
 describe('resolvePriceVisibility', () => {
   const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read'] };
   const clerk = { isSuperAdmin: false, permissions: ['inventory.items.read'] };

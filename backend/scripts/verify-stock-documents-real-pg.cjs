@@ -28,6 +28,7 @@ const { YearEndCloseService } = require('../src/modules/accounting/year-end-clos
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { OpeningBalancesService } = require('../src/modules/accounting/opening-balances.service');
+const { CashAccountsService } = require('../src/modules/cash/cash-accounts.service');
 const { PartiesService } = require('../src/modules/parties/parties.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
@@ -1355,6 +1356,41 @@ let difference = '70000000-0000-4000-8000-000000000005';
     });
     const openings = new OpeningBalancesService(prisma, numbers, posting, map, audit, warehouses);
     const parties = new PartiesService(prisma, audit);
+    const cashAccounts = new CashAccountsService(prisma,audit);
+    const bilingualItems = new ItemsService(prisma,audit,map,posting,warehouses,ledger);
+    const nameCases = [
+      ['COA', (dto) => chart.create(company,user,{type:'ASSET',...dto}),
+        (id,dto) => chart.update(company,user,id,dto)],
+      ['ITEM', (dto) => bilingualItems.create(company,user,dto,branch,true),
+        (id,dto) => bilingualItems.update(company,user,id,dto,true)],
+      ...['customer','supplier'].map(kind => [kind.toUpperCase(),
+        (dto) => parties.create(company,user,kind,dto),
+        (id,dto) => parties.update(company,user,kind,id,dto)]),
+      ['WH', (dto) => warehouses.create(company,user,{branchId:branch,...dto}),
+        (id,dto) => warehouses.update(company,user,id,dto)],
+      ...['CASH','BANK'].map(kind => [kind, async (dto) => {
+        if (!dto.nameEn && !dto.nameAr) return cashAccounts.create(company,user,{kind,...dto});
+        const account = await chart.create(company,user,{code:`GL-${dto.code}`,nameEn:'Synthetic ledger',type:'ASSET',isPostable:true});
+        return cashAccounts.create(company,user,{accountId:account.id,kind,...dto});
+      }, (id,dto) => cashAccounts.update(company,user,id,dto)]),
+    ];
+    for (const [label,create,update] of nameCases) {
+      await assert.rejects(create({code:`BI-${label}-X`}),/Arabic or English/);
+      const arabic = await create({code:`BI-${label}-A`,nameAr:'اسم عربي'});
+      assert.equal(arabic.nameAr,'اسم عربي');
+      assert.equal(arabic.nameEn,'اسم عربي');
+      const english = await create({code:`BI-${label}-E`,nameEn:'English name'});
+      assert.equal(english.nameEn,'English name');
+      assert.equal(english.nameAr,'English name');
+      const both = await create({code:`BI-${label}-B`,nameEn:'Both names',nameAr:'اسمان'});
+      const changed = await update(both.id,{nameEn:'Changed name',nameAr:'  '});
+      assert.equal(changed.nameEn,'Changed name');
+      assert.equal(changed.nameAr,'اسمان');
+      const changedArabic = await update(both.id,{nameEn:'',nameAr:'اسم معدل'});
+      assert.equal(changedArabic.nameEn,'Changed name');
+      assert.equal(changedArabic.nameAr,'اسم معدل');
+    }
+    console.log('PASS: Arabic-only, English-only and bilingual creation plus blank-field updates in seven master-data entities on real PostgreSQL.');
     const openingCurrency = (await prisma.company.findUniqueOrThrow({ where: { id: company } })).currency;
     const draftInput = {
       asOfDate: date, currency: openingCurrency, autoBalanceToEquity: true,
@@ -2317,6 +2353,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       originalInvoiceId:postedCharges.id,returnDate:date,reason:'Synthetic freight refund',
       lines:[{originalLineId:postedCharges.lines[1].id,quantity:'1'}],
     });
+    assert.equal(freightReturn.lines[0].isAdditionalCharge,true);
     assert.equal(freightReturn.taxAmount,'2.8000');
     assert.equal(freightReturn.totalAmount,'22.8000');
     await returns.postSalesReturn(company,user,freightReturn.id);

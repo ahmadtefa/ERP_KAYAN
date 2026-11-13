@@ -50,8 +50,8 @@ function enabled(value: string | boolean | undefined): boolean {
 type MoneySide = 'sale' | 'cost' | null;
 
 function moneySide(slug: string): MoneySide {
-  if (/^sales-/.test(slug)) return 'sale';
-  if (/^purchase-/.test(slug)) return 'cost';
+  if (/^sales(?:-|$)/.test(slug)) return 'sale';
+  if (/^purchases?(?:-|$)/.test(slug)) return 'cost';
   return null;
 }
 
@@ -60,8 +60,11 @@ function matchesSalePrice(key: string, label: string): boolean {
     /sale price|selling price|unit price|quotation price|سعر البيع|سعر الوحدة|قيمة البيع/i.test(label);
 }
 
+const PROFIT_LABEL = /gross profit|profit margin|مجمل الربح|هامش الربح/i;
+const PROFIT_KEY = /^(grossProfit|grossMargin|profitMargin|grossProfitMargin)$/i;
+
 function matchesCost(key: string, label: string): boolean {
-  return /^(purchasePrice|unitCost|averageCost|runningValue|stockValue|costValue|costOfGoodsSold)$/i.test(key) ||
+  return /^(purchasePrice|unitCost|averageCost|runningValue|stockValue|costValue|costOfGoods|costOfGoodsSold)$/i.test(key) ||
     /cost|purchase price|valuation|تكلفة|التكلفة|قيمة المخزون/i.test(label);
 }
 
@@ -78,7 +81,7 @@ const SLUG_COST_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
 /// tax figure, a line total. On a document these are built from the side's
 /// prices, so they disclose what the prices would have said.
 const MONEY_AMOUNT_COLUMN =
-  /^(amount|total|totalAmount|subTotal|subtotal|taxAmount|tax|discount|discountAmount|lineTotal|grandTotal|netTotal|paid|paidAmount|balance|balanceDue|rounding)$/i;
+  /^(amount|total|totalAmount|subTotal|subtotal|taxAmount|tax|discount|discountAmount|lineTotal|grandTotal|netTotal|paid|paidAmount|balance|balanceDue|outstanding|rounding)$/i;
 
 const SALE_TOTAL_LABEL = /sale|sales|revenue|invoice total|بيع|مبيعات/i;
 const COST_TOTAL_LABEL = /cost|purchase|valuation|stock value|تكلفة|مشتريات|قيمة المخزون|تقييم/i;
@@ -107,6 +110,7 @@ export function applyPriceVisibility<T extends ReportTable>(
     source.columns
       .filter((column) => {
         const labels = column.labelEn + ' ' + column.labelAr;
+        if ((!showSalePrice || !showCost) && (PROFIT_KEY.test(column.key) || PROFIT_LABEL.test(labels))) return true;
         if (!showSalePrice && matchesSalePrice(column.key, labels)) return true;
         if (!showCost && matchesCost(column.key, labels)) return true;
         if (!showCost && SLUG_COST_KEYS[source.slug]?.has(column.key)) return true;
@@ -126,11 +130,18 @@ export function applyPriceVisibility<T extends ReportTable>(
     columns: source.columns.filter((column) => !hiddenKeys.has(column.key)),
     rows: source.rows.map((row) => {
       const next = { ...row };
-      for (const key of hiddenKeys) delete next[key];
+      for (const key of Object.keys(next)) {
+        if (hiddenKeys.has(key) ||
+            (!showCost && matchesCost(key, '')) ||
+            ((!showCost || !showSalePrice) && PROFIT_KEY.test(key))) {
+          delete next[key];
+        }
+      }
       return next;
     }),
     totals: source.totals.filter((total) => {
       const labels = total.labelEn + ' ' + total.labelAr;
+      if ((!showSalePrice || !showCost) && PROFIT_LABEL.test(labels)) return false;
       if (side === 'sale') {
         // Every figure on a sales document is sale money, except a cost the
         // reader is still allowed to see.

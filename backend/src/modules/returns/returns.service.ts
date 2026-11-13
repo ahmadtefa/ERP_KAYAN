@@ -165,6 +165,7 @@ export class ReturnsService {
               : line.unitFactor.toFixed(6),
           unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
           description: line.description,
+          isAdditionalCharge: line.isAdditionalCharge,
           quantity: line.quantity.toFixed(MONEY_SCALE),
           baseQuantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
@@ -277,6 +278,7 @@ export class ReturnsService {
     const prepared: Array<{
       originalLineId: string;
       itemId: string | null;
+      isAdditionalCharge: boolean;
       description: string;
       quantity: Prisma.Decimal;
       unitPrice: Prisma.Decimal;
@@ -365,6 +367,7 @@ export class ReturnsService {
       prepared.push({
         originalLineId: originalLine.id,
         itemId: originalLine.itemId,
+        isAdditionalCharge: originalLine.isAdditionalCharge,
         description: originalLine.description,
         quantity,
         unitPrice,
@@ -413,6 +416,7 @@ export class ReturnsService {
               lineNumber: index + 1,
               itemId: line.itemId,
               originalLineId: line.originalLineId,
+              isAdditionalCharge: line.isAdditionalCharge,
               description: line.description,
               quantity: line.quantity,
               unitPrice: line.unitPrice,
