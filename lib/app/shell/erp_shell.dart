@@ -103,6 +103,17 @@ final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_
 /// is recognisable by its text, icon tile, background and edge indicator
 /// all switching to it, and the top bar repeats it — so where you are is
 /// visible before you read a word.
+IconData _iconForGroup(_NavGroup group) => switch (group) {
+  _NavGroup.overview => Icons.dashboard_rounded,
+  _NavGroup.accounting => Icons.account_balance_rounded,
+  _NavGroup.parties => Icons.groups_rounded,
+  _NavGroup.inventory => Icons.warehouse_rounded,
+  _NavGroup.sales => Icons.point_of_sale_rounded,
+  _NavGroup.purchases => Icons.shopping_cart_rounded,
+  _NavGroup.insights => Icons.insights_rounded,
+  _NavGroup.administration => Icons.settings_rounded,
+};
+
 SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
   _NavGroup.overview => SectionAccents.overview,
   _NavGroup.accounting => SectionAccents.accounting,
@@ -742,6 +753,7 @@ class _Sidebar extends StatelessWidget {
                         extended: extended,
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
+                        icon: _iconForGroup(group),
                         accent: _accentForGroup(group),
                         active: groups[group]!.any((item) => item.path == selectedPath),
                         expanded: collapsed.isOpen(group),
@@ -850,6 +862,7 @@ class _GroupLabel extends StatelessWidget {
     required this.extended,
     required this.first,
     required this.label,
+    required this.icon,
     required this.accent,
     required this.expanded,
     required this.active,
@@ -862,6 +875,7 @@ class _GroupLabel extends StatelessWidget {
   final bool extended;
   final bool first;
   final String label;
+  final IconData icon;
   final SectionAccent accent;
 
   @override
@@ -873,30 +887,28 @@ class _GroupLabel extends StatelessWidget {
         message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
           padding: EdgeInsets.fromLTRB(10, first ? 8 : 12, 10, 8),
           child: Icon(
-            expanded ? Icons.keyboard_arrow_up_rounded : Icons.circle,
-            size: expanded ? 18 : 9,
+            icon,
+            size: 20,
             color: accent.darkBase,
           ),
         ))));
     }
     return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
       message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
+      padding: EdgeInsets.fromLTRB(8, first ? 4 : 10, 8, 6),
       child: Row(
         children: [
-          // The section's colour dot: the same hue its entries light up
-          // with when selected, so the eye groups them before reading.
           Container(
-            width: 7,
-            height: 7,
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              // The sidebar is a dark surface in both themes, so the dot
-              // takes the step mixed for dark surfaces.
-              color: accent.darkBase,
-              shape: BoxShape.circle,
+              color: accent.darkBase.withValues(alpha: active || expanded ? 0.23 : 0.12),
+              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
+            child: Icon(icon, size: 19, color: accent.darkBase),
           ),
-          const SizedBox(width: 7),
+          const SizedBox(width: 9),
           Expanded(
             child: Text(
               label.toUpperCase(),
@@ -910,7 +922,7 @@ class _GroupLabel extends StatelessWidget {
               ),
             ),
           ),
-          if (!expanded) const Icon(Icons.chevron_right, size:14,color:AppColors.onSidebarMuted),
+          Icon(expanded ? Icons.expand_less_rounded : Icons.chevron_right_rounded, size: 18, color: accent.darkBase),
         ],
       ),
     ))));
@@ -1420,6 +1432,7 @@ class _ModuleDrawer extends StatelessWidget {
                         extended: true,
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
+                        icon: _iconForGroup(group),
                         accent: _accentForGroup(group),
                         active: groups[group]!.any((item) => _belongsTo(item.path, current)),
                         expanded: collapsed.isOpen(group),
