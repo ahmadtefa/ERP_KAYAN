@@ -7,6 +7,6 @@ import { ProfilePhotoService } from './profile-photo.service';
 @Module({
   controllers: [AuthController, ProfilePhotoController],
   providers: [AuthService, ProfilePhotoService],
-  exports: [AuthService],
+  exports: [AuthService, ProfilePhotoService],
 })
 export class AuthModule {}

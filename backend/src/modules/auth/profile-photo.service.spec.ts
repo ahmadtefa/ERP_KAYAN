@@ -65,4 +65,13 @@ describe('self profile photo', () => {
     expect(await service.get(company,user)).toEqual(before);
     await expect(service.set('other',user,png,'image/png')).rejects.toThrow('User not found');
   });
+
+  it('allows an authorized administrator to set a target account photo without attributing it to that account', async () => {
+    await service.setForUser(company, 'administrator', user, png, 'image/png');
+    expect(await service.get(company, user)).toMatchObject({mime:'image/webp'});
+    expect(auditRows).toContainEqual(expect.objectContaining({userId:'administrator',entityId:user,action:'PROFILE_PHOTO_SET'}));
+    await service.removeForUser(company, 'administrator', user);
+    expect(await service.get(company, user)).toEqual({mime:null,data:null});
+    expect(auditRows).toContainEqual(expect.objectContaining({userId:'administrator',entityId:user,action:'PROFILE_PHOTO_REMOVE'}));
+  });
 });

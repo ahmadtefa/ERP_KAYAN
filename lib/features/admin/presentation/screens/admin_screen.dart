@@ -1,11 +1,14 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/image/company_logo_image.dart';
+import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -13,6 +16,7 @@ import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/user_photo.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/admin_providers.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
@@ -35,7 +39,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
   int _pendingActions = 0;
   void _actionStarted() => _pendingActions++;
   void _actionFinished() => _pendingActions--;
-  Future<bool> _canLeave() => _pendingActions > 0 ? Future.value(false) : _exitRelay.canLeave();
+  Future<bool> _canLeave() =>
+      _pendingActions > 0 ? Future.value(false) : _exitRelay.canLeave();
 
   @override
   void initState() {
@@ -63,14 +68,25 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
             tabs: [
               Tab(text: l10n.users, icon: const Icon(Icons.person_outline)),
               Tab(text: l10n.roles, icon: const Icon(Icons.badge_outlined)),
-              Tab(text: l10n.auditTrail, icon: const Icon(Icons.history_outlined)),
+              Tab(
+                text: l10n.auditTrail,
+                icon: const Icon(Icons.history_outlined),
+              ),
             ],
           ),
           Expanded(
             child: TabBarView(
               children: [
-                _UsersTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
-                _RolesTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
+                _UsersTab(
+                  exitRelay: _exitRelay,
+                  actionStarted: _actionStarted,
+                  actionFinished: _actionFinished,
+                ),
+                _RolesTab(
+                  exitRelay: _exitRelay,
+                  actionStarted: _actionStarted,
+                  actionFinished: _actionFinished,
+                ),
                 const _AuditTab(),
               ],
             ),
@@ -82,14 +98,19 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
 }
 
 Set<String>? _permissionCodes(Object? value) {
-  if (value is! List || value.any((item) => item is! String || item.isEmpty)) return null;
+  if (value is! List || value.any((item) => item is! String || item.isEmpty))
+    return null;
   return value.cast<String>().toSet();
 }
 
 // ═════════════════════════════════════════════════════════════ users
 
 class _UsersTab extends ConsumerStatefulWidget {
-  const _UsersTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
+  const _UsersTab({
+    required this.exitRelay,
+    required this.actionStarted,
+    required this.actionFinished,
+  });
   final DraftExitRelay exitRelay;
   final VoidCallback actionStarted, actionFinished;
 
@@ -116,7 +137,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         FieldOption(
           text(role, 'id'),
           '${text(role, 'code')} — '
-              '${isArabic ? text(role, 'nameAr') : text(role, 'nameEn')}',
+          '${isArabic ? text(role, 'nameAr') : text(role, 'nameEn')}',
         ),
     ];
   }
@@ -136,8 +157,10 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     // used to send [] on every edit and silently strip all existing roles.
     final rawRoles = existing?['roles'];
     final assigned = listOf(rawRoles);
-    if (isEdit && (rawRoles is! List || rawRoles.length != assigned.length ||
-        assigned.any((role) => text(role, 'id').isEmpty))) {
+    if (isEdit &&
+        (rawRoles is! List ||
+            rawRoles.length != assigned.length ||
+            assigned.any((role) => text(role, 'id').isEmpty))) {
       // Never turn a malformed or incomplete response into a role removal.
       showAppError(context, const FormatException());
       return;
@@ -146,8 +169,14 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     for (final role in assigned) {
       final id = text(role, 'id');
       if (id.isNotEmpty && !roles.any((option) => option.value == id)) {
-        roles.add(FieldOption(id, '${text(role, 'code')} — ${text(role, 'nameEn')} '
-            '${Localizations.localeOf(context).languageCode == 'ar' ? '(غير متاح)' : '(unavailable)'}', enabled: false));
+        roles.add(
+          FieldOption(
+            id,
+            '${text(role, 'code')} — ${text(role, 'nameEn')} '
+            '${Localizations.localeOf(context).languageCode == 'ar' ? '(غير متاح)' : '(unavailable)'}',
+            enabled: false,
+          ),
+        );
       }
     }
 
@@ -190,7 +219,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           final client = ref.read(apiClientProvider);
           final payload = Map<String, dynamic>.from(draft);
           final selected = (payload['roleIds'] as List).cast<String>().toSet();
-          if (isEdit && selected.length == roleIds.length && selected.containsAll(roleIds)) {
+          if (isEdit &&
+              selected.length == roleIds.length &&
+              selected.containsAll(roleIds)) {
             // Omission means unchanged on the server. This also avoids
             // overwriting a concurrent role change on a name-only edit.
             payload.remove('roleIds');
@@ -212,7 +243,47 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         }
       },
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted)
+      showMessage(context, l10n.createdSuccessfully);
+  }
+
+  Future<void> _changePhoto(Json row) async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    try {
+      final picked = await pickFile(
+        extensions: ['.png', '.jpg', '.jpeg', '.webp'],
+      );
+      if (picked == null || !mounted) return;
+      final image = await normalizeCompanyLogo(picked.bytes);
+      if (!mounted) return;
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/admin/users/${row['id']}/photo',
+            body: FormData.fromMap({
+              'file': MultipartFile.fromBytes(
+                image,
+                filename: 'profile-photo.png',
+              ),
+            }),
+          );
+      if (mounted) {
+        final current = ref.read(currentUserProvider);
+        if (current?.id == text(row, 'id')) {
+          // The shell observes the same keyed provider, so the visible image
+          // changes immediately when an administrator edits their own photo.
+          ref.invalidate(
+            userPhotoProvider((
+              companyId: current!.companyId,
+              userId: current.id,
+            )),
+          );
+        }
+        showMessage(context, arabic ? 'تم حفظ الصورة.' : 'Photo saved.');
+      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    }
   }
 
   Future<void> _editExtraPermissions(Json row) async {
@@ -231,16 +302,25 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         exitRelay: widget.exitRelay,
         onSubmit: (chosen) async {
           try {
-            await ref.read(apiClientProvider).patch('/admin/users/${row['id']}',
-              body: {'extraPermissions': chosen.toList(growable: false),
-                'expectedExtraPermissions': selected.toList(growable: false)});
+            await ref
+                .read(apiClientProvider)
+                .patch(
+                  '/admin/users/${row['id']}',
+                  body: {
+                    'extraPermissions': chosen.toList(growable: false),
+                    'expectedExtraPermissions': selected.toList(
+                      growable: false,
+                    ),
+                  },
+                );
           } finally {
             if (mounted) ref.invalidate(usersListProvider);
           }
         },
       ),
     );
-    if (saved == true && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (saved == true && mounted)
+      showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _changePassword(Json row) async {
@@ -249,12 +329,20 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       context,
       exitRelay: widget.exitRelay,
       title: '${l10n.changePassword} — ${text(row, 'username')}',
-      fields: [FieldSpec('password', l10n.password, required: true,
-          helper: l10n.passwordHelper, obscure: true)],
+      fields: [
+        FieldSpec(
+          'password',
+          l10n.password,
+          required: true,
+          helper: l10n.passwordHelper,
+          obscure: true,
+        ),
+      ],
       submitLabel: l10n.save,
       onSubmit: (draft) async {
         try {
-          await ref.read(apiClientProvider)
+          await ref
+              .read(apiClientProvider)
               .post('/admin/users/${row['id']}/password', body: draft);
         } catch (error) {
           // A password response can be lost after sessions have been revoked.
@@ -289,7 +377,10 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       if (isActive) {
         await client.post('/admin/users/${row['id']}/deactivate');
       } else {
-        await client.patch('/admin/users/${row['id']}', body: {'isActive': true});
+        await client.patch(
+          '/admin/users/${row['id']}',
+          body: {'isActive': true},
+        );
       }
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } catch (error) {
@@ -368,6 +459,11 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           ],
           actions: (row) => [
             IconButton(
+              tooltip: isArabic ? 'تغيير الصورة' : 'Change photo',
+              icon: const Icon(Icons.photo_camera_outlined, size: 20),
+              onPressed: _busy ? null : () => _changePhoto(row),
+            ),
+            IconButton(
               tooltip: l10n.extraPermissions,
               icon: const Icon(Icons.rule_outlined, size: 20),
               onPressed: _busy ? null : () => _editExtraPermissions(row),
@@ -424,7 +520,11 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 // ═════════════════════════════════════════════════════════════ roles
 
 class _RolesTab extends ConsumerStatefulWidget {
-  const _RolesTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
+  const _RolesTab({
+    required this.exitRelay,
+    required this.actionStarted,
+    required this.actionFinished,
+  });
   final DraftExitRelay exitRelay;
   final VoidCallback actionStarted, actionFinished;
 
@@ -466,7 +566,8 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         }
       },
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted)
+      showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _choosePermissions(Json role) async {
@@ -480,15 +581,22 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       context: context,
       barrierDismissible: false,
       builder: (context) => _PermissionsDialog(
-        title: '${l10n.setPermissions} — '
+        title:
+            '${l10n.setPermissions} — '
             '${Localizations.localeOf(context).languageCode == 'ar' ? text(role, 'nameAr') : text(role, 'nameEn')}',
         selected: selected,
         exitRelay: widget.exitRelay,
         onSubmit: (chosen) async {
           try {
-            await ref.read(apiClientProvider).post('/admin/roles/${role['id']}/permissions',
-              body: {'permissions': chosen.toList(growable: false),
-                'expectedPermissions': selected.toList(growable: false)});
+            await ref
+                .read(apiClientProvider)
+                .post(
+                  '/admin/roles/${role['id']}/permissions',
+                  body: {
+                    'permissions': chosen.toList(growable: false),
+                    'expectedPermissions': selected.toList(growable: false),
+                  },
+                );
           } finally {
             if (mounted) {
               ref.invalidate(rolesListProvider);
@@ -498,7 +606,8 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         },
       ),
     );
-    if (saved == true && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (saved == true && mounted)
+      showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _remove(Json role) async {
@@ -580,7 +689,8 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             ),
             ColumnSpec(
               l10n.status,
-              value: (r) => flag(r, 'isSystem') ? l10n.systemRole : l10n.customRole,
+              value: (r) =>
+                  flag(r, 'isSystem') ? l10n.systemRole : l10n.customRole,
               tone: (r) => flag(r, 'isSystem') ? AppTone.neutral : AppTone.info,
             ),
           ],
@@ -616,8 +726,12 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
 /// Picks permissions from the catalogue the server publishes, grouped by the
 /// module each permission belongs to.
 class _PermissionsDialog extends ConsumerStatefulWidget {
-  const _PermissionsDialog({required this.title, required this.selected,
-    required this.exitRelay, required this.onSubmit});
+  const _PermissionsDialog({
+    required this.title,
+    required this.selected,
+    required this.exitRelay,
+    required this.onSubmit,
+  });
 
   final String title;
   final Set<String> selected;
@@ -646,18 +760,29 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
 
   Future<bool> _canLeave() async {
     if (_saving || _confirmingExit) return false;
-    if (_uncertain || _selected.length != widget.selected.length || !widget.selected.containsAll(_selected)) {
+    if (_uncertain ||
+        _selected.length != widget.selected.length ||
+        !widget.selected.containsAll(_selected)) {
       _confirmingExit = true;
       try {
         final arabic = Localizations.localeOf(context).languageCode == 'ar';
-        final ok = await confirmAction(context,
+        final ok = await confirmAction(
+          context,
           title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
           message: _uncertain
-              ? (arabic ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل التكرار.' : 'The operation may have completed. Review permissions before retrying.')
-              : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
-          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes', destructive: true);
+              ? (arabic
+                    ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل التكرار.'
+                    : 'The operation may have completed. Review permissions before retrying.')
+              : (arabic
+                    ? 'الخروج دون حفظ المدخلات؟'
+                    : 'Leave without saving your changes?'),
+          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',
+          destructive: true,
+        );
         if (!ok || !mounted) return false;
-      } finally { _confirmingExit = false; }
+      } finally {
+        _confirmingExit = false;
+      }
     }
     return mounted;
   }
@@ -676,13 +801,21 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     final raw = catalogue?['items'];
     if (raw is! List) return false;
     final items = listOf(raw);
-    if (raw.length != items.length || items.any((item) => text(item, 'code').isEmpty)) return false;
-    return {for (final item in items) text(item, 'code')}.length == items.length;
+    if (raw.length != items.length ||
+        items.any((item) => text(item, 'code').isEmpty))
+      return false;
+    return {for (final item in items) text(item, 'code')}.length ==
+        items.length;
   }
 
   Future<void> _submit() async {
-    if (_saving || _uncertain || _confirmingExit || !_validCatalogue(ref.read(permissionsProvider).asData?.value)) return;
-    if (_selected.length == widget.selected.length && widget.selected.containsAll(_selected)) {
+    if (_saving ||
+        _uncertain ||
+        _confirmingExit ||
+        !_validCatalogue(ref.read(permissionsProvider).asData?.value))
+      return;
+    if (_selected.length == widget.selected.length &&
+        widget.selected.containsAll(_selected)) {
       // A no-op must not replace newer grants read by another administrator.
       Navigator.of(context).pop(true);
       return;
@@ -706,93 +839,119 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     final l10n = context.l10n;
     final async = ref.watch(permissionsProvider);
 
-    return PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
       child: AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 520,
-        height: 480,
-        child: async.when(
-          loading: () => const LoadingView(),
-          error: (error, _) => ErrorView(
-            message: error,
-            onRetry: () => ref.invalidate(permissionsProvider),
-          ),
-          data: (catalogue) {
-            if (!_validCatalogue(catalogue)) {
-              return ErrorView(message: const FormatException(), onRetry: () => ref.invalidate(permissionsProvider));
-            }
-            final items = listOf(catalogue['items']);
-            final grouped = listOf(catalogue['modules']);
-            final isArabic =
-                Localizations.localeOf(context).languageCode == 'ar';
-            final sections = grouped.isNotEmpty
-                ? grouped
-                    .map((m) => (text(m, 'module'), listOf(m['permissions'])))
-                    .toList(growable: false)
-                : [
-                    for (final module in {
-                      for (final p in items) text(p, 'module'),
-                    })
-                      (
-                        module,
-                        items
-                            .where((p) => text(p, 'module') == module)
-                            .toList(growable: false),
-                      ),
-                  ];
+        title: Text(widget.title),
+        content: SizedBox(
+          width: 520,
+          height: 480,
+          child: async.when(
+            loading: () => const LoadingView(),
+            error: (error, _) => ErrorView(
+              message: error,
+              onRetry: () => ref.invalidate(permissionsProvider),
+            ),
+            data: (catalogue) {
+              if (!_validCatalogue(catalogue)) {
+                return ErrorView(
+                  message: const FormatException(),
+                  onRetry: () => ref.invalidate(permissionsProvider),
+                );
+              }
+              final items = listOf(catalogue['items']);
+              final grouped = listOf(catalogue['modules']);
+              final isArabic =
+                  Localizations.localeOf(context).languageCode == 'ar';
+              final sections = grouped.isNotEmpty
+                  ? grouped
+                        .map(
+                          (m) => (text(m, 'module'), listOf(m['permissions'])),
+                        )
+                        .toList(growable: false)
+                  : [
+                      for (final module in {
+                        for (final p in items) text(p, 'module'),
+                      })
+                        (
+                          module,
+                          items
+                              .where((p) => text(p, 'module') == module)
+                              .toList(growable: false),
+                        ),
+                    ];
 
-            final known = {for (final item in items) text(item, 'code')};
-            final unavailable = _selected.difference(known).toList()..sort();
-            return AbsorbPointer(absorbing: _saving || _uncertain, child: Column(
-              children: [
-                if (_uncertain) Text(isArabic
-                    ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل تكرار الحفظ.'
-                    : 'The operation may have completed. Review permissions before saving again.'),
-                Wrap(
-                  spacing: 8,
+              final known = {for (final item in items) text(item, 'code')};
+              final unavailable = _selected.difference(known).toList()..sort();
+              return AbsorbPointer(
+                absorbing: _saving || _uncertain,
+                child: Column(
                   children: [
-                    TextButton(
-                      onPressed: () => setState(() {
-                        _selected.addAll(items.map((p) => text(p, 'code')));
-                      }),
-                      child: Text(l10n.selectAll),
+                    if (_uncertain)
+                      Text(
+                        isArabic
+                            ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل تكرار الحفظ.'
+                            : 'The operation may have completed. Review permissions before saving again.',
+                      ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        TextButton(
+                          onPressed: () => setState(() {
+                            _selected.addAll(items.map((p) => text(p, 'code')));
+                          }),
+                          child: Text(l10n.selectAll),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(_selected.clear),
+                          child: Text(l10n.clearAll),
+                        ),
+                      ],
                     ),
-                    TextButton(
-                      onPressed: () => setState(_selected.clear),
-                      child: Text(l10n.clearAll),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (final code in unavailable)
+                            CheckboxListTile(
+                              value: true,
+                              title: Text(
+                                isArabic
+                                    ? 'صلاحية غير متاحة'
+                                    : 'Unavailable permission',
+                              ),
+                              subtitle: Text(code),
+                              onChanged: (_) =>
+                                  setState(() => _selected.remove(code)),
+                            ),
+                          for (final section in sections)
+                            _moduleSection(section.$1, section.$2, isArabic),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      for (final code in unavailable)
-                        CheckboxListTile(value: true,
-                          title: Text(isArabic ? 'صلاحية غير متاحة' : 'Unavailable permission'),
-                          subtitle: Text(code),
-                          onChanged: (_) => setState(() => _selected.remove(code))),
-                      for (final section in sections)
-                        _moduleSection(section.$1, section.$2, isArabic),
-                    ],
-                  ),
-                ),
-              ],
-            ));
-          },
+              );
+            },
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _close,
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed:
+                _saving || _uncertain || !_validCatalogue(async.asData?.value)
+                ? null
+                : _submit,
+            child: Text(l10n.save),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : _close,
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(
-          onPressed: _saving || _uncertain || !_validCatalogue(async.asData?.value) ? null : _submit,
-          child: Text(l10n.save),
-        ),
-      ],
-    ));
+    );
   }
 
   Widget _moduleSection(String module, List<Json> permissions, bool isArabic) {
@@ -836,8 +995,16 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
             value: _selected.contains(text(permission, 'code')),
             title: Text(
               isArabic
-                  ? text(permission, 'nameAr', fallback: text(permission, 'code'))
-                  : text(permission, 'nameEn', fallback: text(permission, 'code')),
+                  ? text(
+                      permission,
+                      'nameAr',
+                      fallback: text(permission, 'code'),
+                    )
+                  : text(
+                      permission,
+                      'nameEn',
+                      fallback: text(permission, 'code'),
+                    ),
             ),
             subtitle: Text(text(permission, 'code')),
             onChanged: (checked) => setState(() {

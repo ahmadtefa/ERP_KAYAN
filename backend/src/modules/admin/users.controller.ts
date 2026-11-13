@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
   Headers,
@@ -8,7 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  Delete,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -19,11 +24,15 @@ import {
   UpdateUserDto,
 } from './dto/user.dto';
 import { UsersService } from './users.service';
+import { ProfilePhotoService } from '../auth/profile-photo.service';
+import { LOGO_UPLOAD_MAX_BYTES, logoMimeForUpload } from '../company/company.service';
+
+type Upload = { buffer: Buffer; mimetype: string; originalname: string };
 
 @Controller('admin/users')
 @RequirePermissions('admin.users.manage')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(private readonly users: UsersService, private readonly photos: ProfilePhotoService) {}
 
   @Get()
   list(@CurrentUser() user: AuthUser, @Query() query: ListUsersDto) {
@@ -85,5 +94,17 @@ export class UsersController {
   @Post(':id/deactivate')
   deactivate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.users.deactivate(user.companyId, user.userId, id, user.isSuperAdmin);
+  }
+
+  @Post(':id/photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1, fields: 0, parts: 1 } }))
+  setPhoto(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @UploadedFile() file?: Upload) {
+    if (!file?.buffer?.length) throw new BadRequestException('No photo file was uploaded');
+    return this.photos.setForUser(user.companyId, user.userId, id, file.buffer, logoMimeForUpload(file.mimetype, file.originalname));
+  }
+
+  @Delete(':id/photo')
+  removePhoto(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.photos.removeForUser(user.companyId, user.userId, id);
   }
 }
