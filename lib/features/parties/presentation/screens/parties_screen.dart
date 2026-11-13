@@ -69,8 +69,8 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
     final fields = <FieldSpec>[
       if (!isEdit)
         FieldSpec('code', l10n.accountCode, required: true),
-      FieldSpec('nameEn', 'Name (English)', required: true),
-      FieldSpec('nameAr', 'الاسم (عربي)', required: true),
+      FieldSpec('nameEn', 'Name (English)'),
+      FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec('phone', l10n.phone),
       FieldSpec('email', l10n.email),
       FieldSpec('taxNumber', l10n.taxNumber),
