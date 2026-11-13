@@ -87,361 +87,94 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     }
   }
 
-  Future<void> _createManual() async {
+  Future<void> _manualEntry() async {
     final api = ref.read(apiClientProvider);
-    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final amount = TextEditingController();
+    final date = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
+    String? debit;
+    String? credit;
     try {
-      final result = await api.getObject('/accounting/chart-of-accounts');
-      final accounts = (result['items'] as List? ?? const [])
+      final response = await api.getObject('/accounting/chart-of-accounts');
+      final accounts = (response['items'] as List? ?? const [])
           .whereType<Map>()
           .map(Map<String, dynamic>.from)
           .where((a) => a['isPostable'] == true && a['isActive'] != false)
           .toList();
       if (!mounted) return;
-      if (accounts.length < 2) {
-        showMessage(context, isArabic ? 'يلزم وجود حسابين قابلين للترحيل' : 'At least two postable accounts are required', error: true);
-        return;
-      }
-      String? debitAccount;
-      String? creditAccount;
-      final amount = TextEditingController();
-      final date = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
-      try {
-        final saved = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => StatefulBuilder(
-            builder: (dialogContext, update) => AlertDialog(
-              title: Text(isArabic ? 'إدخال رصيد افتتاحي يدويًا' : 'Enter opening balance manually'),
-              content: SizedBox(
-                width: 480,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(isArabic ? 'اختر حساب البنك أو الخزنة وحساب مقابل لتوازن القيد' : 'Choose a bank/cash account and a balancing account'),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: InputDecoration(labelText: isArabic ? 'حساب البنك أو الخزنة (مدين)' : 'Bank or cash account (debit)'),
-                      value: debitAccount,
-                      items: accounts.map((a) => DropdownMenuItem<String>(
-                        value: '${a['id']}',
-                        child: Text('${a['code']} - ${isArabic ? (a['nameAr'] ?? a['nameEn']) : (a['nameEn'] ?? a['nameAr'])}', overflow: TextOverflow.ellipsis),
-                      )).toList(),
-                      onChanged: (value) => update(() => debitAccount = value),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: InputDecoration(labelText: isArabic ? 'الحساب المقابل (دائن)' : 'Balancing account (credit)'),
-                      value: creditAccount,
-                      items: accounts.map((a) => DropdownMenuItem<String>(
-                        value: '${a['id']}',
-                        child: Text('${a['code']} - ${isArabic ? (a['nameAr'] ?? a['nameEn']) : (a['nameEn'] ?? a['nameAr'])}', overflow: TextOverflow.ellipsis),
-                      )).toList(),
-                      onChanged: (value) => update(() => creditAccount = value),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(labelText: isArabic ? 'الرصيد الافتتاحي' : 'Opening amount')),
-                    const SizedBox(height: 12),
-                    TextField(controller: date, decoration: InputDecoration(labelText: isArabic ? 'التاريخ (YYYY-MM-DD)' : 'Date (YYYY-MM-DD)')),
-                  ],
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, update) => AlertDialog(
+            title: Text(arabic ? 'رصيد افتتاحي يدوي' : 'Manual opening balance'),
+            content: SizedBox(
+              width: 450,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  decoration: InputDecoration(labelText: arabic ? 'حساب البنك أو الخزنة' : 'Bank or cash account'),
+                  items: accounts.map((a) => DropdownMenuItem<String>(
+                    value: a['id'].toString(),
+                    child: Text((a['code'] ?? '').toString() + ' - ' +
+                      (a[arabic ? 'nameAr' : 'nameEn'] ?? a['nameEn'] ?? '').toString(),
+                      overflow: TextOverflow.ellipsis),
+                  )).toList(),
+                  onChanged: (v) => update(() => debit = v),
                 ),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: Text(isArabic ? 'إلغاء' : 'Cancel')),
-                FilledButton(
-                  onPressed: () async {
-                    final value = double.tryParse(amount.text.trim());
-                    if (debitAccount == null || creditAccount == null ||
-                        debitAccount == creditAccount || value == null || !value.isFinite ||
-                        value <= 0 || !RegExp(r'^\\d{4}-\\d{2}-\\d{2}
-    final l10n = context.l10n;
-    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-    final isDetail = widget.documentId != null;
-
-    return ModuleScaffold(
-      title: l10n.openingBalancesTitle,
-      trailing: Wrap(
-        spacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          if (!isDetail)
-            FilledButton.icon(
-              onPressed: _busy ? null : _createManual,
-              icon: const Icon(Icons.add),
-              label: Text(isArabic ? 'إدخال يدوي' : 'Manual entry'),
-            ),
-          // The blank workbook first: it is the file this screen's documents
-          // come from, so it can be fetched from here without hunting for
-          // the import screen and the right entry in its list.
-          if (!isDetail)
-            OutlinedButton.icon(
-              onPressed: () => runDownload(
-                context,
-                ref.read(reportLinkProvider).importTemplate(
-                      kind: 'opening-balances',
-                      language: Localizations.localeOf(context).languageCode,
-                    ),
-              ),
-              icon: const Icon(Icons.download_outlined),
-              label: Text(l10n.downloadTemplate),
-            ),
-          if (!isDetail)
-            OutlinedButton.icon(
-              onPressed: () => context.go('/data/import'),
-              icon: const Icon(Icons.upload_file_outlined),
-              label: Text(l10n.importData),
-            ),
-          IconButton(
-            tooltip: l10n.refresh,
-            onPressed: _busy ? null : _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _load,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(describeError(context, snapshot.error!)),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh),
-                    label: Text(l10n.retry),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          final data = snapshot.data ?? const <String, dynamic>{};
-          if (isDetail) {
-            return _detail(data, isArabic: isArabic);
-          }
-          final items = (data['items'] as List? ?? const [])
-              .whereType<Map>()
-              .map(Map<String, dynamic>.from)
-              .toList(growable: false);
-          if (items.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.account_balance_outlined, size: 40),
-                    const SizedBox(height: 12),
-                    Text(l10n.noOpeningBalanceDocuments),
-                    const SizedBox(height: 8),
-                    Text(
-                      l10n.openingBalanceDraftHint,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  decoration: InputDecoration(labelText: arabic ? 'الحساب المقابل' : 'Balancing account'),
+                  items: accounts.map((a) => DropdownMenuItem<String>(
+                    value: a['id'].toString(),
+                    child: Text((a['code'] ?? '').toString() + ' - ' +
+                      (a[arabic ? 'nameAr' : 'nameEn'] ?? a['nameEn'] ?? '').toString(),
+                      overflow: TextOverflow.ellipsis),
+                  )).toList(),
+                  onChanged: (v) => update(() => credit = v),
                 ),
+                TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: arabic ? 'المبلغ' : 'Amount')),
+                TextField(controller: date,
+                  decoration: InputDecoration(labelText: arabic ? 'التاريخ' : 'Date')),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: Text(arabic ? 'إلغاء' : 'Cancel')),
+              FilledButton(
+                onPressed: () async {
+                  final number = double.tryParse(amount.text.trim());
+                  if (debit == null || credit == null || debit == credit ||
+                      number == null || !number.isFinite || number <= 0 ||
+                      DateTime.tryParse(date.text.trim()) == null) {
+                    showMessage(ctx, arabic ? 'راجع الحسابات والمبلغ والتاريخ' : 'Check accounts, amount and date', error: true);
+                    return;
+                  }
+                  try {
+                    await api.post('/accounting/opening-balances', data: {
+                      'asOfDate': date.text.trim(),
+                      'lines': [
+                        {'accountId': debit, 'debit': amount.text.trim(), 'credit': '0'},
+                        {'accountId': credit, 'debit': '0', 'credit': amount.text.trim()},
+                      ],
+                    });
+                    if (ctx.mounted) Navigator.pop(ctx, true);
+                  } catch (e) {
+                    if (ctx.mounted) showMessage(ctx, e, error: true);
+                  }
+                },
+                child: Text(arabic ? 'حفظ مسودة' : 'Save draft'),
               ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(l10n.openingBalanceDraftHint),
-              ),
-              for (final row in items)
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.account_balance_wallet_outlined),
-                    title: Text('${row['documentNumber'] ?? ''}'),
-                    subtitle: Text(
-                      '${l10n.invoiceDate}: ${row['asOfDate'] ?? ''} · '
-                      '${_localized(row['branch'], isArabic, 'nameEn', 'nameAr') ?? (row['branch'] is Map ? (row['branch'] as Map)['code'] : '')}',
-                    ),
-                    trailing: Chip(
-                      label: Text(_statusLabel(context, '${row['status'] ?? ''}')),
-                    ),
-                    onTap: () => context.go(
-                      '/accounting/opening-balances/${row['id']}',
-                    ),
-                  ),
-                ),
             ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _detail(Map<String, dynamic> data, {required bool isArabic}) {
-    final l10n = context.l10n;
-    final theme = Theme.of(context);
-    final status = '${data['status'] ?? ''}'.toLowerCase();
-    final branch = data['branch'];
-    final warehouse = data['warehouse'];
-    final lines = (data['lines'] as List? ?? const [])
-        .whereType<Map>()
-        .map(Map<String, dynamic>.from)
-        .toList(growable: false);
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${data['documentNumber'] ?? ''}',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                    ),
-                    Chip(label: Text(_statusLabel(context, status))),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('${l10n.invoiceDate}: ${data['asOfDate'] ?? ''}'),
-                if (branch is Map)
-                  Text(
-                    '${l10n.branch}: ${_localized(branch, isArabic, 'nameEn', 'nameAr') ?? branch['code'] ?? ''}',
-                  ),
-                if (warehouse is Map)
-                  Text(
-                    '${l10n.warehouse}: ${_localized(warehouse, isArabic, 'nameEn', 'nameAr') ?? warehouse['code'] ?? ''}',
-                  ),
-                if (data['description'] != null && '${data['description']}'.isNotEmpty)
-                  Text('${l10n.description}: ${data['description']}'),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    _total(context, l10n.debit, '${data['totalDebit'] ?? '0'}'),
-                    _total(context, l10n.credit, '${data['totalCredit'] ?? '0'}'),
-                  ],
-                ),
-                if (status == 'draft') ...[
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : () => _post('${data['id']}'),
-                    icon: const Icon(Icons.publish_outlined),
-                    label: Text(_busy ? l10n.posting : l10n.post),
-                  ),
-                ],
-              ],
-            ),
           ),
         ),
-        const SizedBox(height: 8),
-        Text(l10n.lines, style: theme.textTheme.titleMedium),
-        for (final line in lines)
-          Card(
-            child: ListTile(
-              title: Text(
-                '${line['accountCode'] ?? ''}  '
-                '${isArabic ? line['accountNameAr'] ?? line['accountNameEn'] ?? '' : line['accountNameEn'] ?? line['accountNameAr'] ?? ''}',
-              ),
-              subtitle: Text(
-                '${l10n.debit}: ${line['debit'] ?? '0'} · '
-                '${l10n.credit}: ${line['credit'] ?? '0'}'
-                '${line['item'] is Map ? ' · ${(line['item'] as Map)['code'] ?? ''}' : ''}'
-                '${line['customer'] is Map ? ' · ${(line['customer'] as Map)['code'] ?? ''}' : ''}'
-                '${line['supplier'] is Map ? ' · ${(line['supplier'] as Map)['code'] ?? ''}' : ''}',
-              ),
-              isThreeLine: false,
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _total(BuildContext context, String label, String amount) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-          Text(amount, style: Theme.of(context).textTheme.titleMedium),
-        ],
-      ),
-    );
-  }
-
-  String _statusLabel(BuildContext context, String status) {
-    final l10n = context.l10n;
-    return switch (status.toLowerCase()) {
-      'draft' => l10n.draft,
-      'posted' => l10n.posted,
-      'reversed' => l10n.reversed,
-      _ => status,
-    };
-  }
-
-  String? _localized(
-    Object? value,
-    bool isArabic,
-    String englishKey,
-    String arabicKey,
-  ) {
-    if (value is! Map) return null;
-    final preferred = value[isArabic ? arabicKey : englishKey];
-    final fallback = value[isArabic ? englishKey : arabicKey];
-    final text = preferred ?? fallback;
-    return text == null ? null : '$text';
-  }
-}
-).hasMatch(date.text.trim())) {
-                      showMessage(dialogContext, isArabic ? 'راجع الحسابات والمبلغ والتاريخ' : 'Check accounts, amount and date', error: true);
-                      return;
-                    }
-                    try {
-                      await api.post('/accounting/opening-balances', data: {
-                        'asOfDate': date.text.trim(),
-                        'description': isArabic ? 'أرصدة افتتاحية - إدخال يدوي' : 'Opening balances - manual entry',
-                        'lines': [
-                          {'accountId': debitAccount, 'debit': amount.text.trim(), 'credit': '0'},
-                          {'accountId': creditAccount, 'debit': '0', 'credit': amount.text.trim()},
-                        ],
-                      });
-                      if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-                    } catch (error) {
-                      if (dialogContext.mounted) showMessage(dialogContext, error, error: true);
-                    }
-                  },
-                  child: Text(isArabic ? 'حفظ مسودة' : 'Save draft'),
-                ),
-              ],
-            ),
-          ),
-        );
-        if (saved == true && mounted) _refresh();
-      } finally {
-        amount.dispose();
-        date.dispose();
-      }
-    } catch (error) {
-      if (mounted) showMessage(context, error, error: true);
+      );
+      if (saved == true && mounted) _refresh();
+    } catch (e) {
+      if (mounted) showMessage(context, e, error: true);
+    } finally {
+      amount.dispose();
+      date.dispose();
     }
   }
 
@@ -457,6 +190,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         spacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          if (!isDetail)
+            FilledButton.icon(
+              onPressed: _busy ? null : _manualEntry,
+              icon: const Icon(Icons.add),
+              label: Text(isArabic ? 'إدخال يدوي' : 'Manual entry'),
+            ),
           // The blank workbook first: it is the file this screen's documents
           // come from, so it can be fetched from here without hunting for
           // the import screen and the right entry in its list.
