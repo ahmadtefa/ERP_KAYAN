@@ -111,8 +111,11 @@ export class WarehouseService {
     scope: WarehouseScope = null,
   ) {
     const code = this.text(dto.code, 'code');
-    const nameEn = this.text(dto.nameEn, 'nameEn');
-    const nameAr = this.text(dto.nameAr, 'nameAr');
+    const enteredEn = String(dto.nameEn ?? '').trim();
+    const enteredAr = String(dto.nameAr ?? '').trim();
+    if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English warehouse name');
+    const nameEn = enteredEn || enteredAr;
+    const nameAr = enteredAr || enteredEn;
     const branchId = await this.branch(companyId, this.text(dto.branchId, 'branchId'));
     this.assertInScope(scope, branchId);
 
@@ -185,8 +188,13 @@ export class WarehouseService {
     }
 
     const data: Prisma.WarehouseUpdateInput = {};
-    if (dto.nameEn !== undefined) data.nameEn = this.text(dto.nameEn, 'nameEn');
-    if (dto.nameAr !== undefined) data.nameAr = this.text(dto.nameAr, 'nameAr');
+    if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+      const enteredEn = String(dto.nameEn ?? before.nameEn).trim();
+      const enteredAr = String(dto.nameAr ?? before.nameAr).trim();
+      if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English warehouse name');
+      data.nameEn = enteredEn || enteredAr;
+      data.nameAr = enteredAr || enteredEn;
+    }
     if (dto.address !== undefined) data.address = (dto.address as string) ?? null;
     if (dto.isActive !== undefined) data.isActive = dto.isActive === true;
     if (dto.branchId !== undefined) {
