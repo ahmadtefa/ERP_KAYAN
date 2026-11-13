@@ -72,7 +72,7 @@ export function uploadsDir(): string {
   return process.env.KAYAN_UPLOAD_DIR ?? join(process.cwd(), 'uploads');
 }
 
-const LEGACY_LOGO_MIME: Record<string, string> = {
+export const LEGACY_LOGO_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
