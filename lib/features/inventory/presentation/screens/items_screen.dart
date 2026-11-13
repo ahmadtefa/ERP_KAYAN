@@ -103,8 +103,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       title: isEdit ? l10n.editItem : l10n.newItem,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.accountCode, required: true),
-        FieldSpec('nameEn', 'Name (English)', required: true),
-        FieldSpec('nameAr', 'الاسم (عربي)', required: true),
+        FieldSpec('nameEn', 'Name (English)'),
+        FieldSpec('nameAr', 'الاسم (عربي)'),
         FieldSpec('unit', l10n.unit),
         FieldSpec('barcode', 'Barcode'),
         FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
