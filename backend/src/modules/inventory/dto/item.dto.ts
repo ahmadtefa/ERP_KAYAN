@@ -12,8 +12,8 @@ import {
 
 export class CreateItemDto {
   @IsString() @MaxLength(30) code!: string;
-  @IsString() @MaxLength(200) nameEn!: string;
-  @IsString() @MaxLength(200) nameAr!: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
 
   @IsOptional() @IsString() @MaxLength(20) unit?: string;
   @IsOptional() @IsString() @MaxLength(60) barcode?: string;
