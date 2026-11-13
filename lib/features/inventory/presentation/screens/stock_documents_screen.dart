@@ -424,7 +424,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 await ref.read(stockDocumentsProvider.notifier).reload();
               } catch (failure) {
                 if (!closed && dialogContext.mounted) {
-                  setDialogState(() => error = '$failure');
+                  await showAppError(dialogContext, failure);
                 }
               } finally {
                 if (!closed && dialogContext.mounted) {

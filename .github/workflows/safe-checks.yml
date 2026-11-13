@@ -111,6 +111,7 @@ jobs:
           src/modules/inventory/stock-voucher-search.spec.ts
           src/modules/inventory/item-tax-blank.spec.ts
           src/modules/inventory/item-tax-http.spec.ts
+          src/modules/export/price-visibility.spec.ts
           src/modules/export/stock-voucher-export.spec.ts
           src/modules/export/documents.service.spec.ts
           src/modules/inventory/cost-redaction.spec.ts
