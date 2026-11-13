@@ -67,6 +67,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
 
@@ -114,6 +115,8 @@ jobs:
       - name: Test backend
         working-directory: backend
         shell: powershell
+        env:
+          NODE_OPTIONS: --experimental-vm-modules --max-old-space-size=6144
         # Two things this step has to do besides run the tests: say *which*
         # test failed (the run log archive is not always downloadable), and
         # say what the PDF renderer thought of this machine. Both go out as
