@@ -293,6 +293,13 @@ export class ItemsService {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
+    // A single language is sufficient. Keep both stored names populated for
+    // existing consumers that still expect non-null strings.
+    const nameEn = String(dto.nameEn ?? '').trim();
+    const nameAr = String(dto.nameAr ?? '').trim();
+    if (!nameEn && !nameAr) {
+      throw new BadRequestException('Provide an Arabic or English item name');
+    }
 
     // The form sends the base unit and every packing unit together. They are
     // validated before anything is written, so a bad factor cannot leave an
@@ -389,8 +396,8 @@ export class ItemsService {
         data: {
           companyId,
           code,
-          nameEn: dto.nameEn as string,
-          nameAr: dto.nameAr as string,
+          nameEn: nameEn || nameAr,
+          nameAr: nameAr || nameEn,
           unit: baseUnit,
           barcode,
           salePrice: this.money(dto.salePrice, 'salePrice'),
@@ -537,6 +544,18 @@ export class ItemsService {
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Item not found');
+
+    // Validate the effective pair, including unchanged names on partial edits.
+    // A blank field is allowed if the other language has a name.
+    if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+      const nameEn = String(dto.nameEn ?? before.nameEn).trim();
+      const nameAr = String(dto.nameAr ?? before.nameAr).trim();
+      if (!nameEn && !nameAr) {
+        throw new BadRequestException('Provide an Arabic or English item name');
+      }
+      dto.nameEn = nameEn || nameAr;
+      dto.nameAr = nameAr || nameEn;
+    }
 
     // Which unit the item will be based on after this save. The units table
     // can rename the base row in place, so the answer is not just `dto.unit`:
