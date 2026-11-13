@@ -565,6 +565,10 @@ export class PartiesService {
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
 
+    const nameEn = String(dto.nameEn ?? '').trim();
+    const nameAr = String(dto.nameAr ?? '').trim();
+    if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+
     const model = this.model(kind) as any;
     const existing = await model.findFirst({
       where: { companyId, code },
@@ -577,8 +581,8 @@ export class PartiesService {
     const data: Record<string, unknown> = {
       companyId,
       code,
-      nameEn: dto.nameEn,
-      nameAr: dto.nameAr,
+      nameEn: nameEn || nameAr,
+      nameAr: nameAr || nameEn,
       phone: (dto.phone as string) ?? null,
       email: (dto.email as string) ?? null,
       taxNumber: (dto.taxNumber as string) ?? null,
@@ -617,6 +621,13 @@ export class PartiesService {
     const model = this.model(kind) as any;
     const before = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!before) throw new NotFoundException(`${kind} not found`);
+    if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+      const nameEn = String(dto.nameEn ?? before.nameEn).trim();
+      const nameAr = String(dto.nameAr ?? before.nameAr).trim();
+      if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+      dto.nameEn = nameEn || nameAr;
+      dto.nameAr = nameAr || nameEn;
+    }
 
     const data: Record<string, unknown> = { updatedBy: userId };
     for (const key of [
