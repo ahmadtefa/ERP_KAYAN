@@ -11,6 +11,7 @@ import { AppModule } from '../../app.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsersController } from '../admin/users.controller';
 import { UsersService } from '../admin/users.service';
+import { ProfilePhotoService } from '../auth/profile-photo.service';
 import { HealthController } from '../health/health.controller';
 import { SalesInvoicesController } from '../sales/sales-invoices.controller';
 import { SalesInvoicesService } from '../sales/sales-invoices.service';
@@ -50,6 +51,7 @@ describe('installed licence HTTP guard', () => {
         { provide: PrismaService, useValue: healthDb },
         { provide: SalesInvoicesService, useValue: { findAll: calls.read, create: calls.write } },
         { provide: UsersService, useValue: { list: calls.admin, create: calls.adminWrite } },
+        { provide: ProfilePhotoService, useValue: {} },
         { provide: APP_GUARD, useClass: LicenseGuard },
       ],
     })

@@ -1169,7 +1169,7 @@ class _SidebarFooter extends ConsumerWidget {
   }
 }
 
-class _TopBar extends StatelessWidget {
+class _TopBar extends ConsumerWidget {
   const _TopBar({
     required this.item,
     required this.sectionLabel,
@@ -1187,10 +1187,11 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onOpenMenu;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final accentColor = item.accent.of(scheme.brightness);
+    final compact = MediaQuery.sizeOf(context).width < 480;
     return Container(
       height: Theme.of(context).appBarTheme.toolbarHeight ??
           AppSizes.topBarHeight,
@@ -1224,7 +1225,7 @@ class _TopBar extends StatelessWidget {
           // The current section, in its own colour: icon tile + section
           // name over the page title, so the bar answers «أين أنا؟»
           // before the title is read.
-          Container(
+          if (!compact) Container(
             width: 34,
             height: 34,
             alignment: Alignment.center,
@@ -1234,7 +1235,7 @@ class _TopBar extends StatelessWidget {
             ),
             child: Icon(item.icon, size: 19, color: accentColor),
           ),
-          const SizedBox(width: AppSpacing.md),
+          if (!compact) const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Row(
               children: [
@@ -1293,9 +1294,29 @@ class _TopBar extends StatelessWidget {
             icon: const Icon(Icons.home_outlined, size: 20),
             onPressed: () => context.go(AppRoutes.dashboard),
           ),
-          _SearchTrigger(expanded: isExtended),
+          if (!compact) _SearchTrigger(expanded: isExtended),
+          if (!compact) const SizedBox(width: AppSpacing.xs),
+          if (!compact) const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xs),
-          const _LanguageMenu(),
+          Builder(builder: (context) {
+            final user = ref.watch(currentUserProvider);
+            if (user == null) return const SizedBox.shrink();
+            final bytes = ref.watch(userPhotoProvider((companyId: user.companyId, userId: user.id))).asData?.value;
+            return Row(key: const ValueKey('topbar-current-user'), mainAxisSize: MainAxisSize.min, children: [
+              CircleAvatar(
+                key: ValueKey('topbar-photo-${user.id}'),
+                radius: 15,
+                foregroundImage: bytes == null ? null : MemoryImage(bytes),
+                onForegroundImageError: bytes == null ? null : (_, _) {},
+                child: const Icon(Icons.person_outline, size: 17),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: isExtended ? 130 : 72),
+                child: Text(user.fullName, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ]);
+          }),
           const SizedBox(width: AppSpacing.xxs),
           _SignOutButton(guardKey: guardKey),
         ],

@@ -208,6 +208,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       if (isEdit) FieldSpec('isActive', l10n.active, kind: FieldKind.toggle),
     ];
 
+    String? createdUserId;
     final values = await showFormSheet(
       context,
       exitRelay: widget.exitRelay,
@@ -234,7 +235,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           if (isEdit) {
             await client.patch('/admin/users/${existing['id']}', body: payload);
           } else {
-            await client.post('/admin/users', body: payload);
+            final created = await client.post('/admin/users', body: payload);
+            createdUserId = created['id'] is String ? created['id'] as String : null;
           }
         } catch (error) {
           throw UncertainFormSubmission(error);
@@ -243,8 +245,24 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         }
       },
     );
-    if (values != null && mounted)
+    if (values != null && mounted) {
       showMessage(context, l10n.createdSuccessfully);
+      if (createdUserId != null) {
+        final arabic = Localizations.localeOf(context).languageCode == 'ar';
+        final choose = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(arabic ? 'صورة المستخدم' : 'User photo'),
+            content: Text(arabic ? 'هل تريد إضافة صورة لهذا الحساب الآن؟' : 'Add a photo to this account now?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: Text(l10n.cancel)),
+              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text(arabic ? 'اختيار صورة' : 'Choose photo')),
+            ],
+          ),
+        );
+        if (choose == true && mounted) await _changePhoto({'id': createdUserId});
+      }
+    }
   }
 
   Future<void> _changePhoto(Json row) async {

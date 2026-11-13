@@ -1,8 +1,13 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/design_tokens.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +16,66 @@ import 'package:go_router/go_router.dart';
 
 import 'test_harness.dart';
 
+class _ShellPhotoClient extends ApiClient {
+  _ShellPhotoClient(this.photos) : super(const AppConfig(environment: AppEnvironment.development,
+    apiBaseUrl: 'https://test.invalid/api/v1', connectTimeout: Duration(seconds: 1),
+    receiveTimeout: Duration(seconds: 1)), FakeTokenStore());
+  final Map<String, Uint8List> photos;
+
+  @override
+  Future<Map<String, dynamic>> getObject(String path, {Map<String, dynamic>? query}) async {
+    expect(path, '/profile/photo');
+    final bytes = photos[query?['expectedUserId']];
+    return {'mime': bytes == null ? null : 'image/webp', 'data': bytes == null ? null : base64Encode(bytes)};
+  }
+}
+
+class _ActiveShellUser extends Notifier<AppUser?> {
+  @override
+  AppUser? build() => null;
+  void setUser(AppUser? user) => state = user;
+}
+final _activeShellUser = NotifierProvider<_ActiveShellUser, AppUser?>(_ActiveShellUser.new);
+
 void main() {
+  testWidgets('top bar replaces the previous user photo and name after account switch', (tester) async {
+    tester.view.physicalSize = const Size(1366, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bytes = base64Decode('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAN0lEQVRIie3WuQkAQAwDQZW+pV8VhgsGnAuMnt3q9kYgLxoXJWhTFWnTDE4mM1Qx4BV03M90/QB30QA96QETDgAAAABJRU5ErkJggg==');
+    final client = _ShellPhotoClient({'one': bytes});
+    AppUser account(String id) => AppUser(id: id, username: id, fullName: 'Account $id', companyId: 'company');
+    final container = ProviderContainer(overrides: [
+      currentUserProvider.overrideWith((ref) => ref.watch(_activeShellUser)),
+      apiClientProvider.overrideWithValue(client),
+    ]);
+    container.read(_activeShellUser.notifier).setUser(account('one'));
+    addTearDown(container.dispose);
+    final screen = UncontrolledProviderScope(container: container,
+      child: wrapWithApp(child: const ErpShell(currentPath: AppRoutes.dashboard, child: SizedBox.expand())));
+
+    await tester.pumpWidget(screen);
+    await tester.pumpAndSettle();
+    final first = tester.widget<CircleAvatar>(find.byKey(const ValueKey('topbar-photo-one')));
+    expect(first.foregroundImage, isA<MemoryImage>());
+    expect(find.text('Account one'), findsWidgets);
+    container.read(_activeShellUser.notifier).setUser(null);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('topbar-photo-one')), findsNothing);
+    container.read(_activeShellUser.notifier).setUser(account('two'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('topbar-photo-one')), findsNothing);
+    final second = tester.widget<CircleAvatar>(find.byKey(const ValueKey('topbar-photo-two')));
+    expect(second.foregroundImage, isNull);
+    expect(find.text('Account one'), findsNothing);
+    expect(find.text('Account two'), findsWidgets);
+    tester.view.physicalSize = const Size(320, 700);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 3));
+  });
   test('selected navigation glyphs meet contrast on every section accent', () {
     const accents = [SectionAccents.overview, SectionAccents.accounting,
       SectionAccents.cash, SectionAccents.parties, SectionAccents.inventory,
