@@ -11,6 +11,9 @@ import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
+import '../providers/stock_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -300,7 +303,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
           canPost: ref.read(currentUserProvider)?.can('inventory.stocktake.post') ?? false,
           canCancel: ref.read(currentUserProvider)?.can('inventory.stocktake.create') ?? false,
           api: ref.read(apiClientProvider),
-          onChanged: () => ref.read(stockTakesProvider.notifier).refreshQuietly(),
+          onChanged: _refreshAfterAction,
         ),
       );
       if (mounted) await ref.read(stockTakesProvider.notifier).refreshQuietly();
@@ -386,15 +389,26 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
     await _send('/inventory/stock-takes/${text(row, 'id')}/post');
   }
 
+  Future<void> _refreshAfterAction(String action) async {
+    if (!mounted) return;
+    if (action == 'post') {
+      ref.invalidate(stockListProvider);
+      ref.invalidate(journalEntriesProvider);
+      invalidateDashboardAndReports(ref);
+    }
+    await ref.read(stockTakesProvider.notifier).refreshQuietly();
+  }
+
   Future<void> _send(String path) async {
     try {
       await ref.read(apiClientProvider).post(path);
-      await ref.read(stockTakesProvider.notifier).refreshQuietly();
-      if (!mounted) return;
-      showMessage(context, _arabic ? 'تم' : 'Done');
+      if (mounted) showMessage(context, _arabic ? 'تم' : 'Done');
     } catch (error) {
-      if (!mounted) return;
-      showMessage(context, error, error: true);
+      if (mounted) showMessage(context, error, error: true);
+    } finally {
+      if (mounted) {
+        await _refreshAfterAction(path.endsWith('/post') ? 'post' : 'approve');
+      }
     }
   }
 
@@ -433,7 +447,7 @@ class _StockTakeDetailDialog extends StatefulWidget {
   final bool canPost;
   final bool canCancel;
   final ApiClient api;
-  final Future<void> Function() onChanged;
+  final Future<void> Function(String action) onChanged;
 
   @override
   State<_StockTakeDetailDialog> createState() => _StockTakeDetailDialogState();
@@ -703,13 +717,16 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
           '/inventory/stock-takes/${text(_session, 'id')}',
         );
       }
-      await widget.onChanged();
+      await widget.onChanged(suffix);
       if (mounted) {
         setState(() {});
         if (success != null) showMessage(context, success);
       }
     } catch (error) {
-      if (mounted) showMessage(context, error, error: true);
+      if (mounted) {
+        if (suffix == 'post') await widget.onChanged(suffix);
+        if (mounted) showMessage(context, error, error: true);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

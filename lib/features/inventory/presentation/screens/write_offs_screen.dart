@@ -8,6 +8,9 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
+import '../providers/stock_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -91,9 +94,19 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     return ModuleScaffold(
       title: _arabic ? 'الإعدام' : 'Write-offs',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
-      trailing: SearchField(
-        hint: _arabic ? 'بحث في الإعدام' : 'Search write-offs',
-        onChanged: (value) => setState(() => _query = value.trim()),
+      trailing: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SearchField(
+            hint: _arabic ? 'بحث في الإعدام' : 'Search write-offs',
+            onChanged: (value) => setState(() => _query = value.trim()),
+          ),
+          IconButton(
+            tooltip: _arabic ? 'تحديث' : 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: async.isLoading ? null : () => ref.read(writeOffsProvider.notifier).reload(),
+          ),
+        ],
       ),
       body: AsyncStateView<List<Json>>(
         value: async,
@@ -228,12 +241,18 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
   Future<void> _send(String path) async {
     try {
       await ref.read(apiClientProvider).post(path);
-      await ref.read(writeOffsProvider.notifier).refreshQuietly();
-      if (!mounted) return;
-      showMessage(context, _arabic ? 'تم' : 'Done');
+      if (mounted) showMessage(context, _arabic ? 'تم' : 'Done');
     } catch (error) {
-      if (!mounted) return;
-      showMessage(context, error, error: true);
+      if (mounted) showMessage(context, error, error: true);
+    } finally {
+      if (mounted) {
+        if (path.endsWith('/post')) {
+          ref.invalidate(stockListProvider);
+          ref.invalidate(journalEntriesProvider);
+          invalidateDashboardAndReports(ref);
+        }
+        await ref.read(writeOffsProvider.notifier).refreshQuietly();
+      }
     }
   }
 
