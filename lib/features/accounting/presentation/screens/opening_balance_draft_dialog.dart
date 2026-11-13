@@ -334,7 +334,7 @@ class _DraftDialogState extends State<_DraftDialog> {
   }) {
     final byId = {for (final row in records) row[valueKey] as String: row};
     return DropdownButtonFormField<String>(
-      key: ValueKey(value),
+      key: ValueKey((label, value)),
       isExpanded: true,
       initialValue: value ?? (optional ? '' : null),
       decoration: InputDecoration(labelText: label),
