@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -40,6 +41,13 @@ Json? itemForInvoiceLine(List<Json> items, String? itemId) {
   return null;
 }
 
+final _salesTaxPricingProvider = FutureProvider.autoDispose<bool>((ref) async {
+  final pricing = await ref
+      .read(apiClientProvider)
+      .getObject('/sales/invoices/tax-pricing');
+  return pricing['pricesIncludeTax'] == true;
+});
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
@@ -53,6 +61,7 @@ class _LineDraft {
        discountValue = TextEditingController(text: discountValue);
 
   String? itemId;
+  String? description;
 
   /// The measurement unit the quantity is expressed in. Null on a free line
   /// without an item; the server treats a missing unit as the item's base unit
@@ -75,11 +84,19 @@ class _LineDraft {
   final TextEditingController discountValue;
 
   /// The line's own arithmetic, for the summary under the inputs.
-  ({Decimal gross, ResolvedDiscount discount}) get pricing {
+  ({Decimal gross, ResolvedDiscount discount}) pricing({
+    bool pricesIncludeTax = false,
+  }) {
     final quantityValue =
         Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
     final price = Decimal.tryParse(unitPrice.text.trim()) ?? Decimal.zero;
-    final gross = quantityValue * price;
+    final typedTotal = (quantityValue * price).round(scale: moneyScale);
+    final rate = Decimal.tryParse(taxRate.text.trim()) ?? Decimal.zero;
+    final gross = pricesIncludeTax && rate > Decimal.zero
+        ? (typedTotal * Decimal.fromInt(100) / (Decimal.fromInt(100) + rate))
+              .toDecimal(scaleOnInfinitePrecision: 12)
+              .round(scale: moneyScale)
+        : typedTotal;
     return (
       gross: gross,
       discount: resolveDiscount(
@@ -99,16 +116,22 @@ class _LineDraft {
 }
 
 class _LandedCostDraft {
-  _LandedCostDraft({String description = '', String amount = '0'})
-    : description = TextEditingController(text: description),
-      amount = TextEditingController(text: amount);
+  _LandedCostDraft({
+    String description = '',
+    String amount = '0',
+    String taxRate = '',
+  }) : description = TextEditingController(text: description),
+       amount = TextEditingController(text: amount),
+       taxRate = TextEditingController(text: taxRate);
 
   final TextEditingController description;
   final TextEditingController amount;
+  final TextEditingController taxRate;
 
   void dispose() {
     description.dispose();
     amount.dispose();
+    taxRate.dispose();
   }
 }
 
@@ -187,7 +210,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     'discount': _documentDiscount.text,
     'costs': [
       for (final cost in _landedCosts)
-        [cost.description.text, cost.amount.text],
+        [cost.description.text, cost.amount.text, cost.taxRate.text],
     ],
     'lines': [
       for (final line in _lines)
@@ -271,6 +294,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           _LandedCostDraft(
             description: text(row, 'description'),
             amount: text(row, 'amount', fallback: '0'),
+            taxRate: text(row, 'taxRate'),
           ),
         );
       }
@@ -285,6 +309,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         );
       }
       for (final row in listOf(invoice['lines'])) {
+        if (widget.kind.isSales && row['isAdditionalCharge'] == true) {
+          _landedCosts.add(
+            _LandedCostDraft(
+              description: text(row, 'description'),
+              amount: text(row, 'unitPrice'),
+              taxRate: text(row, 'taxRate'),
+            ),
+          );
+          continue;
+        }
         // Reopen shows exactly what the user entered. A multi-unit line keeps
         // the entered quantity and its unit; a legacy row has no snapshot, so
         // it falls back to the stored base quantity with no unit selected.
@@ -304,6 +338,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
               ..unitName = text(row, 'unitName').isEmpty
                   ? null
                   : text(row, 'unitName')
+              ..description = text(row, 'description')
               ..unitPriceEdited = true
               ..costCenterId = text(row, 'costCenterId').isEmpty
                   ? null
@@ -378,13 +413,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     Decimal landedCost,
     Decimal total,
   })
-  get _totals {
+  _totals({required bool pricesIncludeTax}) {
     final nets = <Decimal>[];
     final rates = <Decimal>[];
     var gross = Decimal.zero;
     var lineDiscount = Decimal.zero;
     for (final line in _lines) {
-      final pricing = line.pricing;
+      final pricing = line.pricing(pricesIncludeTax: pricesIncludeTax);
       if (line.quantity.text.trim().isEmpty ||
           line.unitPrice.text.trim().isEmpty) {
         continue;
@@ -414,11 +449,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .round(scale: moneyScale);
     }
     var landedCost = Decimal.zero;
-    if (!widget.kind.isSales) {
-      for (final charge in _landedCosts) {
-        landedCost +=
-            Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
-      }
+    for (final charge in _landedCosts) {
+      final amount =
+          (Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero).round(
+            scale: moneyScale,
+          );
+      final rate =
+          (Decimal.tryParse(charge.taxRate.text.trim()) ?? Decimal.zero).round(
+            scale: moneyScale,
+          );
+      landedCost += amount;
+      tax += (amount * rate / Decimal.fromInt(100))
+          .toDecimal(scaleOnInfinitePrecision: 12)
+          .round(scale: moneyScale);
     }
     return (
       gross: gross,
@@ -447,13 +490,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (ids.isEmpty) return;
     ItemImageDataSource(ref.read(apiClientProvider))
         .thumbnails(ids)
-        .then<void>((pictures) {
-          if (!mounted || _itemPicturesKey != key) return;
-          setState(() => _itemPictures = pictures);
-        }, onError: (Object _) {
-          // A thumbnail that cannot be fetched is not worth a dialog: the
-          // picker still lists every item, just without pictures.
-        });
+        .then<void>(
+          (pictures) {
+            if (!mounted || _itemPicturesKey != key) return;
+            setState(() => _itemPictures = pictures);
+          },
+          onError: (Object _) {
+            // A thumbnail that cannot be fetched is not worth a dialog: the
+            // picker still lists every item, just without pictures.
+          },
+        );
   }
 
   /// Adds what a scanned label stands for to the invoice.
@@ -634,40 +680,52 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
     final landedCostCharges = <Json>[];
     var landedCost = Decimal.zero;
-    if (!widget.kind.isSales) {
-      for (final charge in _landedCosts) {
-        final description = charge.description.text.trim();
-        final rawAmount = charge.amount.text.trim();
-        final amount = Decimal.tryParse(rawAmount);
-        if (description.isEmpty &&
-            (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
-          continue;
-        }
-        if (description.isEmpty) {
-          showMessage(context, l10n.landedCostDescriptionRequired, error: true);
-          return;
-        }
-        if (amount == null) {
-          showMessage(context, l10n.landedCostAmountInvalid, error: true);
-          return;
-        }
-        if (amount < Decimal.zero) {
-          showMessage(context, l10n.landedCostCannotBeNegative, error: true);
-          return;
-        }
-        landedCost += amount;
-        landedCostCharges.add({
-          'description': description,
-          'amount': amount.toString(),
-        });
+    for (final charge in _landedCosts) {
+      final description = charge.description.text.trim();
+      final rawAmount = charge.amount.text.trim();
+      final amount = Decimal.tryParse(rawAmount);
+      if (description.isEmpty &&
+          (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
+        continue;
       }
+      if (description.isEmpty) {
+        showMessage(context, l10n.landedCostDescriptionRequired, error: true);
+        return;
+      }
+      if (amount == null) {
+        showMessage(context, l10n.landedCostAmountInvalid, error: true);
+        return;
+      }
+      if (amount < Decimal.zero) {
+        showMessage(context, l10n.landedCostCannotBeNegative, error: true);
+        return;
+      }
+      final rateText = charge.taxRate.text.trim();
+      final rate = rateText.isEmpty ? Decimal.zero : Decimal.tryParse(rateText);
+      if (rate == null || rate < Decimal.zero || rate > Decimal.fromInt(100)) {
+        showMessage(
+          context,
+          Localizations.localeOf(context).languageCode == 'ar'
+              ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
+              : 'Charge tax rate must be between 0 and 100',
+          error: true,
+        );
+        return;
+      }
+      final roundedAmount = amount.round(scale: moneyScale);
+      landedCost += roundedAmount;
+      landedCostCharges.add({
+        'description': description,
+        'amount': roundedAmount.toString(),
+        if (rate != Decimal.zero) 'taxRate': rate.toString(),
+      });
     }
 
     final lines = <Json>[];
     for (final line in _lines) {
       final quantity = line.quantity.text.trim();
       final price = line.unitPrice.text.trim();
-      if (quantity.isEmpty || price.isEmpty) continue;
+      if (quantity.isEmpty || price.isEmpty || _lineIsEmpty(line)) continue;
       final parsed = Decimal.tryParse(quantity);
       if (parsed == null || parsed <= Decimal.zero) {
         showMessage(context, l10n.mustBePositive, error: true);
@@ -676,6 +734,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.itemId == null && line.description?.isNotEmpty == true)
+          'description': line.description,
         if (line.unitName != null && line.unitName!.trim().isNotEmpty)
           'unitName': line.unitName!.trim(),
         'quantity': quantity,
@@ -694,6 +754,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         if (line.discountKind == DiscountKind.amount && discountText.isNotEmpty)
           'discountAmount': discountText,
       });
+    }
+    if (widget.kind.isSales) {
+      lines.addAll(
+        landedCostCharges.map(
+          (charge) => {
+            'isAdditionalCharge': true,
+            'description': charge['description'],
+            'quantity': '1',
+            'unitPrice': charge['amount'],
+            'taxRate': charge['taxRate'] ?? '0',
+          },
+        ),
+      );
     }
     if (lines.isEmpty) {
       showMessage(context, l10n.addLineFirst, error: true);
@@ -748,6 +821,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final salesTaxPricing = widget.kind.isSales
+        ? ref.watch(_salesTaxPricingProvider)
+        : const AsyncData(false);
     final itemsAsync = ref.watch(activeItemsProvider);
     // Fetching the thumbnails here keeps it next to the watch that supplies
     // the catalogue; the loader itself does nothing on a rebuild with the
@@ -831,13 +907,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       onDiscountChanged: () => setState(() {}),
                       parties: partiesAsync.value ?? const [],
                     ),
-                    if (!widget.kind.isSales) ...[
+                    ...[
                       const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                              l10n.landedCosts,
+                              widget.kind.isSales
+                                  ? (language == 'ar'
+                                        ? 'المصاريف الإضافية'
+                                        : 'Additional charges')
+                                  : l10n.landedCosts,
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                           ),
@@ -846,12 +926,22 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                               () => _landedCosts.add(_LandedCostDraft()),
                             ),
                             icon: const Icon(Icons.add),
-                            label: Text(l10n.addLandedCost),
+                            label: Text(
+                              widget.kind.isSales
+                                  ? (language == 'ar'
+                                        ? 'إضافة مصروف'
+                                        : 'Add charge')
+                                  : l10n.addLandedCost,
+                            ),
                           ),
                         ],
                       ),
                       Text(
-                        l10n.landedCostAllocationHint,
+                        widget.kind.isSales
+                            ? (language == 'ar'
+                                  ? 'أدخل قيمة المصروف قبل الضريبة ونسبة الضريبة لكل سطر.'
+                                  : 'Enter each charge before tax and set its own tax rate.')
+                            : l10n.landedCostAllocationHint,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       for (
@@ -887,6 +977,28 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                     ),
                                 decoration: InputDecoration(
                                   labelText: l10n.amount,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                key: ValueKey('landed-cost-tax-$index'),
+                                controller: _landedCosts[index].taxRate,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText:
+                                      Localizations.localeOf(context)
+                                              .languageCode ==
+                                          'ar'
+                                      ? 'الضريبة %'
+                                      : 'Tax %',
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
@@ -929,8 +1041,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       child: BarcodeScanField(
                         key: const ValueKey('invoice-barcode'),
                         controller: _barcode,
-                        arabic: Localizations.localeOf(context).languageCode == 'ar',
-                        label: Localizations.localeOf(context).languageCode == 'ar'
+                        arabic:
+                            Localizations.localeOf(context).languageCode ==
+                            'ar',
+                        label:
+                            Localizations.localeOf(context).languageCode == 'ar'
                             ? 'امسح الباركود لإضافة صنف'
                             : 'Scan a barcode to add an item',
                         enabled: !_saving && !_loadingExisting,
@@ -940,6 +1055,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                     const SizedBox(height: 8),
                     _LinesTable(
                       kind: widget.kind,
+                      pricesIncludeTax: salesTaxPricing.value ?? false,
                       lines: _lines,
                       items: itemsAsync.value ?? const [],
                       pictures: _itemPictures,
@@ -952,10 +1068,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       onItemDefaults: _applyItemDefaults,
                     ),
                     const SizedBox(height: 16),
-                    _Totals(
-                      totals: _totals,
-                      showLandedCost: !widget.kind.isSales,
-                    ),
+                    if (salesTaxPricing.hasValue)
+                      _Totals(
+                        totals: _totals(
+                          pricesIncludeTax: salesTaxPricing.requireValue,
+                        ),
+                        isSales: widget.kind.isSales,
+                      ),
                   ],
                 ),
               ),
@@ -1001,6 +1120,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1064,7 +1184,7 @@ class _Header extends StatelessWidget {
                         DropdownMenuItem(
                           value: text(party, 'id'),
                           child: Text(
-                            '${text(party, 'code')} — ${text(party, 'nameEn')}',
+                            '${text(party, 'code')} — ${localizedRecordName(party, arabic: arabic)}',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -1167,6 +1287,7 @@ String? _costCenterChoice(List<Json> centres, String? id) {
 class _LinesTable extends StatelessWidget {
   const _LinesTable({
     required this.kind,
+    required this.pricesIncludeTax,
     required this.lines,
     required this.items,
     required this.pictures,
@@ -1179,6 +1300,7 @@ class _LinesTable extends StatelessWidget {
   });
 
   final InvoiceKind kind;
+  final bool pricesIncludeTax;
   final List<_LineDraft> lines;
   final List<Json> items;
 
@@ -1240,14 +1362,13 @@ class _LinesTable extends StatelessWidget {
                                         child: Row(
                                           children: [
                                             ItemThumbnail(
-                                              bytes:
-                                                  pictures[text(item, 'id')],
+                                              bytes: pictures[text(item, 'id')],
                                               size: 24,
                                             ),
                                             const SizedBox(width: 8),
                                             Flexible(
                                               child: Text(
-                                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
+                                                '${text(item, 'code')} — ${localizedRecordName(item, arabic: language == 'ar')}',
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
@@ -1444,7 +1565,10 @@ class _LinesTable extends StatelessWidget {
                           width: 150,
                           child: _LineBaseEquivalent(
                             key: ValueKey('line-base-equivalent-$index'),
-                            item: itemForInvoiceLine(items, lines[index].itemId),
+                            item: itemForInvoiceLine(
+                              items,
+                              lines[index].itemId,
+                            ),
                             unitName: lines[index].unitName,
                             quantity: lines[index].quantity,
                           ),
@@ -1493,7 +1617,10 @@ class _LinesTable extends StatelessWidget {
                         const SizedBox(width: 8),
                         SizedBox(
                           width: 120,
-                          child: _LineTotal(line: lines[index]),
+                          child: _LineTotal(
+                            line: lines[index],
+                            pricesIncludeTax: pricesIncludeTax,
+                          ),
                         ),
                         IconButton(
                           tooltip: l10n.removeLine,
@@ -1518,7 +1645,10 @@ class _LinesTable extends StatelessWidget {
                           Expanded(
                             child: _LineScanSummary(
                               key: ValueKey('line-scan-summary-$index'),
-                              item: itemForInvoiceLine(items, lines[index].itemId),
+                              item: itemForInvoiceLine(
+                                items,
+                                lines[index].itemId,
+                              ),
                               unitName: lines[index].unitName,
                               quantity: lines[index].quantity,
                               language: language,
@@ -1593,10 +1723,10 @@ class _LinesTable extends StatelessWidget {
                           Expanded(
                             child: Text(
                               '${l10n.beforeDiscount}: '
-                              '${formatAmount(lines[index].pricing.gross.toString())}'
-                              '  −  ${formatAmount(lines[index].pricing.discount.amount.toString())}'
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).gross.toString())}'
+                              '  −  ${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.amount.toString())}'
                               '  =  ${l10n.netLine}: '
-                              '${formatAmount(lines[index].pricing.discount.net.toString())}',
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.net.toString())}',
                               style: Theme.of(context).textTheme.bodySmall,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1712,9 +1842,10 @@ class _LineBaseEquivalent extends StatelessWidget {
 }
 
 class _LineTotal extends StatelessWidget {
-  const _LineTotal({required this.line});
+  const _LineTotal({required this.line, required this.pricesIncludeTax});
 
   final _LineDraft line;
+  final bool pricesIncludeTax;
 
   @override
   Widget build(BuildContext context) {
@@ -1730,7 +1861,7 @@ class _LineTotal extends StatelessWidget {
         child: Text('—', textAlign: TextAlign.end),
       );
     }
-    final pricing = line.pricing;
+    final pricing = line.pricing(pricesIncludeTax: pricesIncludeTax);
     final hasDiscount = pricing.discount.amount > Decimal.zero;
     return InputDecorator(
       decoration: const InputDecoration(
@@ -1768,7 +1899,7 @@ class _LineTotal extends StatelessWidget {
 }
 
 class _Totals extends StatelessWidget {
-  const _Totals({required this.totals, required this.showLandedCost});
+  const _Totals({required this.totals, required this.isSales});
 
   final ({
     Decimal gross,
@@ -1781,7 +1912,7 @@ class _Totals extends StatelessWidget {
   })
   totals;
 
-  final bool showLandedCost;
+  final bool isSales;
 
   @override
   Widget build(BuildContext context) {
@@ -1820,7 +1951,15 @@ class _Totals extends StatelessWidget {
               row(l10n.invoiceDiscount, totals.invoiceDiscount),
             row(l10n.subTotal, totals.subTotal),
             row(l10n.taxAmount, totals.tax),
-            if (showLandedCost) row(l10n.landedCosts, totals.landedCost),
+            if (!isSales || totals.landedCost != Decimal.zero)
+              row(
+                isSales
+                    ? (Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'المصاريف الإضافية'
+                          : 'Additional charges')
+                    : l10n.landedCosts,
+                totals.landedCost,
+              ),
             const Divider(),
             row(l10n.totalAmount, totals.total, strong: true),
           ],

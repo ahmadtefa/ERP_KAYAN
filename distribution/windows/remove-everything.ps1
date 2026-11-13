@@ -54,7 +54,11 @@ $script:Removed = New-Object 'System.Collections.Generic.List[string]'
 $script:Skipped = New-Object 'System.Collections.Generic.List[string]'
 
 $serviceName = 'KayanERPPostgreSQL'
-$productMarkerText = 'KAYAN ERP'
+$uninstallKeyName = '{D1B6074C-12D1-4B4A-9F2C-650A53F15D91}_is1'
+$uninstallRoots = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+  'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+)
 
 function IsElevated {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -97,9 +101,11 @@ function Stop-KayanProcesses {
       Where-Object { $_.Path -and (Test-UnderRoot $_.Path @($script:InstallRoot, $script:ProgramDataRoot)) })
     foreach ($process in $processes) {
       try {
-        Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        Stop-Process -InputObject $process -Force -ErrorAction Stop
         Start-Sleep -Milliseconds 500
       } catch {
+        # The service or an earlier stop can finish while the snapshot is in use.
+        if ($process.HasExited) { continue }
         $script:Failures.Add([ordered]@{ component = 'process'; path = "PID $($process.Id) $name"; reason = $_.Exception.Message })
       }
     }
@@ -171,20 +177,14 @@ function Remove-KayanFolder([string]$Path, [string]$Label, [string[]]$Evidence) 
 
 function Get-KayanInstallRoot {
   # The real install location, as recorded by the installer, not a guess.
-  $candidates = @()
-  foreach ($key in @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-  )) {
-    $candidates += @(Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -eq $productMarkerText -or $_.DisplayName -like 'KAYAN ERP*' } |
-      Select-Object -ExpandProperty InstallLocation -ErrorAction SilentlyContinue)
-  }
-  foreach ($candidate in ($candidates | Where-Object { $_ })) {
-    if (Test-Path -LiteralPath $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+  foreach ($key in $uninstallRoots) {
+    $entry = Get-ItemProperty -LiteralPath (Join-Path $key $uninstallKeyName) -ErrorAction SilentlyContinue
+    if ($entry.InstallLocation -and (Test-KayanOwnedFolder $entry.InstallLocation @('erp_kayan.exe'))) {
+      return (Resolve-Path -LiteralPath $entry.InstallLocation).Path
+    }
   }
   $fallback = Join-Path $env:ProgramFiles 'KAYAN ERP'
-  if (Test-Path -LiteralPath $fallback) { return (Resolve-Path -LiteralPath $fallback).Path }
+  if (Test-KayanOwnedFolder $fallback @('erp_kayan.exe')) { return (Resolve-Path -LiteralPath $fallback).Path }
   return $null
 }
 
@@ -242,9 +242,7 @@ function Remove-KayanShortcuts {
 }
 
 function Remove-KayanRegistry {
-  $keys = @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\KAYAN ERP_is1',
-    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\KAYAN ERP_is1',
+  $keys = @($uninstallRoots | ForEach-Object { Join-Path $_ $uninstallKeyName }) + @(
     'HKLM:\SOFTWARE\KAYAN',
     'HKCU:\SOFTWARE\KAYAN'
   )
@@ -261,7 +259,14 @@ function Remove-KayanRegistry {
 
 function Remove-KayanTasks {
   $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue |
-    Where-Object { $_.TaskName -like '*KAYAN*' -or $_.TaskPath -like '*KAYAN*' })
+    Where-Object {
+      $task = $_
+      $ownedActions = @($task.Actions | Where-Object {
+        $_.Execute -and $script:InstallRoot -and
+          (Test-UnderRoot ([Environment]::ExpandEnvironmentVariables($_.Execute.Trim('"'))) @($script:InstallRoot))
+      })
+      $ownedActions.Count -gt 0 -and $ownedActions.Count -eq @($task.Actions).Count
+    })
   foreach ($task in $tasks) {
     try {
       Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Confirm:$false -ErrorAction Stop
@@ -299,9 +304,9 @@ function Write-Report($Remaining) {
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     computerName   = $env:COMPUTERNAME
     installRoot    = $script:InstallRoot
-    removed        = @($script:Removed)
-    skipped        = @($script:Skipped)
-    failures       = @($script:Failures)
+    removed        = $script:Removed.ToArray()
+    skipped        = $script:Skipped.ToArray()
+    failures       = $script:Failures.ToArray()
     stillPresent   = @($Remaining)
     preservedLogs  = $script:PreservedLogs
     complete       = ($script:Failures.Count -eq 0 -and $Remaining.Count -eq 0)
@@ -351,23 +356,17 @@ if (-not $script:InstallRoot -and -not (Test-Path -LiteralPath $script:ProgramDa
   exit 0
 }
 
+$pgData = Join-Path $script:ProgramDataRoot 'PostgreSQL\data'
+if ((Test-Path -LiteralPath $pgData) -and -not (Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION') -PathType Leaf)) {
+  Write-Host '::error title=KAYAN removal::The database directory has no PG_VERSION. Complete removal stopped before changing anything.'
+  exit 1
+}
+
 Write-Host '::notice title=KAYAN removal::Complete removal started. Company data will be deleted.'
 
-Stop-KayanProcesses
 Remove-KayanService
-# Stopping the service can leave child postgres processes for a moment.
-Start-Sleep -Seconds 2
+Remove-KayanTasks
 Stop-KayanProcesses
-
-# Databases are removed by removing the data directory the service owned. The
-# identity of that directory is checked first: it must be the one this program
-# created, holding PG_VERSION, inside KAYAN's own ProgramData root.
-$pgData = Join-Path $script:ProgramDataRoot 'PostgreSQL\data'
-$pgProven = (Test-Path -LiteralPath $pgData) -and
-            (Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION'))
-if ($pgData -and (Test-Path -LiteralPath $pgData) -and -not $pgProven) {
-  $script:Failures.Add([ordered]@{ component = 'database'; path = $pgData; reason = 'folder exists but is not a PostgreSQL data directory with PG_VERSION; left alone' })
-}
 
 # -KeepLogs moves the logs aside first, so a failed removal can still be
 # diagnosed after the folder that held them is gone.
@@ -392,10 +391,9 @@ foreach ($profile in @($env:USERPROFILE)) {
 }
 Remove-KayanShortcuts
 Remove-KayanRegistry
-Remove-KayanTasks
 
 $script:PreservedLogs = $preservedLogs
-$remaining = Assert-NothingLeft
+$remaining = @(Assert-NothingLeft)
 $report = Write-Report $remaining
 
 if ($report.complete) {

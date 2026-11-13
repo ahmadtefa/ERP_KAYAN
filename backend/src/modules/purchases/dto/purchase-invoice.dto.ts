@@ -49,6 +49,7 @@ export class PurchaseInvoiceLineDto {
 export class PurchaseLandedCostChargeDto {
   @IsString() @MinLength(1) @MaxLength(120) description!: string;
   @IsString() amount!: string;
+  @IsOptional() @IsString() taxRate?: string;
 }
 
 export class CreatePurchaseInvoiceDto {

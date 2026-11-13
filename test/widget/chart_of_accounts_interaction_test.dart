@@ -160,8 +160,8 @@ void main() {
     await tester.tap(find.byType(DropdownButtonFormField<String?>).first); await tester.pumpAndSettle();
     await tester.tap(find.textContaining(longName).last); await tester.pumpAndSettle();
     expect(tester.takeException(),isNull);
-    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic *'),'حساب تجريبي');
-    await tester.enterText(find.widgetWithText(TextField,'Name in English *'),'Synthetic child');
+    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic'),'حساب تجريبي');
+    await tester.enterText(find.widgetWithText(TextField,'Name in English'),'Synthetic child');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(source.createdInput?.parentId,'long');
   });
@@ -171,8 +171,8 @@ void main() {
     await _open(tester, source);
     await tester.tap(find.text('New account'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic *'), 'أصل جديد');
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'New asset');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(source.createdInput, isNotNull);
@@ -204,7 +204,7 @@ void main() {
     final row = find.byKey(const ValueKey('leaf'));
     await tester.tap(find.descendant(of: row, matching: find.byTooltip('Edit account')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Edited cash');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'Edited cash');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(source.updatedId, 'leaf');
@@ -217,14 +217,14 @@ void main() {
     await _open(tester, source);
     await tester.tap(find.text('New account'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic *'), 'أصل جديد');
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'New asset');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNWidgets(2));
     await tester.tap(find.text('حسنًا'));
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English')).controller!.text,
         'New asset');
     expect(find.textContaining('The save result is uncertain'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNull);
@@ -237,8 +237,8 @@ void main() {
     final source = _ChartSource()..createError = const ApiFailure('بيانات مصطنعة خاصة لا تعرض',statusCode:503);
     await _open(tester, source);
     await tester.tap(find.text('New account')); await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic *'), 'أصل جديد');
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'New asset');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(find.textContaining('بيانات مصطنعة خاصة'),findsNothing);
     expect(find.textContaining('تعذّر تأكيد نتيجة العملية'),findsOneWidget);
@@ -252,20 +252,20 @@ void main() {
     await _open(tester, source);
     await tester.tap(find.text('New account'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Unsaved asset');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'Unsaved asset');
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('Unsaved changes'), findsOneWidget);
     await tester.tap(find.text('Keep editing'));
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English')).controller!.text,
         'Unsaved asset');
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Unsaved changes'), findsOneWidget);
     await tester.tap(find.text('Discard changes'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'Name in English *'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Name in English'), findsNothing);
     expect(source.createdInput, isNull);
   });
 
@@ -290,15 +290,15 @@ void main() {
         supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('New account')); await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Unsaved chart');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'Unsaved chart');
     router.go('/home'); await tester.pumpAndSettle();
     expect(find.text('Unsaved changes'),findsOneWidget);
     await tester.tap(find.text('Keep editing')); await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,'Unsaved chart');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English')).controller!.text,'Unsaved chart');
     router.go('/home'); await tester.pumpAndSettle();
     await tester.tap(find.text('Discard changes')); await tester.pumpAndSettle();
     expect(find.text('Home destination'),findsOneWidget);
-    expect(find.widgetWithText(TextField, 'Name in English *'),findsNothing);
+    expect(find.widgetWithText(TextField, 'Name in English'),findsNothing);
     expect(source.createAttempts,0);
     expect(tester.takeException(),isNull);
   });
@@ -322,8 +322,8 @@ void main() {
         supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('New account')); await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic *'),'أصل جديد');
-    await tester.enterText(find.widgetWithText(TextField,'Name in English *'),'New asset');
+    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic'),'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField,'Name in English'),'New asset');
     await tester.tap(find.text('Save')); await tester.pump();
     expect(source.createAttempts,1);
     router.go('/home'); await tester.pumpAndSettle();

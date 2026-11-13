@@ -28,6 +28,8 @@ describe('opening balances permissions', () => {
 
   it('guards writes with the opening-balances manage permission', () => {
     expect(declared('create')).toEqual(['accounting.openingbalances.manage']);
+    expect(declared('update')).toEqual(['accounting.openingbalances.manage']);
+    expect(declared('remove')).toEqual(['accounting.openingbalances.manage']);
     expect(declared('post')).toEqual(['accounting.openingbalances.manage']);
     expect(declared('reverse')).toEqual(['accounting.openingbalances.manage']);
   });

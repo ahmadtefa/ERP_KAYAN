@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/data_dialog.dart';
@@ -41,7 +42,9 @@ final warehousesListProvider =
     );
 
 class WarehousesScreen extends ConsumerStatefulWidget {
-  const WarehousesScreen({super.key});
+  const WarehousesScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<WarehousesScreen> createState() => _WarehousesScreenState();
@@ -50,13 +53,31 @@ class WarehousesScreen extends ConsumerStatefulWidget {
 class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
   String _query = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
   /// The backend carries both names; the screen shows the one belonging to the
   /// interface language, in the same way items and stock already do.
-  String _name(Json row) =>
-      _arabic ? text(row, 'nameAr') : text(row, 'nameEn');
+  String _name(Json row) => _arabic
+      ? text(row, 'nameAr', fallback: text(row, 'nameEn'))
+      : text(row, 'nameEn', fallback: text(row, 'nameAr'));
 
   @override
   Widget build(BuildContext context) {
@@ -122,26 +143,19 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
         value: async,
         onRetry: () => ref.read(warehousesListProvider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: _arabic
-            ? 'لا توجد مستودعات بعد.'
-            : 'No warehouses yet.',
+        emptyMessage: _arabic ? 'لا توجد مستودعات بعد.' : 'No warehouses yet.',
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           columns: [
-            ColumnSpec(
-              l10n.warehouse,
-              value: (r) => _name(r),
-              emphasise: true,
-            ),
+            ColumnSpec(l10n.warehouse, value: (r) => _name(r), emphasise: true),
             ColumnSpec(
               _arabic ? 'الكود' : 'Code',
               value: (r) => text(r, 'code'),
             ),
             ColumnSpec(
               _arabic ? 'الفرع' : 'Branch',
-              value: (r) => _arabic
-                  ? text(r, 'branchNameAr')
-                  : text(r, 'branchNameEn'),
+              value: (r) =>
+                  _arabic ? text(r, 'branchNameAr') : text(r, 'branchNameEn'),
             ),
             ColumnSpec(
               _arabic ? 'العنوان' : 'Address',
@@ -229,10 +243,9 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
     // the same screen then works for a company with one branch and for one
     // with twenty.
     final fields = [
-      if (!isEdit)
-        FieldSpec('code', arabic ? 'الكود' : 'Code', required: true),
-      FieldSpec('nameEn', 'Name (English)', required: true),
-      FieldSpec('nameAr', 'الاسم (عربي)', required: true),
+      if (!isEdit) FieldSpec('code', arabic ? 'الكود' : 'Code', required: true),
+      FieldSpec('nameEn', 'Name (English)'),
+      FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec(
         'branchId',
         arabic ? 'معرّف الفرع' : 'Branch id',
@@ -241,11 +254,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
             ? 'الفرع الذي يتبع له المستودع.'
             : 'The branch this warehouse belongs to.',
       ),
-      FieldSpec(
-        'address',
-        arabic ? 'العنوان' : 'Address',
-        maxLines: 2,
-      ),
+      FieldSpec('address', arabic ? 'العنوان' : 'Address', maxLines: 2),
       FieldSpec(
         'isDefault',
         arabic ? 'المستودع الافتراضي للفرع' : 'Default for the branch',
@@ -263,6 +272,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
           : (arabic ? 'مستودع جديد' : 'New warehouse'),
       fields: fields,
       initial: existing ?? const {},
+      exitRelay: _exitRelay,
       onSubmit: (entered) async {
         await _submit(entered, existing: existing);
       },

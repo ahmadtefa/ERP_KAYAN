@@ -123,6 +123,26 @@ describe('applyPriceVisibility on the finished output', () => {
   });
 });
 
+it('removes profit, cost values outside the column list, and derived purchase totals', () => {
+  const report: ReportTable = {
+    slug: 'sales',
+    titleEn: 'Sales', titleAr: 'المبيعات', meta: [], notes: [],
+    columns: [
+      { key: 'grossProfit', labelEn: 'Gross profit', labelAr: 'مجمل الربح' },
+      { key: 'totalAmount', labelEn: 'Total', labelAr: 'الإجمالي' },
+    ],
+    rows: [{ grossProfit: '99', costOfGoods: '101', totalAmount: '200' }],
+    totals: [{ labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: '99' }],
+  };
+  const sales = applyPriceVisibility(report, { showCost: false });
+  expect(sales.columns.map(column => column.key)).toEqual(['totalAmount']);
+  expect(sales.rows).toEqual([{ totalAmount: '200' }]);
+  expect(sales.totals).toEqual([]);
+  const purchases = applyPriceVisibility({ ...report, slug: 'purchases' }, { showCost: false });
+  expect(purchases.columns).toEqual([]);
+  expect(purchases.rows).toEqual([{}]);
+});
+
 describe('resolvePriceVisibility', () => {
   const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read'] };
   const clerk = { isSuperAdmin: false, permissions: ['inventory.items.read'] };
@@ -204,4 +224,20 @@ describe('applyPriceVisibility on the stock list table', () => {
     expect(result.columns.map((c) => c.key)).toContain('value');
     expect(JSON.stringify(result)).toContain('50.0000');
   });
+});
+
+it('hides purchase unit prices and derived amounts without exposing unlisted fields', () => {
+  const purchase: ReportTable = {
+    ...table,
+    slug: 'purchase-invoice',
+    columns: [
+      { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية' },
+      { key: 'unitPrice', labelEn: 'Unit price', labelAr: 'سعر الوحدة' },
+    ],
+    rows: [{ quantity: '2', unitPrice: '12', netUnitPrice: '10', lineTotal: '20', paidAmount: '5' }],
+  };
+  const hidden = applyPriceVisibility(purchase, { showCost: false });
+  expect(hidden.columns.map(column => column.key)).toEqual(['quantity']);
+  expect(hidden.rows).toEqual([{ quantity: '2' }]);
+  expect(applyPriceVisibility(purchase, { showSalePrice: false, showCost: true }).rows).toEqual(purchase.rows);
 });

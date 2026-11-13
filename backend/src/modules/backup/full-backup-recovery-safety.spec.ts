@@ -94,6 +94,14 @@ describe('full restore failure safety', () => {
     }
   });
 
+  it('leaves the live schema untouched when admitted requests cannot drain', async () => {
+    jest.spyOn(maintenance, 'waitForBusinessRequests').mockRejectedValueOnce(new Error('drain deadline'));
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow('drain deadline');
+    expect(internals.createSafety).not.toHaveBeenCalled();
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+    expect(maintenance.isActive).toBe(false);
+  });
+
   it('releases maintenance if the safety backup fails before the primary is touched', async () => {
     internals.createSafety.mockRejectedValue(new Error('synthetic failure'));
     await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow('synthetic failure');

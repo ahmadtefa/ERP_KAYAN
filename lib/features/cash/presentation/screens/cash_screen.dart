@@ -143,8 +143,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
       title: l10n.newCashAccount,
       fields: [
         FieldSpec('code', l10n.accountCode, required: true),
-        FieldSpec('nameEn', l10n.fullNameEn, required: true),
-        FieldSpec('nameAr', l10n.fullNameAr, required: true),
+        FieldSpec('nameEn', l10n.fullNameEn),
+        FieldSpec('nameAr', l10n.fullNameAr),
         FieldSpec(
           'kind',
           l10n.voucherType,

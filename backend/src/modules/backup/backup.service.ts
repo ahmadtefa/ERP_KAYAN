@@ -2,10 +2,11 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   NotFoundException,
 } from '@nestjs/common';
-import { basename, join } from 'node:path';
-import { readFile, unlink } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
+import { lstat, readFile, unlink } from 'node:fs/promises';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
 
@@ -18,6 +19,7 @@ import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
 import {
+  LEGACY_LOGO_MIME,
   LOGO_MAX_BYTES,
   logoDimensions,
   uploadsDir,
@@ -314,6 +316,10 @@ export class BackupService {
     });
     if (!company) throw new BadRequestException('Company not found');
 
+    const logo = company.logoData?.length
+      ? { data: company.logoData, mime: company.logoMime ?? 'image/png' }
+      : await this.readLegacyLogo(company.logoPath);
+
     const tables: BackupFile['tables'] = {};
     const counts: Record<string, number> = {};
 
@@ -343,10 +349,8 @@ export class BackupService {
         address: company.address,
         currency: company.currency,
         timezone: company.timezone,
-        logoBase64: company.logoData
-          ? Buffer.from(company.logoData).toString('base64')
-          : null,
-        logoMime: company.logoData ? company.logoMime : null,
+        logoBase64: logo ? Buffer.from(logo.data).toString('base64') : null,
+        logoMime: logo?.mime ?? null,
       },
       counts,
       tables,
@@ -356,6 +360,28 @@ export class BackupService {
   /// The sample backup is shipped as a discoverable download, but never
   /// inferred from a caller-supplied path. The first location is the packaged
   /// Windows layout; the second is the repository layout used in development.
+  private async readLegacyLogo(logoPath: string | null) {
+    if (!logoPath) return null;
+    const name = basename(logoPath);
+    const mime = LEGACY_LOGO_MIME[extname(name).toLowerCase()];
+    try {
+      if (!mime) throw new Error('Unsupported logo type');
+      const path = join(uploadsDir(), name);
+      const stat = await lstat(path);
+      if (!stat.isFile() || stat.size > LOGO_MAX_BYTES) throw new Error('Invalid logo file');
+      const logo = validateLogo(await readFile(path), mime);
+      const { width, height } = logoDimensions(Buffer.from(logo.data), logo.mime) ?? {};
+      if (!width || !height || width < 32 || height < 32 || width > 2048 || height > 2048) {
+        throw new Error('Invalid logo dimensions');
+      }
+      return logo;
+    } catch {
+      throw new ServiceUnavailableException(
+        'تعذّر تضمين شعار الشركة القديم في النسخة. أعد رفع الشعار ثم أعد المحاولة. / Could not include the legacy company logo. Upload the logo again and retry.',
+      );
+    }
+  }
+
   async demoBackup(): Promise<Buffer> {
     const fileName = 'kayan-company-backup-demo.json';
     const paths = [

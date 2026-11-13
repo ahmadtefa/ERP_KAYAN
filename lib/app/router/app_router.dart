@@ -178,10 +178,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '${AppRoutes.openingBalances}/:id',
+        onExit: (_, state) => ref.read(currentUserProvider) == null
+            ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.openingBalances,
+          guardKey: state.pageKey,
           child: OpeningBalancesScreen(
             documentId: state.pathParameters['id'],
+            navigationKey: state.pageKey,
           ),
         ),
       ),
@@ -229,7 +233,9 @@ final routerProvider = Provider<GoRouter>((ref) {
                       : route.path == AppRoutes.stock
                         ? StockScreen(navigationKey:state.pageKey)
                         : route.path == AppRoutes.warehouses
-                          ? WarehousesScreen()
+                          ? WarehousesScreen(navigationKey: state.pageKey)
+                          : route.path == AppRoutes.openingBalances
+                            ? OpeningBalancesScreen(navigationKey: state.pageKey)
                           : route.path == AppRoutes.batches
                             ? BatchesScreen()
                             : route.path == AppRoutes.storageLocations
@@ -241,7 +247,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                                   : route.path == AppRoutes.writeOffs
                                     ? WriteOffsScreen()
                                     : route.path == AppRoutes.stockDocuments
-                                      ? StockDocumentsScreen()
+                                      ? StockDocumentsScreen(navigationKey: state.pageKey)
                                       : route.path == AppRoutes.inventoryReports
                                         ? InventoryReportsScreen()
                                         : route.path == AppRoutes.warehouseAccess
@@ -255,7 +261,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 const _guardedShellPaths = <String>{
   AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
-  AppRoutes.warehouses,
+  AppRoutes.warehouses, AppRoutes.openingBalances,
   AppRoutes.batches,
   AppRoutes.expiryAlerts,
   AppRoutes.storageLocations,

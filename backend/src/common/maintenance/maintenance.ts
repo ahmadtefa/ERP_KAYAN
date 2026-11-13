@@ -5,7 +5,7 @@ import {
   NestInterceptor,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import { finalize, Observable } from 'rxjs';
 
 /**
  * The maintenance switch.
@@ -14,15 +14,47 @@ import { Observable } from 'rxjs';
  * switch rejects business requests while data may be incomplete; only
  * diagnostics and access to already-created backup files remain available.
  *
- * IMPORTANT: this switch is process-local and does not drain in-flight work,
- * coordinate other backend processes or survive a restart. It is not by itself
- * a production-safe restore protocol.
+ * The switch drains admitted HTTP business handlers in this process. Other
+ * processes, background work and crash recovery require separate coordination.
  */
 @Injectable()
 export class MaintenanceService {
   private active = false;
   private detail: string | null = null;
   private since: Date | null = null;
+  private inFlight = 0;
+  private readonly drained = new Set<() => void>();
+
+  trackBusinessRequest(): () => void {
+    this.inFlight++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.inFlight--;
+      if (this.inFlight === 0) {
+        for (const resolve of this.drained) resolve();
+      }
+    };
+  }
+
+  waitForBusinessRequests(timeoutMs = 30_000): Promise<void> {
+    if (this.inFlight === 0) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const finish = () => {
+        clearTimeout(timeout);
+        this.drained.delete(finish);
+        resolve();
+      };
+      const timeout = setTimeout(() => {
+        this.drained.delete(finish);
+        reject(new ServiceUnavailableException(
+          'Existing business requests did not finish before the restore deadline. The database was not changed.',
+        ));
+      }, timeoutMs);
+      this.drained.add(finish);
+    });
+  }
 
   get isActive(): boolean {
     return this.active;
@@ -59,8 +91,6 @@ export class MaintenanceInterceptor implements NestInterceptor {
   constructor(private readonly maintenance: MaintenanceService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    if (!this.maintenance.isActive) return next.handle();
-
     const request = context.switchToHttp().getRequest<{
       method: string;
       path: string;
@@ -78,6 +108,15 @@ export class MaintenanceInterceptor implements NestInterceptor {
     const isRestoreRequest =
       method === 'POST' && path === '/backup/full/restore';
     if ((isRead && (safeDiagnostic || safeBackup)) || isRestoreRequest) return next.handle();
+    if (!this.maintenance.isActive) {
+      const release = this.maintenance.trackBusinessRequest();
+      try {
+        return next.handle().pipe(finalize(release));
+      } catch (error) {
+        release();
+        throw error;
+      }
+    }
 
     throw new ServiceUnavailableException(
       'The database is in maintenance mode. Business reads and writes are blocked; ' +

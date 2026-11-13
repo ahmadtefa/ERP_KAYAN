@@ -66,8 +66,11 @@ export class CashAccountsService {
 
   async create(companyId: string, userId: string, dto: Record<string, unknown>) {
     const code = this.text(dto.code, 'code');
-    const nameEn = this.text(dto.nameEn, 'nameEn');
-    const nameAr = this.text(dto.nameAr, 'nameAr');
+    const enteredEn = String(dto.nameEn ?? '').trim();
+    const enteredAr = String(dto.nameAr ?? '').trim();
+    if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English name');
+    const nameEn = enteredEn || enteredAr;
+    const nameAr = enteredAr || enteredEn;
     const accountId = this.text(dto.accountId, 'accountId');
     const kind = String(dto.kind ?? 'CASH').toUpperCase() as CashAccountKind;
     if (!Object.values(CashAccountKind).includes(kind)) {
@@ -144,6 +147,13 @@ export class CashAccountsService {
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Cash account not found');
+    if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+      const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
+      if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English name');
+      dto.nameEn = enteredEn || enteredAr;
+      dto.nameAr = enteredAr || enteredEn;
+    }
 
     const data: Record<string, unknown> = { updatedBy: userId };
     for (const field of ['nameEn', 'nameAr', 'bankName', 'bankAccountNumber', 'iban', 'swiftCode', 'notes']) {

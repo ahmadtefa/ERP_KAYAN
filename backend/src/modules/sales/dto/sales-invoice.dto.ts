@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
@@ -15,6 +16,7 @@ import {
 
 export class SalesInvoiceLineDto {
   @IsOptional() @IsUUID() itemId?: string;
+  @IsOptional() @IsBoolean() isAdditionalCharge?: boolean;
 
   /// Optional: when an item is given the item's name is used instead, so a
   /// quick invoice does not force the user to retype what the item already says.

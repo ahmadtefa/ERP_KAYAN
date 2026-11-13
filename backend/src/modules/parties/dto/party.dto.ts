@@ -13,8 +13,8 @@ import {
 
 export class CreatePartyDto {
   @IsString() @MaxLength(30) code!: string;
-  @IsString() @MaxLength(200) nameEn!: string;
-  @IsString() @MaxLength(200) nameAr!: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
   @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsEmail() @MaxLength(200) email?: string;
   @IsOptional() @IsString() @MaxLength(60) taxNumber?: string;

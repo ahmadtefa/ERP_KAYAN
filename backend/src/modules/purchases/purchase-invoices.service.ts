@@ -55,6 +55,7 @@ const RATE_SCALE = 4;
 interface PreparedLandedCostCharge {
   description: string;
   amount: Prisma.Decimal;
+  taxRate: Prisma.Decimal;
 }
 
 interface PreparedLine {
@@ -139,7 +140,7 @@ export class PurchaseInvoicesService {
     return { items: items.map((i) => this.toSummary(i)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -191,10 +192,10 @@ export class PurchaseInvoicesService {
         discountPercent: l.discountPercent.toFixed(RATE_SCALE),
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
-        landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
-        inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
+        landedCostAmount: mayReadCost ? l.landedCostAmount.toFixed(MONEY_SCALE) : null,
+        inventoryCostTotal: mayReadCost ? l.inventoryCostTotal.toFixed(MONEY_SCALE) : null,
         costCenterId: l.costCenterId ?? null,
-        returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
+        returnedCostTotal: mayReadCost ? l.returnedCostTotal.toFixed(MONEY_SCALE) : null,
       })),
     };
   }
@@ -205,6 +206,7 @@ export class PurchaseInvoicesService {
     userId: string,
     dto: CreatePurchaseInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
+    mayReadCost = true,
   ) {
     const created = await this.prisma.$transaction((tx) =>
       this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
@@ -222,7 +224,7 @@ export class PurchaseInvoicesService {
       },
     });
 
-    return this.findOne(companyId, created.id);
+    return this.findOne(companyId, created.id, mayReadCost);
   }
 
   /** Internal: caller owns the transaction and any required audit records. */
@@ -255,6 +257,7 @@ export class PurchaseInvoicesService {
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
       orderUnits,
       tx,
+      landedCosts.tax,
     );
     const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
@@ -333,6 +336,7 @@ export class PurchaseInvoicesService {
     userId: string,
     id: string,
     dto: CreatePurchaseInvoiceDto,
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -368,6 +372,9 @@ export class PurchaseInvoicesService {
       dto.supplierId,
       landedCostAmount,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      undefined,
+      this.prisma,
+      landedCosts.tax,
     );
     const lines = prepared.lines;
     const subTotal = lines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
@@ -456,11 +463,11 @@ export class PurchaseInvoicesService {
         landedCostAmount: landedCostAmount.toFixed(MONEY_SCALE),
       },
     });
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
-  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>, mayReadCost = true) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const before = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { purchaseOrderId: true },
@@ -570,7 +577,7 @@ export class PurchaseInvoicesService {
           allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
       }, tx);
     }, { maxWait: 10000, timeout: 30000 });
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /** Cancel a draft without deleting its historical identity or retry key. */
@@ -615,7 +622,7 @@ export class PurchaseInvoicesService {
     return { id, cancelled: true };
   }
 
-  async post(companyId: string, userId: string, id: string) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { status: true },
@@ -776,10 +783,10 @@ export class PurchaseInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -938,7 +945,7 @@ export class PurchaseInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /// The due date the supplier's payment terms imply, or null when they have
@@ -962,6 +969,7 @@ export class PurchaseInvoicesService {
 
   private prepareLandedCosts(dto: CreatePurchaseInvoiceDto): {
     total: Prisma.Decimal;
+    tax: Prisma.Decimal;
     charges: PreparedLandedCostCharge[];
   } {
     const legacyTotal = dto.landedCostAmount === undefined
@@ -980,6 +988,7 @@ export class PurchaseInvoicesService {
         return {
           description,
           amount: this.nonNegative(raw.amount, `Landed-cost charge ${index + 1} amount`),
+          taxRate: this.rate(raw.taxRate?.trim() || '0', `Landed-cost charge ${index + 1} tax rate`),
         };
       });
       const total = charges.reduce(
@@ -991,15 +1000,20 @@ export class PurchaseInvoicesService {
           `landedCostAmount (${legacyTotal.toFixed(MONEY_SCALE)}) must equal the sum of named charges (${total.toFixed(MONEY_SCALE)})`,
         );
       }
-      return { total, charges };
+      const tax = charges.reduce(
+        (sum, charge) => sum.plus(charge.amount.mul(charge.taxRate).div(100).toDecimalPlaces(MONEY_SCALE)),
+        new Prisma.Decimal(0),
+      );
+      return { total, tax, charges };
     }
 
     const total = legacyTotal ?? new Prisma.Decimal(0);
     return {
       total,
+      tax: new Prisma.Decimal(0),
       charges: total.isZero()
         ? []
-        : [{ description: 'Other landed costs', amount: total }],
+        : [{ description: 'Other landed costs', amount: total, taxRate: new Prisma.Decimal(0) }],
     };
   }
 
@@ -1007,6 +1021,7 @@ export class PurchaseInvoicesService {
     return charges.map((charge) => ({
       description: charge.description,
       amount: charge.amount.toFixed(MONEY_SCALE),
+      ...(charge.taxRate.isZero() ? {} : { taxRate: charge.taxRate.toFixed(RATE_SCALE) }),
     })) as Prisma.InputJsonValue;
   }
 
@@ -1018,6 +1033,7 @@ export class PurchaseInvoicesService {
     documentDiscount: DiscountInput,
     orderUnits?: readonly TrustedOrderUnit[],
     client: Prisma.TransactionClient = this.prisma,
+    landedCostTax: Prisma.Decimal = new Prisma.Decimal(0),
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     const settings = await this.settings.get(companyId, client);
@@ -1185,11 +1201,11 @@ export class PurchaseInvoicesService {
     }));
 
     let allocated: string[];
+    let allocatedTax: string[];
     try {
-      allocated = allocateLandedCostAmounts(
-        discounted.map((line) => line.lineTotal.toFixed(MONEY_SCALE)),
-        landedCostAmount.toFixed(MONEY_SCALE),
-      );
+      const weights = discounted.map((line) => line.lineTotal.toFixed(MONEY_SCALE));
+      allocated = allocateLandedCostAmounts(weights, landedCostAmount.toFixed(MONEY_SCALE));
+      allocatedTax = allocateLandedCostAmounts(weights, landedCostTax.toFixed(MONEY_SCALE));
     } catch (error) {
       throw new BadRequestException(
         error instanceof Error ? error.message : 'Landed costs could not be allocated',
@@ -1200,7 +1216,8 @@ export class PurchaseInvoicesService {
       const lineLandedCost = new Prisma.Decimal(allocated[index]);
       return {
         ...line,
-        taxAmount: line.lineTotal.mul(line.taxRate).div(100).toDecimalPlaces(MONEY_SCALE),
+        taxAmount: line.lineTotal.mul(line.taxRate).div(100).toDecimalPlaces(MONEY_SCALE)
+          .plus(allocatedTax[index]),
         landedCostAmount: lineLandedCost,
         inventoryCostTotal: line.lineTotal.plus(lineLandedCost),
       };
@@ -1263,7 +1280,7 @@ export class PurchaseInvoicesService {
     }
   }
 
-  private toLandedCostCharges(value: Prisma.JsonValue): Array<{ description: string; amount: string }> {
+  private toLandedCostCharges(value: Prisma.JsonValue): Array<{ description: string; amount: string; taxRate?: string }> {
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
       if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return [];
@@ -1274,6 +1291,7 @@ export class PurchaseInvoicesService {
         return [{
           description: row.description,
           amount: new Prisma.Decimal(String(row.amount)).toFixed(MONEY_SCALE),
+          ...(typeof row.taxRate === 'string' ? { taxRate: row.taxRate } : {}),
         }];
       } catch {
         return [];

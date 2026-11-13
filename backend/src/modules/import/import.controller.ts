@@ -127,7 +127,7 @@ export class ImportController {
     return this.service.run(slug, user.companyId, user.userId, file, {
       dryRun: query.dryRun === 'true' || query.dryRun === '1',
       mode: query.mode === 'upsert' ? 'upsert' : 'insert',
-      clearBlankTaxRates: slug === 'items' && query.clearBlankTaxRates === 'true',
+      clearBlankTaxRates: slug === 'items' && (query.clearBlankTaxRates === undefined || query.clearBlankTaxRates === 'true'),
     }, user.branchId, user.isSuperAdmin);
   }
 

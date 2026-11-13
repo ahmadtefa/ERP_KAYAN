@@ -41,12 +41,12 @@ module.exports = async ({prisma,audit,company,branch,user}) => {
     permissions.push('inventory.items.update');
     assert.equal((await send(absent,{...baseParams,clearBlankTaxRates:'true'})).status,201);
     assert.equal(await current(),'14.0000');
-    assert.equal((await send(withTax('  '),baseParams)).status,201);
+    assert.equal((await send(withTax('  '),{...baseParams,clearBlankTaxRates:'false'})).status,201);
     assert.equal(await current(),'14.0000');
     const dry=await send(withTax('  '),{...baseParams,dryRun:'true',clearBlankTaxRates:'true'});
     assert.equal(dry.status,201); assert.equal(dry.body.clearedBlankTaxRates,1);
     assert.equal(await current(),'14.0000');
-    const committed=await send(withTax('  '),{...baseParams,clearBlankTaxRates:'true'});
+    const committed=await send(withTax('  '),baseParams);
     assert.equal(committed.status,201); assert.equal(committed.body.clearedBlankTaxRates,1);
     assert.equal(await current(),'0.0000');
     for(const [value,expected] of [['5','5.0000'],['0','0.0000'],['14','14.0000']]) {
@@ -56,6 +56,6 @@ module.exports = async ({prisma,audit,company,branch,user}) => {
     const invalid=await send(withTax('101'),baseParams);
     assert.equal(invalid.status,201); assert.equal(invalid.body.errors.length,1);
     assert.equal(await current(),'14.0000');
-    console.log('PASS: isolated real HTTP/PG item tax import: omitted, protected blank, opted-in blank preview/commit, zero, rates, validation and permission denial; principal injected.');
+    console.log('PASS: isolated real HTTP/PG item tax import: omitted, protected blank, blank preview/default commit, zero, rates, validation and permission denial; principal injected.');
   } finally { await app.close(); }
 };

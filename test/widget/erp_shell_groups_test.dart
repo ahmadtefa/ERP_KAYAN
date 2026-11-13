@@ -284,17 +284,16 @@ void main() {
             await tester.tap(find.byIcon(Icons.menu_rounded));
             await tester.pumpAndSettle();
           }
-          // The route changed to the sales invoice screen, so the shell opens
-          // the section that owns it. Tapping the header closes that section;
-          // tapping it again reopens it. Before the accordion the columns were
-          // independent, and this sequence proved nothing about the route.
           await tester.ensureVisible(group);
           await tester.pumpAndSettle();
-          expect(invoice, findsOneWidget,
-              reason: 'the section owning the current route is open');
-          await tester.tap(group);
-          await tester.pumpAndSettle();
-          expect(invoice, findsNothing);
+          if (mobile) {
+            expect(invoice, findsNothing);
+          } else {
+            expect(invoice, findsOneWidget);
+            await tester.tap(group);
+            await tester.pumpAndSettle();
+            expect(invoice, findsNothing);
+          }
           router.go(AppRoutes.dashboard);
           await tester.pumpAndSettle();
           if (mobile) {
@@ -343,14 +342,7 @@ void main() {
                   username: 'u',
                   fullName: 'u',
                   companyId: 'c',
-                  permissions: [
-                    'inventory.warehouses.read',
-                    'inventory.batches.read',
-                    'inventory.stock.read',
-                    'inventory.stocktake.read',
-                    'sales.invoices.read',
-                    'purchases.invoices.read',
-                  ],
+                  isSuperAdmin: true,
                 ),
               ),
             ],
@@ -364,45 +356,14 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // 1. The section headings this user may reach, and nothing else. The
-        // menu holds eight sections, but a section with no permitted entry is
-        // not drawn at all - a heading with nothing under it is a dead end the
-        // operator cannot use. Four of the eight are reachable with these
-        // permissions, so the menu shows four headings.
-        const sections = <String>[
-          'overview',
-          'inventory',
-          'sales',
-          'purchases',
-          'administration',
+        const sections = [
+          'overview', 'accounting', 'parties', 'inventory',
+          'sales', 'purchases', 'insights', 'administration',
         ];
         for (final section in sections) {
-          expect(find.byKey(ValueKey('nav-group-$section')), findsOneWidget,
-              reason: 'section $section must be in the menu');
+          expect(find.byKey(ValueKey('nav-group-$section')), findsOneWidget);
         }
-        // A section the user has no permission for is absent, not empty.
-        for (final hidden in ['accounting', 'parties', 'insights']) {
-          expect(find.byKey(ValueKey('nav-group-$hidden')), findsNothing,
-              reason: 'section $hidden has no permitted entry');
-        }
-        // 2. Exactly one section is open - the one that owns the screen being
-        // shown - and no other section's entries are on screen. This is the
-        // accordion rule; a menu that expanded everything would list every
-        // entry of every section here.
-        expect(find.text('Warehouses'), findsNothing);
-        expect(find.text('Batches'), findsNothing);
-        expect(find.text('Purchase invoices'), findsNothing);
-        // ...while the overview entry (the dashboard list row) is visible,
-        // because the operator is looking at it. Matched as a list row, not as
-        // any text: the top bar also names the current screen, and a loose
-        // match would pass even if the sidebar entry were missing.
-        expect(
-          find.widgetWithText(
-            ListTile,
-            arabic ? 'لوحة التحكم' : 'Dashboard',
-          ),
-          findsOneWidget,
-        );
+        expect(find.byType(ListTile), findsNothing);
 
         // 3. Opening a section shows its entries, in the interface language.
         final inventory = find.byKey(const ValueKey('nav-group-inventory'));

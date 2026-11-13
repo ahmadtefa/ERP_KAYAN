@@ -43,13 +43,19 @@ test('ownership is proven before a folder is removed', () => {
 });
 
 test('the database folder must be identifiable as PostgreSQL', () => {
-  assert.match(source, /PG_VERSION/);
-  assert.match(source, /is not a PostgreSQL data directory/);
+  const markerCheck = source.indexOf("Join-Path $pgData 'PG_VERSION'");
+  const firstMutation = source.search(/^Stop-KayanProcesses$/m);
+  assert.ok(markerCheck > 0 && markerCheck < firstMutation);
+  assert.match(source.slice(markerCheck, firstMutation), /exit 1/);
 });
 
-test('the install location comes from the registry, not a fixed guess', () => {
-  assert.match(source, /Uninstall\\\*/);
-  assert.match(source, /InstallLocation/);
+test('the install location and uninstall registry entry use the exact Inno AppId', () => {
+  const appId = installer.match(/^#define AppId "{{([A-F0-9-]+)}"/m)?.[1];
+  assert.ok(appId);
+  assert.ok(source.includes(`'{${appId}}_is1'`));
+  assert.match(source, /Get-ItemProperty -LiteralPath \(Join-Path \$key \$uninstallKeyName\)/);
+  assert.match(source, /Test-KayanOwnedFolder \$entry.InstallLocation/);
+  assert.match(source, /Join-Path \$_ \$uninstallKeyName/);
 });
 
 test('every component in the requirement is handled', () => {
@@ -57,7 +63,6 @@ test('every component in the requirement is handled', () => {
     'KayanERPPostgreSQL',        // the service
     'AppData\\Roaming\\KAYAN-ERP', // per-user settings
     'AppData\\Local\\KAYAN-ERP',   // per-user cache
-    'Uninstall\\KAYAN ERP_is1',    // registry entry
     'Get-ScheduledTask',           // scheduled tasks
     'Start Menu',                  // shortcuts
   ]) {
@@ -67,6 +72,7 @@ test('every component in the requirement is handled', () => {
 
 test('success is never claimed while anything remains', () => {
   assert.match(source, /function Assert-NothingLeft/);
+  assert.match(source, /\$remaining = @\(Assert-NothingLeft\)/);
   assert.match(source, /complete       = \(\$script:Failures\.Count -eq 0 -and \$Remaining\.Count -eq 0\)/);
   assert.match(source, /did not finish/);
   assert.match(source, /exit 1/);
@@ -113,12 +119,18 @@ test('two confirmations, both explicit, before data is destroyed', () => {
 });
 
 test('processes and the service are stopped before files are deleted', () => {
-  const main = source.slice(source.indexOf('Stop-KayanProcesses\nRemove-KayanService'));
-  assert.ok(main.indexOf('Stop-KayanProcesses') < main.indexOf('Remove-KayanFolder'));
+  const main = source.slice(source.search(/^Remove-KayanService$/m));
+  assert.match(main, /^Remove-KayanService[\s\S]*?^Stop-KayanProcesses[\s\S]*?^Remove-KayanFolder/m);
   assert.ok(source.includes('Stop-Service -Name $serviceName -Force'));
 });
 
 test('logs can be kept for diagnosis without blocking the removal', () => {
   assert.match(source, /\[switch\]\$KeepLogs/);
   assert.match(source, /Copy-Item -LiteralPath \$LogDirectory/);
+});
+
+test('only a process that has exited can suppress a stop error', () => {
+  const stop = source.slice(source.indexOf('function Stop-KayanProcesses'), source.indexOf('function Remove-KayanService'));
+  assert.match(stop, /Stop-Process -InputObject \$process -Force -ErrorAction Stop/);
+  assert.match(stop, /if \(\$process.HasExited\) \{ continue \}[\s\S]*?\$script.Failures.Add/);
 });

@@ -13,15 +13,21 @@ import 'test_harness.dart';
 
 class _FakeApiClient extends ApiClient {
   _FakeApiClient()
-      : super(
-          const AppConfig(
-            environment: AppEnvironment.development,
-            apiBaseUrl: 'https://test.invalid/api/v1',
-            connectTimeout: Duration(seconds: 1),
-            receiveTimeout: Duration(seconds: 1),
-          ),
-          FakeTokenStore(),
-        );
+    : super(
+        const AppConfig(
+          environment: AppEnvironment.development,
+          apiBaseUrl: 'https://test.invalid/api/v1',
+          connectTimeout: Duration(seconds: 1),
+          receiveTimeout: Duration(seconds: 1),
+        ),
+        FakeTokenStore(),
+      );
+
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => {'pricesIncludeTax': true};
 
   String? postPath;
   Map<String, dynamic>? postBody;
@@ -47,8 +53,139 @@ class _FakeApiClient extends ApiClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('purchase editor sends multiple named landed-cost charges and their total', (tester) async {
-    tester.view.physicalSize = const Size(1600, 1000);
+  testWidgets(
+    'purchase editor sends multiple named landed-cost charges and their total',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeApiClient();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(api),
+            activeItemsProvider.overrideWith(
+              (ref) async => [
+                {
+                  'id': 'item-1',
+                  'code': 'ITEM-1',
+                  'nameEn': 'Tracked item',
+                  'nameAr': 'صنف مخزني',
+                  'unit': 'piece',
+                  'isActive': true,
+                  'isStockTracked': true,
+                  'taxRate': '0.0000',
+                  'purchasePrice': '10.0000',
+                },
+              ],
+            ),
+            activeSuppliersProvider.overrideWith(
+              (ref) async => [
+                {
+                  'id': 'supplier-1',
+                  'code': 'SUP-1',
+                  'nameEn': 'Test supplier',
+                  'nameAr': 'مورد تجريبي',
+                  'isActive': true,
+                },
+              ],
+            ),
+          ],
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const InvoiceEditorScreen(
+                          kind: InvoiceKind.purchase,
+                        ),
+                      ),
+                    ),
+                    child: const Text('Open editor'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open editor'));
+      await tester.pumpAndSettle();
+
+      final dropdowns = find.byType(DropdownButtonFormField<String>);
+      expect(dropdowns, findsNWidgets(3));
+      expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
+      await tester.tap(dropdowns.at(0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SUP-1 — Test supplier').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ITEM-1 — Tracked item').last);
+      await tester.pumpAndSettle();
+
+      // A fixed invoice-wide discount travels independently of landed costs:
+      // the discount reduces the goods value, the charges are added after it.
+      await tester.tap(find.byKey(const ValueKey('document-discount')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fixed amount').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('document-discount-value')),
+        '5',
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Add charge'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('landed-cost-description-0')),
+        'Freight',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('landed-cost-amount-0')),
+        '7.00',
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Add charge'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('landed-cost-description-1')),
+        'Insurance',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('landed-cost-amount-1')),
+        '3.00',
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(api.postPath, '/purchases/invoices');
+      expect(api.postBody?['discountType'], 'AMOUNT');
+      expect(api.postBody?['discountAmount'], '5');
+      expect(api.postBody?['landedCostAmount'], '10');
+      expect(api.postBody?['landedCostCharges'], [
+        {'description': 'Freight', 'amount': '7'},
+        {'description': 'Insurance', 'amount': '3'},
+      ]);
+    },
+  );
+
+  testWidgets('sales editor submits independently taxed charges', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1050);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -58,100 +195,73 @@ void main() {
       ProviderScope(
         overrides: [
           apiClientProvider.overrideWithValue(api),
-          activeItemsProvider.overrideWith((ref) async => [
-            {
-              'id': 'item-1',
-              'code': 'ITEM-1',
-              'nameEn': 'Tracked item',
-              'nameAr': 'صنف مخزني',
-              'unit': 'piece',
-              'isActive': true,
-              'isStockTracked': true,
-              'taxRate': '0.0000',
-              'purchasePrice': '10.0000',
-            },
-          ]),
-          activeSuppliersProvider.overrideWith((ref) async => [
-            {
-              'id': 'supplier-1',
-              'code': 'SUP-1',
-              'nameEn': 'Test supplier',
-              'nameAr': 'مورد تجريبي',
-              'isActive': true,
-            },
-          ]),
+          activeItemsProvider.overrideWith((ref) async => []),
+          activeCustomersProvider.overrideWith(
+            (ref) async => [
+              {'id': 'customer-1', 'code': 'CUS-1', 'nameEn': 'Test customer'},
+            ],
+          ),
         ],
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: Center(
-                child: TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const InvoiceEditorScreen(kind: InvoiceKind.purchase),
-                    ),
-                  ),
-                  child: const Text('Open editor'),
-                ),
-              ),
-            ),
-          ),
+          home: const InvoiceEditorScreen(kind: InvoiceKind.sales),
         ),
       ),
     );
-
-    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-1 — Test customer').last);
     await tester.pumpAndSettle();
 
-    final dropdowns = find.byType(DropdownButtonFormField<String>);
-    expect(dropdowns, findsNWidgets(3));
-    expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
-    await tester.tap(dropdowns.at(0));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('SUP-1 — Test supplier').last);
-    await tester.pumpAndSettle();
+    for (final (index, name, amount, tax) in [
+      (0, 'Freight', '20', '14'),
+      (1, 'Handling', '5', ''),
+    ]) {
+      await tester.tap(find.text('Add charge'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(ValueKey('landed-cost-description-$index')),
+        name,
+      );
+      await tester.enterText(
+        find.byKey(ValueKey('landed-cost-amount-$index')),
+        amount,
+      );
+      await tester.enterText(
+        find.byKey(ValueKey('landed-cost-tax-$index')),
+        tax,
+      );
+      await tester.pump();
+    }
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('ITEM-1 — Tracked item').last);
-    await tester.pumpAndSettle();
-
-    // A fixed invoice-wide discount travels independently of landed costs:
-    // the discount reduces the goods value, the charges are added after it.
-    await tester.tap(find.byKey(const ValueKey('document-discount')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Fixed amount').last);
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('document-discount-value')),
-      '5',
+    final total = find.text('27.80');
+    await tester.scrollUntilVisible(
+      total,
+      160,
+      scrollable: find.byType(Scrollable).first,
     );
-    await tester.pump();
-
-    await tester.tap(find.text('Add charge'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('landed-cost-description-0')), 'Freight');
-    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-0')), '7.00');
-    await tester.pump();
-
-    await tester.tap(find.text('Add charge'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('landed-cost-description-1')), 'Insurance');
-    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-1')), '3.00');
-    await tester.pump();
-
+    expect(total, findsOneWidget);
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
-
-    expect(api.postPath, '/purchases/invoices');
-    expect(api.postBody?['discountType'], 'AMOUNT');
-    expect(api.postBody?['discountAmount'], '5');
-    expect(api.postBody?['landedCostAmount'], '10');
-    expect(api.postBody?['landedCostCharges'], [
-      {'description': 'Freight', 'amount': '7'},
-      {'description': 'Insurance', 'amount': '3'},
+    expect(api.postPath, '/sales/invoices');
+    expect(api.postBody, isNot(contains('landedCostAmount')));
+    expect(api.postBody?['lines'], [
+      {
+        'description': 'Freight',
+        'isAdditionalCharge': true,
+        'quantity': '1',
+        'unitPrice': '20',
+        'taxRate': '14',
+      },
+      {
+        'description': 'Handling',
+        'isAdditionalCharge': true,
+        'quantity': '1',
+        'unitPrice': '5',
+        'taxRate': '0',
+      },
     ]);
   });
 }

@@ -386,3 +386,28 @@ describe('ChartOfAccountsService desktop expense rules', () => {
   });
 });
 
+
+describe('single-language account names', () => {
+  it.each([
+    [{ nameAr: 'خزينة' }, 'خزينة'],
+    [{ nameEn: 'Cash' }, 'Cash'],
+  ])('creates with only one supplied name', async (names, expected) => {
+    const prisma = fakePrisma({ accounts: [] });
+    await serviceWith(prisma).create('c1', 'u1', {
+      code: '1199',
+      type: 'ASSET',
+      ...names,
+    } as any);
+    const created = prisma.calls.find((c: { method: string }) => c.method === 'account.create') as any;
+    expect(created.args.data.nameEn).toBe(expected);
+    expect(created.args.data.nameAr).toBe(expected);
+  });
+
+  it('rejects an account with both names blank', async () => {
+    const prisma = fakePrisma({ accounts: [] });
+    await expect(serviceWith(prisma).create('c1', 'u1', {
+      code: '1199', nameEn: '  ', nameAr: '', type: 'ASSET',
+    } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.calls.some((c: { method: string }) => c.method === 'account.create')).toBe(false);
+  });
+});

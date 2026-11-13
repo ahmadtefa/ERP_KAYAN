@@ -1,5 +1,5 @@
 import { ExecutionContext, ServiceUnavailableException } from '@nestjs/common';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { MaintenanceInterceptor, MaintenanceService } from './maintenance';
 
 describe('MaintenanceInterceptor', () => {
@@ -65,5 +65,30 @@ describe('MaintenanceInterceptor', () => {
       interceptor.intercept(context('GET', '/api/v1/backup/full/status'), next as any),
     ).toBe(stream);
     expect(next.handle).toHaveBeenCalledTimes(1);
+  });
+  it('drains admitted business handlers and refuses new work during the wait', async () => {
+    const maintenance = new MaintenanceService();
+    const interceptor = new MaintenanceInterceptor(maintenance);
+    const stream = new Subject<string>();
+    const next = { handle: () => stream };
+    interceptor.intercept(context('POST', '/invoices'), next).subscribe();
+    maintenance.begin('Restoring database');
+    const finished = jest.fn();
+    const drain = maintenance.waitForBusinessRequests().then(finished);
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    expect(() => interceptor.intercept(context('GET', '/invoices'), next)).toThrow(ServiceUnavailableException);
+    stream.complete();
+    await drain;
+    expect(finished).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails on the deadline and can drain on a subsequent attempt', async () => {
+    const maintenance = new MaintenanceService();
+    const release = maintenance.trackBusinessRequest();
+    await expect(maintenance.waitForBusinessRequests(1)).rejects.toThrow(/database was not changed/);
+    const retry = maintenance.waitForBusinessRequests();
+    release();
+    await expect(retry).resolves.toBeUndefined();
   });
 });

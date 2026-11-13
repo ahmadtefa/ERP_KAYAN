@@ -13,14 +13,14 @@ function fixture() {
   return {run,updates,prisma};
 }
 describe('item tax spreadsheet safety',()=>{
-  it('leaves tax untouched when the column is absent or blank without explicit opt-in',async()=>{
+  it('keeps a missing column and defaults blank cells to zero',async()=>{
     const f=fixture();
     await f.run('Code,Name (English),Name (Arabic)\nI1,A,أ\n',{});
     expect(f.updates.mock.calls[0][0].data).not.toHaveProperty('taxRate');
     await f.run('Code,Name (English),Name (Arabic),Tax rate %\nI1,A,أ,  \n',{});
-    expect(f.updates.mock.calls[1][0].data).not.toHaveProperty('taxRate');
+    expect(String(f.updates.mock.calls[1][0].data.taxRate)).toBe('0');
   });
-  it('clears a blank cell only with explicit opt-in, reports it, and keeps an absent column untouched',async()=>{
+  it('reports blank cells converted to zero and supports explicit preservation',async()=>{
     const f=fixture();
     const report=await f.run('Code,Name (English),Name (Arabic),Tax rate %\nI1,A,أ,  \nI2,B,ب,0\n',{clearBlankTaxRates:true});
     expect(report.errors).toEqual([]);
@@ -30,6 +30,9 @@ describe('item tax spreadsheet safety',()=>{
     const omitted=await f.run('Code,Name (English),Name (Arabic)\nI1,A,أ\n',{clearBlankTaxRates:true});
     expect(omitted.clearedBlankTaxRates).toBe(0);
     expect(f.updates.mock.calls[2][0].data).not.toHaveProperty('taxRate');
+    await f.run('Code,Name (English),Tax rate %\nI1,A,\n',{clearBlankTaxRates:false});
+    expect(f.updates.mock.calls[3][0].data).not.toHaveProperty('taxRate');
+    expect(f.updates.mock.calls[3][0].data).not.toHaveProperty('nameAr');
   });
   it('rejects ambiguous multiple tax columns rather than overwriting one value',async()=>{
     const f=fixture();

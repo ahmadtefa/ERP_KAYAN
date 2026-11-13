@@ -1,4 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
@@ -159,6 +162,32 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
   });
 
   describe('company backup portability', () => {
+    test('includes a legacy logo and fails closed if the referenced file disappears', async () => {
+      const folder = await mkdtemp(join(tmpdir(), 'kayan-legacy-logo-'));
+      const prior = process.env.KAYAN_UPLOAD_DIR;
+      try {
+        process.env.KAYAN_UPLOAD_DIR = folder;
+        const png = Buffer.alloc(24);
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+        png.writeUInt32BE(64, 16);
+        png.writeUInt32BE(48, 20);
+        const path = join(folder, 'legacy.png');
+        await writeFile(path, png);
+        const company = await prismaMock.company.findUnique({ where: { id: COMPANY_ID } });
+        prismaMock.company.findUnique = jest.fn(async () => ({ ...company, logoData: null, logoPath: 'legacy.png' }));
+        const backup = await service.create(COMPANY_ID);
+        expect(backup.companyProfile?.logoBase64).toBe(png.toString('base64'));
+        expect(backup.companyProfile?.logoMime).toBe('image/png');
+        await service.inspect(backup, COMPANY_ID);
+        await rm(path);
+        await expect(service.create(COMPANY_ID)).rejects.toThrow(/include the legacy company logo/);
+      } finally {
+        if (prior === undefined) delete process.env.KAYAN_UPLOAD_DIR;
+        else process.env.KAYAN_UPLOAD_DIR = prior;
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
     test('does not serialize installation-local backup history into a company archive', async () => {
       const findMany = jest.fn(async () => [{ id: 'local-run', sizeBytes: BigInt(4096) }]);
       prismaMock.backupRun = { findMany };

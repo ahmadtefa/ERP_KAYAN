@@ -1659,6 +1659,7 @@ model SalesInvoiceLine {
   lineNumber Int
   itemId    String? @db.Uuid
 
+  isAdditionalCharge Boolean @default(false)
   description String
   quantity    Decimal @db.Decimal(19, 4)
   unitPrice   Decimal @db.Decimal(19, 4)

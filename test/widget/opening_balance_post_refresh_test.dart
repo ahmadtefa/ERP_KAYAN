@@ -2,6 +2,7 @@ import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/journal_entries_screen.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/opening_balances_screen.dart';
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/providers/stock_providers.dart';
@@ -37,7 +38,13 @@ void main() {
     tester.view.physicalSize=const Size(1500,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final api=_OpeningApi();
-    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    final container=ProviderContainer(overrides:[
+      apiClientProvider.overrideWithValue(api),
+      currentUserProvider.overrideWithValue(const AppUser(
+        id: 'user', username: 'test', fullName: 'Test', companyId: 'company',
+        isSuperAdmin: true,
+      )),
+    ]);
     addTearDown(container.dispose);
     final stockSubscription=container.listen(stockListProvider,(_,_) {});
     final journalSubscription=container.listen(journalEntriesProvider,(_,_) {});

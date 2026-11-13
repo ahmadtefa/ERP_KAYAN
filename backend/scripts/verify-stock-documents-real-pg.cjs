@@ -27,6 +27,9 @@ const { FiscalPeriodsService } = require('../src/modules/accounting/fiscal-perio
 const { YearEndCloseService } = require('../src/modules/accounting/year-end-close.service');
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
+const { OpeningBalancesService } = require('../src/modules/accounting/opening-balances.service');
+const { CashAccountsService } = require('../src/modules/cash/cash-accounts.service');
+const { PartiesService } = require('../src/modules/parties/parties.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
 const { JournalEntriesController } = require('../src/modules/accounting/journal-entries.controller');
@@ -1334,6 +1337,99 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const prices = new PriceListsService(prisma,audit);
     const posting = new PostingService(numbers,periods,costCenters);
     const map = new AccountMapService();
+    const openingBranch = await prisma.branch.create({ data: {
+      companyId: company, code: 'SYN-OPEN', nameEn: 'Opening fixture', nameAr: 'فرع افتتاحي',
+    } });
+    const openingStock = await prisma.item.create({ data: {
+      companyId: company, code: 'SYN-OPEN-STOCK', nameEn: 'Opening stock', nameAr: 'مخزون افتتاحي',
+      unit: 'piece', isStockTracked: true,
+    } });
+    const ar = await prisma.account.upsert({
+      where: { companyId_code: { companyId: company, code: '1103' } },
+      create: { companyId: company, code: '1103', nameEn: 'Receivables', nameAr: 'العملاء', type: 'ASSET', isPostable: true },
+      update: { isActive: true, isPostable: true },
+    });
+    await prisma.account.upsert({
+      where: { companyId_code: { companyId: company, code: '3103' } },
+      create: { companyId: company, code: '3103', nameEn: 'Opening equity', nameAr: 'الأرصدة الافتتاحية', type: 'EQUITY', isPostable: true },
+      update: { isActive: true, isPostable: true },
+    });
+    const openings = new OpeningBalancesService(prisma, numbers, posting, map, audit, warehouses);
+    const parties = new PartiesService(prisma, audit);
+    const cashAccounts = new CashAccountsService(prisma,audit);
+    const bilingualItems = new ItemsService(prisma,audit,map,posting,warehouses,ledger);
+    const nameCases = [
+      ['COA', (dto) => chart.create(company,user,{type:'ASSET',...dto}),
+        (id,dto) => chart.update(company,user,id,dto)],
+      ['ITEM', (dto) => bilingualItems.create(company,user,dto,branch,true),
+        (id,dto) => bilingualItems.update(company,user,id,dto,true)],
+      ...['customer','supplier'].map(kind => [kind.toUpperCase(),
+        (dto) => parties.create(company,user,kind,dto),
+        (id,dto) => parties.update(company,user,kind,id,dto)]),
+      ['WH', (dto) => warehouses.create(company,user,{branchId:branch,...dto}),
+        (id,dto) => warehouses.update(company,user,id,dto)],
+      ...['CASH','BANK'].map(kind => [kind, async (dto) => {
+        if (!dto.nameEn && !dto.nameAr) return cashAccounts.create(company,user,{kind,...dto});
+        const account = await chart.create(company,user,{code:`GL-${dto.code}`,nameEn:'Synthetic ledger',type:'ASSET',isPostable:true});
+        return cashAccounts.create(company,user,{accountId:account.id,kind,...dto});
+      }, (id,dto) => cashAccounts.update(company,user,id,dto)]),
+    ];
+    for (const [label,create,update] of nameCases) {
+      await assert.rejects(create({code:`BI-${label}-X`}),/Arabic or English/);
+      const arabic = await create({code:`BI-${label}-A`,nameAr:'اسم عربي'});
+      assert.equal(arabic.nameAr,'اسم عربي');
+      assert.equal(arabic.nameEn,'اسم عربي');
+      const english = await create({code:`BI-${label}-E`,nameEn:'English name'});
+      assert.equal(english.nameEn,'English name');
+      assert.equal(english.nameAr,'English name');
+      const both = await create({code:`BI-${label}-B`,nameEn:'Both names',nameAr:'اسمان'});
+      const changed = await update(both.id,{nameEn:'Changed name',nameAr:'  '});
+      assert.equal(changed.nameEn,'Changed name');
+      assert.equal(changed.nameAr,'اسمان');
+      const changedArabic = await update(both.id,{nameEn:'',nameAr:'اسم معدل'});
+      assert.equal(changedArabic.nameEn,'Changed name');
+      assert.equal(changedArabic.nameAr,'اسم معدل');
+    }
+    console.log('PASS: Arabic-only, English-only and bilingual creation plus blank-field updates in seven master-data entities on real PostgreSQL.');
+    const openingCurrency = (await prisma.company.findUniqueOrThrow({ where: { id: company } })).currency;
+    const draftInput = {
+      asOfDate: date, currency: openingCurrency, autoBalanceToEquity: true,
+      lines: [
+        { accountId: ar.id, customerId: customer.id, debit: '1.1234' },
+        { accountId: inventory, itemId: openingStock.id, quantity: '2', unitCost: '2.2222', debit: '4.4444' },
+      ],
+    };
+    const deletedDraft = await openings.create(company, openingBranch.id, user, draftInput);
+    await openings.removeDraft(company, user, deletedDraft.id, openingBranch.id);
+    await assert.rejects(openings.findOne(company, deletedDraft.id), /not found/);
+    const draft = await openings.create(company, openingBranch.id, user, draftInput);
+    const updated = await openings.create(company, openingBranch.id, user, {
+      ...draftInput, lines: [{ ...draftInput.lines[0], debit: '2.1234' }, draftInput.lines[1]],
+    }, draft.id);
+    assert.equal(updated.documentNumber, draft.documentNumber);
+    assert.equal(updated.totalDebit, '6.5678');
+    assert.equal(updated.totalCredit, '6.5678');
+    const limitedOpening = await openings.findOne(company, draft.id, false);
+    assert.equal(limitedOpening.totalDebit, null);
+    assert.equal(limitedOpening.lines[1].unitCost, null);
+    assert.equal(limitedOpening.lines[1].debit, null);
+    assert.equal((await openings.findAll(company, false)).items.find(row => row.id === draft.id).totalCredit, null);
+    await assert.rejects(openings.post(company, user, draft.id, openingBranch.id, false), /inventory cost permission/);
+    const results = await Promise.allSettled([
+      openings.post(company, user, draft.id, openingBranch.id),
+      openings.post(company, user, draft.id, openingBranch.id),
+    ]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(await prisma.stockMovement.count({ where: { referenceId: draft.id } }), 1);
+    assert.equal((await parties.summary(company, 'customer', customer.id)).totals.netBalance, '2.1234');
+    const statement = await parties.statement(company, 'customer', customer.id, { from: date, to: date });
+    assert.equal(statement.closingBalance, '2.1234');
+    await openings.reverse(company, user, draft.id, openingBranch.id);
+    assert.equal((await parties.summary(company, 'customer', customer.id)).totals.netBalance, '0.0000');
+    assert.equal(await prisma.auditLog.count({
+      where: { companyId: company, entity: 'opening_balances', action: { in: ['UPDATE', 'DELETE'] }, entityId: { in: [draft.id, deletedDraft.id] } },
+    }), 2);
+    console.log('PASS: PostgreSQL opening draft edit/delete, exact equity balance, concurrent post, party statement and stock reversal.');
     const batches = new BatchesService(prisma,warehouses,posting,map,numbers,audit,ledger);
     const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit,batches,ledger);
     // Keep the fixture's runtime wiring explicit as this service gains
@@ -1393,7 +1489,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','purchases.invoices.read',...(req.headers['x-cost']==='yes'?['inventory.cost.read']:[]),'inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -1483,6 +1579,21 @@ let difference = '70000000-0000-4000-8000-000000000005';
         if (kind === 'sales') {
           assert.equal(updated.costOfGoods,null); assert.equal(updated.grossProfit,null);
           assert.ok(updated.lines.every(line=>line.unitCost===null && line.costTotal===null));
+        }
+        if (kind === 'purchase') {
+          for (const response of [body, updated]) {
+            assert.ok(response.lines.every(line => line.inventoryCostTotal === null &&
+              line.landedCostAmount === null && line.returnedCostTotal === null));
+            assert.equal(response.lines[0].unitPrice, '100.0000');
+          }
+          const path = base + route + '/' + body.id;
+          const restricted = await fetch(path,{headers:{'x-allowed':'yes'}});
+          assert.equal(restricted.status,200);
+          assert.equal((await restricted.json()).lines[0].inventoryCostTotal,null);
+          const permitted = await fetch(path,{headers:{'x-allowed':'yes','x-cost':'yes'}});
+          assert.equal(permitted.status,200);
+          assert.equal((await permitted.json()).lines[0].inventoryCostTotal,'100.0000');
+          console.log('PASS: purchase invoice valuation is redacted on create, edit and read without inventory.cost.read.');
         }
         assert.equal(await model.count({where:{companyId:company}}),before+1,kind);
         const saved=await model.findUniqueOrThrow({where:{id:body.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
@@ -2230,6 +2341,41 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:cancelTarget.id}}),0);
     }
     console.log('PASS: real Prisma/PostgreSQL post/edit stale-read, edit/cancel, post/cancel, cancel audit rollback and stock/journal invariants for sales and purchases.');
+    await prisma.companySetting.update({where:{companyId:company},data:{pricesIncludeTax:true,maxDiscountPercent:'100'}});
+    const additionalCharges = {
+      customerId: customer.id, invoiceDate: date, discountType: 'PERCENT', discountPercent: '10',
+      lines: [
+        {description:'Synthetic service',quantity:'1',unitPrice:'114',taxRate:'14'},
+        {description:'Freight',isAdditionalCharge:true,quantity:'1',unitPrice:'20',taxRate:'14'},
+        {description:'Handling',isAdditionalCharge:true,quantity:'1',unitPrice:'5',taxRate:'0'},
+      ],
+    };
+    const chargeDraft = await si.create(company,branch,user,additionalCharges);
+    assert.equal(chargeDraft.totalAmount,'130.4000');
+    const amendedCharges = {...additionalCharges,lines:[...additionalCharges.lines,
+      {description:'Insurance',isAdditionalCharge:true,quantity:'1',unitPrice:'10',taxRate:'7'}]};
+    const editedCharges = await si.updateDraft(company,branch,user,chargeDraft.id,amendedCharges);
+    assert.equal(editedCharges.subTotal,'125.0000');
+    assert.equal(editedCharges.taxAmount,'16.1000');
+    assert.equal(editedCharges.totalAmount,'141.1000');
+    assert.deepEqual(editedCharges.lines.map(line => line.isAdditionalCharge),[false,true,true,true]);
+    const postedCharges = await si.post(company,user,chargeDraft.id);
+    const chargeJournal = await prisma.journalEntry.findUniqueOrThrow({where:{id:postedCharges.journalEntryId},include:{lines:true}});
+    assert.equal(chargeJournal.totalDebit.toFixed(4),'141.1000');
+    assert.equal(chargeJournal.totalCredit.toFixed(4),'141.1000');
+    assert.equal(chargeJournal.lines.find(line => line.description === 'VAT on sales').credit.toFixed(4),'16.1000');
+    const freightReturn = await returns.createSalesReturn(company,branch,user,{
+      originalInvoiceId:postedCharges.id,returnDate:date,reason:'Synthetic freight refund',
+      lines:[{originalLineId:postedCharges.lines[1].id,quantity:'1'}],
+    });
+    assert.equal(freightReturn.lines[0].isAdditionalCharge,true);
+    assert.equal(freightReturn.taxAmount,'2.8000');
+    assert.equal(freightReturn.totalAmount,'22.8000');
+    await returns.postSalesReturn(company,user,freightReturn.id);
+    const freightJournal = await prisma.journalEntry.findFirstOrThrow({where:{companyId:company,sourceId:freightReturn.id},include:{lines:true}});
+    assert.equal(freightJournal.lines.find(line => line.description === 'VAT on sales return').debit.toFixed(4),'2.8000');
+    assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:{in:[postedCharges.id,freightReturn.id]}}}),0);
+    console.log('PASS: real PostgreSQL sales charges draft/edit/post, VAT and exact freight refund without stock movements.');
     console.log('PASS: PostgreSQL + Prisma order conversion full/partial, historical values, audit rollback, retry/competition, post/reverse, draft cancel and order-cancel race. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();

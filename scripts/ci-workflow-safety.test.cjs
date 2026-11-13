@@ -117,22 +117,59 @@ for (const forbidden of ['smoke-test-installed-windows', 'memory-flow.test', 've
 }
 assert.match(source, /ci-no-signing\.cjs/);
 const integrity = read('code-integrity.yml');
-assert.deepEqual(integrity.on, safe.on, 'Additional code checks must run on the same PR and main events');
+assert.deepEqual(integrity.on, { ...safe.on, push: { branches: ['main', 'work/bilingual-names-opening-balances'] } });
 assert.deepEqual(integrity.permissions, { contents: 'read' });
-assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build']);
+assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build', 'work-setup', 'work-setup-inspection', 'work-setup-public-runtime', 'work-setup-runtime']);
 const accounting = integrity.jobs['accounting-and-packaging-policy'];
 assert.ok(!accounting.env?.NODE_OPTIONS, 'preload guard cannot run before checkout provides it');
 for (const step of accounting.steps.filter((step) => step.run && /npm ci|prisma generate|npm test|node --test/.test(step.run))) {
   assert.match(step.env?.NODE_OPTIONS || '', /ci-no-signing\.cjs/, `missing non-signing guard: ${step.name}`);
 }
 const integritySource = fs.readFileSync(path.join(workflows, 'code-integrity.yml'), 'utf8');
-assert.doesNotMatch(integritySource, /secrets\.|contents:\s*write|generateKeyPair|createPrivateKey|publish-verified-windows|smoke-test-installed-windows/);
+assert.doesNotMatch(integritySource, /secrets\.|contents:\s*write|generateKeyPair|createPrivateKey|publish-verified-windows/);
 assert.match(integritySource, /ci-no-signing\.cjs/);
 for (const path of ['opening-balances.controller.spec.ts', 'opening-balances.service.spec.ts', 'posting.service.spec.ts', 'year-end-close.service.spec.ts', 'migrate-deploy.test.mjs', 'windows-policy-non-signing.test.mjs']) {
   assert.ok(integritySource.includes(path), `Additional required code test missing: ${path}`);
 }
-for (const job of Object.values(integrity.jobs)) {
-  assert.equal(job.if, undefined, 'Required code job must not be skipped');
+const packageCondition = "github.event_name == 'pull_request' && github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'work/bilingual-names-opening-balances'";
+const workPush = "github.event_name == 'push' && github.ref == 'refs/heads/work/bilingual-names-opening-balances'";
+const sameRepo = "github.repository == 'ahmadtefa/ERP_KAYAN'";
+const runtime = integrity.jobs['work-setup-runtime'];
+assert.equal(runtime.if, `${sameRepo} && ${workPush}`);
+assert.equal(runtime.environment, 'windows-installer-test');
+assert.equal(runtime.needs, 'work-setup-inspection');
+assert.equal(runtime['runs-on'], 'windows-latest');
+assert.deepEqual(runtime.permissions, { contents: 'read', actions: 'read', deployments: 'read' });
+assert.equal(runtime.steps[0].with.ref, '${{ github.sha }}');
+assert.equal(runtime.steps[0].with['persist-credentials'], false);
+const runtimeSteps = runtime.steps.map(step => step.run ?? step.with?.name ?? '');
+const guard = runtimeSteps.findIndex(step => step.includes('check-installer-test-environment'));
+const download = runtimeSteps.findIndex(step => step.includes('KAYAN-ERP-Setup-inspected-'));
+const provenance = runtimeSteps.findIndex(step => step.includes('$report.installer.sha256 -ne $hash'));
+const smoke = runtimeSteps.findIndex(step => step.includes('smoke-test-installed-windows'));
+assert.ok(guard >= 0 && guard < download && download < provenance && provenance < smoke);
+assert.match(runtimeSteps[smoke], /-RuntimeOnly -ExpectedSourceCommit/);
+assert.ok(runtimeSteps.some(step => step.includes('exercise-complete-uninstall')));
+const publicRuntime = integrity.jobs['work-setup-public-runtime'];
+assert.equal(publicRuntime.if, runtime.if);
+assert.equal(publicRuntime.environment, undefined);
+assert.equal(publicRuntime.needs, runtime.needs);
+assert.equal(publicRuntime['runs-on'], 'windows-2025');
+assert.deepEqual(publicRuntime.permissions, { contents: 'read', actions: 'read' });
+assert.deepEqual(publicRuntime.steps[0], runtime.steps[0]);
+const publicSteps = publicRuntime.steps.map(step => step.run ?? step.with?.name ?? '');
+assert.ok(publicSteps.includes(runtimeSteps[download]));
+assert.ok(publicSteps.includes(runtimeSteps[provenance]));
+assert.ok(publicSteps.findIndex(step => step.includes('-RuntimeOnly -PublicDiagnostics -ExpectedSourceCommit')) >
+  publicSteps.indexOf(runtimeSteps[provenance]));
+assert.ok(publicSteps.some(step => step.includes('exercise-complete-uninstall')));
+assert.equal(integritySource.match(/smoke-test-installed-windows/g)?.length, 2);
+for (const [name, job] of Object.entries(integrity.jobs)) {
+  if (name === 'work-setup-runtime' || name === 'work-setup-public-runtime') continue;
+  const packages = name === 'work-setup' || name === 'work-setup-inspection';
+  assert.equal(job.if?.trim(), packages ? `${sameRepo} && ((${packageCondition}) || (${workPush}))` : undefined);
+  assert.equal(job.environment, undefined);
+  assert.equal(job.permissions, undefined);
   assert.equal(job['continue-on-error'], undefined, 'Required code job must not mask failures');
   const checkout = job.steps.find(step => String(step.uses ?? '').startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
@@ -142,6 +179,10 @@ for (const job of Object.values(integrity.jobs)) {
     assert.doesNotMatch(String(step.run ?? ''), /(?:\|\|\s*true|\bexit\s+0\b)/);
   }
 }
+assert.deepEqual(integrity.jobs['work-setup'].needs, ['accounting-and-packaging-policy', 'windows-build']);
+assert.equal(integrity.jobs['work-setup-inspection'].needs, 'work-setup');
+assert.match(integrity.jobs['work-setup'].steps.find(step => step.name?.startsWith('Build offline Setup')).env.NODE_OPTIONS, /ci-no-signing\.cjs/);
+assert.doesNotMatch(integritySource, /(?:TestSignedBuild|EvaluationBuild|gh release|VERYSILENT|Restart-Computer)/);
 for (const job of Object.values(safe.jobs)) {
   const checkout = job.steps.find(step => String(step.uses ?? '').startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}', 'Code checks must use the exact source head');

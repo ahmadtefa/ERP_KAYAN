@@ -437,6 +437,7 @@ export class PurchaseOrdersService {
     userId: string,
     id: string,
     dto: Record<string, unknown> = {},
+    mayReadCost = true,
   ) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const invoiceId = await this.prisma.$transaction(async (tx) => {
@@ -538,7 +539,7 @@ export class PurchaseOrdersService {
         entityId: id, after: { orderNumber: order.orderNumber, invoiceId: invoice.id, lines: consumed.length } }, tx);
       return invoice.id;
     }, { maxWait: 10000, timeout: 30000 });
-    return { order: await this.findOne(companyId, id), invoice: await this.invoices.findOne(companyId, invoiceId) };
+    return { order: await this.findOne(companyId, id), invoice: await this.invoices.findOne(companyId, invoiceId, mayReadCost) };
   }
 
   // ------------------------------------------------------------------ helpers

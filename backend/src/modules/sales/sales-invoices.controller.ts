@@ -21,6 +21,12 @@ export class SalesInvoicesController {
     return this.service.findAll(user.companyId, query, canReadCost(user));
   }
 
+  @Get('tax-pricing')
+  @RequirePermissions('sales.invoices.create')
+  taxPricing(@CurrentUser() user: AuthUser) {
+    return this.service.taxPricing(user.companyId);
+  }
+
   @Get(':id')
   @RequirePermissions('sales.invoices.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
