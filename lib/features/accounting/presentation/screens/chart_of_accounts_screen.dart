@@ -456,14 +456,14 @@ Future<void> _editAccount(
                   TextField(
                     controller: nameArController,
                     decoration: InputDecoration(
-                      labelText: '${dialogL10n.nameArabic} *',
+                      labelText: dialogL10n.nameArabic,
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: nameEnController,
                     decoration: InputDecoration(
-                      labelText: '${dialogL10n.nameEnglish} *',
+                      labelText: dialogL10n.nameEnglish,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -629,7 +629,7 @@ Future<void> _editAccount(
             ),
             FilledButton(
               onPressed: saving || uncertain ? null : () async {
-                if (nameArController.text.trim().isEmpty || nameEnController.text.trim().isEmpty) {
+                if (nameArController.text.trim().isEmpty && nameEnController.text.trim().isEmpty) {
                   showMessage(dialogContext, arabic
                       ? 'أدخل اسم الحساب بالعربية والإنجليزية.'
                       : 'Enter both the Arabic and English account names.', error: true);
