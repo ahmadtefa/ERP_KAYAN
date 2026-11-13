@@ -373,6 +373,32 @@ void main() {
         for (final section in sections) {
           expect(find.byKey(ValueKey('nav-group-$section')), findsOneWidget);
         }
+        // Every one of the eight headers must have its own meaningful icon.
+        // Decorative circles passed the old accordion test despite failing
+        // the installed application's visual acceptance criteria.
+        const groupIcons = <String, IconData>{
+          'overview': Icons.dashboard_rounded,
+          'accounting': Icons.account_balance_rounded,
+          'parties': Icons.groups_rounded,
+          'inventory': Icons.warehouse_rounded,
+          'sales': Icons.point_of_sale_rounded,
+          'purchases': Icons.shopping_cart_rounded,
+          'insights': Icons.insights_rounded,
+          'administration': Icons.settings_rounded,
+        };
+        for (final entry in groupIcons.entries) {
+          final header = find.byKey(ValueKey('nav-group-${entry.key}'));
+          expect(
+            find.descendant(of: header, matching: find.byIcon(entry.value)),
+            findsOneWidget,
+            reason: '${entry.key} must display a recognizable group icon',
+          );
+          expect(
+            find.descendant(of: header, matching: find.byIcon(Icons.circle)),
+            findsNothing,
+            reason: 'a decorative dot is not a group icon',
+          );
+        }
         expect(find.byType(ListTile), findsNothing);
 
         // 3. Opening a section shows its entries, in the interface language.
