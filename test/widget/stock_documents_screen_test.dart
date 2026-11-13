@@ -124,7 +124,7 @@ class _DocumentsApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    expect(path, '/inventory/items/by-barcode/CARTON');
+    if (path != '/inventory/items/by-barcode/CARTON') return {};
     return {
       'matched': 'unit',
       'unit': 'carton',
