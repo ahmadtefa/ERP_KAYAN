@@ -635,6 +635,7 @@ try {
     # A partial runtime diagnostic must not mistake intentionally blocked
     # complete recovery for a broken PostgreSQL service or a passed restore.
     $capabilities = Invoke-RestMethod -Uri "$base/backup/full/capabilities" -Headers $headers -TimeoutSec 30
+    $backupEvidence = 'backup/restore guard refusals'
     if ($capabilities.fullBackupSupported -eq $true -and $capabilities.fullRestoreSupported -eq $true) {
       # Verify the bundled pg_dump/pg_restore path against the installed runtime,
       # using only the synthetic SQL sentinel created before upgrade/repair.
@@ -664,6 +665,7 @@ try {
       if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
         Fail ("PostgreSQL full restore did not recover the original SQL sentinel: " + ($sentinelResult -join ' '))
       }
+      $backupEvidence = 'PostgreSQL archive and SQL sentinel restore'
       Write-Output '::notice::Installed Windows runtime backup/restore passed: valid PGDMP archive, checked restore, safety backup, re-login and original SQL sentinel verified.'
     } elseif ($capabilities.fullBackupSupported -eq $false -and $capabilities.fullRestoreSupported -eq $false) {
       $backupBlocked = Invoke-WebRequest -Method Post -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/backup/full" -Headers $headers -TimeoutSec 30
@@ -777,7 +779,7 @@ try {
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
-    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt-state refusal, trusted saved-state byte restoration and public-key missing/restore. This is not signed-licence reconstruction or activation: neither was tested.'
+    Write-Output "::notice::Runtime-only Windows diagnostics passed: installation, PostgreSQL, Prisma, API startup/login, ${backupEvidence}, corrupt-state refusal and public-key recovery. Signed-licence activation and reconstruction were not exercised."
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress

@@ -1055,6 +1055,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                     const SizedBox(height: 8),
                     _LinesTable(
                       kind: widget.kind,
+                      pricesIncludeTax: salesTaxPricing.value ?? false,
                       lines: _lines,
                       items: itemsAsync.value ?? const [],
                       pictures: _itemPictures,
@@ -1285,6 +1286,7 @@ String? _costCenterChoice(List<Json> centres, String? id) {
 class _LinesTable extends StatelessWidget {
   const _LinesTable({
     required this.kind,
+    required this.pricesIncludeTax,
     required this.lines,
     required this.items,
     required this.pictures,
@@ -1297,6 +1299,7 @@ class _LinesTable extends StatelessWidget {
   });
 
   final InvoiceKind kind;
+  final bool pricesIncludeTax;
   final List<_LineDraft> lines;
   final List<Json> items;
 
@@ -1613,7 +1616,10 @@ class _LinesTable extends StatelessWidget {
                         const SizedBox(width: 8),
                         SizedBox(
                           width: 120,
-                          child: _LineTotal(line: lines[index]),
+                          child: _LineTotal(
+                            line: lines[index],
+                            pricesIncludeTax: pricesIncludeTax,
+                          ),
                         ),
                         IconButton(
                           tooltip: l10n.removeLine,
@@ -1716,10 +1722,10 @@ class _LinesTable extends StatelessWidget {
                           Expanded(
                             child: Text(
                               '${l10n.beforeDiscount}: '
-                              '${formatAmount(lines[index].pricing().gross.toString())}'
-                              '  −  ${formatAmount(lines[index].pricing().discount.amount.toString())}'
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).gross.toString())}'
+                              '  −  ${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.amount.toString())}'
                               '  =  ${l10n.netLine}: '
-                              '${formatAmount(lines[index].pricing().discount.net.toString())}',
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.net.toString())}',
                               style: Theme.of(context).textTheme.bodySmall,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1835,9 +1841,10 @@ class _LineBaseEquivalent extends StatelessWidget {
 }
 
 class _LineTotal extends StatelessWidget {
-  const _LineTotal({required this.line});
+  const _LineTotal({required this.line, required this.pricesIncludeTax});
 
   final _LineDraft line;
+  final bool pricesIncludeTax;
 
   @override
   Widget build(BuildContext context) {
@@ -1853,7 +1860,7 @@ class _LineTotal extends StatelessWidget {
         child: Text('—', textAlign: TextAlign.end),
       );
     }
-    final pricing = line.pricing();
+    final pricing = line.pricing(pricesIncludeTax: pricesIncludeTax);
     final hasDiscount = pricing.discount.amount > Decimal.zero;
     return InputDecorator(
       decoration: const InputDecoration(
