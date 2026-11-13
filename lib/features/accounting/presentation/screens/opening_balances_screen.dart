@@ -133,7 +133,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                         child: DropdownButtonFormField<String>(
                           key: ValueKey('cash-account-$i'),
                           isExpanded: true,
-                          value: selectedAccounts[i],
+                          initialValue: selectedAccounts[i],
                           decoration: InputDecoration(labelText: arabic ? 'البنك / الخزنة' : 'Bank / cash'),
                           items: cashAccounts.map((a) => DropdownMenuItem<String>(
                             value: a['accountId'].toString(),
@@ -174,7 +174,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   ),
                   DropdownButtonFormField<String>(
                     isExpanded: true,
-                    value: balancingAccount,
+                    initialValue: balancingAccount,
                     decoration: InputDecoration(labelText: arabic ? 'الحساب المقابل للأرصدة' : 'Balancing account'),
                     items: accounts.map((a) => DropdownMenuItem<String>(
                       value: a['id'].toString(),
