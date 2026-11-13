@@ -1373,6 +1373,12 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(updated.documentNumber, draft.documentNumber);
     assert.equal(updated.totalDebit, '6.5678');
     assert.equal(updated.totalCredit, '6.5678');
+    const limitedOpening = await openings.findOne(company, draft.id, false);
+    assert.equal(limitedOpening.totalDebit, null);
+    assert.equal(limitedOpening.lines[1].unitCost, null);
+    assert.equal(limitedOpening.lines[1].debit, null);
+    assert.equal((await openings.findAll(company, false)).items.find(row => row.id === draft.id).totalCredit, null);
+    await assert.rejects(openings.post(company, user, draft.id, openingBranch.id, false), /inventory cost permission/);
     const results = await Promise.allSettled([
       openings.post(company, user, draft.id, openingBranch.id),
       openings.post(company, user, draft.id, openingBranch.id),

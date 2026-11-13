@@ -295,6 +295,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final status = '${data['status'] ?? ''}'.toLowerCase();
     final user = ref.watch(currentUserProvider);
     final mayManage =
+        data['hasRestrictedCosts'] != true &&
         user?.can('accounting.openingbalances.manage') == true &&
         (user?.isSuperAdmin == true || user?.branchId == data['branchId']);
     final id = '${data['id']}';
@@ -343,11 +344,11 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   spacing: 12,
                   runSpacing: 8,
                   children: [
-                    _total(context, l10n.debit, '${data['totalDebit'] ?? '0'}'),
+                    _total(context, l10n.debit, '${data['totalDebit'] ?? '—'}'),
                     _total(
                       context,
                       l10n.credit,
-                      '${data['totalCredit'] ?? '0'}',
+                      '${data['totalCredit'] ?? '—'}',
                     ),
                   ],
                 ),
@@ -400,8 +401,8 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                 '${isArabic ? line['accountNameAr'] ?? line['accountNameEn'] ?? '' : line['accountNameEn'] ?? line['accountNameAr'] ?? ''}',
               ),
               subtitle: Text(
-                '${l10n.debit}: ${line['debit'] ?? '0'} · '
-                '${l10n.credit}: ${line['credit'] ?? '0'}'
+                '${l10n.debit}: ${line['debit'] ?? '—'} · '
+                '${l10n.credit}: ${line['credit'] ?? '—'}'
                 '${line['item'] is Map ? ' · ${(line['item'] as Map)['code'] ?? ''}' : ''}'
                 '${line['customer'] is Map ? ' · ${(line['customer'] as Map)['code'] ?? ''}' : ''}'
                 '${line['supplier'] is Map ? ' · ${(line['supplier'] as Map)['code'] ?? ''}' : ''}',

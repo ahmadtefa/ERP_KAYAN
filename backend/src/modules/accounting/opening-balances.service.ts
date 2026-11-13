@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -62,19 +63,22 @@ export class OpeningBalancesService {
     private readonly warehouses: WarehouseService,
   ) {}
 
-  async findAll(companyId: string) {
+  async findAll(companyId: string, mayReadCost = true) {
     const items = await this.prisma.openingBalance.findMany({
       where: { companyId, deletedAt: null },
       orderBy: { asOfDate: 'desc' },
-      include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        _count: { select: { lines: { where: { itemId: { not: null } } } } },
+      },
     });
     return {
-      items: items.map((document) => this.toSummary(document)),
+      items: items.map((document) => this.toSummary(document, !mayReadCost && document._count.lines > 0)),
       total: items.length,
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -93,8 +97,10 @@ export class OpeningBalancesService {
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
 
+    const hasRestrictedCosts = !mayReadCost && document.lines.some(line => line.itemId !== null);
     return {
-      ...this.toSummary(document),
+      ...this.toSummary(document, hasRestrictedCosts),
+      hasRestrictedCosts,
       branchId: document.branchId,
       warehouse: document.warehouse,
       lines: document.lines.map((line) => ({
@@ -110,10 +116,10 @@ export class OpeningBalancesService {
         supplier: line.supplier,
         itemId: line.itemId,
         item: line.item,
-        debit: line.debit.toFixed(MONEY_SCALE),
-        credit: line.credit.toFixed(MONEY_SCALE),
+        debit: hasRestrictedCosts ? null : line.debit.toFixed(MONEY_SCALE),
+        credit: hasRestrictedCosts ? null : line.credit.toFixed(MONEY_SCALE),
         quantity: line.quantity?.toFixed(MONEY_SCALE) ?? null,
-        unitCost: line.unitCost?.toFixed(MONEY_SCALE) ?? null,
+        unitCost: mayReadCost ? line.unitCost?.toFixed(MONEY_SCALE) ?? null : null,
         description: line.description,
       })),
     };
@@ -126,6 +132,7 @@ export class OpeningBalancesService {
     userId: string,
     dto: OpeningBalanceDraftInput,
     draftId?: string,
+    mayReadCost = true,
   ) {
     if (dto.importFingerprint !== undefined && !/^[0-9a-f]{64}$/.test(dto.importFingerprint)) {
       throw new BadRequestException('The import fingerprint must be a SHA-256 hex digest');
@@ -244,6 +251,11 @@ export class OpeningBalancesService {
           select: { id: true, branchId: true, status: true, updatedAt: true },
         });
         if (!existing) throw new NotFoundException('Opening balance document not found');
+        if (!mayReadCost && await tx.openingBalanceLine.count({
+          where: { openingBalanceId: draftId, itemId: { not: null } },
+        })) {
+          throw new ForbiddenException('Stock opening balances require inventory cost permission');
+        }
         if (existing.branchId !== targetBranch) {
           throw new BadRequestException('A saved opening balance cannot change branches');
         }
@@ -300,11 +312,14 @@ export class OpeningBalancesService {
     return this.findOne(companyId, result.created.id);
   }
 
-  async removeDraft(companyId: string, userId: string, id: string, branchId?: string | null) {
+  async removeDraft(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
     if (branchId === null) throw new BadRequestException('Select a branch before deleting a draft');
     await this.prisma.$transaction(async (tx) => {
       const removed = await tx.openingBalance.updateMany({
-        where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: {
+          id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null,
+          ...(mayReadCost ? {} : { lines: { none: { itemId: { not: null } } } }),
+        },
         data: { deletedAt: new Date(), importFingerprint: null },
       });
       if (removed.count !== 1) {
@@ -321,13 +336,16 @@ export class OpeningBalancesService {
    * Posts the document: one journal entry, plus a stock movement for every
    * stocked item line, all in the same transaction.
    */
-  async post(companyId: string, userId: string, id: string, branchId?: string | null) {
+  async post(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
     if (branchId === null) throw new BadRequestException('Select a branch first');
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
+      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+    }
     if (document.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft opening balance can be posted (current status: ${document.status})`,
@@ -548,13 +566,16 @@ export class OpeningBalancesService {
   }
 
   /** Reverses a posted opening balance: a mirror entry, plus stock back out. */
-  async reverse(companyId: string, userId: string, id: string, branchId?: string | null) {
+  async reverse(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
     if (branchId === null) throw new BadRequestException('Select a branch first');
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
+      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+    }
     if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
       throw new BadRequestException('Only a posted opening balance can be reversed');
     }
@@ -824,15 +845,15 @@ export class OpeningBalancesService {
     postedAt: Date | null;
     createdAt: Date;
     branch?: { code: string; nameEn: string; nameAr: string };
-  }) {
+  }, redactTotals = false) {
     return {
       id: document.id,
       documentNumber: document.documentNumber,
       asOfDate: document.asOfDate.toISOString().slice(0, 10),
       description: document.description,
       status: document.status.toLowerCase(),
-      totalDebit: document.totalDebit.toFixed(MONEY_SCALE),
-      totalCredit: document.totalCredit.toFixed(MONEY_SCALE),
+      totalDebit: redactTotals ? null : document.totalDebit.toFixed(MONEY_SCALE),
+      totalCredit: redactTotals ? null : document.totalCredit.toFixed(MONEY_SCALE),
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
       createdAt: document.createdAt.toISOString(),

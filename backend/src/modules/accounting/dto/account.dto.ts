@@ -7,7 +7,6 @@ import {
   IsUUID,
   Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 
 const CODE_PATTERN = /^[A-Za-z0-9_.-]{1,50}$/;
@@ -49,8 +48,8 @@ export class UpdateAccountDto {
   @IsOptional() @IsString() @MaxLength(50) @Matches(CODE_PATTERN)
   code?: string;
 
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameEn?: string;
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameAr?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
   @IsOptional() @IsUUID() parentId?: string | null;
   /// Compare the original parent before a requested move. null means root.
   @IsOptional() @IsUUID() expectedParentId?: string | null;
