@@ -149,6 +149,13 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_acceptance?schema=public
       NODE_OPTIONS: --experimental-vm-modules
       NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: '900'
+      JWT_REFRESH_TTL: '604800'
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: '3000'
     defaults:
       run:
         working-directory: backend
@@ -162,6 +169,15 @@ jobs:
           node-version: '22.22.3'
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      - name: Install PostgreSQL 16 client for backup checks
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
       - name: Install locked backend dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prepare Prisma adapter and client
@@ -186,6 +202,31 @@ jobs:
           status=$?
           cat ../build/acceptance-postgres/jest.log
           exit "$status"
+      - name: Build API and seed isolated database
+        run: |
+          npm run build
+          npx ts-node prisma/seed.ts
+      - name: Run real API stock and accounting scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start:prod > ../build/acceptance-postgres/api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > ../build/acceptance-postgres/health.json 2>/dev/null &&
+               node -e 'const h=require("../build/acceptance-postgres/health.json");process.exit(h.status==="ok"&&h.database==="up"&&!h.needsSetup?0:1)'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then cat ../build/acceptance-postgres/api.log; exit 1; fi
+          export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
+          node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/warehouses-orders.log
+          ENABLE_DISPOSABLE_RESET=true node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting.log
+          node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting-reconciliation.log
       - name: Upload PostgreSQL evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
