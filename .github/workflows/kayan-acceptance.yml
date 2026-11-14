@@ -187,6 +187,8 @@ jobs:
           npx prisma validate
       - name: Apply real migrations to isolated PostgreSQL
         run: node scripts/apply-migrations.mjs
+      - name: Build API for real PostgreSQL service checks
+        run: npm run build
       - name: Reconcile real PostgreSQL stock ledger and shelf balances
         shell: bash
         run: |
@@ -202,10 +204,8 @@ jobs:
           status=$?
           cat ../build/acceptance-postgres/jest.log
           exit "$status"
-      - name: Build API and seed isolated database
-        run: |
-          npm run build
-          npx ts-node prisma/seed.ts
+      - name: Seed isolated database
+        run: npx ts-node prisma/seed.ts
       - name: Run real API stock and accounting scenarios
         shell: bash
         run: |
