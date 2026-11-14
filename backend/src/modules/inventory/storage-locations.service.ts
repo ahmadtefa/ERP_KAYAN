@@ -423,27 +423,10 @@ export class StorageLocationsService {
     });
     if (!item) throw new NotFoundException('Item not found');
 
-    const availableRows = await this.prisma.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
-      Prisma.sql`
-        SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
-          FROM "stock_movements"
-         WHERE "companyId" = ${companyId}::uuid
-           AND "storageLocationId" = ${input.fromLocationId}::uuid
-           AND "itemId" = ${input.itemId}::uuid
-           ${input.batchId ? Prisma.sql`AND "batchId" = ${input.batchId}::uuid` : Prisma.empty}
-      `,
-    );
-    const available = new Prisma.Decimal(availableRows[0]?.quantity ?? 0);
-    if (available.lessThan(quantity)) {
-      throw new BadRequestException(
-        `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
-          `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
-      );
-    }
-
     const result = await this.prisma.$transaction(async (tx) => {
-      // The value travels with the goods at the shelf's average, so a move
-      // never invents profit and never loses cost.
+      // Serialize location moves against the branch/item balance before
+      // reading the shelf ledger; checking outside the transaction can let
+      // two concurrent moves spend the same stock.
       const balance = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(
         Prisma.sql`
           SELECT "quantity", "value" FROM "stock_balances"
@@ -453,6 +436,53 @@ export class StorageLocationsService {
            FOR UPDATE
         `,
       );
+
+      const availableRows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
+        Prisma.sql`
+          SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+            FROM "stock_movements"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "storageLocationId" = ${input.fromLocationId}::uuid
+             AND "itemId" = ${input.itemId}::uuid
+             ${input.batchId ? Prisma.sql`AND "batchId" = ${input.batchId}::uuid` : Prisma.empty}
+        `,
+      );
+      const available = new Prisma.Decimal(availableRows[0]?.quantity ?? 0);
+      if (available.lessThan(quantity)) {
+        throw new BadRequestException(
+          `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
+            `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
+        );
+      }
+
+      // itemBatch has one storageLocationId. Before writing the transfer,
+      // verify that this lot has positive stock on this shelf only; otherwise
+      // a single location field cannot truthfully represent the lot.
+      let lotIsOnlyAtSource = false;
+      if (input.batchId) {
+        const lotLocations = await tx.$queryRaw<
+          Array<{ storageLocationId: string; quantity: Prisma.Decimal }>
+        >(
+          Prisma.sql`
+            SELECT "storageLocationId",
+                   SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "itemId" = ${input.itemId}::uuid
+               AND "batchId" = ${input.batchId}::uuid
+             GROUP BY "storageLocationId"
+            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) <> 0
+          `,
+        );
+        lotIsOnlyAtSource =
+          lotLocations.length === 1 &&
+          lotLocations[0].storageLocationId === from.id &&
+          quantity.equals(available) &&
+          quantity.equals(lotLocations[0].quantity);
+      }
+
+      // The value travels with the goods at the shelf's average, so a move
+      // never invents profit and never loses cost.
       const onHand = balance[0]?.quantity ?? new Prisma.Decimal(0);
       const onHandValue = balance[0]?.value ?? new Prisma.Decimal(0);
       const unitCost = onHand.isZero()
@@ -488,8 +518,12 @@ export class StorageLocationsService {
         });
       }
 
-      // The lot keeps its quantity; only its shelf changed.
-      if (input.batchId) {
+      // itemBatch has one storageLocationId, while stock_movements is the
+      // location-level source of truth. Update the denormalized lot location
+      // only when this move relocates the lot's entire remaining quantity;
+      // a partial move must not make the untouched remainder appear on the
+      // destination shelf.
+      if (input.batchId && lotIsOnlyAtSource) {
         await tx.itemBatch.updateMany({
           where: { id: input.batchId, companyId },
           data: { storageLocationId: to.id, updatedBy: userId },

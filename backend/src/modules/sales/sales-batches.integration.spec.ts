@@ -101,6 +101,30 @@ async function seedShelf(db: PGlite, quantity: number, value: number) {
   );
 }
 
+async function seedLocation(db: PGlite, id: string, code: string) {
+  await db.query(
+    `INSERT INTO storage_locations
+       (id,"companyId","branchId","warehouseId",kind,code,"nameEn","nameAr","isActive","createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,'BIN',$5,$6,$7,true,now(),now())`,
+    [id, COMPANY, BRANCH, WAREHOUSE, code, code, code],
+  );
+}
+
+async function seedLotAtLocation(
+  db: PGlite,
+  batchId: string,
+  locationId: string,
+  quantity: number,
+) {
+  await db.query(
+    `INSERT INTO stock_movements
+       (id,"companyId","branchId","warehouseId","itemId","batchId","storageLocationId",
+        "movementDate",direction,quantity,"unitCost","totalCost","referenceType","createdAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,'IN',$8,5,$9,'TEST_RECEIPT',now())`,
+    [crypto.randomUUID(), COMPANY, BRANCH, WAREHOUSE, ITEM, batchId, locationId, quantity, quantity * 5],
+  );
+}
+
 const batchPolicyItem = {
   id: ITEM,
   code: 'IT-1',
@@ -224,6 +248,148 @@ const vmLacksDynamicImport = !(
     expect(await remaining(db, late)).toBe(100);
     expect(result.lots).toHaveLength(1);
     expect(result.lots[0].batchId).toBe(soon);
+  });
+
+  it('issues only lots that have stock in the selected storage location', async () => {
+    const selectedLot = await seedLot(db, 'L-SELECTED', 5, '2027-12-31');
+    const otherShelfLot = await seedLot(db, 'L-OTHER-SHELF', 20, '2026-12-01');
+    const selectedLocation = '66666666-6666-4666-8666-666666666661';
+    const otherLocation = '66666666-6666-4666-8666-666666666662';
+    await seedLocation(db, selectedLocation, 'BIN-A');
+    await seedLocation(db, otherLocation, 'BIN-B');
+    await seedLotAtLocation(db, selectedLot, selectedLocation, 5);
+    await seedLotAtLocation(db, otherShelfLot, otherLocation, 20);
+    await seedShelf(db, 25, 125);
+
+    const referenceId = '88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const { service } = serviceWith(db);
+    const result = await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      { warehouse: { id: WAREHOUSE, branchId: BRANCH }, branchId: BRANCH, item: batchPolicyItem },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        storageLocationId: selectedLocation,
+        quantity: D(4),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-LOCATION-1',
+      },
+      D(4),
+    );
+
+    expect(result.lots).toEqual([
+      expect.objectContaining({ batchId: selectedLot, quantity: '4.0000' }),
+    ]);
+    expect(await remaining(db, selectedLot)).toBe(1);
+    expect(await remaining(db, otherShelfLot)).toBe(20);
+    const outgoing = await db.query<{ storageLocationId: string; batchId: string }>(
+      `SELECT "storageLocationId","batchId" FROM stock_movements
+        WHERE "referenceId"=$1 AND direction='OUT'`,
+      [referenceId],
+    );
+    expect(outgoing.rows).toEqual([
+      { storageLocationId: selectedLocation, batchId: selectedLot },
+    ]);
+  });
+
+  it('caps selected-shelf lot availability at the lot remaining quantity', async () => {
+    const partiallyConsumedLot = await seedLot(db, 'L-PARTIAL', 2, '2026-12-01');
+    const nextLot = await seedLot(db, 'L-NEXT', 10, '2027-06-30');
+    const selectedLocation = '66666666-6666-4666-8666-666666666671';
+    await seedLocation(db, selectedLocation, 'BIN-C');
+    // Simulate older unlocated issues/write-offs: the shelf ledger still says
+    // ten, but the authoritative lot row says only two remain.
+    await seedLotAtLocation(db, partiallyConsumedLot, selectedLocation, 10);
+    await seedLotAtLocation(db, nextLot, selectedLocation, 10);
+    await seedShelf(db, 12, 60);
+
+    const referenceId = '88888888-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const { service } = serviceWith(db);
+    const result = await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      { warehouse: { id: WAREHOUSE, branchId: BRANCH }, branchId: BRANCH, item: batchPolicyItem },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        storageLocationId: selectedLocation,
+        quantity: D(5),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-LOCATION-CAP',
+      },
+      D(5),
+    );
+
+    expect(result.lots).toEqual([
+      expect.objectContaining({ batchId: partiallyConsumedLot, quantity: '2.0000' }),
+      expect.objectContaining({ batchId: nextLot, quantity: '3.0000' }),
+    ]);
+    expect(await remaining(db, partiallyConsumedLot)).toBe(0);
+    expect(await remaining(db, nextLot)).toBe(7);
+  });
+
+  it('does not issue unbatched stock from a different storage location', async () => {
+    const selectedLocation = '66666666-6666-4666-8666-666666666681';
+    const otherLocation = '66666666-6666-4666-8666-666666666682';
+    await seedLocation(db, selectedLocation, 'BIN-D');
+    await seedLocation(db, otherLocation, 'BIN-E');
+    await db.query(
+      `INSERT INTO stock_movements
+         (id,"companyId","branchId","warehouseId","itemId","storageLocationId",
+          "movementDate",direction,quantity,"unitCost","totalCost","referenceType","createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,'IN',4,5,20,'TEST_UNBATCHED',now()),
+              ($7,$2,$3,$4,$5,$8,CURRENT_DATE,'IN',20,5,100,'TEST_UNBATCHED',now())`,
+      [crypto.randomUUID(), COMPANY, BRANCH, WAREHOUSE, ITEM, selectedLocation,
+       crypto.randomUUID(), otherLocation],
+    );
+    await seedShelf(db, 24, 120);
+
+    const referenceId = '88888888-cccc-4ccc-8ccc-cccccccccccc';
+    const { service } = serviceWith(db);
+    await service.issueTx(
+      pglitePrisma(db as never) as never,
+      COMPANY,
+      USER,
+      {
+        warehouse: { id: WAREHOUSE, branchId: BRANCH },
+        branchId: BRANCH,
+        item: { ...batchPolicyItem, requiresBatch: false },
+      },
+      {
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        storageLocationId: selectedLocation,
+        quantity: D(3),
+        referenceType: 'SALES_INVOICE',
+        referenceId,
+        referenceNumber: 'SI-UNBATCHED-LOCATION',
+      },
+      D(3),
+    );
+
+    const outgoing = await db.query<{ storageLocationId: string | null; batchId: string | null }>(
+      `SELECT "storageLocationId","batchId" FROM stock_movements
+        WHERE "referenceId"=$1 AND direction='OUT'`,
+      [referenceId],
+    );
+    expect(outgoing.rows).toEqual([
+      { storageLocationId: selectedLocation, batchId: null },
+    ]);
+    const locationBalance = await db.query<{ quantity: string }>(
+      `SELECT SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END)::text AS quantity
+         FROM stock_movements
+        WHERE "storageLocationId"=$1 AND "batchId" IS NULL`,
+      [selectedLocation],
+    );
+    expect(Number(locationBalance.rows[0].quantity)).toBe(1);
   });
 
   it('splits one line across several lots when the first cannot cover it, and records each lot', async () => {

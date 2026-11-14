@@ -117,6 +117,7 @@ jobs:
           src/modules/sales/cost-redaction.spec.ts
           src/modules/inventory/stock-documents.warehouse-guard.spec.ts
           src/modules/inventory/stock-documents.units.spec.ts
+          src/modules/inventory/storage-locations.service.spec.ts
           src/modules/inventory/original-stock-movement.spec.ts
           src/modules/backup/backup.service.spec.ts
           src/modules/backup/full-backup.service.spec.ts
@@ -155,6 +156,8 @@ jobs:
           src/modules/company/company-profile.guard.spec.ts
           src/modules/company/company.service.spec.ts
           src/modules/company/company-audit-atomic.spec.ts
+      - name: Verify lot FEFO and storage-location issue integration on PostgreSQL engine
+        run: npm run test:lots -- --runInBand
 
   prisma-upgrade:
     name: Native Prisma and PostgreSQL 16 upgrade

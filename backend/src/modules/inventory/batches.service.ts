@@ -684,6 +684,9 @@ export class BatchesService {
     }
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     const item = await this.requireItem(companyId, input.itemId);
+    if (input.storageLocationId) {
+      await this.requireLocation(companyId, warehouse.id, input.storageLocationId);
+    }
 
     return this.prisma.$transaction((tx) =>
       this.issueTx(
@@ -745,6 +748,31 @@ export class BatchesService {
       // that each read the lots first would both see the same quantity and
       // both promise it away; taken in this order the second waits here.
       const shelf = await this.shelf(tx, companyId, warehouse, item.id);
+      // A named shelf is a hard stock boundary, not merely a label on the
+      // outgoing movement. Derive each lot's available quantity from that
+      // shelf's movement ledger so FEFO cannot issue a lot stored elsewhere.
+      let locationLotBalances: Map<string, Prisma.Decimal> | null = null;
+      if (input.storageLocationId) {
+        const locationLots = await tx.$queryRaw<
+          Array<{ batchId: string; quantity: Prisma.Decimal }>
+        >(
+          Prisma.sql`
+            SELECT "batchId",
+                   SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "warehouseId" = ${warehouse.id}::uuid
+               AND "itemId" = ${item.id}::uuid
+               AND "storageLocationId" = ${input.storageLocationId}::uuid
+               AND "batchId" IS NOT NULL
+             GROUP BY "batchId"
+            HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) > 0
+          `,
+        );
+        locationLotBalances = new Map(
+          locationLots.map((row) => [row.batchId, new Prisma.Decimal(row.quantity)]),
+        );
+      }
       const lots = await tx.itemBatch.findMany({
         where: {
           companyId,
@@ -752,7 +780,13 @@ export class BatchesService {
           itemId: item.id,
           deletedAt: null,
           remainingQuantity: { gt: 0 },
-          ...(input.batchId ? { id: input.batchId } : {}),
+          ...(input.batchId && locationLotBalances !== null
+            ? { id: { equals: input.batchId, in: [...locationLotBalances.keys()] } }
+            : input.batchId
+              ? { id: input.batchId }
+              : locationLotBalances !== null
+                ? { id: { in: [...locationLotBalances.keys()] } }
+                : {}),
         },
         // Locked, so two simultaneous issues cannot both take the last unit
         // of the same lot.
@@ -769,8 +803,28 @@ export class BatchesService {
             'هذا الصنف يتطلب دفعة. / This item is lot-controlled: no lot is available to issue from.',
           );
         }
-        // An item without lots issues from the shelf's plain balance, which is
-        // exactly how the program worked before lots existed.
+        if (input.storageLocationId) {
+          const unbatchedRows = await tx.$queryRaw<
+            Array<{ quantity: Prisma.Decimal | null }>
+          >(
+            Prisma.sql`
+              SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+                FROM "stock_movements"
+               WHERE "companyId" = ${companyId}::uuid
+                 AND "warehouseId" = ${warehouse.id}::uuid
+                 AND "itemId" = ${item.id}::uuid
+                 AND "storageLocationId" = ${input.storageLocationId}::uuid
+                 AND "batchId" IS NULL
+            `,
+          );
+          const locationQuantity = new Prisma.Decimal(unbatchedRows[0]?.quantity ?? 0);
+          if (locationQuantity.lessThan(quantity)) {
+            throw new BadRequestException(
+              `الرصيد غير كافٍ في موقع التخزين المحدد: ${locationQuantity.toFixed(MONEY_SCALE)} متاح. / ` +
+                'Not enough unbatched stock in the selected storage location.',
+            );
+          }
+        }
         return this.issueUnbatched(tx, companyId, userId, warehouse, item, quantity, input, today);
       }
 
@@ -807,7 +861,15 @@ export class BatchesService {
         expiryDate: lot.expiryDate,
         productionDate: lot.productionDate,
         unitCost: lot.unitCost,
-        remainingQuantity: lot.remainingQuantity,
+        remainingQuantity: (() => {
+          const atLocation = locationLotBalances?.get(lot.id);
+          // Other issue paths (write-offs, transfers, or issues without a
+          // selected shelf) can reduce the lot total without a shelf-tagged
+          // movement. Never let a stale shelf ledger overstate the lot itself.
+          return atLocation && atLocation.lessThan(lot.remainingQuantity)
+            ? atLocation
+            : lot.remainingQuantity;
+        })(),
         status: lot.status,
       }));
 
@@ -1025,6 +1087,7 @@ export class BatchesService {
         branchId: warehouse.branchId,
         warehouseId: warehouse.id,
         itemId: item.id,
+        storageLocationId: input.storageLocationId ?? null,
         movementDate: today,
         direction: StockDirection.OUT,
         quantity,

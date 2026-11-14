@@ -91,6 +91,22 @@ describe('storage locations', () => {
           quantity: entry.quantity,
         }));
       }
+      // Whole-lot shelf balances, grouped before a move is written.
+      if (sql.includes('GROUP BY "storageLocationId"')) {
+        const [companyId, itemId, batchId] = values;
+        const grouped = new Map<string, Prisma.Decimal>();
+        for (const row of state.movements) {
+          if (row.companyId !== companyId || row.itemId !== itemId || row.batchId !== batchId) continue;
+          const current = grouped.get(row.storageLocationId) ?? D(0);
+          grouped.set(
+            row.storageLocationId,
+            row.direction === 'IN' ? current.plus(D(row.quantity)) : current.minus(D(row.quantity)),
+          );
+        }
+        return [...grouped]
+          .filter(([, quantity]) => !quantity.isZero())
+          .map(([storageLocationId, quantity]) => ({ storageLocationId, quantity }));
+      }
       // A sum over one location, optionally narrowed to one item and one lot.
       const [, locationId, itemId, batchId] = values;
       let total = D(0);
@@ -542,17 +558,79 @@ describe('storage locations', () => {
     expect(created[0].referenceType).toBe('LOCATION_MOVE_OUT');
     expect(created[1].referenceType).toBe('LOCATION_MOVE_IN');
     expect(created[0].notes).toBe('re-shelving');
-    // The lot keeps its quantity and changes shelf.
-    expect(state.batches[0]).toMatchObject({
-      where: { id: LOT, companyId: COMPANY },
-      data: { storageLocationId: 'loc-shelf-2', updatedBy: USER },
-    });
+    // A partial move splits a lot across shelves. The ledger records the
+    // destination quantity; the single-location lot shortcut must stay put.
+    expect(state.batches).toHaveLength(0);
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'MOVE_LOCATION',
         after: expect.objectContaining({ to: 'loc-shelf-2', quantity: '4.0000', value: '40.0000' }),
       }),
     );
+  });
+
+  it('updates the lot location only when its entire remaining quantity moves', async () => {
+    const { service, state } = makeHarness({
+      locations: [shelf(), shelf({ id: 'loc-shelf-2', code: 'S2' })],
+      movements: [
+        {
+          companyId: COMPANY,
+          storageLocationId: 'loc-shelf',
+          itemId: ITEM,
+          batchId: LOT,
+          direction: 'IN',
+          quantity: '10',
+        },
+      ],
+      balance: { quantity: '10', value: '100' },
+    });
+
+    await service.move(
+      COMPANY,
+      USER,
+      { fromLocationId: 'loc-shelf', toLocationId: 'loc-shelf-2', itemId: ITEM, batchId: LOT, quantity: '10' },
+      null,
+    );
+
+    expect(state.batches).toHaveLength(1);
+    expect(state.batches[0]).toMatchObject({
+      where: { id: LOT, companyId: COMPANY },
+      data: { storageLocationId: 'loc-shelf-2', updatedBy: USER },
+    });
+  });
+
+  it('keeps the lot shortcut unchanged when the lot already occupies another shelf', async () => {
+    const { service, state } = makeHarness({
+      locations: [shelf(), shelf({ id: 'loc-shelf-2', code: 'S2' })],
+      movements: [
+        {
+          companyId: COMPANY,
+          storageLocationId: 'loc-shelf',
+          itemId: ITEM,
+          batchId: LOT,
+          direction: 'IN',
+          quantity: '4',
+        },
+        {
+          companyId: COMPANY,
+          storageLocationId: 'loc-shelf-2',
+          itemId: ITEM,
+          batchId: LOT,
+          direction: 'IN',
+          quantity: '6',
+        },
+      ],
+      balance: { quantity: '10', value: '100' },
+    });
+
+    await service.move(
+      COMPANY,
+      USER,
+      { fromLocationId: 'loc-shelf', toLocationId: 'loc-shelf-2', itemId: ITEM, batchId: LOT, quantity: '4' },
+      null,
+    );
+
+    expect(state.batches).toHaveLength(0);
   });
 
   it('refuses to move more than the shelf holds', async () => {
