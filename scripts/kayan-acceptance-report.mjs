@@ -27,6 +27,7 @@ const requirements = [
   ['X07', 'Offline Windows Setup installs Flutter, Backend, Node, Prisma and PostgreSQL', ['windows_setup', 'windows_install']],
   ['X08', 'Licensed installed product enforces activation', ['licence_runtime']],
   ['X09', 'Skipped tests are disclosed', ['skip_audit']],
+  ['X10', 'Full Flutter suite completes with no failures or skips', ['flutter_full_suite']],
 ];
 const values = new Set(['PASS', 'FAIL', 'BLOCKED', 'NOT TESTED']);
 const checks = requirements.map(([id, requirement, tests]) => {

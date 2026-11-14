@@ -45,6 +45,29 @@ test('Flutter JSON events distinguish passing, failing, and skipped tests', () =
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a failure outside mapped widget groups fails full Flutter acceptance', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kayan-full-suite-'));
+  try {
+    const log = join(dir, 'flutter.jsonl');
+    const output = join(dir, 'results.json');
+    const reportPath = join(dir, 'report.json');
+    writeFileSync(log, [
+      { type: 'suite', suite: { id: 1, path: 'test/features/orders/order_flow_test.dart' } },
+      { type: 'testStart', test: { id: 2, suiteID: 1, name: 'posting failure' } },
+      { type: 'testDone', testID: 2, result: 'failure', skipped: false },
+    ].map(event => JSON.stringify(event)).join('\n'));
+    const result = spawnSync(process.execPath, ['scripts/kayan-acceptance-results.mjs', log, output],
+      { encoding: 'utf8', env: { ...process.env, BACKEND_STATUS: '0', FLUTTER_STATUS: '1' } });
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(readFileSync(output, 'utf8'));
+    assert.equal(parsed.flutter_full_suite.status, 'FAIL');
+    assert.match(parsed.flutter_full_suite.failures[0].path, /order_flow_test\.dart/);
+    const report = spawnSync(process.execPath, ['scripts/kayan-acceptance-report.mjs', output, reportPath], { encoding: 'utf8' });
+    assert.equal(report.status, 0, report.stderr);
+    assert.equal(JSON.parse(readFileSync(reportPath, 'utf8')).checks.find(check => check.id === 'X10').status, 'FAIL');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('acceptance gate fails for a skipped or failed test', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kayan-gate-'));
   try {

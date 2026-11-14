@@ -21,6 +21,7 @@ const suites = new Map();
 const tests = new Map();
 const verdicts = new Map(Object.keys(groups).map(key => [key, []]));
 const skipped = [];
+const allTests = [];
 const bytes = readFileSync(log === '-' ? 0 : log);
 const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf16le' : 'utf8';
 for (const line of bytes.toString(encoding).replace(/^\uFEFF/, '').split(/\r?\n/)) {
@@ -33,12 +34,21 @@ for (const line of bytes.toString(encoding).replace(/^\uFEFF/, '').split(/\r?\n/
   const test = tests.get(event.testID);
   const path = suites.get(test?.suiteID) ?? '';
   if (event.hidden) continue;
+  allTests.push({ path, name: test?.name ?? 'unknown', status: event.skipped ? 'NOT TESTED' : event.result === 'success' ? 'PASS' : 'FAIL' });
   if (event.skipped) skipped.push({ path, name: test?.name ?? 'unknown' });
   for (const [group, pattern] of Object.entries(groups)) {
     if (pattern.test(path)) verdicts.get(group).push(event.skipped ? 'NOT TESTED' : event.result === 'success' ? 'PASS' : 'FAIL');
   }
 }
 const results = { skipped };
+const failedTests = allTests.filter(test => test.status === 'FAIL');
+results.flutter_full_suite = {
+  status: process.env.FLUTTER_STATUS == null || allTests.length === 0 ? 'NOT TESTED'
+    : process.env.FLUTTER_STATUS !== '0' || failedTests.length ? 'FAIL'
+    : skipped.length ? 'FAIL' : 'PASS',
+  evidence: `${allTests.length} Flutter tests, ${failedTests.length} failed, ${skipped.length} skipped in ${log}`,
+  failures: failedTests,
+};
 for (const [group, statuses] of verdicts) {
   results[group] = { status: statuses.includes('FAIL') ? 'FAIL'
     : statuses.length && statuses.every(status => status === 'PASS') ? 'PASS' : 'NOT TESTED',
