@@ -35,7 +35,8 @@ const reviewed = [
   // 3.47.6, the version every other workflow here uses.
   'barcode-quantity-focused.yml',
   // Acceptance evidence and a licence-protected Setup on an ephemeral runner:
-  // read-only checkout, no private key or publication, and test failure gates build.
+  // read-only checkout, no private key or publication; build is independent
+  // of tests, and neither result is reported as an installation pass.
   'kayan-acceptance.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');

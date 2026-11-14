@@ -73,7 +73,6 @@ jobs:
 
   windows-evaluation:
     name: Build licence-protected Setup on disposable Windows runner
-    needs: acceptance
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
