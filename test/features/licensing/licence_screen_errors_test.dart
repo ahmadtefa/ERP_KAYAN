@@ -35,11 +35,11 @@ void main() {
     await tester.enterText(find.byType(TextField),'synthetic-input-not-a-key');
     await tester.ensureVisible(find.text('Apply key'));
     await tester.tap(find.text('Apply key')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('INTERNAL_LICENCE_DIAGNOSTIC'),findsNothing);
     await tester.tapAt(const Offset(5,5)); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.text('OK'),findsOneWidget);
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,'synthetic-input-not-a-key');
     expect(tester.takeException(),isNull);
   });
@@ -51,9 +51,9 @@ void main() {
       locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
       supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:LicenceScreen()))));
     await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('INTERNAL_LICENCE_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.byTooltip('Retry'),findsOneWidget);
     expect(tester.takeException(),isNull);
   });

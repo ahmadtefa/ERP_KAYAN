@@ -103,9 +103,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>)); await tester.pumpAndSettle();
     await tester.tap(find.textContaining('INV-1').last); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('internal source diagnostic'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.byType(ReturnEditorScreen),findsOneWidget);
     expect(find.text('Synthetic item'),findsNothing);
   });

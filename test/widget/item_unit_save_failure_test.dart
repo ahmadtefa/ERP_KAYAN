@@ -65,9 +65,9 @@ void main() {
       await tester.enterText(find.widgetWithText(TextFormField,'Unit name'),'Crate');
       await tester.enterText(find.widgetWithText(TextFormField,'Base units per unit'),'5');
       await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('PRIVATE_UNIT_DIAGNOSTIC'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Unit name')).controller!.text,'Crate');
       expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Base units per unit')).controller!.text,'5');
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);

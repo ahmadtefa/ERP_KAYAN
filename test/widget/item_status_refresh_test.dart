@@ -76,9 +76,9 @@ void main() {
         expect(confirm, findsOneWidget, reason: 'the confirmation must appear');
         await tester.tap(confirm); await tester.pumpAndSettle();
       }
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('PRIVATE_ITEM_STATUS'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(api.attempts,1);
       expect(find.byTooltip(initialActive ? 'Reactivate' : 'Deactivate'),findsOneWidget);
       expect((await container.read(activeItemsProvider.future)).length,initialActive ? 0 : 1);

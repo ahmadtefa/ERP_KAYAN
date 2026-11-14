@@ -49,9 +49,9 @@ void main() {
       await tester.enterText(name,'Draft period');
       if (failure) {
         await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-        expect(find.text('حسنًا'),findsOneWidget);
+        expect(find.text('OK'),findsOneWidget);
         expect(find.textContaining('PRIVATE_PERIOD_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(api.attempts,1);
         expect(tester.widget<TextFormField>(name).controller!.text,'Draft period');
         expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);

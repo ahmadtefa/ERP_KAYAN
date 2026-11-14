@@ -57,9 +57,9 @@ void main() {
       await tester.tap(find.text(entry.tab)); await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(entry.action)); await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton,entry.action)); await tester.pumpAndSettle();
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('PRIVATE_CASH_DIAGNOSTIC'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(api.posts,1);
       final list=entry.tab == 'Transfers' ? cashTransfersProvider : cashVouchersProvider;
       expect((await container.read(list.future)).single['status'],entry.expected);

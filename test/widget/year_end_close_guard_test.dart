@@ -66,9 +66,9 @@ void main() {
         expect(tester.widget<TextField>(reason).enabled,isFalse);
         api.closed=true; api.response.completeError(StateError('PRIVATE_CLOSE_DIAGNOSTIC'));
         await tester.pumpAndSettle();
-        expect(find.text('حسنًا'),findsOneWidget);
+        expect(find.text('OK'),findsOneWidget);
         expect(find.textContaining('PRIVATE_CLOSE_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Close the year')).onPressed,isNull);
         expect(tester.widget<TextField>(reason).controller!.text,'Synthetic reason');
         expect((await container.read(fiscalPeriodsListProvider.future)).single['isClosed'],isTrue);

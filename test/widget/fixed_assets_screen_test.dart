@@ -547,9 +547,9 @@ void main() {
     final field = find.widgetWithText(TextFormField,'Name in English');
     await tester.ensureVisible(field); await tester.enterText(field,'Edited synthetic tool');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('Synthetic private asset error'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(field).controller!.text,'Edited synthetic tool');
     expect(find.textContaining('The operation may have completed'),findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
@@ -571,9 +571,9 @@ void main() {
     await tester.tap(find.textContaining('1101.REC — Lifecycle cash').last); await tester.pumpAndSettle();
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Activate (post acquisition)')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_PRIVATE_ASSET'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.textContaining('The operation may have completed'),findsOneWidget);
     expect(find.textContaining('1101.REC — Lifecycle cash'),findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
@@ -600,7 +600,7 @@ void main() {
     expect(find.textContaining('1101.REC — Lifecycle cash'),findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNotNull);
     expect(api.posts.where((p)=>p.path.endsWith('/activate')),isEmpty);
-    expect(find.text('حسنًا'),findsNothing);
+    expect(find.text('OK'),findsNothing);
   });
 
   testWidgets('lost depreciation response preserves period and blocks a second request', (tester) async {
@@ -610,9 +610,9 @@ void main() {
     final period=find.widgetWithText(TextFormField,'Month (YYYY-MM)');
     await tester.enterText(period,'2024-01');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('private depreciation'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(period).controller!.text,'2024-01');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(api.posts.where((p)=>p.path == '/fixed-assets/depreciation-runs'),hasLength(1));
@@ -630,9 +630,9 @@ void main() {
     await tester.enterText(proceeds,'1000');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Dispose of asset')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('private disposal'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(proceeds).controller!.text,'1000');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(api.posts.where((p)=>p.path.endsWith('/dispose')),hasLength(1));

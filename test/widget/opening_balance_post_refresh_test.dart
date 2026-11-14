@@ -63,9 +63,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Post')); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Post').last); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('INTERNAL_OPENING_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(api.posts,1);
     expect(find.text('Posted'),findsOneWidget);
     expect((await container.read(stockListProvider.future)).single['status'],'posted');

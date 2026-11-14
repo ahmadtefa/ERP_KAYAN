@@ -41,9 +41,9 @@ void main() {
         child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
           supportedLocales:AppLocalizations.supportedLocales,home:const QuotationEditorScreen(quotationId:'offer'))));
       await tester.pumpAndSettle();
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('internal diagnostic'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
       expect(find.byKey(const ValueKey('quotation-subject')),findsNothing);
       expect(api.updates,0);

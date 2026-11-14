@@ -48,8 +48,8 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField,'Name'),'Kept value');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(find.textContaining('INTERNAL_DO_NOT_SHOW'),findsNothing);
-    expect(find.text('حسنًا'),findsOneWidget);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.text('OK'),findsOneWidget);
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name')).controller!.text,'Kept value');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(calls,2); expect(find.text('Edit record'),findsNothing);
@@ -68,7 +68,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField,'Name'),'Original draft');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(find.textContaining('PRIVATE_CREATE_ERROR'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name')).controller!.text,'Original draft');
     expect(find.textContaining('operation may have completed'),findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);

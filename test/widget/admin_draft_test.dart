@@ -132,9 +132,9 @@ void main() {
     final field=find.widgetWithText(TextFormField,'Name in English');
     await tester.enterText(field,'Edited');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_ADMIN_RESPONSE'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(field).controller!.text,'Edited');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(api.patches,1); expect(api.userReads,greaterThanOrEqualTo(2));
@@ -145,7 +145,7 @@ void main() {
     testWidgets('user editor fails safely for ${malformed ? 'incomplete user roles' : 'unavailable roles catalogue'}', (tester) async {
       final api=_AdminApi()..malformedRoles=malformed..failRolesLoad=!malformed;
       await _screen(tester,api); await _openEdit(tester);
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('PRIVATE_ROLE_LOOKUP'),findsNothing);
       expect(find.text('Edit user'),findsNothing);
       expect(api.patches,0);
@@ -173,9 +173,9 @@ void main() {
     await tester.enterText(name,'New role');
     await tester.enterText(find.widgetWithText(TextFormField,'Name in Arabic'),'دور');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_ROLE_RESPONSE'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(name).controller!.text,'New role');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(api.posts,1);
@@ -198,8 +198,8 @@ void main() {
         expect(api.submitted!['permissions'],containsAll(['sales.invoices.read','sales.invoices.write']));
         expect(api.submitted!['expectedPermissions'],['sales.invoices.read']);
       } else {
-        expect(find.text('حسنًا'),findsOneWidget);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        expect(find.text('OK'),findsOneWidget);
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(tester.widget<CheckboxListTile>(read).value,isTrue);
         expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile,'Edit invoices')).value,isTrue);
         expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
@@ -224,7 +224,7 @@ void main() {
     final action=find.byTooltip('Extra permissions');
     await tester.ensureVisible(action); await tester.pumpAndSettle();
     await tester.tap(action); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(api.patches,0);
   });
 
@@ -273,9 +273,9 @@ void main() {
     await tester.ensureVisible(deactivate); await tester.pumpAndSettle();
     await tester.tap(deactivate); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Deactivate')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_DEACTIVATE_RESPONSE'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.byTooltip('Reactivate'),findsOneWidget);
     expect(api.userReads,greaterThanOrEqualTo(2));
     expect(api.posts,1);
@@ -288,9 +288,9 @@ void main() {
     await tester.ensureVisible(remove); await tester.pumpAndSettle();
     await tester.tap(remove); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Delete role')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_DELETE_RESPONSE'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.text('Available role'),findsNothing);
     expect(api.deletes,1);
   });

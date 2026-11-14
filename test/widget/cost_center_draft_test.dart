@@ -51,9 +51,9 @@ void main() {
     await tester.enterText(description,'');
     expect(tester.widget<TextFormField>(end).controller!.text,'');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_CENTER_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect((api.submitted as Map)['startDate'],'2026-01-01');
     expect((api.submitted as Map).containsKey('endDate'),isTrue);
     expect((api.submitted as Map)['endDate'],isNull);

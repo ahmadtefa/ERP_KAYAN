@@ -53,8 +53,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Reactivate')); await tester.pumpAndSettle();
       expect(find.textContaining('INTERNAL_PARTY_DIAGNOSTIC'),findsNothing);
-      expect(find.text('حسنًا'),findsOneWidget);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      expect(find.text('OK'),findsOneWidget);
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(find.byTooltip('Deactivate'),findsOneWidget);
     });
   }
@@ -83,7 +83,7 @@ void main() {
         await tester.enterText(find.widgetWithText(TextFormField,'Name (English)'),'Kept name');
         await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
         expect(find.textContaining('INTERNAL_PARTY_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name (English)')).controller!.text,'Kept name');
         expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
         expect(find.textContaining('operation may have completed'),findsOneWidget);

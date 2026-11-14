@@ -52,9 +52,9 @@ void main() {
         final action=reverse ? 'Reverse' : 'Post';
         await tester.tap(find.byTooltip(action)); await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton,action)); await tester.pumpAndSettle();
-        expect(find.text('حسنًا'),findsOneWidget);
+        expect(find.text('OK'),findsOneWidget);
         expect(find.textContaining('INTERNAL_RETURN_ACTION_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(api.posts,1); expect(api.loads,greaterThanOrEqualTo(2));
         expect((await container.read(dashboardSummaryProvider.future))['status'],reverse ? 'reversed' : 'posted');
         expect((await container.read(dashboardMonthlyProvider.future))['status'],reverse ? 'reversed' : 'posted');

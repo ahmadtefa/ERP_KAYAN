@@ -57,9 +57,9 @@ void main() {
     await tester.tap(find.byType(DropdownButtonFormField<String>).last); await tester.pumpAndSettle();
     await tester.tap(find.text('111 — Ledger').last); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_ACCOUNT_ERROR'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Code')).controller!.text,'SYN');
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name in English')).controller!.text,'Synthetic name');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
@@ -87,9 +87,9 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField,'Amount'),'12.5');
     await tester.enterText(find.widgetWithText(TextFormField,'Description'),'Draft retained');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_TRANSFER_ERROR'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Amount')).controller!.text,'12.5');
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Description')).controller!.text,'Draft retained');
     expect(find.textContaining('operation may have completed'),findsOneWidget);

@@ -70,9 +70,9 @@ void main() {
       await tester.enterText(notes,failure ? '' : 'Draft budget');
       if (failure) {
         await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-        expect(find.text('حسنًا'),findsOneWidget);
+        expect(find.text('OK'),findsOneWidget);
         expect(find.textContaining('PRIVATE_BUDGET_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(api.attempts,1);
         final body=api.body as Map;
         expect(body.containsKey('accountId'),isFalse);

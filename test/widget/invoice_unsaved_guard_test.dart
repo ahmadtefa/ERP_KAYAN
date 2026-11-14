@@ -92,9 +92,9 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('line-quantity-0')),'2');
       await tester.enterText(find.byKey(const ValueKey('line-price-0')),'5');
       await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('INTERNAL_INVOICE_DIAGNOSTIC'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text,'2');
     });
   }
@@ -167,8 +167,8 @@ void main() {
           onPressed:() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
             const InvoiceEditorScreen(kind:InvoiceKind.sales,invoiceId:'invoice-1'))),child:const Text('Open invoice')))))));
     await tester.tap(find.text('Open invoice')); await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.text('OK'),findsOneWidget);
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.text('Open invoice'),findsOneWidget);
     expect(find.byType(InvoiceEditorScreen),findsNothing);
   });
@@ -182,7 +182,7 @@ void main() {
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
         supportedLocales:AppLocalizations.supportedLocales,home:const InvoiceEditorScreen(kind:InvoiceKind.sales,invoiceId:'invoice-1'))));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(find.byKey(const ValueKey('line-quantity-0')),findsNothing);
     api.failLoad = false;

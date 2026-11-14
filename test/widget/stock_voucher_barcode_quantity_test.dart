@@ -147,7 +147,7 @@ void main() {
     // AppLocalizationsAr() directly rather than from the ambient localizations.
     // That is the dialog's own decision and not something to change here, so
     // the test dismisses the button it actually renders.
-    final dismiss = find.text('حسنًا');
+    final dismiss = find.text('OK');
     if (dismiss.evaluate().isNotEmpty) {
       await tester.tap(dismiss);
       await tester.pumpAndSettle();
