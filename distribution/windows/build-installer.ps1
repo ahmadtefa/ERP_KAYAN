@@ -158,6 +158,53 @@ function Run-Native([string]$File, [string[]]$Arguments, [string]$WorkingDirecto
     if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $File $($Arguments -join ' ')" }
   } finally { Pop-Location }
 }
+function Copy-PostgresRuntimeFromArchive([string]$Archive, [string]$Destination, [string]$LicenseDestination) {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+  try {
+    # The upstream archive has a single PostgreSQL root (normally pgsql/).
+    # Locate it from initdb instead of assuming its directory name, then read
+    # only the runtime trees.  In particular, do not materialize pgAdmin's
+    # deeply nested Python files on the Windows build machine.
+    $initdb = $zip.Entries | Where-Object { $_.FullName -match '(?i)^(?<root>.*?)(?<directory>bin)/initdb\.exe$' } | Select-Object -First 1
+    if (-not $initdb) { throw 'The verified PostgreSQL archive did not contain bin\\initdb.exe.' }
+    $archiveRoot = $initdb.FullName.Substring(0, $initdb.FullName.Length - 'bin/initdb.exe'.Length)
+    $destinationRoot = [IO.Path]::GetFullPath($Destination)
+    if (-not $destinationRoot.EndsWith([IO.Path]::DirectorySeparatorChar)) { $destinationRoot += [IO.Path]::DirectorySeparatorChar }
+
+    foreach ($runtimeDir in @('bin', 'lib', 'share')) {
+      $entryPrefix = "$archiveRoot$runtimeDir/"
+      $runtimeEntries = @($zip.Entries | Where-Object { $_.FullName.StartsWith($entryPrefix, [StringComparison]::OrdinalIgnoreCase) -and -not $_.FullName.EndsWith('/') })
+      if ($runtimeEntries.Count -eq 0) { throw "Verified PostgreSQL archive is missing runtime directory $runtimeDir." }
+      foreach ($entry in $runtimeEntries) {
+        $relative = $entry.FullName.Substring($archiveRoot.Length).Replace('/', [IO.Path]::DirectorySeparatorChar)
+        if ($relative -match '(^|[\\/])\.\.([\\/]|$)') { throw "Refusing traversal in PostgreSQL archive entry: $($entry.FullName)" }
+        $target = [IO.Path]::GetFullPath((Join-Path $Destination $relative))
+        if (-not $target.StartsWith($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing archive entry outside PostgreSQL runtime destination: $($entry.FullName)" }
+        [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target))
+        $input = $entry.Open()
+        try {
+          $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+          try { $input.CopyTo($output) } finally { $output.Dispose() }
+        } finally { $input.Dispose() }
+      }
+    }
+
+    # Licence notices travel with the PostgreSQL runtime, but are copied
+    # directly from its archive root so pgAdmin is never extracted.
+    foreach ($licenseName in @('LICENSE','COPYRIGHT','README')) {
+      $entry = $zip.Entries | Where-Object { $_.FullName -ieq "$archiveRoot$licenseName" } | Select-Object -First 1
+      if (-not $entry) { continue }
+      [void](New-Item -ItemType Directory -Force -Path $LicenseDestination)
+      $target = Join-Path $LicenseDestination "PostgreSQL-$licenseName"
+      $input = $entry.Open()
+      try {
+        $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        try { $input.CopyTo($output) } finally { $output.Dispose() }
+      } finally { $input.Dispose() }
+    }
+  } finally { $zip.Dispose() }
+}
 
 if (-not [Environment]::Is64BitOperatingSystem) { throw 'Only Windows x64 is supported. Flutter Windows and the bundled PostgreSQL distribution do not provide a supported 32-bit product build.' }
 Require-Command 'flutter'
@@ -323,28 +370,10 @@ foreach ($relativeExtra in $bundledNodeExtras) {
 if (-not (Test-Path -LiteralPath (Join-Path $app 'backend\node\node.exe'))) {
   throw 'The bundled Node.js executable is missing after package-manager pruning.'
 }
-Expand-Archive -LiteralPath $pgZip -DestinationPath (Join-Path $stage 'extract-postgres') -Force
-$pgBin = Get-ChildItem (Join-Path $stage 'extract-postgres') -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName 'bin\initdb.exe') } | Select-Object -First 1
-if (-not $pgBin) { throw 'The verified PostgreSQL archive did not contain bin\initdb.exe.' }
-# The official archive also contains pgAdmin and unrelated tooling. Recursing
-# into its deeply nested Python packages coincided with Inno failing while
-# compressing a 264-character pgAdmin path on the Windows runner. The service needs
-# PostgreSQL's binaries, extension libraries and shared data, not pgAdmin. Copy
-# only those runtime trees into this fresh staging directory; never delete or
-# modify anything in the downloaded archive.
-foreach ($runtimeDir in @('bin', 'lib', 'share')) {
-  $source = Join-Path $pgBin.FullName $runtimeDir
-  if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Verified PostgreSQL archive is missing runtime directory $runtimeDir." }
-  Copy-Item -LiteralPath $source -Destination (Join-Path $app 'backend\postgres') -Recurse -Force
-}
-$pgRoot = Split-Path -Parent $pgBin.FullName
-foreach ($licenseName in @('LICENSE','COPYRIGHT','README')) {
-  Get-ChildItem $pgRoot -Filter $licenseName -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-    $target = Join-Path $app "licenses\PostgreSQL-$($_.Name)"
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-    Copy-Item $_.FullName $target -Force
-  }
-}
+# The official archive also contains pgAdmin and unrelated tooling. Extract
+# only PostgreSQL's runtime trees directly from the verified archive: staging
+# pgAdmin's nested Python packages can exceed Windows' path limit.
+Copy-PostgresRuntimeFromArchive -Archive $pgZip -Destination (Join-Path $app 'backend\postgres') -LicenseDestination (Join-Path $app 'licenses')
 Get-ChildItem $nodeFolder.FullName -Filter 'LICENSE*' -File -ErrorAction SilentlyContinue | Copy-Item -Destination (Join-Path $app 'licenses') -Force -ErrorAction SilentlyContinue
 
 Write-Host '[5/8] Add database lifecycle and first-run setup scripts'

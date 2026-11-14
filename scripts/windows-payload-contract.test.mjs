@@ -35,6 +35,27 @@ test('the build script stages every runtime the product needs', async () => {
   assert.match(build, /migration\.sql/, 'the build must refuse a package with no migration');
 });
 
+test('PostgreSQL extraction skips pgAdmin while retaining the verified runtime and notices', async () => {
+  const build = await read('distribution/windows/build-installer.ps1');
+
+  // PostgreSQL 17.7's archive includes pgAdmin 4, whose deeply nested Python
+  // files can exceed the Windows extraction path limit.  The builder must read
+  // only the database runtime entries straight from the verified ZIP instead
+  // of expanding that unrelated tree first.
+  assert.doesNotMatch(build, /Expand-Archive\s+-LiteralPath\s+\$pgZip\b/i,
+    'the complete PostgreSQL archive must never be expanded');
+  assert.match(build, /System\.IO\.Compression\.ZipFile\]::OpenRead\(\$Archive\)/,
+    'PostgreSQL must be selectively read from the ZIP archive');
+  assert.match(build, /Copy-PostgresRuntimeFromArchive\s+-Archive\s+\$pgZip\b/,
+    'the verified PostgreSQL archive must be passed to the selective extractor');
+  assert.match(build, /@\('bin',\s*'lib',\s*'share'\)/,
+    'only PostgreSQL bin, lib and share runtime trees may be extracted');
+  assert.match(build, /Get-VerifiedArchive\s+\$postgresUrl\s+\$pgZip\s+\$postgresSha256/,
+    'the PostgreSQL ZIP must remain SHA-256 verified before extraction');
+  assert.match(build, /@\('LICENSE','COPYRIGHT','README'\)/,
+    'PostgreSQL licence notices must remain staged');
+});
+
 test('the staged scripts include every file the migration chain shells out to', async () => {
   const build = await read('distribution/windows/build-installer.ps1');
 
