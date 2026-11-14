@@ -44,7 +44,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
     await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Quantity')).controller!.text,'2');
     expect(find.textContaining('The order changed.'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes')).onPressed, isNull);
@@ -71,7 +71,7 @@ void main() {
         if (raw == '0' || raw == '7') {
           expect(api.requests, hasLength(1));
           expect((api.requests.single['lines'] as List).single['taxRate'], raw);
-          await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+          await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         } else {
           expect(api.requests, isEmpty);
           expect(find.text('Invalid number'), findsOneWidget);
@@ -102,7 +102,7 @@ void main() {
       }
       await tester.enterText(find.widgetWithText(TextFormField,'Quantity'),'2');
       await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
       await tester.tap(find.text('Open amendment')); await tester.pumpAndSettle();
       expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Quantity')).controller!.text,'2');
@@ -134,7 +134,7 @@ void main() {
       expect(api.requests, hasLength(1));
       expect((api.requests.single['lines'] as List).single['taxRate'], '0');
       expect((api.requests.single['lines'] as List).single['quantity'], '2');
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
       await tester.tap(find.text('Open editor')); await tester.pumpAndSettle();
       expect(find.text('Order edit is unresolved; retry the same request.'), findsOneWidget);

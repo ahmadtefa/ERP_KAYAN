@@ -92,7 +92,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Post')); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm').last); await tester.pumpAndSettle();
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       expect(find.textContaining('POSTED'), findsOneWidget);
       expect(api.stockLoads, 2); expect(api.journalLoads, 2);
       expect(find.byTooltip('Post'), findsNothing);
