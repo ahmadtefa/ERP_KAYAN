@@ -90,6 +90,7 @@ jobs:
           src/common/settings/company-settings-atomic.spec.ts
           src/modules/auth/profile-photo.service.spec.ts
           src/modules/auth/profile-photo.controller.spec.ts
+          src/modules/admin/users.photo.controller.spec.ts
           src/modules/admin/permissions.catalogue.spec.ts
           src/modules/admin/role-permission-concurrency.spec.ts
           src/modules/admin/user-grant-concurrency.spec.ts
