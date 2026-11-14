@@ -98,8 +98,9 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
 }
 
 Set<String>? _permissionCodes(Object? value) {
-  if (value is! List || value.any((item) => item is! String || item.isEmpty))
+  if (value is! List || value.any((item) => item is! String || item.isEmpty)) {
     return null;
+  }
   return value.cast<String>().toSet();
 }
 
@@ -337,8 +338,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         },
       ),
     );
-    if (saved == true && mounted)
+    if (saved == true && mounted) {
       showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _changePassword(Json row) async {
@@ -584,8 +586,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         }
       },
     );
-    if (values != null && mounted)
+    if (values != null && mounted) {
       showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _choosePermissions(Json role) async {
@@ -624,8 +627,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         },
       ),
     );
-    if (saved == true && mounted)
+    if (saved == true && mounted) {
       showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _remove(Json role) async {
@@ -820,8 +824,9 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     if (raw is! List) return false;
     final items = listOf(raw);
     if (raw.length != items.length ||
-        items.any((item) => text(item, 'code').isEmpty))
+        items.any((item) => text(item, 'code').isEmpty)) {
       return false;
+    }
     return {for (final item in items) text(item, 'code')}.length ==
         items.length;
   }
@@ -830,8 +835,9 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     if (_saving ||
         _uncertain ||
         _confirmingExit ||
-        !_validCatalogue(ref.read(permissionsProvider).asData?.value))
+        !_validCatalogue(ref.read(permissionsProvider).asData?.value)) {
       return;
+    }
     if (_selected.length == widget.selected.length &&
         widget.selected.containsAll(_selected)) {
       // A no-op must not replace newer grants read by another administrator.
