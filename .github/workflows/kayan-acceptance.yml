@@ -128,7 +128,7 @@ jobs:
           retention-days: 7
 
   postgres-acceptance:
-    name: Real PostgreSQL stock and accounting checks
+    name: PostgreSQL stock reconciliation and embedded SQL integration
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -171,6 +171,12 @@ jobs:
           npx prisma validate
       - name: Apply real migrations to isolated PostgreSQL
         run: node scripts/apply-migrations.mjs
+      - name: Reconcile real PostgreSQL stock ledger and shelf balances
+        shell: bash
+        run: |
+          mkdir -p ../build/acceptance-postgres
+          set -o pipefail
+          node scripts/pg-ledger-shelf-agreement.mjs 2>&1 | tee ../build/acceptance-postgres/real-postgres-stock.log
       - name: Run stock and sales posting integration tests
         shell: bash
         run: |
