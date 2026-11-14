@@ -190,18 +190,39 @@ function Copy-PostgresRuntimeFromArchive([string]$Archive, [string]$Destination,
       }
     }
 
-    # Licence notices travel with the PostgreSQL runtime, but are copied
-    # directly from its archive root so pgAdmin is never extracted.
+    # Licence notices travel with the PostgreSQL runtime, copied straight from
+    # the archive so pgAdmin is never extracted.
+    #
+    # The notice is NOT always at the archive root: the EDB Windows archive
+    # keeps it beside the binaries (pgsql\COPYRIGHT, pgsql\README). The first
+    # version of this function matched only "<root>LICENSE", found nothing,
+    # `continue`d silently, and the finished package then failed the payload
+    # check with "Required runtime payload entries are missing:
+    # licenses/PostgreSQL-LICENSE". Search the whole archive, prefer the
+    # shallowest match, and keep the historical PostgreSQL-LICENSE name that
+    # the manifest and the payload verifier both refer to.
+    [void](New-Item -ItemType Directory -Force -Path $LicenseDestination)
+    $licenseCopied = $false
     foreach ($licenseName in @('LICENSE','COPYRIGHT','README')) {
-      $entry = $zip.Entries | Where-Object { $_.FullName -ieq "$archiveRoot$licenseName" } | Select-Object -First 1
+      $entry = $zip.Entries |
+        Where-Object { $_.FullName -match "(?i)(^|/)$licenseName$" -and -not $_.FullName.EndsWith('/') } |
+        Sort-Object { ($_.FullName -split '/').Count } |
+        Select-Object -First 1
       if (-not $entry) { continue }
-      [void](New-Item -ItemType Directory -Force -Path $LicenseDestination)
       $target = Join-Path $LicenseDestination "PostgreSQL-$licenseName"
       $input = $entry.Open()
       try {
         $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
         try { $input.CopyTo($output) } finally { $output.Dispose() }
       } finally { $input.Dispose() }
+      if ($licenseName -ne 'LICENSE') {
+        Copy-Item -LiteralPath $target -Destination (Join-Path $LicenseDestination 'PostgreSQL-LICENSE') -Force
+      }
+      $licenseCopied = $true
+      break
+    }
+    if (-not $licenseCopied) {
+      throw 'The verified PostgreSQL archive carried no LICENSE, COPYRIGHT or README notice; refusing to ship a package without its third-party licence.'
     }
   } finally { $zip.Dispose() }
 }
