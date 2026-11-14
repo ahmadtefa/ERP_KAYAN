@@ -38,37 +38,39 @@ class ModuleScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        PageHeader(
-          title: title,
-          subtitle: subtitle,
-          eyebrow: eyebrow,
-          leading: leading ?? IconButton(
-            tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-            onPressed: () {
-              final navigator = Navigator.of(context);
-              if (navigator.canPop()) {
-                navigator.maybePop();
-              } else {
-                context.go(AppRoutes.dashboard);
-              }
-            },
-            icon: const Icon(Icons.arrow_back_rounded),
+    return ColoredBox(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PageHeader(
+            title: title,
+            subtitle: subtitle,
+            eyebrow: eyebrow,
+            leading:
+                leading ??
+                IconButton(
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  onPressed: () {
+                    final navigator = Navigator.of(context);
+                    if (navigator.canPop()) {
+                      navigator.maybePop();
+                    } else {
+                      context.go(AppRoutes.dashboard);
+                    }
+                  },
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
+            dense: denseHeader,
+            actions: [?trailing, ...actions],
           ),
-          dense: denseHeader,
-          actions: [
-            ?trailing,
-            ...actions,
-          ],
-        ),
-        Container(
-          height: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
-        Expanded(child: body),
-      ],
+          Container(
+            height: 1,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          Expanded(child: body),
+        ],
+      ),
     );
   }
 }
@@ -131,7 +133,8 @@ class _SearchFieldState extends State<SearchField> {
               suffixIcon: value.text.isEmpty
                   ? null
                   : IconButton(
-                      tooltip: MaterialLocalizations.of(context).deleteButtonTooltip,
+                      tooltip: MaterialLocalizations.of(context)
+                          .deleteButtonTooltip,
                       icon: const Icon(Icons.close_rounded, size: 16),
                       onPressed: () {
                         _controller.clear();

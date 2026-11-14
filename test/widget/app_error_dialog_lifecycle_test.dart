@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   testWidgets('errors remain Arabic RTL and require explicit acknowledgement', (tester) async {
     await tester.pumpWidget(MaterialApp(
-      locale: const Locale('en'),
+      locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: Builder(builder: (context) => TextButton(
@@ -36,7 +36,7 @@ void main() {
   });
   testWidgets('a mixed Arabic and technical failure does not expose internals', (tester) async {
     await tester.pumpWidget(MaterialApp(
-      locale: const Locale('en'),
+      locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: Builder(builder: (context) => TextButton(
@@ -57,6 +57,7 @@ void main() {
 
   testWidgets('message and print failures retain HTTP status and hide server bodies', (tester) async {
     await tester.pumpWidget(MaterialApp(
+      locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: Builder(builder: (context) => Column(children: [
@@ -82,6 +83,7 @@ void main() {
 
   testWidgets('different concurrent errors are acknowledged in order', (tester) async {
     await tester.pumpWidget(MaterialApp(
+      locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: Builder(builder: (context) => TextButton(
@@ -112,7 +114,7 @@ void main() {
   testWidgets('a disposed navigator does not suppress errors in its replacement', (tester) async {
     Widget app(Key key) => MaterialApp(
       key: key,
-      locale: const Locale('en'),
+      locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: Builder(builder: (context) => TextButton(

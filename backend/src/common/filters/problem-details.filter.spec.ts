@@ -16,6 +16,21 @@ class SyntheticProblemController {
 @Module({controllers:[SyntheticProblemController]}) class SyntheticProblemModule {}
 
 describe('ProblemDetailsFilter', () => {
+  it('keeps safe field and action details in the compatible error contract', () => {
+    const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const host = { switchToHttp: () => ({ getResponse: () => response }) } as any;
+    new ProblemDetailsFilter().catch(new HttpException({
+      detail: 'Choose a warehouse', code: 'WAREHOUSE_REQUIRED',
+      errors: { warehouseId: 'Choose a warehouse' }, userAction: 'Select a warehouse',
+    }, 422), host);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      detail: 'Choose a warehouse', message: 'Choose a warehouse',
+      code: 'WAREHOUSE_REQUIRED', errorCode: 'WAREHOUSE_REQUIRED',
+      errors: { warehouseId: 'Choose a warehouse' },
+      fieldErrors: { warehouseId: 'Choose a warehouse' },
+      userAction: 'Select a warehouse',
+    }));
+  });
   it('preserves an explicit problem-details description', () => {
     const response = {
       status: jest.fn().mockReturnThis(),

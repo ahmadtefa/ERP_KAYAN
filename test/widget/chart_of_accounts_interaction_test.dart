@@ -222,7 +222,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNWidgets(2));
-    await tester.tap(find.text('حسنًا'));
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English')).controller!.text,
         'New asset');
@@ -241,8 +241,8 @@ void main() {
     await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
     expect(find.textContaining('بيانات مصطنعة خاصة'),findsNothing);
-    expect(find.textContaining('تعذّر تأكيد نتيجة العملية'),findsOneWidget);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.textContaining('result could not be confirmed'),findsOneWidget);
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.textContaining('The save result is uncertain'),findsOneWidget);
     expect(source.createAttempts,1);
   });

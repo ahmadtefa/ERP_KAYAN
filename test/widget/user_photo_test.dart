@@ -92,15 +92,15 @@ void main() {
     await tester.tap(find.byKey(const Key('user-photo-upload')));
     // Busy remains true until the error is acknowledged; its spinner cannot settle.
     await tester.pump(); await tester.pump(const Duration(seconds: 1));
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_UPLOAD_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.byKey(const Key('user-photo-remove')),findsOneWidget);
     await tester.tap(find.byKey(const Key('user-photo-remove')));
     await tester.pump(); await tester.pump(const Duration(seconds: 1));
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_REMOVE_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(client.photos,isEmpty);
     expect(find.byKey(const Key('user-photo-remove')),findsNothing);
     expect(tester.takeException(),isNull);

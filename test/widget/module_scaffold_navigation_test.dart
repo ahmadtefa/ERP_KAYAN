@@ -2,8 +2,16 @@ import 'package:erp_kayan/features/common/presentation/screens/module_scaffold.d
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:erp_kayan/app/theme/app_theme.dart';
+import 'package:erp_kayan/app/theme/design_tokens.dart';
 
 void main() {
+  testWidgets('module canvas inherits the dashboard colour tokens', (tester) async {
+    await tester.pumpWidget(MaterialApp(theme: AppTheme.light(), home: const Scaffold(
+      body: ModuleScaffold(title: 'Module', body: Text('Content')))));
+    final coloured = tester.widgetList<ColoredBox>(find.byType(ColoredBox));
+    expect(coloured.any((box) => box.color == AppColors.background), isTrue);
+  });
   testWidgets('module header back returns to dashboard at the root', (tester) async {
     final router = GoRouter(
       initialLocation: '/module',

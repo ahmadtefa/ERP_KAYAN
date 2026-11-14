@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/theme/design_tokens.dart';
 import '../../core/error/app_error_text.dart';
 import '../../l10n/generated/app_localizations.dart';
-import '../../l10n/generated/app_localizations_ar.dart';
 import '../extensions/l10n_extension.dart';
 
 /// The one place a system error is shown.
@@ -36,89 +35,92 @@ class AppErrorDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final l10n = AppLocalizationsAr();
+    final l10n = context.l10n;
     final isWarning = severity == AppErrorSeverity.warning;
     final accent = isWarning ? AppColors.warning : theme.colorScheme.error;
     final soft = isWarning ? AppColors.warningSoft : AppColors.errorSoft;
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: Localizations.localeOf(context).languageCode == 'ar'
+          ? TextDirection.rtl
+          : TextDirection.ltr,
       child: AlertDialog(
-      // The title and the action sit at the start edge, which is the right
-      // edge under RTL.
-      titlePadding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.lg,
-        0,
-      ),
-      contentPadding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.md,
-        AppSpacing.lg,
-        AppSpacing.sm,
-      ),
-      actionsPadding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        0,
-        AppSpacing.md,
-        AppSpacing.md,
-      ),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: soft,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
+        // The title and the action sit at the start edge, which is the right
+        // edge under RTL.
+        titlePadding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          0,
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.md,
+          AppSpacing.lg,
+          AppSpacing.sm,
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.md,
+        ),
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: soft,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+              ),
+              child: Icon(
+                isWarning
+                    ? Icons.warning_amber_rounded
+                    : Icons.error_outline_rounded,
+                color: accent,
+                size: 22,
+              ),
             ),
-            child: Icon(
-              isWarning
-                  ? Icons.warning_amber_rounded
-                  : Icons.error_outline_rounded,
-              color: accent,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsetsDirectional.only(top: 6),
-              child: Text(
-                isWarning ? l10n.warningDialogTitle : l10n.errorDialogTitle,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(top: 6),
+                child: Text(
+                  isWarning ? l10n.warningDialogTitle : l10n.errorDialogTitle,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
               ),
             ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Text(
+            message,
+            // Start alignment follows the ambient direction: right in Arabic,
+            // left in English, without hard-coding either.
+            textAlign: TextAlign.start,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              height: 1.6,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.okAction),
           ),
         ],
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Text(
-          message,
-          // Start alignment follows the ambient direction: right in Arabic,
-          // left in English, without hard-coding either.
-          textAlign: TextAlign.start,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            height: 1.6,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-      actions: [
-        FilledButton(
-          autofocus: true,
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.okAction),
-        ),
-      ],
-    ));
+    );
   }
 }
 
@@ -159,9 +161,8 @@ String presentErrorText(
   int? statusCode,
 }) {
   final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-  final text = AppErrorMessageResolver(
-    isArabic: isArabic,
-  ).resolve(error, statusCode: statusCode);
+  final text = AppErrorMessageResolver(isArabic: isArabic)
+      .resolve(error, statusCode: statusCode);
   final business = text.businessMessage;
   if (business != null && business.trim().isNotEmpty) return business;
   return defaultErrorMessage(context.l10n, text.reason);
@@ -186,13 +187,13 @@ Future<void> showAppError(
   // better than an exception inside an error handler.
   final navigator = Navigator.maybeOf(context, rootNavigator: true);
   if (navigator == null) return;
-  final resolved = const AppErrorMessageResolver(
-    isArabic: true,
-  ).resolve(error, statusCode: statusCode);
+  final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+  final resolved = AppErrorMessageResolver(isArabic: isArabic)
+      .resolve(error, statusCode: statusCode);
   final business = resolved.businessMessage;
   final message = business != null && business.trim().isNotEmpty
       ? business
-      : defaultErrorMessage(AppLocalizationsAr(), resolved.reason);
+      : defaultErrorMessage(context.l10n, resolved.reason);
 
   final previous = _errorDialogTails[navigator];
   final ready = previous == null

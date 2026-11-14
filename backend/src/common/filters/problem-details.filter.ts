@@ -96,7 +96,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
             : Array.isArray(b.message)
               ? (b.message as string[]).join('; ')
               : String(b.message ?? detail);
-        if (b.errors) extra = { errors: b.errors };
+        if (b.errors) extra = { errors: b.errors, fieldErrors: b.errors };
+        if (typeof b.userAction === 'string' && b.userAction.length <= 300) {
+          extra = { ...extra, userAction: b.userAction };
+        }
         // A machine-readable reason travels with the sentence: the client uses
         // it to open the right screen (an expired licence is not a permission
         // problem), and it is safe to show - it names a category, not a secret.
@@ -126,6 +129,8 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       title: HttpStatus[status] ?? 'Error',
       status,
       detail,
+      message: detail,
+      errorCode: typeof extra.code === 'string' ? extra.code : undefined,
       ...extra,
     });
   }

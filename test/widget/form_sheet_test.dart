@@ -1,10 +1,55 @@
 import 'package:erp_kayan/shared/widgets/form_sheet.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'test_harness.dart';
 
 void main() {
+  testWidgets(
+    'server field errors stay beside fields and preserve entered values',
+    (tester) async {
+      await tester.pumpWidget(
+        wrapWithApp(
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => FilledButton(
+                onPressed: () => showFormSheet(
+                  context,
+                  title: 'Edit',
+                  fields: const [
+                    FieldSpec('name', 'Name'),
+                    FieldSpec('code', 'Code'),
+                  ],
+                  onSubmit: (_) async => throw const ApiFailure(
+                    'Invalid',
+                    statusCode: 422,
+                    fieldErrors: {
+                      'name': 'Name already exists',
+                      'code': 'Code already exists',
+                    },
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'Sara');
+      await tester.enterText(find.byType(TextFormField).last, 'S1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Name already exists'), findsOneWidget);
+      expect(find.text('Code already exists'), findsOneWidget);
+      expect(find.text('Sara'), findsOneWidget);
+      expect(find.text('S1'), findsOneWidget);
+      expect(tester.binding.focusManager.primaryFocus?.hasFocus, isTrue);
+    },
+  );
+
   /// A screen with one button that opens the shared form sheet, and keeps
   /// whatever the sheet returns.
   Widget host(

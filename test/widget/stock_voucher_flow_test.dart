@@ -547,18 +547,18 @@ void main() {
           await tester.tap(find.text('History'));
           await tester.pumpAndSettle();
         }
-        expect(find.text('حسنًا'), findsOneWidget);
+        expect(find.text('OK'), findsOneWidget);
         expect(
           find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),
           findsNothing,
         );
-        await tester.tap(find.text('حسنًا'));
+        await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
         api.fail = false;
         await tester.ensureVisible(find.text('Retry'));
         await tester.tap(find.text('Retry'));
         await tester.pumpAndSettle();
-        expect(find.text('حسنًا'), findsNothing);
+        expect(find.text('OK'), findsNothing);
         expect(
           find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),
           findsNothing,
@@ -664,7 +664,7 @@ void main() {
           (api.requests.single['lines'] as List).single['unitName'],
           'box',
         );
-        await tester.tap(find.text('حسنًا'));
+        await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
         await tester.pageBack();
         await tester.pumpAndSettle();
@@ -741,7 +741,7 @@ void main() {
           (api.edits.first['lines'] as List).single['notes'],
           'Original line note',
         );
-        await tester.tap(find.text('حسنًا'));
+        await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
         await tester.pageBack();
         await tester.pumpAndSettle();

@@ -19,6 +19,7 @@ class _CommittedThenFailedApi extends ApiClient {
   int loads=0, posts=0;
   bool responseLost=true;
   bool serverFailure=false;
+  bool stockShortfall=false;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
     loads++;
@@ -29,6 +30,7 @@ class _CommittedThenFailedApi extends ApiClient {
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     posts++;
+    if (stockShortfall) throw const ApiFailure('الرصيد غير كافٍ في الدفعات المتاحة: ينقص 2.0000. / Not enough stock in the available lots: 2.0000 short.', statusCode: 400);
     status = path.endsWith('/reverse') ? 'reversed' : 'posted';
     if (responseLost && serverFailure) throw const ApiFailure('بيانات مصطنعة خاصة لا تعرض', statusCode: 503);
     if (responseLost) throw StateError('INTERNAL_INVOICE_ACTION_DIAGNOSTIC');
@@ -36,6 +38,25 @@ class _CommittedThenFailedApi extends ApiClient {
   }
 }
 void main() {
+  for (final locale in const [Locale('ar'), Locale('en')]) {
+    testWidgets('sales posting explains stock shortfall in ${locale.languageCode}', (tester) async {
+      tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api=_CommittedThenFailedApi('draft')..stockShortfall=true;
+      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+        child:MaterialApp(locale:locale,localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales)))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(locale.languageCode == 'ar' ? 'ترحيل' : 'Post'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, locale.languageCode == 'ar' ? 'ترحيل' : 'Post'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('2.0000'), findsOneWidget);
+      expect(find.textContaining('البيانات المرسلة غير صالحة'), findsNothing);
+      expect(api.status, 'draft');
+    });
+  }
   testWidgets('successful invoice posting refreshes previously cached reports', (tester) async {
     tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
@@ -66,8 +87,8 @@ void main() {
     await tester.tap(find.byTooltip('Post')); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Post')); await tester.pumpAndSettle();
     expect(find.textContaining('بيانات مصطنعة خاصة'), findsNothing);
-    expect(find.textContaining('تعذّر تأكيد نتيجة العملية'), findsOneWidget);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.textContaining('result could not be confirmed'), findsOneWidget);
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.text('Posted'), findsOneWidget);
     expect(api.posts,1);
   });
@@ -90,9 +111,9 @@ void main() {
         final action=reverse ? 'Reverse' : 'Post';
         await tester.tap(find.byTooltip(action)); await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton,action)); await tester.pumpAndSettle();
-        expect(find.text('حسنًا'),findsOneWidget);
+        expect(find.text('OK'),findsOneWidget);
         expect(find.textContaining('INTERNAL_INVOICE_ACTION_DIAGNOSTIC'),findsNothing);
-        await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        await tester.tap(find.text('OK')); await tester.pumpAndSettle();
         expect(api.posts,1); expect(api.loads,greaterThanOrEqualTo(2));
         expect((await container.read(dashboardSummaryProvider.future))['status'],reverse ? 'reversed' : 'posted');
         expect((await container.read(dashboardMonthlyProvider.future))['status'],reverse ? 'reversed' : 'posted');

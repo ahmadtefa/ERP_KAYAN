@@ -25,11 +25,23 @@ class NetworkFailure extends Failure {
 
 /// The server rejected the request (4xx) with a business-level reason.
 class ApiFailure extends Failure {
-  const ApiFailure(super.message, {this.statusCode, this.code, super.cause});
+  const ApiFailure(
+    super.message, {
+    this.statusCode,
+    this.code,
+    this.fieldErrors = const {},
+    this.userAction,
+    this.requestId,
+    super.cause,
+  });
 
   final int? statusCode;
+
   /// A validated, non-secret machine-readable reason from the server.
   final String? code;
+  final Map<String, String> fieldErrors;
+  final String? userAction;
+  final String? requestId;
 }
 
 /// Authentication is missing, expired or rejected.
@@ -43,8 +55,10 @@ class AuthFailure extends Failure {
 /// [AuthFailure] because a failed sign-in shows "invalid credentials" while
 /// this must say that the session ended and nothing was lost.
 class SessionExpiredFailure extends Failure {
-  const SessionExpiredFailure([super.message = 'Session expired', Object? cause])
-    : super(cause: cause);
+  const SessionExpiredFailure([
+    super.message = 'Session expired',
+    Object? cause,
+  ]) : super(cause: cause);
 }
 
 /// The account is valid but not allowed to do this. Showing "invalid

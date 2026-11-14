@@ -5,12 +5,22 @@ import 'package:flutter/material.dart';
 import '../../app/router/draft_exit_guard.dart';
 import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
+import '../../core/error/failure.dart';
 import '../extensions/l10n_extension.dart';
 import 'confirm_dialog.dart';
 import 'app_error_dialog.dart';
 
 /// What kind of input a field collects.
-enum FieldKind { text, multiline, decimal, integer, date, toggle, select, multiSelect }
+enum FieldKind {
+  text,
+  multiline,
+  decimal,
+  integer,
+  date,
+  toggle,
+  select,
+  multiSelect,
+}
 
 /// One choice in a [FieldKind.select] field.
 class FieldOption {
@@ -18,6 +28,7 @@ class FieldOption {
 
   final String value;
   final String label;
+
   /// An existing unavailable value can stay visible without becoming a new choice.
   final bool enabled;
 }
@@ -47,10 +58,13 @@ class FieldSpec {
   final String? helper;
   final List<FieldOption> options;
   final int maxLines;
+
   /// Explicit payload when an optional field is blank; null keeps omission.
   final String? emptyValue;
+
   /// Optional date fields can expose a clear button in addition to the picker.
   final bool clearable;
+
   /// Sensitive fields must not be shown in clear text or offered to the IME.
   final bool obscure;
 }
@@ -128,6 +142,9 @@ class _FormSheetState extends State<_FormSheet> {
   final _toggles = <String, bool>{};
   final _selections = <String, String?>{};
   final _multiSelections = <String, Set<String>>{};
+  final _fieldErrors = <String, String>{};
+  final _fieldKeys = <String, GlobalKey<FormFieldState>>{};
+  final _focusNodes = <String, FocusNode>{};
   late final String _initialSnapshot;
   bool _confirmingExit = false, _saving = false, _uncertain = false;
 
@@ -135,6 +152,8 @@ class _FormSheetState extends State<_FormSheet> {
   void initState() {
     super.initState();
     for (final field in widget.fields) {
+      _fieldKeys[field.key] = GlobalKey<FormFieldState>();
+      _focusNodes[field.key] = FocusNode();
       final raw = widget.initial[field.key];
       switch (field.kind) {
         case FieldKind.toggle:
@@ -160,10 +179,15 @@ class _FormSheetState extends State<_FormSheet> {
   }
 
   String _snapshot() => jsonEncode({
-    'text': {for (final entry in _controllers.entries) entry.key: entry.value.text},
+    'text': {
+      for (final entry in _controllers.entries) entry.key: entry.value.text,
+    },
     'toggles': _toggles,
     'selections': _selections,
-    'multi': {for (final entry in _multiSelections.entries) entry.key: (entry.value.toList()..sort())},
+    'multi': {
+      for (final entry in _multiSelections.entries)
+        entry.key: (entry.value.toList()..sort()),
+    },
   });
 
   Future<bool> _canLeave() async {
@@ -172,14 +196,23 @@ class _FormSheetState extends State<_FormSheet> {
       _confirmingExit = true;
       try {
         final arabic = Localizations.localeOf(context).languageCode == 'ar';
-        final discard = await confirmAction(context,
+        final discard = await confirmAction(
+          context,
           title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
           message: _uncertain
-              ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع القائمة قبل إنشاء سجل آخر.' : 'The operation may have completed. Close this form and review the list before creating another record.')
-              : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
-          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',destructive:true);
+              ? (arabic
+                    ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع القائمة قبل إنشاء سجل آخر.'
+                    : 'The operation may have completed. Close this form and review the list before creating another record.')
+              : (arabic
+                    ? 'الخروج دون حفظ المدخلات؟'
+                    : 'Leave without saving your changes?'),
+          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',
+          destructive: true,
+        );
         if (!discard || !mounted) return false;
-      } finally { _confirmingExit = false; }
+      } finally {
+        _confirmingExit = false;
+      }
     }
     return mounted;
   }
@@ -202,10 +235,14 @@ class _FormSheetState extends State<_FormSheet> {
     for (final controller in _controllers.values) {
       controller.dispose();
     }
+    for (final node in _focusNodes.values) {
+      node.dispose();
+    }
     super.dispose();
   }
 
   String? _validate(FieldSpec field, String? value) {
+    if (_fieldErrors.containsKey(field.key)) return _fieldErrors[field.key];
     final text = value?.trim() ?? '';
     if (field.required && text.isEmpty) return context.l10n.requiredField;
     if (text.isEmpty) return null;
@@ -234,8 +271,12 @@ class _FormSheetState extends State<_FormSheet> {
     final defaultLast = DateTime(now.year + 5, 12, 31);
     // Historical or future records must remain editable; showDatePicker
     // asserts when its initial value lies outside the supplied range.
-    final first = initial.isBefore(defaultFirst) ? DateTime(initial.year) : defaultFirst;
-    final last = initial.isAfter(defaultLast) ? DateTime(initial.year, 12, 31) : defaultLast;
+    final first = initial.isBefore(defaultFirst)
+        ? DateTime(initial.year)
+        : defaultFirst;
+    final last = initial.isAfter(defaultLast)
+        ? DateTime(initial.year, 12, 31)
+        : defaultLast;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
@@ -253,7 +294,11 @@ class _FormSheetState extends State<_FormSheet> {
   }
 
   Future<void> _submit() async {
-    if (_saving || _uncertain || _confirmingExit || !(_formKey.currentState?.validate() ?? false)) return;
+    if (_saving ||
+        _uncertain ||
+        _confirmingExit ||
+        !(_formKey.currentState?.validate() ?? false))
+      return;
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
       switch (field.kind) {
@@ -286,8 +331,30 @@ class _FormSheetState extends State<_FormSheet> {
       if (mounted) Navigator.of(context).pop(result);
     } catch (error) {
       if (mounted && error is! FormSubmissionCancelled) {
+        if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
+          setState(() {
+            _fieldErrors
+              ..clear()
+              ..addAll(error.fieldErrors);
+          });
+          _formKey.currentState?.validate();
+          final first = widget.fields
+              .where((field) => _fieldErrors.containsKey(field.key))
+              .firstOrNull;
+          if (first != null) {
+            final fieldContext = _fieldKeys[first.key]?.currentContext;
+            if (fieldContext != null) {
+              Scrollable.ensureVisible(fieldContext);
+              _focusNodes[first.key]?.requestFocus();
+            }
+            return;
+          }
+        }
         if (error is UncertainFormSubmission) setState(() => _uncertain = true);
-        await showAppError(context, error is UncertainFormSubmission ? error.cause : error);
+        await showAppError(
+          context,
+          error is UncertainFormSubmission ? error.cause : error,
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -297,44 +364,54 @@ class _FormSheetState extends State<_FormSheet> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
-      child:AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 440,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(top: AppSpacing.xs),
-          child: AbsorbPointer(absorbing:_saving || _uncertain,child:Form(
-            key: _formKey,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_uncertain)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: Text(Localizations.localeOf(context).languageCode == 'ar'
-                      ? 'قد تكون العملية قد اكتملت. راجع القائمة قبل إنشاء سجل آخر؛ لا يمكن إعادة الإرسال من هذا النموذج.'
-                      : 'The operation may have completed. Review the list before creating another record; this form cannot be resubmitted.'),
-                  ),
-                for (final field in widget.fields) _buildField(field),
-              ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: AlertDialog(
+        title: Text(widget.title),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: AbsorbPointer(
+              absorbing: _saving || _uncertain,
+              child: Form(
+                key: _formKey,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_uncertain)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: Text(
+                          Localizations.localeOf(context).languageCode == 'ar'
+                              ? 'قد تكون العملية قد اكتملت. راجع القائمة قبل إنشاء سجل آخر؛ لا يمكن إعادة الإرسال من هذا النموذج.'
+                              : 'The operation may have completed. Review the list before creating another record; this form cannot be resubmitted.',
+                        ),
+                      ),
+                    for (final field in widget.fields) _buildField(field),
+                  ],
+                ),
+              ),
             ),
-          )),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : _close,
-          child: Text(widget.readOnly ? l10n.close : l10n.cancel),
-        ),
-        if (!widget.readOnly)
-          FilledButton(
-            onPressed: _saving || _uncertain ? null : _submit,
-            child: Text(widget.submitLabel ?? l10n.save),
           ),
-      ],
-    ));
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _close,
+            child: Text(widget.readOnly ? l10n.close : l10n.cancel),
+          ),
+          if (!widget.readOnly)
+            FilledButton(
+              onPressed: _saving || _uncertain ? null : _submit,
+              child: Text(widget.submitLabel ?? l10n.save),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildField(FieldSpec field) {
@@ -357,6 +434,8 @@ class _FormSheetState extends State<_FormSheet> {
         return Padding(
           padding: padding,
           child: DropdownButtonFormField<String>(
+            key: _fieldKeys[field.key],
+            focusNode: _focusNodes[field.key],
             // Expanded, or the button sizes to its widest option and
             // a long label (an account, a purchase line) overflows
             // the field instead of ellipsising inside it.
@@ -368,7 +447,11 @@ class _FormSheetState extends State<_FormSheet> {
             ),
             items: [
               for (final option in field.options)
-                DropdownMenuItem(value: option.value, enabled: option.enabled, child: Text(option.label)),
+                DropdownMenuItem(
+                  value: option.value,
+                  enabled: option.enabled,
+                  child: Text(option.label),
+                ),
             ],
             validator: field.required
                 ? (value) => (value == null || value.isEmpty)
@@ -377,74 +460,91 @@ class _FormSheetState extends State<_FormSheet> {
                 : null,
             onChanged: widget.readOnly
                 ? null
-                : (value) => setState(() => _selections[field.key] = value),
+                : (value) => setState(() {
+                    _selections[field.key] = value;
+                    _fieldErrors.remove(field.key);
+                  }),
           ),
         );
       case FieldKind.multiSelect:
-      return Padding(
-        padding: padding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              field.label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (field.helper != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  field.helper!,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+        return Padding(
+          padding: padding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                field.label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.xs,
-              children: [
-                for (final option in field.options)
-                  FilterChip(
-                    label: Text(option.label),
-                    selected:
-                        _multiSelections[field.key]?.contains(option.value) ??
-                        false,
-                    onSelected: widget.readOnly ||
-                            (!option.enabled && !(_multiSelections[field.key]?.contains(option.value) ?? false))
-                        ? null
-                        : (selected) => setState(() {
-                            final chosen =
-                                _multiSelections[field.key] ?? <String>{};
-                            if (selected) {
-                              chosen.add(option.value);
-                            } else {
-                              chosen.remove(option.value);
-                            }
-                            _multiSelections[field.key] = chosen;
-                          }),
+              if (field.helper != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    field.helper!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-              ],
-            ),
-          ],
-        ),
-      );
+                ),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final option in field.options)
+                    FilterChip(
+                      label: Text(option.label),
+                      selected:
+                          _multiSelections[field.key]?.contains(option.value) ??
+                          false,
+                      onSelected:
+                          widget.readOnly ||
+                              (!option.enabled &&
+                                  !(_multiSelections[field.key]?.contains(
+                                        option.value,
+                                      ) ??
+                                      false))
+                          ? null
+                          : (selected) => setState(() {
+                              final chosen =
+                                  _multiSelections[field.key] ?? <String>{};
+                              if (selected) {
+                                chosen.add(option.value);
+                              } else {
+                                chosen.remove(option.value);
+                              }
+                              _multiSelections[field.key] = chosen;
+                            }),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
       case FieldKind.date:
         return Padding(
           padding: padding,
           child: TextFormField(
+            key: _fieldKeys[field.key],
+            focusNode: _focusNodes[field.key],
             controller: _controllers[field.key],
             readOnly: true,
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              suffixIcon: field.clearable && !widget.readOnly && _controllers[field.key]!.text.isNotEmpty
+              suffixIcon:
+                  field.clearable &&
+                      !widget.readOnly &&
+                      _controllers[field.key]!.text.isNotEmpty
                   ? IconButton(
-                      tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'مسح التاريخ' : 'Clear date',
-                      onPressed: () => setState(() => _controllers[field.key]!.clear()),
+                      tooltip:
+                          Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'مسح التاريخ'
+                          : 'Clear date',
+                      onPressed: () =>
+                          setState(() => _controllers[field.key]!.clear()),
                       icon: const Icon(Icons.clear),
                     )
                   : const Icon(Icons.calendar_today_outlined),
@@ -457,6 +557,8 @@ class _FormSheetState extends State<_FormSheet> {
         return Padding(
           padding: padding,
           child: TextFormField(
+            key: _fieldKeys[field.key],
+            focusNode: _focusNodes[field.key],
             controller: _controllers[field.key],
             readOnly: widget.readOnly,
             obscureText: field.obscure,
@@ -476,6 +578,7 @@ class _FormSheetState extends State<_FormSheet> {
               helperText: field.helper,
             ),
             validator: (value) => _validate(field, value),
+            onChanged: (_) => setState(() => _fieldErrors.remove(field.key)),
           ),
         );
     }

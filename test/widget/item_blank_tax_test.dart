@@ -117,7 +117,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField,'Tax %'),'7');
     await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
     expect(find.textContaining('INTERNAL_DO_NOT_SHOW'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Tax %')).controller!.text,'7');
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Code')).controller!.text,'I-1');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);

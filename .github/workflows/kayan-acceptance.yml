@@ -1,0 +1,72 @@
+name: KAYAN automated acceptance evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'backend/**'
+      - 'scripts/kayan-acceptance-*.mjs'
+      - '.github/workflows/kayan-acceptance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: backend
+      - name: Resolve locked Flutter packages
+        run: flutter pub get --enforce-lockfile
+      - name: Run acceptance tests and capture real exit codes
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          set +e
+          npm --prefix backend test -- --runInBand src/common/filters/problem-details.filter.spec.ts > build/acceptance/backend.log 2>&1
+          backend_status=$?
+          flutter test test/widget/form_sheet_test.dart test/core/network/order_edit_error_code_test.dart test/core/error/app_error_text_test.dart test/widget/app_error_dialog_lifecycle_test.dart test/widget/invoice_action_refresh_error_test.dart test/widget/module_scaffold_navigation_test.dart test/widget/app_theme_font_test.dart test/widget/erp_shell_groups_test.dart test/widget/dashboard_screen_test.dart test/widget/item_blank_tax_test.dart test/widget/user_photo_test.dart test/widget/stock_voucher_flow_test.dart test/widget/chart_of_accounts_interaction_test.dart --reporter json > build/acceptance/flutter.jsonl 2> build/acceptance/flutter.stderr
+          flutter_status=$?
+          BACKEND_STATUS="$backend_status" FLUTTER_STATUS="$flutter_status" node scripts/kayan-acceptance-results.mjs build/acceptance/flutter.jsonl build/acceptance/results.json
+          node scripts/kayan-acceptance-scan.mjs build/acceptance/screen-audit.json
+          node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          if [ "$backend_status" -ne 0 ] || [ "$flutter_status" -ne 0 ]; then
+            echo 'Acceptance tests failed; evidence was retained in build/acceptance.' >&2
+            exit 1
+          fi
+          node scripts/kayan-acceptance-gate.mjs build/acceptance/report.json
+      - name: Preserve a report when setup or test execution fails early
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          if [ ! -s build/acceptance/report.json ]; then
+            node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          fi
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-acceptance-${{ github.sha }}
+          path: build/acceptance/
+          if-no-files-found: error

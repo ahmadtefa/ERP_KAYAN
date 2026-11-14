@@ -9,16 +9,53 @@ import 'package:flutter_test/flutter_test.dart';
 /// of the DTOs, the business rules the server enforces, and a few shapes a
 /// stray exception can take.
 void main() {
+  test(
+    'sales posting stock shortfall remains actionable in both languages',
+    () {
+      const failure = ApiFailure(
+        'الرصيد غير كافٍ في الدفعات المتاحة: ينقص 2.0000. / Not enough stock in the available lots: 2.0000 short.',
+        statusCode: 400,
+      );
+      expect(
+        const AppErrorMessageResolver(isArabic: true)
+            .resolve(failure)
+            .businessMessage,
+        contains('2.0000'),
+      );
+      expect(
+        const AppErrorMessageResolver(isArabic: false)
+            .resolve(failure)
+            .businessMessage,
+        contains('2.0000'),
+      );
+    },
+  );
   const arabic = AppErrorMessageResolver(isArabic: true);
   const english = AppErrorMessageResolver(isArabic: false);
 
-  test('licence state mismatch displays fixed guidance, never server details', () {
-    const failure = ApiFailure('synthetic-private-marker', statusCode: 403, code: 'LICENSE_STATE_ID_MISMATCH');
-    expect(arabic.resolve(failure).businessMessage, contains('حالة الترخيص المحمية'));
-    expect(english.resolve(failure).businessMessage, contains('protected licence state'));
-    expect(english.resolve(failure).businessMessage, isNot(contains('synthetic-private-marker')));
-    expect(arabic.resolve(failure).reason, AppErrorReason.conflict);
-  });
+  test(
+    'licence state mismatch displays fixed guidance, never server details',
+    () {
+      const failure = ApiFailure(
+        'synthetic-private-marker',
+        statusCode: 403,
+        code: 'LICENSE_STATE_ID_MISMATCH',
+      );
+      expect(
+        arabic.resolve(failure).businessMessage,
+        contains('حالة الترخيص المحمية'),
+      );
+      expect(
+        english.resolve(failure).businessMessage,
+        contains('protected licence state'),
+      );
+      expect(
+        english.resolve(failure).businessMessage,
+        isNot(contains('synthetic-private-marker')),
+      );
+      expect(arabic.resolve(failure).reason, AppErrorReason.conflict);
+    },
+  );
 
   test('quotation deletion conflict explains that nothing was removed', () {
     const message = 'Only a draft quotation can be deleted';
@@ -28,7 +65,8 @@ void main() {
   });
 
   test('quotation conversion mismatch has safe actionable Arabic guidance', () {
-    const message = 'Invoice totals differ from the accepted quotation; review tax and discounts before conversion';
+    const message =
+        'Invoice totals differ from the accepted quotation; review tax and discounts before conversion';
     final result = arabic.resolve(const ApiFailure(message, statusCode: 400));
     expect(result.businessMessage, contains('لا تطابق عرض السعر'));
     expect(result.businessMessage, contains('لم تُنشأ فاتورة'));
@@ -47,7 +85,10 @@ void main() {
 
     test('an unknown property is just as technical as a missing one', () {
       final text = arabic.resolve(
-        const ApiFailure('property bogusField should not exist', statusCode: 400),
+        const ApiFailure(
+          'property bogusField should not exist',
+          statusCode: 400,
+        ),
       );
       expect(text.hasBusinessMessage, isFalse);
     });
@@ -83,45 +124,82 @@ void main() {
         expect(result.hasBusinessMessage, isFalse, reason: raw);
       }
       // Technical markers are also rejected on business-error responses.
-      expect(arabic.resolve('فشل الحفظ: Prisma SQL error', statusCode: 400).hasBusinessMessage, isFalse);
+      expect(
+        arabic
+            .resolve('فشل الحفظ: Prisma SQL error', statusCode: 400)
+            .hasBusinessMessage,
+        isFalse,
+      );
     });
 
     test('server 4xx Arabic text is not trusted merely for being Arabic', () {
-      const remote = ApiFailure('بيانات خاصة اصطناعية لا تعرض', statusCode: 400);
+      const remote = ApiFailure(
+        'بيانات خاصة اصطناعية لا تعرض',
+        statusCode: 400,
+      );
       expect(arabic.resolve(remote).hasBusinessMessage, isFalse);
       expect(english.resolve(remote).hasBusinessMessage, isFalse);
-      expect(arabic.resolve('بيانات خاصة اصطناعية لا تعرض', statusCode: 400).hasBusinessMessage, isFalse);
-      expect(arabic.resolve(const ValidationFailure('اختر حسابًا أولاً')).businessMessage, 'اختر حسابًا أولاً');
+      expect(
+        arabic
+            .resolve('بيانات خاصة اصطناعية لا تعرض', statusCode: 400)
+            .hasBusinessMessage,
+        isFalse,
+      );
+      expect(
+        arabic
+            .resolve(const ValidationFailure('اختر حسابًا أولاً'))
+            .businessMessage,
+        'اختر حسابًا أولاً',
+      );
     });
 
-    test('unmapped remote English text is not displayed in English inline views', () {
-      const remote = ApiFailure('Synthetic private record is not available', statusCode: 400);
-      expect(english.resolve(remote).hasBusinessMessage, isFalse);
-      expect(english.resolve(const ApiFailure('Account not found', statusCode: 404)).businessMessage, 'Account not found');
-    });
+    test(
+      'unmapped remote English text is not displayed in English inline views',
+      () {
+        const remote = ApiFailure(
+          'Synthetic private record is not available',
+          statusCode: 400,
+        );
+        expect(english.resolve(remote).hasBusinessMessage, isFalse);
+        expect(
+          english
+              .resolve(const ApiFailure('Account not found', statusCode: 404))
+              .businessMessage,
+          'Account not found',
+        );
+      },
+    );
 
     test('all 5xx failures use the uncertain server-result wording', () {
       for (final status in [500, 501, 503, 505, 599]) {
-        final result = arabic.resolve(ApiFailure('سر مصطنع', statusCode: status));
+        final result = arabic.resolve(
+          ApiFailure('سر مصطنع', statusCode: status),
+        );
         expect(result.reason, AppErrorReason.server);
         expect(result.hasBusinessMessage, isFalse);
       }
     });
 
-    test('parameterised translations do not echo unknown remote tokens or paths', () {
-      for (final raw in [
-        'Account SYNTHETIC_PRIVATE is inactive',
-        'Missing permission: SYNTHETIC_PRIVATE',
-        'No backup file named "SYNTHETIC_PRIVATE" on this server.',
-        'SYNTHETIC_PRIVATE is required',
-        'item SYNTHETIC_PRIVATE is not stock-tracked',
-      ]) {
-        final result = arabic.resolve(ApiFailure(raw,statusCode:400));
-        expect(result.businessMessage ?? '', isNot(contains('SYNTHETIC_PRIVATE')));
-      }
-      final long = arabic.resolve(ApiFailure('A' * 1025,statusCode:400));
-      expect(long.hasBusinessMessage,isFalse);
-    });
+    test(
+      'parameterised translations do not echo unknown remote tokens or paths',
+      () {
+        for (final raw in [
+          'Account SYNTHETIC_PRIVATE is inactive',
+          'Missing permission: SYNTHETIC_PRIVATE',
+          'No backup file named "SYNTHETIC_PRIVATE" on this server.',
+          'SYNTHETIC_PRIVATE is required',
+          'item SYNTHETIC_PRIVATE is not stock-tracked',
+        ]) {
+          final result = arabic.resolve(ApiFailure(raw, statusCode: 400));
+          expect(
+            result.businessMessage ?? '',
+            isNot(contains('SYNTHETIC_PRIVATE')),
+          );
+        }
+        final long = arabic.resolve(ApiFailure('A' * 1025, statusCode: 400));
+        expect(long.hasBusinessMessage, isFalse);
+      },
+    );
 
     test('a raw exception object is not forwarded', () {
       final text = arabic.resolve(StateError('Bad state: no element'));
@@ -139,7 +217,10 @@ void main() {
 
   group('business reasons survive, in Arabic', () {
     test('an already depreciated period has a useful Arabic explanation', () {
-      final text = arabic.resolve('Nothing to depreciate for 2024-01 — FA-M-1: already depreciated for 2024-01', statusCode: 400);
+      final text = arabic.resolve(
+        'Nothing to depreciate for 2024-01 — FA-M-1: already depreciated for 2024-01',
+        statusCode: 400,
+      );
       expect(text.businessMessage, contains('سبق احتساب إهلاك'));
       expect(text.businessMessage, contains('2024-01'));
     });
@@ -228,9 +309,7 @@ void main() {
 
     test('every other refusal is an error', () {
       expect(
-        arabic
-            .resolve(const ApiFailure('x', statusCode: 500))
-            .severity,
+        arabic.resolve(const ApiFailure('x', statusCode: 500)).severity,
         AppErrorSeverity.error,
       );
       expect(
@@ -238,9 +317,7 @@ void main() {
         AppErrorSeverity.error,
       );
       expect(
-        arabic
-            .resolve(const ApiFailure('x', statusCode: 404))
-            .severity,
+        arabic.resolve(const ApiFailure('x', statusCode: 404)).severity,
         AppErrorSeverity.error,
       );
     });
