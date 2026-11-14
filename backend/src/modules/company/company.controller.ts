@@ -10,6 +10,7 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -19,6 +20,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import {
   CompanyService,
   LOGO_UPLOAD_MAX_BYTES,
@@ -39,8 +41,8 @@ interface UploadedLogo {
 
 /// Company profile, the logo, and the units (headquarters and branches).
 ///
-/// Everything here needs `admin.company.manage`: these records define who the
-/// books belong to, and a wrong edit would show on every report.
+/// Profile, logo and branch mutations require super admin and retain their
+/// existing permission checks.
 @Controller('company')
 export class CompanyController {
   constructor(private readonly service: CompanyService) {}
@@ -52,6 +54,7 @@ export class CompanyController {
 
   @Patch('profile')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   updateProfile(
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateCompanyProfileDto,
@@ -73,6 +76,7 @@ export class CompanyController {
 
   @Post('logo')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1 } }),
   )
@@ -93,6 +97,7 @@ export class CompanyController {
 
   @Delete('logo')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   async deleteLogo(@CurrentUser() user: AuthUser) {
     await this.service.deleteLogo(user.companyId, user.userId);
     return { deleted: true };
@@ -105,6 +110,7 @@ export class CompanyController {
 
   @Post('branches')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   createBranch(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateBranchDto,
@@ -114,6 +120,7 @@ export class CompanyController {
 
   @Patch('branches/:id')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   updateBranch(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -124,6 +131,7 @@ export class CompanyController {
 
   @Delete('branches/:id')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   async deleteBranch(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

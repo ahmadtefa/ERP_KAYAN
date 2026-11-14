@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -27,7 +29,7 @@ class _CompanyManagementPanelState
   String tr(String en, String ar) => _isArabic ? ar : en;
   bool get _canEditCompany {
     final user = ref.read(currentUserProvider);
-    return user?.permissions.contains('company.profile.manage') == true;
+    return user?.isSuperAdmin == true;
   }
 
   String _companyValue(String key) => _company?[key]?.toString() ?? '';
@@ -47,7 +49,7 @@ class _CompanyManagementPanelState
       final client = ref.read(apiClientProvider);
       if (_canEditCompany) _company = await client.get('/companies/profile');
     } catch (e) {
-      _error = '$e';
+      if (mounted) _error = presentErrorText(context, e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -162,7 +164,7 @@ class _CompanyManagementPanelState
               );
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = presentErrorText(context, e));
     }
   }
 
@@ -194,7 +196,10 @@ class _CompanyManagementPanelState
   }
 
   String _friendlyError(Object error) {
-    final response = error is DioException ? error.response?.data : null;
+    if (error is! DioException || (error.response?.statusCode ?? 0) >= 500) {
+      return presentErrorText(context, error);
+    }
+    final response = error.response?.data;
     final raw = response is Map && response['detail'] is String
         ? response['detail'] as String
         : '$error';
@@ -212,7 +217,7 @@ class _CompanyManagementPanelState
         'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.',
       );
     }
-    return raw;
+    return presentErrorText(context, error);
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -230,7 +235,8 @@ class _CompanyManagementPanelState
 
   @override
   Widget build(BuildContext context) {
-    if (!_canEditCompany) return const SizedBox.shrink();
+    final user = ref.watch(currentUserProvider);
+    if (user?.isSuperAdmin != true) return const SizedBox.shrink();
     if (_loading) {
       return const Center(
         child: Padding(
@@ -240,10 +246,12 @@ class _CompanyManagementPanelState
       );
     }
     final base = ref.watch(appConfigProvider).apiBaseUrl;
-    final user = ref.watch(currentUserProvider);
-    final logoUrl = user == null
-        ? null
-        : '${base.replaceFirst(RegExp(r'/+$'), '')}/companies/logo/${user.companyId}';
+    // Use the same API-prefix-aware, versioned URL as every other company mark.
+    final savedLogoUrl = companyLogoUrl(base, {
+      ...?_company,
+      if (_company?['id'] == null && user != null) 'id': user.companyId,
+      'hasLogo': _company?['hasLogo'] == true || _company?['logoUrl'] != null,
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -294,10 +302,11 @@ class _CompanyManagementPanelState
                         height: 76,
                         child: _logo != null
                             ? Image.memory(_logo!.bytes, fit: BoxFit.contain)
-                            : (logoUrl == null
+                            : (savedLogoUrl == null
                                   ? const Icon(Icons.business, size: 48)
                                   : Image.network(
-                                      '$logoUrl?v=${_company?['updatedAt'] ?? ''}',
+                                      savedLogoUrl,
+                                      key: ValueKey(savedLogoUrl),
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, _, _) =>
                                           const Icon(Icons.business, size: 48),

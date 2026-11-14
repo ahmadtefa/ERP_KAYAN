@@ -17,6 +17,7 @@ describe('PostingService guards', () => {
   } = {}) {
     const created: Array<Record<string, unknown>> = [];
     const tx = {
+      $queryRaw: jest.fn(async () => []),
       account: {
         findMany: jest.fn(async () => [
           { id: 'acc-cash', code: '1101', isPostable: true, isActive: true },
@@ -71,6 +72,27 @@ describe('PostingService guards', () => {
     const entry = await service.post(tx, request);
     expect(entry.entryNumber).toBe('JV-0001');
     expect(created).toHaveLength(1);
+  });
+
+  it('locks accounts in deterministic order before validating and creating a journal', async () => {
+    const { service, tx } = makeService();
+    await service.post(tx, request);
+    const mock = tx as unknown as {
+      $queryRaw: jest.Mock;
+      account: {findMany: jest.Mock};
+      journalEntry: {create: jest.Mock};
+    };
+    expect(mock.$queryRaw).toHaveBeenCalledTimes(1);
+    const query = mock.$queryRaw.mock.calls[0][0] as {sql: string; values: unknown[]};
+    expect(query.sql).toMatch(/ORDER BY id FOR SHARE/i);
+    // The local Prisma shim can retain nested SQL fragments; native Prisma
+    // flattens them. Both must bind the same ordered account IDs.
+    const bound = query.values.flatMap(value =>
+      typeof value === 'object' && value !== null && 'values' in value
+        ? (value as {values: unknown[]}).values : [value]);
+    expect(bound).toEqual([companyId, 'acc-cash', 'acc-revenue']);
+    expect(mock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(mock.account.findMany.mock.invocationCallOrder[0]);
+    expect(mock.account.findMany.mock.invocationCallOrder[0]).toBeLessThan(mock.journalEntry.create.mock.invocationCallOrder[0]);
   });
 
   it('refuses an unbalanced document before anything is written', async () => {

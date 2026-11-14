@@ -1,0 +1,50 @@
+name: Licence store gate (approved VM required, not a test pass)
+
+# The licence-store integration test needs a real HMAC key and an approved
+# disposable VM. No such VM exists, so it cannot run here. It is deliberately
+# kept out of safe-checks.yml: that workflow carries ordinary code CI, which
+# must be able to report a truthful pass or fail on its own evidence.
+#
+# This gate stays separate so the gap remains visible instead of being folded
+# into a green code check. Nothing here may ever report success without the
+# test actually running on an approved VM: both branches below either block or
+# notice, and neither is capable of passing.
+#
+# It runs on the same events as the code checks, so an unfiltered run on main
+# shows this as a failed check and the gap cannot be scrolled past.
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  licence-store-integration:
+    # The original, unmodified license-store.spec.ts requires a real HMAC key
+    # and intentionally is NOT executed on this general-purpose runner. This
+    # independent check fails closed, rather than silently skipping or
+    # reporting the test as passed. Do not replace this gate with a flag or a
+    # self-hosted runner until an independently approved disposable VM and
+    # runner isolation/PR-trust policy exist.
+    #
+    # Neither event can produce a pass here. The PR branch emits an error
+    # annotation and blocks, so the check reads as failed and a PR is never
+    # advertised as fully green while the licence test is unrun.
+    name: Licence store integration blocked (approved VM required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Require approved isolated licence-test VM before HMAC test
+        run: |
+          echo '::error title=BLOCKED — licence store integration not run::Approved isolated test VM and runner trust controls are not configured. This is not a test pass or release approval.'
+          exit 1
+      - name: Run the unchanged licence store integration test
+        working-directory: backend
+        run: npm test -- --runInBand src/modules/licensing/license-store.spec.ts

@@ -4,11 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, StockDocumentKind } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { parseFactor } from '../../common/units/unit-math';
+import { isValidEan13, randomInternalBarcode } from './barcode';
 
 const MONEY_SCALE = 4;
 
@@ -68,7 +70,7 @@ export class InventoryReportsService {
 
   // ------------------------------------------------------------ item units
 
-  async listUnits(companyId: string, itemId: string) {
+  async listUnits(companyId: string, itemId: string, mayReadCost = true) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
@@ -87,16 +89,390 @@ export class InventoryReportsService {
         factor: unit.factor.toFixed(6),
         barcode: unit.barcode,
         salePrice: unit.salePrice?.toFixed(MONEY_SCALE) ?? null,
-        purchasePrice: unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null,
+        // Unit purchase prices are costs: redact for callers without cost.read.
+        purchasePrice: mayReadCost
+          ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
+          : null,
+        isDefaultSale: unit.isDefaultSale,
+        isDefaultPurchase: unit.isDefaultPurchase,
         isBase: unit.unit === item.unit,
+        // Multi-unit: inactive units stay readable on old documents but are
+        // refused on new ones (resolveUnitSelection enforces that).
+        isActive: unit.isActive,
+        createdAt: unit.createdAt.toISOString(),
       })),
     };
+  }
+
+  /// Changes a unit's name, factor, prices or barcode.
+  ///
+  /// The base unit's factor stays 1: stock is kept in base units, and a base
+  /// unit whose factor changed would silently re-value everything already on
+  /// the shelf. A unit that is not the base unit can be re-factored, which is
+  /// an honest correction of the conversion the item was set up with - it does
+  /// not rewrite history, because past documents recorded their quantities in
+  /// base units.
+  async updateUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    dto: Record<string, unknown>,
+    mayReadCost = true,
+  ) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const unit = await this.prisma.itemUnit.findFirst({
+      where: { id: unitId, itemId },
+    });
+    if (!unit) throw new NotFoundException('Unit not found');
+    const isBase = unit.unit === item.unit;
+    if (!unit.isActive &&
+        (dto.isDefaultSale === true || dto.isDefaultPurchase === true)) {
+      throw new BadRequestException('An inactive unit cannot be a default unit');
+    }
+
+    const data: Record<string, unknown> = {};
+    if (dto.unit !== undefined) {
+      const name = String(dto.unit ?? '').trim();
+      if (!name) throw new BadRequestException('unit is required');
+      if (isBase && name !== item.unit) {
+        throw new BadRequestException(
+          'The base unit of an item cannot be renamed; add the new name as another unit instead.',
+        );
+      }
+      const clash = await this.prisma.itemUnit.findFirst({
+        where: { itemId, unit: name, id: { not: unitId } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictException(`Item ${item.code} already has a unit called ${name}`);
+      data.unit = name;
+    }
+
+    if (dto.factor !== undefined) {
+      const factor = this.parseFactor(dto.factor);
+      if (isBase && !factor.equals(1)) {
+        throw new BadRequestException(`factor must be 1 for the base unit of ${item.code}`);
+      }
+      data.factor = factor;
+    }
+
+    if (dto.barcode !== undefined) {
+      const barcode = String(dto.barcode ?? '').trim() || null;
+      if (barcode) await this.assertBarcodeFree(companyId, barcode, itemId, unitId);
+      data.barcode = barcode;
+    }
+
+    for (const key of ['salePrice', 'purchasePrice'] as const) {
+      if (dto[key] === undefined) continue;
+      if (dto[key] === null || dto[key] === '') {
+        data[key] = null;
+        continue;
+      }
+      try {
+        const value = new Prisma.Decimal(String(dto[key])).toDecimalPlaces(MONEY_SCALE);
+        if (value.isNegative()) throw new Error('negative');
+        data[key] = value;
+      } catch {
+        throw new BadRequestException(`${key} is not a valid amount`);
+      }
+    }
+
+    for (const key of ['isDefaultSale', 'isDefaultPurchase'] as const) {
+      if (dto[key] === undefined) continue;
+      if (typeof dto[key] !== 'boolean') {
+        throw new BadRequestException(`${key} must be a boolean`);
+      }
+      data[key] = dto[key];
+    }
+
+    const changesDefault = data.isDefaultSale === true || data.isDefaultPurchase === true;
+    const updated = changesDefault
+      ? await this.prisma.$transaction(async (tx) => {
+      for (const key of ['isDefaultSale', 'isDefaultPurchase'] as const) {
+        if (data[key] === true) {
+          await tx.itemUnit.updateMany({
+            where: { itemId, id: { not: unitId } },
+            data: { [key]: false },
+          });
+        }
+      }
+      return tx.itemUnit.update({ where: { id: unitId }, data });
+      })
+      : await this.prisma.itemUnit.update({ where: { id: unitId }, data });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, factor: unit.factor.toFixed(6), barcode: unit.barcode },
+      after: {
+        item: item.code,
+        unit: updated.unit,
+        factor: updated.factor.toFixed(6),
+        barcode: updated.barcode,
+      },
+    });
+    return this.listUnits(companyId, itemId, mayReadCost);
+  }
+
+  /// Removes a unit.
+  ///
+  /// The base unit is not removable: it is what the stock ledger counts in.
+  /// A unit that a saved document already names (its frozen snapshot stores
+  /// the label) is never hard-deleted - it is deactivated instead, so old
+  /// documents still name a unit that exists while new documents refuse it.
+  /// Only a unit referenced by no document is actually deleted.
+  async removeUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    mayReadCost = true,
+  ) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
+    if (!unit) throw new NotFoundException('Unit not found');
+    if (unit.unit === item.unit || unit.factor.equals(1)) {
+      throw new BadRequestException(
+        'The base unit cannot be removed; it is the unit stock is counted in.',
+      );
+    }
+
+    if (await this.unitIsReferenced(itemId, unit.unit)) {
+      const updated = await this.prisma.itemUnit.update({
+        where: { id: unitId },
+        data: {
+          isActive: false,
+          isDefaultSale: false,
+          isDefaultPurchase: false,
+        },
+      });
+      await this.audit.record({
+        companyId,
+        userId,
+        action: 'DEACTIVATE',
+        entity: 'item_units',
+        entityId: unitId,
+        before: { item: item.code, unit: unit.unit, isActive: true },
+        after: { item: item.code, unit: updated.unit, isActive: false },
+      });
+      return { ...(await this.listUnits(companyId, itemId, mayReadCost)), deactivated: true };
+    }
+
+    await this.prisma.itemUnit.delete({ where: { id: unitId } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'DELETE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, factor: unit.factor.toFixed(6) },
+    });
+    return { ...(await this.listUnits(companyId, itemId, mayReadCost)), deactivated: false };
+  }
+
+  /// Deactivates a unit without deleting it. The factor-1 base unit is always
+  /// active because stock itself is counted in it.
+  async deactivateUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    mayReadCost = true,
+  ) {
+    const { item, unit } = await this.requireOwnedUnit(companyId, itemId, unitId);
+    if (unit.factor.equals(1) || unit.unit === item.unit) {
+      throw new BadRequestException('The base unit cannot be deactivated.');
+    }
+    if (!unit.isActive) return this.listUnits(companyId, itemId, mayReadCost);
+    await this.prisma.itemUnit.update({
+      where: { id: unitId },
+      data: {
+        isActive: false,
+        isDefaultSale: false,
+        isDefaultPurchase: false,
+      },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'DEACTIVATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, isActive: true },
+      after: { item: item.code, unit: unit.unit, isActive: false },
+    });
+    return this.listUnits(companyId, itemId, mayReadCost);
+  }
+
+  /// Reactivates a previously deactivated unit so it can be chosen again.
+  async reactivateUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    mayReadCost = true,
+  ) {
+    const { item, unit } = await this.requireOwnedUnit(companyId, itemId, unitId);
+    await this.prisma.itemUnit.update({ where: { id: unitId }, data: { isActive: true } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'REACTIVATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, isActive: unit.isActive },
+      after: { item: item.code, unit: unit.unit, isActive: true },
+    });
+    return this.listUnits(companyId, itemId, mayReadCost);
+  }
+
+  private async requireOwnedUnit(companyId: string, itemId: string, unitId: string) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+    const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
+    if (!unit) throw new NotFoundException('Unit not found');
+    return { item, unit };
+  }
+
+  /// True once any saved document line names this unit. Document lines keep a
+  /// frozen unitName snapshot rather than a foreign key, so usage is checked
+  /// by label across every document kind that carries unit snapshots.
+  private async unitIsReferenced(itemId: string, unitName: string): Promise<boolean> {
+    const common = { where: { itemId, unitName } };
+    const [sales, purchases, stock, purchaseOrders, salesOrders] = await Promise.all([
+      this.prisma.salesInvoiceLine.count(common),
+      this.prisma.purchaseInvoiceLine.count(common),
+      this.prisma.stockDocumentLine.count(common),
+      this.prisma.purchaseOrderLine.count(common),
+      this.prisma.salesOrderLine.count(common),
+    ]);
+    return sales + purchases + stock + purchaseOrders + salesOrders > 0;
+  }
+
+  /// A code for this unit alone, generated or supplied, unique in the company.
+  async assignUnitBarcode(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    requested: string | null | undefined,
+    mayReadCost = true,
+  ) {
+    const unit = await this.prisma.itemUnit.findFirst({
+      where: { id: unitId, item: { id: itemId, companyId, deletedAt: null } },
+      include: { item: { select: { code: true } } },
+    });
+    if (!unit) throw new NotFoundException('Unit not found');
+
+    let barcode = String(requested ?? '').trim();
+    if (barcode) {
+      if (barcode.length > 60) throw new BadRequestException('barcode cannot be longer than 60 characters');
+      await this.assertBarcodeFree(companyId, barcode, itemId, unitId);
+    } else {
+      for (let attempt = 0; attempt < 20 && !barcode; attempt += 1) {
+        const candidate = randomInternalBarcode();
+        if (!isValidEan13(candidate)) continue;
+        const taken = await this.barcodeTaken(companyId, candidate, itemId, unitId);
+        if (!taken) barcode = candidate;
+      }
+      if (!barcode) {
+        throw new ConflictException('Could not generate a free internal barcode; enter one by hand');
+      }
+    }
+
+    await this.prisma.itemUnit.update({ where: { id: unitId }, data: { barcode } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: unit.item.code, unit: unit.unit, barcode: unit.barcode },
+      after: { item: unit.item.code, unit: unit.unit, barcode },
+    });
+    return this.listUnits(companyId, itemId, mayReadCost);
+  }
+
+  private parseFactor(value: unknown): Prisma.Decimal {
+    return parseFactor(value ?? '0');
+  }
+
+  private async barcodeTaken(
+    companyId: string,
+    barcode: string,
+    itemId: string | null,
+    unitId: string | null,
+  ) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: { companyId, barcode, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        select: { id: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          ...(unitId ? { id: { not: unitId } } : {}),
+          item: { companyId, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(item || unit);
+  }
+
+  private async assertBarcodeFree(
+    companyId: string,
+    barcode: string,
+    itemId: string | null,
+    unitId: string | null,
+  ) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: { companyId, barcode, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        select: { code: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          ...(unitId ? { id: { not: unitId } } : {}),
+          item: { companyId, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        },
+        include: { item: { select: { code: true } } },
+      }),
+    ]);
+    if (item) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${item.code}`);
+    if (unit) {
+      throw new ConflictException(
+        `Barcode ${barcode} is already assigned to unit ${unit.unit} of item ${unit.item.code}`,
+      );
+    }
   }
 
   /// Adds a unit and the factor that converts it to the item's base unit.
   /// The base unit itself is always 1 - a conversion that contradicts that
   /// would make the stock ledger ambiguous.
-  async addUnit(companyId: string, userId: string, itemId: string, dto: Record<string, unknown>) {
+  async addUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    dto: Record<string, unknown>,
+    mayReadCost = true,
+  ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, unit: true, code: true },
@@ -106,19 +482,31 @@ export class InventoryReportsService {
     const unit = String(dto.unit ?? '').trim();
     if (!unit) throw new BadRequestException('unit is required');
 
-    let factor: Prisma.Decimal;
-    try {
-      factor = new Prisma.Decimal(String(dto.factor ?? '0')).toDecimalPlaces(6);
-    } catch {
-      throw new BadRequestException('factor is not a valid number');
-    }
-    if (factor.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('factor must be greater than zero');
-    }
+    const factor = this.parseFactor(dto.factor);
     if (unit === item.unit && !factor.equals(1)) {
       throw new BadRequestException(
         `factor must be 1 for the base unit of ${item.code}`,
       );
+    }
+
+    const barcode = String(dto.barcode ?? '').trim() || null;
+    if (barcode) {
+      const [itemBarcode, unitBarcode] = await Promise.all([
+        this.prisma.item.findFirst({
+          where: { companyId, barcode, deletedAt: null },
+          select: { id: true, code: true },
+        }),
+        this.prisma.itemUnit.findFirst({
+          where: { barcode, item: { companyId, deletedAt: null } },
+          include: { item: { select: { code: true } } },
+        }),
+      ]);
+      if (itemBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+      }
+      if (unitBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
+      }
     }
 
     const existing = await this.prisma.itemUnit.findFirst({ where: { itemId, unit } });
@@ -129,7 +517,8 @@ export class InventoryReportsService {
         itemId,
         unit,
         factor,
-        barcode: (dto.barcode as string) ?? null,
+        barcode,
+        isActive: true,
         salePrice: dto.salePrice === undefined ? null : new Prisma.Decimal(String(dto.salePrice)),
         purchasePrice:
           dto.purchasePrice === undefined ? null : new Prisma.Decimal(String(dto.purchasePrice)),
@@ -145,7 +534,7 @@ export class InventoryReportsService {
       after: { item: item.code, unit, factor: factor.toFixed(6) },
     });
 
-    return this.listUnits(companyId, itemId);
+    return this.listUnits(companyId, itemId, mayReadCost);
   }
 
   // -------------------------------------------------------------- reports
@@ -156,6 +545,7 @@ export class InventoryReportsService {
   async valuation(
     companyId: string,
     filters: { branchId?: string; categoryId?: string } = {},
+    mayReadCost = true,
   ) {
     const settings = await this.settings.get(companyId);
 
@@ -183,11 +573,12 @@ export class InventoryReportsService {
         branchCode: balance.branch.code,
         branchNameEn: balance.branch.nameEn,
         quantity: balance.quantity.toFixed(MONEY_SCALE),
-        value: balance.value.toFixed(MONEY_SCALE),
-        averageCost: (balance.quantity.isZero()
+        // Cost fields: kept as Decimals until the totals are computed, then
+        // serialized (or redacted) in the final mapping below.
+        value: balance.value,
+        averageCost: balance.quantity.isZero()
           ? new Prisma.Decimal(0)
-          : balance.value.div(balance.quantity)
-        ).toFixed(MONEY_SCALE),
+          : balance.value.div(balance.quantity),
       }));
 
     const totalValue = rows.reduce(
@@ -210,12 +601,105 @@ export class InventoryReportsService {
 
     return {
       valuationMethod: settings.inventoryValuation,
-      rows,
+      rows: rows.map((row) => ({
+        ...row,
+        value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null,
+        averageCost: mayReadCost ? row.averageCost.toFixed(MONEY_SCALE) : null,
+      })),
       totals: {
-        value: totalValue.toFixed(MONEY_SCALE),
-        ledgerValue: ledgerValue.toFixed(MONEY_SCALE),
-        difference: totalValue.minus(ledgerValue).toFixed(MONEY_SCALE),
+        value: mayReadCost ? totalValue.toFixed(MONEY_SCALE) : null,
+        // The ledger comparison is itself a cost reconciliation: withhold the
+        // whole block from callers who may not read costs.
+        ledgerValue: mayReadCost ? ledgerValue.toFixed(MONEY_SCALE) : null,
+        difference: mayReadCost
+          ? totalValue.minus(ledgerValue).toFixed(MONEY_SCALE)
+          : null,
       },
+    };
+  }
+
+  /**
+   * Stock-document ledger grouped by its source document's cost centre.
+   * The stock movement remains the only source of quantity/value; joining its
+   * reference to the document attributes it without creating a second ledger.
+   * A nullable centre intentionally keeps legacy documents visible.
+   */
+  async costCenterMovements(
+    companyId: string,
+    filters: { costCenterId?: string } = {},
+    mayReadCost = true,
+  ) {
+    if (filters.costCenterId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.costCenterId)) {
+      throw new BadRequestException('costCenterId must be a UUID');
+    }
+    const raw = await this.prisma.$queryRaw<Array<{
+      id: string; movementDate: Date; direction: string; quantity: Prisma.Decimal;
+      unitCost: Prisma.Decimal; totalCost: Prisma.Decimal; referenceType: string;
+      referenceNumber: string | null; itemId: string; itemCode: string;
+      itemNameEn: string; itemNameAr: string; unit: string;
+      costCenterId: string | null; costCenterCode: string | null;
+      costCenterNameEn: string | null; costCenterNameAr: string | null;
+    }>>(Prisma.sql`
+      SELECT m.id, m."movementDate", m.direction, m.quantity, m."unitCost", m."totalCost",
+             m."referenceType", m."referenceNumber", i.id AS "itemId", i.code AS "itemCode",
+             i."nameEn" AS "itemNameEn", i."nameAr" AS "itemNameAr", i.unit,
+             m."costCenterId", c.code AS "costCenterCode", c."nameEn" AS "costCenterNameEn",
+             c."nameAr" AS "costCenterNameAr"
+        FROM stock_movements m
+        JOIN items i ON i.id = m."itemId"
+        LEFT JOIN stock_documents d ON d.id = m."referenceId" AND d."companyId" = m."companyId"
+           LEFT JOIN cost_centers c ON c.id = m."costCenterId" AND c."companyId" = m."companyId"
+       WHERE m."companyId" = ${companyId}::uuid
+         AND m."referenceType" IN ('STOCK_ADJUSTMENT', 'STOCK_COUNT', 'STOCK_DOCUMENT_REVERSAL')
+         AND (m."referenceType" <> 'STOCK_DOCUMENT_REVERSAL' OR d.id IS NULL OR d.kind <> 'TRANSFER')
+         AND (${filters.costCenterId ?? null}::uuid IS NULL OR m."costCenterId" = ${filters.costCenterId ?? null}::uuid)
+       ORDER BY m."movementDate" DESC, m."createdAt" DESC, m.id
+    `);
+
+    const totals = new Map<string, { costCenterId: string | null; code: string | null;
+      nameEn: string | null; nameAr: string | null; movementCount: number;
+      quantityIn: Prisma.Decimal; quantityOut: Prisma.Decimal;
+      valueIn: Prisma.Decimal; valueOut: Prisma.Decimal }>();
+    const items = raw.map((row) => {
+      const key = row.costCenterId ?? '';
+      const total = totals.get(key) ?? {
+        costCenterId: row.costCenterId, code: row.costCenterCode,
+        nameEn: row.costCenterNameEn, nameAr: row.costCenterNameAr,
+        movementCount: 0, quantityIn: new Prisma.Decimal(0), quantityOut: new Prisma.Decimal(0),
+        valueIn: new Prisma.Decimal(0), valueOut: new Prisma.Decimal(0),
+      };
+      total.movementCount += 1;
+      if (row.direction === 'IN') {
+        total.quantityIn = total.quantityIn.plus(row.quantity);
+        total.valueIn = total.valueIn.plus(row.totalCost);
+      } else {
+        total.quantityOut = total.quantityOut.plus(row.quantity);
+        total.valueOut = total.valueOut.plus(row.totalCost);
+      }
+      totals.set(key, total);
+      return {
+        id: row.id, movementDate: row.movementDate.toISOString().slice(0, 10),
+        direction: row.direction, quantity: row.quantity.toFixed(MONEY_SCALE),
+        unitCost: mayReadCost ? row.unitCost.toFixed(MONEY_SCALE) : null,
+        value: mayReadCost ? row.totalCost.toFixed(MONEY_SCALE) : null,
+        referenceType: row.referenceType, referenceNumber: row.referenceNumber,
+        itemId: row.itemId, itemCode: row.itemCode, itemNameEn: row.itemNameEn,
+        itemNameAr: row.itemNameAr, unit: row.unit,
+        costCenterId: row.costCenterId, costCenterCode: row.costCenterCode,
+        costCenterNameEn: row.costCenterNameEn, costCenterNameAr: row.costCenterNameAr,
+      };
+    });
+    return {
+      items,
+      totals: [...totals.values()].map((row) => ({
+        costCenterId: row.costCenterId, costCenterCode: row.code,
+        costCenterNameEn: row.nameEn, costCenterNameAr: row.nameAr,
+        movementCount: row.movementCount,
+        quantityIn: row.quantityIn.toFixed(MONEY_SCALE), quantityOut: row.quantityOut.toFixed(MONEY_SCALE),
+        valueIn: mayReadCost ? row.valueIn.toFixed(MONEY_SCALE) : null,
+        valueOut: mayReadCost ? row.valueOut.toFixed(MONEY_SCALE) : null,
+        netValue: mayReadCost ? row.valueIn.minus(row.valueOut).toFixed(MONEY_SCALE) : null,
+      })),
     };
   }
 
@@ -223,6 +707,7 @@ export class InventoryReportsService {
   async slowMoving(
     companyId: string,
     filters: { days?: number; branchId?: string } = {},
+    mayReadCost = true,
   ) {
     const days = Math.max(filters.days ?? 90, 1);
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -254,7 +739,7 @@ export class InventoryReportsService {
           itemNameAr: balance.item.nameAr,
           unit: balance.item.unit,
           quantity: balance.quantity.toFixed(MONEY_SCALE),
-          value: balance.value.toFixed(MONEY_SCALE),
+          value: balance.value,
           lastIssuedOn: last ? last.toISOString().slice(0, 10) : null,
           daysSinceLastIssue: idle,
         };
@@ -266,11 +751,19 @@ export class InventoryReportsService {
         return idleB - idleA;
       });
 
+    const totalValue = rows.reduce(
+      (sum, row) => sum.plus(row.value),
+      new Prisma.Decimal(0),
+    );
+
     return {
       days,
-      rows,
+      rows: rows.map((row) => ({
+        ...row,
+        value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null,
+      })),
       totals: {
-        value: rows.reduce((sum, row) => sum.plus(row.value), new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+        value: mayReadCost ? totalValue.toFixed(MONEY_SCALE) : null,
         items: rows.length,
       },
     };
@@ -280,6 +773,7 @@ export class InventoryReportsService {
   async reorder(
     companyId: string,
     filters: { branchId?: string } = {},
+    mayReadCost = true,
   ) {
     const items = await this.prisma.item.findMany({
       where: { companyId, deletedAt: null, isActive: true, isStockTracked: true },
@@ -319,14 +813,15 @@ export class InventoryReportsService {
           category: item.category?.code ?? null,
           categoryNameEn: item.category?.nameEn ?? null,
           onHand: onHand.toFixed(MONEY_SCALE),
-          value: value.toFixed(MONEY_SCALE),
+          // Cost figures stay Decimal until the redaction step at the end.
+          value,
           reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
           shortfall: shortfall.greaterThan(0) ? shortfall.toFixed(MONEY_SCALE) : '0.0000',
-          averageCost: (onHand.isZero() ? new Prisma.Decimal(0) : value.div(onHand)).toFixed(MONEY_SCALE),
+          averageCost: onHand.isZero() ? new Prisma.Decimal(0) : value.div(onHand),
           estimatedOrderCost: shortfall
             .greaterThan(0)
-            ? shortfall.mul(item.purchasePrice).toFixed(MONEY_SCALE)
-            : '0.0000',
+            ? shortfall.mul(item.purchasePrice)
+            : new Prisma.Decimal(0),
           branches: item.stockBalances.map((balance) => ({
             branchCode: balance.branch.code,
             quantity: balance.quantity.toFixed(MONEY_SCALE),
@@ -342,13 +837,170 @@ export class InventoryReportsService {
       )
       .sort((a, b) => new Prisma.Decimal(b.shortfall).minus(a.shortfall).toNumber());
 
+    const totalEstimatedCost = rows.reduce(
+      (sum, row) => sum.plus(row.estimatedOrderCost),
+      new Prisma.Decimal(0),
+    );
+
     return {
-      rows,
+      rows: rows.map((row) => ({
+        ...row,
+        value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null,
+        averageCost: mayReadCost ? row.averageCost.toFixed(MONEY_SCALE) : null,
+        estimatedOrderCost: mayReadCost
+          ? row.estimatedOrderCost.toFixed(MONEY_SCALE)
+          : null,
+      })),
       totals: {
         items: rows.length,
-        estimatedOrderCost: rows
-          .reduce((sum, row) => sum.plus(row.estimatedOrderCost), new Prisma.Decimal(0))
-          .toFixed(MONEY_SCALE),
+        estimatedOrderCost: mayReadCost
+          ? totalEstimatedCost.toFixed(MONEY_SCALE)
+          : null,
+      },
+    };
+  }
+
+  /// What the physical counts found against what the ledger said.
+  ///
+  /// A count document records the figure that was counted and the movement
+  /// that brings the ledger to it, so the system figure is `counted - movement`
+  /// and the difference needs no second source of truth. Shortages and
+  /// surpluses are kept apart rather than netted: a store that lost 100 pieces
+  /// and gained 100 others has two problems, not none.
+  ///
+  /// The quantities are base units, and each row carries the unit that was
+  /// actually counted with its factor, so a sheet read off the shelf ("4
+  /// cartons") can be checked against the ledger ("48 pieces") on paper.
+  async stockTakeVariance(
+    companyId: string,
+    filters: { from?: string; to?: string; branchId?: string; warehouseId?: string } = {},
+    mayReadCost = true,
+  ) {
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (filters.from) dateFilter.gte = new Date(filters.from);
+    if (filters.to) dateFilter.lte = new Date(filters.to);
+
+    const documents = await this.prisma.stockDocument.findMany({
+      where: {
+        companyId,
+        kind: StockDocumentKind.COUNT,
+        deletedAt: null,
+        ...(filters.branchId ? { branchId: filters.branchId } : {}),
+        // A count of one warehouse names it as the destination, the same way
+        // a transfer does; the count of a branch that names no warehouse
+        // belongs to the branch's default store.
+        ...(filters.warehouseId ? { toWarehouseId: filters.warehouseId } : {}),
+        ...(Object.keys(dateFilter).length ? { documentDate: dateFilter } : {}),
+      },
+      orderBy: [{ documentDate: 'asc' }, { documentNumber: 'asc' }],
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        toWarehouse: { select: { code: true, nameEn: true, nameAr: true } },
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+        },
+      },
+    });
+
+    const rows: Array<{
+      documentId: string;
+      documentNumber: string;
+      documentDate: string;
+      branchCode: string;
+      warehouseCode: string | null;
+      itemCode: string;
+      itemNameEn: string;
+      itemNameAr: string;
+      unit: string;
+      unitName: string | null;
+      unitFactor: string | null;
+      unitQuantity: string | null;
+      systemQuantity: Prisma.Decimal;
+      countedQuantity: Prisma.Decimal;
+      varianceQuantity: Prisma.Decimal;
+      unitCost: Prisma.Decimal;
+      varianceValue: Prisma.Decimal;
+      notes: string | null;
+    }> = [];
+
+    for (const document of documents) {
+      for (const line of document.lines) {
+        // `quantity` is the movement that brings the ledger to the counted
+        // figure, so it *is* the variance; `countedQuantity` is what a person
+        // wrote down when the count was entered.
+        const variance = line.quantity;
+        const counted = line.countedQuantity ?? variance;
+        const system = counted.minus(variance);
+        rows.push({
+          documentId: document.id,
+          documentNumber: document.documentNumber,
+          documentDate: document.documentDate.toISOString().slice(0, 10),
+          branchCode: document.branch.code,
+          warehouseCode: document.toWarehouse?.code ?? null,
+          itemCode: line.item.code,
+          itemNameEn: line.item.nameEn,
+          itemNameAr: line.item.nameAr,
+          unit: line.item.unit,
+          unitName: line.unitName ?? null,
+          unitFactor: line.unitFactor ? line.unitFactor.toFixed(6) : null,
+          unitQuantity: line.unitQuantity ? line.unitQuantity.toFixed(4) : null,
+          systemQuantity: system,
+          countedQuantity: counted,
+          varianceQuantity: variance,
+          unitCost: line.unitCost,
+          varianceValue: variance.mul(line.unitCost),
+          notes: line.notes ?? null,
+        });
+      }
+    }
+
+    const zero = new Prisma.Decimal(0);
+    let shortageQuantity = zero;
+    let surplusQuantity = zero;
+    let shortageValue = zero;
+    let surplusValue = zero;
+    for (const row of rows) {
+      if (row.varianceQuantity.isNegative()) {
+        shortageQuantity = shortageQuantity.plus(row.varianceQuantity.abs());
+        shortageValue = shortageValue.plus(row.varianceValue.abs());
+      } else if (row.varianceQuantity.greaterThan(0)) {
+        surplusQuantity = surplusQuantity.plus(row.varianceQuantity);
+        surplusValue = surplusValue.plus(row.varianceValue);
+      }
+    }
+
+    return {
+      rows: rows.map((row) => ({
+        documentId: row.documentId,
+        documentNumber: row.documentNumber,
+        documentDate: row.documentDate,
+        branchCode: row.branchCode,
+        warehouseCode: row.warehouseCode,
+        itemCode: row.itemCode,
+        itemNameEn: row.itemNameEn,
+        itemNameAr: row.itemNameAr,
+        unit: row.unit,
+        unitName: row.unitName,
+        unitFactor: row.unitFactor,
+        unitQuantity: row.unitQuantity,
+        systemQuantity: row.systemQuantity.toFixed(MONEY_SCALE),
+        countedQuantity: row.countedQuantity.toFixed(MONEY_SCALE),
+        varianceQuantity: row.varianceQuantity.toFixed(MONEY_SCALE),
+        // A variance value is a cost: withheld entirely from a caller who may
+        // not read costs, so no total can be inferred from a row.
+        unitCost: mayReadCost ? row.unitCost.toFixed(MONEY_SCALE) : null,
+        varianceValue: mayReadCost ? row.varianceValue.toFixed(MONEY_SCALE) : null,
+        notes: row.notes,
+      })),
+      totals: {
+        documents: documents.length,
+        lines: rows.length,
+        shortageQuantity: shortageQuantity.toFixed(MONEY_SCALE),
+        surplusQuantity: surplusQuantity.toFixed(MONEY_SCALE),
+        shortageValue: mayReadCost ? shortageValue.toFixed(MONEY_SCALE) : null,
+        surplusValue: mayReadCost ? surplusValue.toFixed(MONEY_SCALE) : null,
+        netValue: mayReadCost ? surplusValue.minus(shortageValue).toFixed(MONEY_SCALE) : null,
       },
     };
   }

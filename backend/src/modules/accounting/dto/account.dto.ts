@@ -7,7 +7,6 @@ import {
   IsUUID,
   Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 
 const CODE_PATTERN = /^[A-Za-z0-9_.-]{1,50}$/;
@@ -19,8 +18,8 @@ export class CreateAccountDto {
   })
   code?: string;
 
-  @IsString() @MinLength(1) @MaxLength(200) nameEn!: string;
-  @IsString() @MinLength(1) @MaxLength(200) nameAr!: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
 
   /// Defaults to EXPENSE: the expense screen creates expense accounts without
   /// naming a type (the contract the desktop client has always used).
@@ -49,9 +48,11 @@ export class UpdateAccountDto {
   @IsOptional() @IsString() @MaxLength(50) @Matches(CODE_PATTERN)
   code?: string;
 
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameEn?: string;
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameAr?: string;
-  @IsOptional() @IsUUID() parentId?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
+  @IsOptional() @IsUUID() parentId?: string | null;
+  /// Compare the original parent before a requested move. null means root.
+  @IsOptional() @IsUUID() expectedParentId?: string | null;
   @IsOptional() @IsBoolean() isPostable?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(3) currency?: string;

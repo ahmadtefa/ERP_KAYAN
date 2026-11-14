@@ -41,6 +41,12 @@ export interface PostingRequest {
     | 'FIXED_ASSET'
     | 'ASSET_DEPRECIATION'
     | 'ASSET_DISPOSAL'
+    /// A lot written off or destroyed: the value leaves stock for the
+    /// inventory-difference account, with the reason on the entry.
+    | 'INVENTORY_WRITE_OFF'
+    /// A lot moved between two warehouses. Value does not change overall;
+    /// the entry exists so both shelves' cards reconcile.
+    | 'BATCH_TRANSFER'
     | 'MANUAL';
   sourceId: string;
   sourceNumber: string;
@@ -163,7 +169,17 @@ export class PostingService {
 
     // Accounts must exist, be postable and belong to this company. A document
     // is rejected rather than posted to a grouping account.
-    const accountIds = [...new Set(lines.map((l) => l.accountId))];
+    const accountIds = [...new Set(lines.map((l) => l.accountId))].sort();
+    // Keep account validity stable until the journal has committed. Chart
+    // updates and soft deletion acquire conflicting row locks; a plain MVCC
+    // validation could otherwise post to an account after it was retired.
+    // A deterministic order reduces deadlocks between multi-account postings.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM accounts
+      WHERE "companyId" = ${request.companyId}::uuid
+        AND id IN (${Prisma.join(accountIds.map(id => Prisma.sql`${id}::uuid`))})
+      ORDER BY id FOR SHARE
+    `);
     const accounts = await tx.account.findMany({
       where: { id: { in: accountIds }, companyId: request.companyId, deletedAt: null },
       select: { id: true, code: true, isPostable: true, isActive: true },

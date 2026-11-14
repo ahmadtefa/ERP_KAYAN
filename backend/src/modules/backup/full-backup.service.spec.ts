@@ -4,11 +4,18 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import * as childProcess from 'child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
 import { FullBackupService } from './full-backup.service';
+
+// Licensing is asked to re-assert its watermarks after a restore; that
+// behaviour lives in licensing.service.spec.ts.
+const licensingStub = {
+  reconcile: jest.fn().mockResolvedValue(undefined),
+  reserveSeat: jest.fn(),
+} as any;
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -77,6 +84,7 @@ describe('FullBackupService guards', () => {
       {} as any,
       { record: async () => {} } as any,
       { begin() {}, end() {}, isActive: false, status: {} } as any,
+      licensingStub,
     );
     return service;
   }
@@ -120,6 +128,49 @@ describe('FullBackupService guards', () => {
     });
   });
 
+  describe('database tool target', () => {
+    it('preserves encoded separators and rejects libpq connection-string database names', () => {
+      const service = serviceWithEnv(temporaryDir('kayan-backups-'));
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/books%2Farchive';
+      expect((service as unknown as { requireDatabase(): string }).requireDatabase()).toBe('books%2Farchive');
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/db%3Dother';
+      // node-postgres preserves %3D as part of the database name; it cannot
+      // become a libpq key/value connection string.
+      expect((service as unknown as { requireDatabase(): string }).requireDatabase()).toBe('db%3Dother');
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/db=other';
+      expect(() => (service as unknown as { requireDatabase(): string }).requireDatabase()).toThrow(/ambiguous/);
+    });
+  });
+
+  describe('complete backup honesty', () => {
+    it('records a failed full backup attempt without creating or deleting an archive', async () => {
+      const dir = temporaryDir('kayan-full-refusal-');
+      writeFileSync(join(dir, 'previous.dump'), 'previous copy');
+      const create = jest.fn().mockResolvedValue({});
+      const service = new FullBackupService({ backupRun: { create } } as any,
+        {} as any, { isActive: false } as any, licensingStub);
+      const error = await service.rejectFullBackup('operator', 'company').catch((e) => e);
+      expect(error.getStatus()).toBe(503);
+      expect(error.getResponse()).toMatchObject({ code: 'FULL_BACKUP_INCOMPLETE' });
+      expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({
+        companyId: 'company', createdBy: 'operator', kind: 'FULL',
+        status: 'FAILED', fileName: '-', sizeBytes: BigInt(0),
+      }) });
+      expect(readdirSync(dir)).toEqual(['previous.dump']);
+      expect(jest.mocked(childProcess.execFile)).not.toHaveBeenCalled();
+    });
+
+    it('does not claim a failure record was saved when the database rejects it', async () => {
+      const marker = 'synthetic-private-marker';
+      const service = new FullBackupService({backupRun: {create: jest.fn().mockRejectedValue(new Error(marker))}} as any,
+        {} as any, {isActive: false} as any, licensingStub);
+      const error = await service.rejectFullBackup('operator', null).catch((e) => e);
+      expect(error.getStatus()).toBe(503);
+      expect(error.getResponse()).toMatchObject({ code: 'FULL_BACKUP_FAILURE_NOT_RECORDED' });
+      expect(JSON.stringify(error.getResponse())).not.toContain(marker);
+    });
+  });
+
   describe('creating a backup', () => {
     function serviceWithTools(dir: string, audit = { record: jest.fn(async () => {}) }) {
       const toolsDir = temporaryDir('kayan-tools-');
@@ -136,7 +187,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         audit as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
     }
 
     it('runs pg_dump with --no-password and reports the file only after validating it', async () => {
@@ -152,23 +204,50 @@ describe('FullBackupService guards', () => {
           if (fileArg) {
             writeFileSync(fileArg.slice('--file='.length), Buffer.from('PGDMP-fake-archive'));
           }
-          (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+          (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
           return {} as childProcess.ChildProcess;
         }) as typeof childProcess.execFile,
       );
 
+      const flush = jest.spyOn(service as any, 'syncArchive');
       const result = await service.createFull('user-1');
 
-      expect(seenArgs).toHaveLength(1);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(seenArgs).toHaveLength(3);
+      expect(seenArgs[1]).toContain('--list');
+      expect(seenArgs[2]).toContain('--file');
+      expect(seenArgs[2]).toContain(process.platform === 'win32' ? 'NUL' : '/dev/null');
       expect(seenArgs[0]).toContain('--no-password');
       expect(seenArgs[0]).toContain('--format=custom');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
       expect(result.file.sizeBytes).toBeGreaterThan(0);
       expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'BACKUP', userId: 'user-1' }),
+        expect.objectContaining({ action: 'BACKUP', entity: 'backup_database_archive', userId: 'user-1',
+          after: expect.objectContaining({fullBackup: false, includesExternalFiles: false, includesLicence: false}) }),
       );
       const listed = await service.list();
       expect(listed.map((f) => f.name)).toContain(result.file.name);
+    });
+
+    it('does not publish or audit a new archive when flushing its bytes fails', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const existing = join(dir, 'kayan-full-existing.dump');
+      writeFileSync(existing, 'PGDMP-previous-synthetic');
+      const audit = { record: jest.fn(async () => {}) };
+      const service = serviceWithTools(dir, audit);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const argv = args as string[];
+        const fileArg = argv.find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-synthetic'));
+        (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const flush = jest.spyOn(service as any, 'syncArchive').mockRejectedValue(new Error('synthetic fsync failure'));
+      await expect(service.createFull('user-1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(readdirSync(dir)).toEqual(['kayan-full-existing.dump']);
+      expect((await service.read('kayan-full-existing.dump')).data.toString()).toBe('PGDMP-previous-synthetic');
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('fails with a clear error and leaves no partial file when pg_dump fails', async () => {
@@ -188,7 +267,105 @@ describe('FullBackupService guards', () => {
       await expect(service.createFull('user-1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
-      await expect(service.list()).resolves.toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it.each(['unreadable', 'empty'] as const)(
+      'does not publish a %s archive even when pg_dump exits successfully',
+      async (failure) => {
+        const dir = temporaryDir('kayan-backups-');
+        const audit = { record: jest.fn(async () => {}) };
+        const service = serviceWithTools(dir, audit);
+        const before = await service.list();
+        jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+          const argv = args as string[];
+          const fileArg = argv.find((a) => a.startsWith('--file='));
+          if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-truncated'));
+          const error = !fileArg && failure === 'unreadable' ? new Error('bad archive') : null;
+          (callback as (e: Error | null, o: string, s: string) => void)(error, '; header only', error ? 'bad archive' : '');
+          return {} as childProcess.ChildProcess;
+        }) as typeof childProcess.execFile);
+        await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect(readdirSync(dir)).toEqual([]);
+        expect(await service.list()).toEqual(before);
+        expect(audit.record).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not publish an archive when its table of contents reads but data does not', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const argv = args as string[];
+        const fileArg = argv.find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-synthetic'));
+        const dataRead = argv.includes('--file');
+        (callback as (e: Error | null, o: string, s: string) => void)(
+          dataRead ? new Error('synthetic data corruption') : null,
+          argv.includes('--list') ? '1; 0 0 TABLE DATA synthetic' : '', '',
+        );
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it('creates distinct completed files for concurrent backups in the same second', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
+        setImmediate(() => (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', ''));
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const [first, second] = await Promise.all([service.createFull('u1'), service.createFull('u2')]);
+      expect(first.file.name).not.toBe(second.file.name);
+      expect((await service.list()).map((file) => file.name)).toEqual(expect.arrayContaining([first.file.name, second.file.name]));
+      expect(readdirSync(dir).filter((file) => file.endsWith('.partial'))).toEqual([]);
+    });
+
+    it('never overwrites an existing destination if publication collides', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
+        (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const fsPromises = jest.requireActual<typeof import('fs/promises')>('fs/promises');
+      let collisionPath = '';
+      const spy = jest.spyOn(fsPromises, 'link').mockImplementationOnce(async (_source, destination) => {
+        collisionPath = String(destination);
+        writeFileSync(collisionPath, 'existing backup');
+        throw Object.assign(new Error('destination exists'), { code: 'EEXIST' });
+      });
+      try {
+        await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect((await import('fs')).readFileSync(collisionPath, 'utf8')).toBe('existing backup');
+        expect(readdirSync(dir).filter((file) => file.endsWith('.partial'))).toEqual([]);
+      } finally { spy.mockRestore(); }
+    });
+
+    it('does not expose an unfinished or malformed archive as a backup', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      let finish!: () => void;
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('not-a-pg-archive'));
+        finish = () => (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const before = await service.list();
+      const pending = service.createFull('u1');
+      while (!finish) await new Promise((resolve) => setImmediate(resolve));
+      expect(await service.list()).toEqual(before);
+      finish();
+      await expect(pending).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(await service.list()).toEqual(before);
+      expect(readdirSync(dir)).toEqual([]);
     });
 
     it('still lists backups written by older builds into the working directory', async () => {
@@ -258,10 +435,13 @@ describe('FullBackupService guards', () => {
         prisma,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
 
       const caps = await service.capabilities();
       expect(caps.available).toBe(true);
+      expect(caps.fullBackupSupported).toBe(false);
+      expect(caps.fullRestoreSupported).toBe(false);
       expect(caps.serverVersion).toBe('16.2');
       expect(caps.warning).toContain('version 12');
       expect(caps.warning).toContain('16');
@@ -279,7 +459,8 @@ describe('FullBackupService guards', () => {
         { $queryRaw: async () => [{ v: '16.2' }] } as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const caps = await service.capabilities();
       expect(caps.warning).toBeNull();
     });
@@ -327,7 +508,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -344,15 +526,31 @@ describe('FullBackupService guards', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
+    it('refuses manual deletion without complete replacement restore evidence', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithEnv(dir);
+      const old = join(dir, 'old.dump');
+      const newer = join(dir, 'new.dump');
+      writeFileSync(old, 'synthetic old backup');
+      writeFileSync(newer, 'synthetic new backup');
+      await expect(service.remove('old.dump', 'u1')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'BACKUP_DELETE_PROTECTED' }),
+      });
+      const fs = await import('fs');
+      expect(fs.readFileSync(old, 'utf8')).toBe('synthetic old backup');
+      expect(fs.readFileSync(newer, 'utf8')).toBe('synthetic new backup');
+    });
+
     it('a full backup is reported only after the file exists and is a real archive', async () => {
       const dir = temporaryDir('kayan-backups-');
       fakeTools(dir);
+      process.env.KAYAN_BACKUP_DIR = dir;
       // The "pg_dump" writes a Custom-format file where it was told to.
       jest.mocked(childProcess.execFile).mockImplementation(
         ((_, args, ___, callback) => {
           const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
-          writeFileSync(
-            String(fileArg).slice('--file='.length),
+          if (fileArg) writeFileSync(
+            fileArg.slice('--file='.length),
             Buffer.concat([Buffer.from('PGDMP', 'latin1'), Buffer.alloc(32)]),
           );
           const complete = callback as (
@@ -360,7 +558,7 @@ describe('FullBackupService guards', () => {
             stdout: string,
             stderr: string,
           ) => void;
-          complete(null, '', '');
+          complete(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
           return {} as childProcess.ChildProcess;
         }) as typeof childProcess.execFile,
       );
@@ -370,7 +568,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async (input: unknown) => audits.push(input) } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const result = await service.createFull('u1');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
       expect(result.file.sizeBytes).toBeGreaterThan(0);
@@ -398,7 +597,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -415,7 +615,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -430,7 +631,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toThrow(/DATABASE_URL/);
     });
   });
@@ -479,12 +681,31 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const verified = await service.verify(
         'kayan-full-2026-01-01-00-00-00.dump',
       );
       expect(verified.entries).toBe(2);
       expect(verified.sizeBytes).toBe(69);
+      expect(verified).toMatchObject({ archiveContentReadable: true, fullRestoreRehearsed: false, includesExternalFiles: false, includesLicence: false, fullBackup: false });
+    });
+
+    it('refuses data corruption even when the table of contents is readable', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      fakeTools(dir);
+      process.env.KAYAN_BACKUP_DIR = dir;
+      writeFileSync(join(dir, 'corrupt.dump'), Buffer.from('PGDMP-synthetic'));
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const isList = (args as string[]).includes('--list');
+        (callback as (e: Error | null, o: string, s: string) => void)(
+          isList ? null : new Error('synthetic corruption'), isList ? '1; 0 TABLE DATA test' : '', '',
+        );
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const service = serviceWithEnv(dir);
+      await expect(service.verify('corrupt.dump')).rejects.toThrow(/could not read/);
+      expect(readdirSync(dir)).toContain('corrupt.dump');
     });
 
     it('refuses an archive that holds no objects', async () => {
@@ -511,7 +732,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.verify('kayan-full-empty.dump')).rejects.toThrow(
         /no database objects/,
       );
@@ -526,7 +748,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.verify('kayan-full-text.dump')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -551,7 +774,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: true, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(
         service.restore({ confirm: true, fileName: 'x.dump' }, 'u1'),
       ).rejects.toThrow(/already running/);

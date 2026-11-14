@@ -95,6 +95,18 @@ namespace Kayan
                 report.AppendLine("Repair attempted (exit code " + exitCode + ").");
                 if (output.Length > 0) { report.AppendLine(output.TrimEnd()); }
                 if (!quiet) { Console.WriteLine(report.ToString()); }
+                if (exitCode != 0)
+                {
+                    // The repair script says it did not finish. Diagnostics
+                    // happening to look clean afterwards is not a repair: it
+                    // can be clean because the script got as far as restarting
+                    // the service and then failed. Reporting 0 here made a
+                    // failed repair indistinguishable from a successful one.
+                    report.AppendLine("The repair did not complete; its own exit code was " + exitCode + ".");
+                    RepairLog.Write(root, report.ToString());
+                    if (!quiet) { Console.WriteLine(report.ToString()); }
+                    return exitCode == 0 ? 1 : exitCode;
+                }
             }
             else if (repair)
             {

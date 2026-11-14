@@ -1,9 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
+import { InvoiceDocumentType, InvoiceStatus, JournalStatus, OrderStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
@@ -17,6 +18,20 @@ import {
 } from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
+import { batchPolicyOf } from '../../common/warehouse/batch-policy';
+import { BatchesService } from '../inventory/batches.service';
+import { historicalOrderUnit, orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
+import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
+import { planOrderReallocation } from '../../common/units/order-reallocation';
+import { createHash } from 'node:crypto';
+import { releaseOrderAllocations } from '../../common/units/order-invoice-reconciliation';
+import {
+  defaultUnitPrice,
+  parseDocumentQuantity,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { PriceListsService } from './price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -32,6 +47,7 @@ const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
 
 interface PreparedLine {
+  isAdditionalCharge: boolean;
   lineNumber: number;
   itemId: string | null;
   description: string;
@@ -48,12 +64,21 @@ interface PreparedLine {
   discountAmount: Prisma.Decimal;
   invoiceDiscountAmount: Prisma.Decimal;
   costCenterId: string | null;
+  // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` above
+  // is always the internal base-unit quantity the stock ledger moves.
+  unitName: string | null;
+  unitFactor: Prisma.Decimal | null;
+  unitQuantity: Prisma.Decimal | null;
 }
 
 interface PreparedInvoice {
   lines: PreparedLine[];
   documentDiscount: ResolvedDiscount;
   lineDiscountTotal: Prisma.Decimal;
+}
+
+interface SalesInvoicePreparationOptions {
+  pricesExcludeTax?: boolean;
 }
 
 @Injectable()
@@ -67,9 +92,11 @@ export class SalesInvoicesService {
     private readonly warehouses: WarehouseService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    private readonly batches: BatchesService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
-  async findAll(companyId: string, query: ListInvoicesDto) {
+  async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
@@ -106,14 +133,19 @@ export class SalesInvoicesService {
     ]);
 
     return {
-      items: items.map((i) => this.toSummary(i)),
+      items: items.map((i) => this.toSummary(i, mayReadCost)),
       total,
       page,
       pageSize,
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async taxPricing(companyId: string) {
+    const settings = await this.settings.get(companyId);
+    return { pricesIncludeTax: settings.pricesIncludeTax };
+  }
+
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -128,21 +160,34 @@ export class SalesInvoicesService {
     if (!invoice) throw new NotFoundException('Sales invoice not found');
 
     return {
-      ...this.toSummary(invoice),
+      ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
+      orderId: invoice.salesOrderId,
+      updatedAt: invoice.updatedAt.toISOString(),
       notes: invoice.notes,
       journalEntryId: invoice.journalEntryId,
       postedAt: invoice.postedAt?.toISOString() ?? null,
       lines: invoice.lines.map((l) => ({
         id: l.id,
+        orderLineId: l.orderLineId,
         lineNumber: l.lineNumber,
         itemId: l.itemId,
+        isAdditionalCharge: l.isAdditionalCharge,
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
-        unit: l.item?.unit ?? null,
+        // Display unit: the unit the user chose, falling back to the item base
+        // unit for rows written before multi-unit existed.
+        unit: l.unitName ?? l.item?.unit ?? null,
+        unitName: l.unitName ?? null,
+        unitFactor: l.unitFactor === null || l.unitFactor === undefined ? null : l.unitFactor.toFixed(6),
+        // What the user entered in the chosen unit. Legacy rows fall back to
+        // the stored quantity, which already is what they typed.
+        unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
         description: l.description,
+        // Internal base-unit quantity used by stock and returns.
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: l.quantity.toFixed(MONEY_SCALE),
         returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
@@ -154,8 +199,10 @@ export class SalesInvoicesService {
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
-        unitCost: l.unitCost.toFixed(MONEY_SCALE),
-        costTotal: l.costTotal.toFixed(MONEY_SCALE),
+        // Cost snapshots must not leave the API for a role without cost.read;
+        // selling, totals and tax figures are unaffected by the redaction.
+        unitCost: mayReadCost ? l.unitCost.toFixed(MONEY_SCALE) : null,
+        costTotal: mayReadCost ? l.costTotal.toFixed(MONEY_SCALE) : null,
       })),
     };
   }
@@ -166,12 +213,43 @@ export class SalesInvoicesService {
     branchId: string | null,
     userId: string,
     dto: CreateSalesInvoiceDto,
+    orderUnits?: readonly TrustedOrderUnit[],
+    mayReadCost = true,
+  ) {
+    const created = await this.prisma.$transaction((tx) =>
+      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
+    );
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'sales_invoices',
+      entityId: created.id,
+      after: {
+        invoiceNumber: created.invoiceNumber,
+        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
+      },
+    });
+
+    return this.findOne(companyId, created.id, mayReadCost);
+  }
+
+  /** Internal: caller owns the transaction and any required audit records. */
+  async createInTransaction(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    dto: CreateSalesInvoiceDto,
+    tx: Prisma.TransactionClient,
+    orderUnits?: readonly TrustedOrderUnit[],
+    options: SalesInvoicePreparationOptions = {},
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
 
-    const customer = await this.prisma.customer.findFirst({
+    const customer = await tx.customer.findFirst({
       where: { id: dto.customerId, companyId, deletedAt: null },
       select: { id: true, nameEn: true, isActive: true },
     });
@@ -183,11 +261,13 @@ export class SalesInvoicesService {
       dto.lines,
       dto.customerId,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      orderUnits,
+      tx,
+      options,
     );
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
 
-    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.numbers.next(
         tx,
         companyId,
@@ -207,7 +287,7 @@ export class SalesInvoicesService {
           // invoice is never born with no due date at all.
           dueDate: dto.dueDate
             ? new Date(dto.dueDate)
-            : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate))),
+            : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate), tx)),
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
           discountType: prepared.documentDiscount.type,
@@ -223,6 +303,7 @@ export class SalesInvoicesService {
             create: lines.map((l) => ({
               lineNumber: l.lineNumber,
               itemId: l.itemId,
+              isAdditionalCharge: l.isAdditionalCharge,
               description: l.description,
               quantity: l.quantity,
               unitPrice: l.unitPrice,
@@ -235,26 +316,15 @@ export class SalesInvoicesService {
               discountAmount: l.discountAmount,
               invoiceDiscountAmount: l.invoiceDiscountAmount,
               costCenterId: l.costCenterId,
+              unitName: l.unitName,
+              unitFactor: l.unitFactor,
+              unitQuantity: l.unitQuantity,
             })),
           },
         },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-    });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'sales_invoices',
-      entityId: created.id,
-      after: {
-        invoiceNumber: created.invoiceNumber,
-        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, created.id);
   }
 
   /**
@@ -272,6 +342,7 @@ export class SalesInvoicesService {
     userId: string,
     id: string,
     dto: CreateSalesInvoiceDto,
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -281,6 +352,7 @@ export class SalesInvoicesService {
       where: { id, companyId, deletedAt: null },
     });
     if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (invoice.salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as sales invoices');
     }
@@ -312,10 +384,10 @@ export class SalesInvoicesService {
       : await this.dueDateFromTerms(companyId, dto.customerId, invoiceDate);
 
     await this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
-        SELECT status
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; salesOrderId: string | null }>>(Prisma.sql`
+        SELECT status, "salesOrderId"
           FROM sales_invoices
-         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
@@ -323,6 +395,8 @@ export class SalesInvoicesService {
           'This invoice was posted or changed by someone else. Reload it before editing.',
         );
       }
+
+      if (locked[0].salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
 
       await tx.salesInvoice.update({
         where: { id },
@@ -344,6 +418,7 @@ export class SalesInvoicesService {
             create: lines.map((line) => ({
               lineNumber: line.lineNumber,
               itemId: line.itemId,
+              isAdditionalCharge: line.isAdditionalCharge,
               description: line.description,
               quantity: line.quantity,
               unitPrice: line.unitPrice,
@@ -356,6 +431,9 @@ export class SalesInvoicesService {
               discountAmount: line.discountAmount,
               invoiceDiscountAmount: line.invoiceDiscountAmount,
               costCenterId: line.costCenterId,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -372,7 +450,7 @@ export class SalesInvoicesService {
       after: { status: InvoiceStatus.DRAFT, totalAmount: totals.totalAmount.toFixed(MONEY_SCALE) },
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /**
@@ -382,13 +460,185 @@ export class SalesInvoicesService {
    * weighted average cost, the cost lines are written onto the invoice, and the
    * journal entry is created. If any of it fails, none of it happened.
    */
-  async post(companyId: string, userId: string, id: string) {
+  /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
+  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const before = await this.prisma.salesInvoice.findFirst({
+      where: { id, companyId, branchId, deletedAt: null }, select: { salesOrderId: true },
+    });
+    if (!before?.salesOrderId) throw new BadRequestException('Invoice is not linked to an order');
+    const orderId = before.salesOrderId;
+    if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
+      throw new BadRequestException('expectedUpdatedAt is required');
+    }
+    const expectedUpdatedAt = dto.expectedUpdatedAt;
+    await this.prisma.$transaction(async (tx) => {
+      // Lock in the same order as conversion, cancellation and reversal.
+      const lockedOrder = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedOrder.length !== 1) throw new NotFoundException('Sales order not found');
+      const lockedInvoice = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_invoices WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedInvoice.length !== 1) throw new NotFoundException('Sales invoice not found');
+      const invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      const order = await tx.salesOrder.findFirst({
+        where: { id: orderId, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice || !order || invoice.salesOrderId !== orderId) throw new BadRequestException('Order allocation changed; reload');
+      const requested = selectedOrderLineQuantities(dto.lines, order.lines);
+      const identity = orderConversionIdentity(dto, requested);
+      const hash = createHash('sha256').update(JSON.stringify({ selection: identity.hash, expectedUpdatedAt })).digest('hex');
+      const previous = await tx.auditLog.findFirst({
+        where: { companyId, entity: 'sales_invoices', entityId: id, action: 'AMEND_ORDER_ALLOCATION',
+          afterJson: { path: ['amendmentKey'], equals: identity.key } },
+      });
+      if (previous) {
+        const after = previous.afterJson as { amendmentHash?: string } | null;
+        if (after?.amendmentHash !== hash) throw new ConflictException('The idempotency key was used for a different amendment');
+        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('The amended invoice is no longer a draft');
+        return;
+      }
+      if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
+        throw new BadRequestException('Only an active draft invoice can be amended');
+      }
+      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
+      if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero()) {
+        throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
+      }
+      const counters = planOrderReallocation(order.lines, invoice.lines, requested);
+      const prior = new Map<string, typeof invoice.lines[number]>();
+      for (const old of invoice.lines) {
+        if (old.isAdditionalCharge || !old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero()) {
+          throw new BadRequestException('Historical invoice lines require manual review');
+        }
+        prior.set(old.orderLineId, old);
+      }
+      const selected = order.lines.filter((line) => requested.has(line.id));
+      const units: TrustedOrderUnit[] = [];
+      const rawLines = selected.map((line) => {
+        const existing = prior.get(line.id);
+        if (existing && existing.itemId !== line.itemId) throw new BadRequestException('Historical order item changed; manual review required');
+        // Existing lines keep the invoice snapshot even if the order was
+        // changed later. Newly selected lines use the agreed order snapshot.
+        const source = existing ?? line;
+        const historical = historicalOrderUnit({ label: `Line ${line.lineNumber}`, unitName: source.unitName,
+          unitFactor: source.unitFactor, baseQuantity: requested.get(line.id)! });
+        units.push({ itemId: line.itemId, resolved: historical });
+        return { itemId: line.itemId, description: source.description,
+          quantity: (historical.snapshot.unitQuantity ?? historical.baseQuantity).toFixed(MONEY_SCALE),
+          unitPrice: source.unitPrice.toFixed(MONEY_SCALE), taxRate: source.taxRate.toFixed(MONEY_SCALE),
+          discountPercent: source.discountPercent.toFixed(MONEY_SCALE), unitName: source.unitName ?? undefined,
+          costCenterId: existing?.costCenterId ?? undefined };
+      });
+      const prepared = await this.prepareLines(companyId, rawLines, invoice.customerId, {}, units, tx);
+      const totals = this.totalsOf(prepared.lines);
+      const subTotal = totals.subTotal, taxAmount = totals.taxAmount, totalAmount = totals.totalAmount;
+      await tx.salesInvoice.update({
+        where: { id }, data: { subTotal, taxAmount, totalAmount,
+          discountType: prepared.documentDiscount.type, discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount, lineDiscountTotal: prepared.lineDiscountTotal,
+          lines: { deleteMany: {}, create: prepared.lines.map((line, index) => ({
+            orderLineId: selected[index].id, lineNumber: line.lineNumber, itemId: line.itemId,
+            description: line.description, quantity: line.quantity, unitPrice: line.unitPrice,
+            taxRate: line.taxRate, taxAmount: line.taxAmount, lineTotal: line.lineTotal,
+            grossLineTotal: line.grossLineTotal, discountType: line.discountType,
+            discountPercent: line.discountPercent, discountAmount: line.discountAmount,
+            invoiceDiscountAmount: line.invoiceDiscountAmount,
+            costCenterId: line.costCenterId, unitName: line.unitName, unitFactor: line.unitFactor, unitQuantity: line.unitQuantity,
+          })) },
+        },
+      });
+      for (const line of order.lines) await tx.salesOrderLine.update({
+        where: { id: line.id }, data: { invoicedQuantity: counters.get(line.id)! },
+      });
+      const complete = order.lines.every((line) => counters.get(line.id)!.greaterThanOrEqualTo(line.quantity));
+      const none = order.lines.every((line) => counters.get(line.id)!.isZero());
+      await tx.salesOrder.update({ where: { id: orderId }, data: {
+        status: none ? OrderStatus.APPROVED : complete ? OrderStatus.FULFILLED : OrderStatus.PARTIALLY_FULFILLED,
+      } });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'AMEND_ORDER_ALLOCATION', entity: 'sales_invoices', entityId: id,
+        before: { totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE), allocations: invoice.lines.map((line) => ({ orderLineId: line.orderLineId, quantity: line.quantity.toFixed(MONEY_SCALE) })) },
+        after: { amendmentKey: identity.key, amendmentHash: hash, totalAmount: totalAmount.toFixed(MONEY_SCALE),
+          allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
+      }, tx);
+    }, { maxWait: 10000, timeout: 30000 });
+    return this.findOne(companyId, id, false);
+  }
+
+  /** Cancel a draft without deleting its historical identity or retry key. */
+  async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    await this.prisma.$transaction(async (tx) => {
+      let invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice) throw new NotFoundException('Sales invoice not found');
+      if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
+        throw new BadRequestException('Only a draft invoice can be cancelled');
+      }
+      if (invoice.salesOrderId) {
+        // An amendment can commit while we wait for the order lock. Reload
+        // its allocation afterwards; releasing the pre-lock snapshot corrupts
+        // the order counters even though both operations are transactions.
+        const orderId = invoice.salesOrderId;
+        const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+            AND "deletedAt" IS NULL FOR UPDATE
+        `);
+        if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+        invoice = await tx.salesInvoice.findFirst({
+          where: { id, companyId, branchId, deletedAt: null },
+          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        });
+        if (!invoice || invoice.salesOrderId !== orderId || invoice.status !== InvoiceStatus.DRAFT) {
+          throw new BadRequestException('Invoice was posted or cancelled concurrently');
+        }
+        await releaseOrderAllocations(tx, 'sales', companyId, orderId, invoice.lines);
+      }
+      const claimed = await tx.salesInvoice.updateMany({
+        where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new BadRequestException('Invoice was posted or cancelled concurrently');
+      await this.audit.recordRequired({ companyId, userId, action: 'CANCEL_DRAFT',
+        entity: 'sales_invoices', entityId: id, after: { invoiceNumber: invoice.invoiceNumber } }, tx);
+    });
+    return { id, cancelled: true };
+  }
+
+  /// Posts a draft invoice, issuing its goods from the lots they live in.
+  ///
+  /// `expiry` is what the controller resolved from the caller's permissions, not
+  /// anything the request body said. When it is absent a sale simply may not
+  /// touch an expired lot: the engine skips those and answers with how many
+  /// short the invoice is.
+  async post(
+    companyId: string,
+    userId: string,
+    id: string,
+    mayReadCost = true,
+    expiry?: { mayIssueExpired: boolean; reason?: string | null },
+  ) {
+    const expiredApproval =
+      expiry?.mayIssueExpired === true
+        ? {
+            userId,
+            reason: (expiry.reason ?? '').trim().length >= 3 ? (expiry.reason as string).trim() : '',
+          }
+        : null;
+
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
-      include: {
-        lines: { orderBy: { lineNumber: 'asc' } },
-        customer: { select: { code: true, nameEn: true } },
-      },
+      select: { status: true },
     });
     if (!invoice) throw new NotFoundException('Sales invoice not found');
     if (invoice.status !== InvoiceStatus.DRAFT) {
@@ -397,13 +647,13 @@ export class SalesInvoicesService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       // Claim the document before anything else happens. Two people pressing
       // Post at the same moment: the row lock lets exactly one of them win, and
       // the other is told the invoice has already been posted - instead of both
       // of them issuing the same stock and writing the same revenue twice.
       const claimed = await tx.salesInvoice.updateMany({
-        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: { id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
@@ -411,6 +661,18 @@ export class SalesInvoicesService {
           'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
         );
       }
+
+      // The draft may have been edited while this request waited for the row
+      // lock. Read both the header and lines only after the guarded claim, on
+      // the same transaction, so stock and journal use the committed version.
+      const invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: {
+          lines: { orderBy: { lineNumber: 'asc' } },
+          customer: { select: { code: true, nameEn: true } },
+        },
+      });
+      if (!invoice) throw new NotFoundException('Sales invoice not found');
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsReceivable',
@@ -435,7 +697,18 @@ export class SalesInvoicesService {
         });
       }
 
-      // ---- stock issue, valued at the weighted average cost
+      // ---- stock issue
+      //
+      // The goods leave the lots they actually live in, not an abstract
+      // branch balance. Issuing through the lot engine is what makes FEFO
+      // real: it picks the nearest expiry first, skips expired lots unless an
+      // approval travels with the request, walks on to the next lot when one
+      // cannot cover the line, and writes one stock movement per lot so every
+      // quantity sold can be traced back to where it came from.
+      //
+      // An item that keeps no lots still issues exactly as before. The engine
+      // detects that itself and takes the weighted average off the shelf, so
+      // the two paths cannot drift apart.
       let costOfGoods = new Prisma.Decimal(0);
       const costByLine = new Map<string, { unitCost: Prisma.Decimal; costTotal: Prisma.Decimal }>();
 
@@ -444,11 +717,28 @@ export class SalesInvoicesService {
 
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, nameEn: true, unit: true, isStockTracked: true },
+          select: {
+            id: true,
+            code: true,
+            nameEn: true,
+            nameAr: true,
+            unit: true,
+            isStockTracked: true,
+            requiresBatch: true,
+            requiresProductionDate: true,
+            requiresExpiryDate: true,
+            useFefo: true,
+            allowExpiredIssue: true,
+            expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
 
+        // The branch balance is still checked first, because it is the figure
+        // the invoice's own cost is computed from and the one a reader sees on
+        // the customer's screen. The lot engine then proves the goods exist in
+        // this particular warehouse and takes them from named lots.
         const lockedBalances = await tx.$queryRaw<
           Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
         >(Prisma.sql`
@@ -473,48 +763,61 @@ export class SalesInvoicesService {
           );
         }
 
-        const unitCost = qtyOnHand.isZero()
-          ? new Prisma.Decimal(0)
-          : valueOnHand.div(qtyOnHand).toDecimalPlaces(MONEY_SCALE);
-        const costTotal = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
+        // A lot-controlled item cannot be sold from a branch that has no shelf
+        // for it: there would be nothing to point at when somebody asks which
+        // batch the customer received.
+        if (batchPolicyOf(item).requiresBatch && !warehouseId) {
+          throw new BadRequestException(
+            `الصنف ${item.code} يتطلب دفعة ولا يوجد مخزن للفرع. / ` +
+              `Item ${item.code} is lot-controlled, and this branch has no warehouse to issue it from.`,
+          );
+        }
 
-        costOfGoods = costOfGoods.plus(costTotal);
-        costByLine.set(line.id, { unitCost, costTotal });
-
-        await tx.stockMovement.create({
-          data: {
-            companyId,
+        const issued = await this.batches.issueTx(
+          tx,
+          companyId,
+          userId,
+          {
+            warehouse: warehouseId ? { id: warehouseId, branchId: invoice.branchId } : null,
+            branchId: invoice.branchId,
+            item,
+          },
+          {
             branchId: invoice.branchId,
             warehouseId,
             itemId: item.id,
-            movementDate: invoice.invoiceDate,
-            direction: StockDirection.OUT,
             quantity: line.quantity,
-            unitCost,
-            totalCost: costTotal,
             referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
             referenceNumber: invoice.invoiceNumber,
-            createdBy: userId,
+            documentDate: invoice.invoiceDate.toISOString().slice(0, 10),
+            // A sale never sells expired stock on the strength of a boolean in
+            // a request. The approval is built here, from the permission the
+            // controller checked, and stamped with the person who holds it.
+            ...(expiredApproval
+              ? { allowExpired: true, expiredApproval }
+              : {}),
+            movementUnits:
+              line.unitName && line.unitQuantity && line.unitFactor
+                ? {
+                    enteredUnit: line.unitName,
+                    enteredQuantity: line.unitQuantity,
+                    unitFactor: line.unitFactor,
+                    baseUnitName: item.unit,
+                  }
+                : undefined,
           },
-        });
+          line.quantity,
+        );
 
-        // The balance was locked and verified above. Never upsert an OUT
-        // movement with a negative create quantity: PostgreSQL checks the
-        // nonnegative constraint before resolving ON CONFLICT.
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: costTotal },
-          },
-        });
+        // The engine already moved the branch and shelf books. Sales still owns
+        // the invoice's cost, so it is read back from what was issued - one
+        // number per line, whatever number of lots that line left from.
+        const unitCost = new Prisma.Decimal(issued.unitCost);
+        const costTotal = new Prisma.Decimal(issued.value);
+
+        costOfGoods = costOfGoods.plus(costTotal);
+        costByLine.set(line.id, { unitCost, costTotal });
       }
 
       // The cost of each line is frozen onto the invoice, so the gross profit
@@ -577,7 +880,7 @@ export class SalesInvoicesService {
 
       // The transaction already claimed the invoice as POSTED. Attach the
       // accounting/cost results without repeating the guarded status change.
-      const updated = await tx.salesInvoice.update({
+      await tx.salesInvoice.update({
         where: { id: invoice.id },
         data: {
           costOfGoods,
@@ -585,25 +888,19 @@ export class SalesInvoicesService {
         },
       });
 
-      return { updated, journal, costOfGoods };
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'sales_invoices', entityId: id,
+        before: { status: InvoiceStatus.DRAFT },
+        after: {
+          status: InvoiceStatus.POSTED,
+          journalEntryId: journal.id,
+          journalNumber: journal.entryNumber,
+          costOfGoods: costOfGoods.toFixed(MONEY_SCALE),
+        },
+      }, tx);
     });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'sales_invoices',
-      entityId: id,
-      before: { status: InvoiceStatus.DRAFT },
-      after: {
-        status: InvoiceStatus.POSTED,
-        journalEntryId: result.journal.id,
-        journalNumber: result.journal.entryNumber,
-        costOfGoods: result.costOfGoods.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /**
@@ -613,7 +910,7 @@ export class SalesInvoicesService {
    * stock goes back in at exactly the cost it left at, and the invoice is
    * marked REVERSED so it can never be posted twice.
    */
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -640,7 +937,10 @@ export class SalesInvoicesService {
       throw new BadRequestException('This invoice has already been reversed');
     }
 
-    const journal = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
+      if (invoice.salesOrderId) {
+        await releaseOrderAllocations(tx, 'sales', companyId, invoice.salesOrderId, invoice.lines);
+      }
       const claimedInvoice = await tx.salesInvoice.updateMany({
         where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
         data: { status: InvoiceStatus.REVERSED },
@@ -678,6 +978,15 @@ export class SalesInvoicesService {
         });
       }
 
+      // The goods go back where they came from - not into "the warehouse" as
+      // an average, and never into a different lot. Each OUT movement the
+      // posting wrote names its lot, so the reversal walks those same rows and
+      // returns the exact quantity to the exact lot. A lot that the sale had
+      // emptied was closed by the issue; it is reopened here, because the sale
+      // is being undone and refusing to reopen would silently lose the stock.
+      //
+      // If the invoice left a lot, there is nothing to reopen: an item that
+      // keeps no lots is put back on the shelf book the way it always was.
       for (const line of invoice.lines) {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
@@ -687,70 +996,153 @@ export class SalesInvoicesService {
         if (!item) throw new BadRequestException('A sales invoice item no longer exists');
         if (!item.isStockTracked) continue;
 
-        await tx.stockMovement.create({
-          data: {
+        // What this invoice actually took, lot by lot. Read from the movements
+        // rather than recomputed: the movements are the record of the sale, and
+        // FEFO decided them at posting time with information that may no longer
+        // exist (a lot could have been closed since).
+        const consumed = await tx.stockMovement.findMany({
+          where: {
             companyId,
-            branchId: invoice.branchId,
-            warehouseId,
             itemId: line.itemId,
-            movementDate: new Date(),
-            direction: StockDirection.IN,
-            quantity: line.quantity,
-            unitCost: line.unitCost,
-            totalCost: line.costTotal,
-            referenceType: 'SALES_INVOICE_REVERSAL',
+            direction: StockDirection.OUT,
+            referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
-            referenceNumber: invoice.invoiceNumber,
-            notes: `Reversal of ${invoice.invoiceNumber}`,
-            createdBy: userId,
           },
+          select: { batchId: true, quantity: true, unitCost: true, totalCost: true },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
+        const lotRows = consumed.filter((row) => row.batchId !== null);
+        const unbatchedQuantity = consumed
+          .filter((row) => row.batchId === null)
+          .reduce((sum, row) => sum.plus(row.quantity), new Prisma.Decimal(0));
+        const lotQuantity = lotRows.reduce(
+          (sum, row) => sum.plus(row.quantity),
+          new Prisma.Decimal(0),
+        );
+
+        // A posted invoice that took goods from lots must give them back to
+        // those lots. If the historical movements are missing and the item is
+        // lot-controlled, a blind shelf credit would invent stock that no lot
+        // owns - refuse instead of hiding the discrepancy.
+        if (lotRows.length === 0 && consumed.length === 0 && line.quantity.greaterThan(0)) {
+          const policy = batchPolicyOf(
+            await tx.item.findFirst({
+              where: { id: line.itemId, companyId, deletedAt: null },
+              select: { requiresBatch: true },
+            }),
+          );
+          if (policy.requiresBatch) {
+            throw new BadRequestException(
+              'لا يمكن عكس فاتورة صنف يتطلب دفعة دون حركات دفعات مسجّلة. / ' +
+                'A lot-controlled invoice cannot be reversed: its original lot movements are missing.',
+            );
+          }
+        }
+
+        for (const row of lotRows) {
+          // Conditional reopen: fail loudly if the lot has vanished rather than
+          // crediting stock to a lot nobody can name.
+          const restored = await tx.itemBatch.updateMany({
+            where: { id: row.batchId as string, companyId },
+            data: {
+              remainingQuantity: { increment: row.quantity },
+              // Only a CLOSED lot is reopened. A lot that was written off or
+              // quarantined after the sale keeps that status; the quantity
+              // still returns, because the sale is being undone.
+              ...(await (async () => {
+                const current = await tx.itemBatch.findFirst({
+                  where: { id: row.batchId as string, companyId },
+                  select: { status: true },
+                });
+                return current?.status === 'CLOSED' ? { status: 'OPEN' as const } : {};
+              })()),
+              updatedBy: userId,
+            },
+          });
+          if (restored.count !== 1) {
+            throw new BadRequestException(
+              'دفعة أصلية لم تعد موجودة؛ لا يمكن إعادة الكمية. / ' +
+                'An original lot no longer exists, so its quantity cannot be given back.',
+            );
+          }
+
+          await tx.stockMovement.create({
+            data: {
               companyId,
               branchId: invoice.branchId,
+              warehouseId,
               itemId: line.itemId,
+              batchId: row.batchId,
+              movementDate: new Date(),
+              direction: StockDirection.IN,
+              quantity: row.quantity,
+              unitCost: row.unitCost,
+              totalCost: row.totalCost,
+              referenceType: 'SALES_INVOICE_REVERSAL',
+              referenceId: invoice.id,
+              referenceNumber: invoice.invoiceNumber,
+              notes: `Reversal of ${invoice.invoiceNumber}`,
+              createdBy: userId,
             },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity,
-            value: line.costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.costTotal },
-          },
+          });
+        }
+
+        // Whatever was not taken from a named lot goes back on the branch book
+        // with no lot attached, which is exactly how it left.
+        const backfill = lotRows.length > 0 ? new Prisma.Decimal(0) : line.quantity;
+        if (backfill.greaterThan(0)) {
+          await tx.stockMovement.create({
+            data: {
+              companyId,
+              branchId: invoice.branchId,
+              warehouseId,
+              itemId: line.itemId,
+              movementDate: new Date(),
+              direction: StockDirection.IN,
+              quantity: backfill,
+              unitCost: line.unitCost,
+              totalCost: line.costTotal,
+              referenceType: 'SALES_INVOICE_REVERSAL',
+              referenceId: invoice.id,
+              referenceNumber: invoice.invoiceNumber,
+              notes: `Reversal of ${invoice.invoiceNumber}`,
+              createdBy: userId,
+            },
+          });
+        }
+
+        // The branch and shelf books are moved once for the whole line, by the
+        // same ledger the issue used - not once per lot. Doing it per lot would
+        // round each slice and leave a fils behind on every reversal.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          value: line.costTotal,
         });
       }
+
 
       // One reversal path for the whole system: it claims the original,
       // refuses a closed period with a readable message (instead of the
       // database trigger surfacing as a 500), and stamps the mirror with
       // the invoice as its source so a ledger reader can drill back to it.
-      return this.posting.reverse(
+      const reversal = await this.posting.reverse(
         tx,
         companyId,
         userId,
         original.id,
         `Reversal of sales invoice ${invoice.invoiceNumber}`,
       );
+      await this.audit.recordRequired({
+        companyId, userId, action: 'REVERSE', entity: 'sales_invoices', entityId: id,
+        after: { reversalJournalNumber: reversal.entryNumber },
+      }, tx);
     });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'REVERSE',
-      entity: 'sales_invoices',
-      entityId: id,
-      after: { reversalJournalNumber: journal.entryNumber },
-    });
-
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   // ------------------------------------------------------------------ helpers
@@ -761,8 +1153,9 @@ export class SalesInvoicesService {
     companyId: string,
     customerId: string,
     invoiceDate: Date,
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<Date | null> {
-    const customer = await this.prisma.customer.findFirst({
+    const customer = await client.customer.findFirst({
       where: { id: customerId, companyId },
       select: { paymentTermDays: true },
     });
@@ -778,14 +1171,30 @@ export class SalesInvoicesService {
     input: SalesInvoiceLineDto[],
     customerId: string | null | undefined,
     documentDiscount: DiscountInput,
+    orderUnits?: readonly TrustedOrderUnit[],
+    client: Prisma.TransactionClient = this.prisma,
+    options: SalesInvoicePreparationOptions = {},
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     // The company's own policy: the rate to apply when nobody said otherwise,
     // and whether the prices being typed already contain it.
-    const settings = await this.settings.get(companyId);
+    const settings = await this.settings.get(companyId, client);
 
+    if (orderUnits && orderUnits.length !== input.length) {
+      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+    }
     for (const [index, raw] of input.entries()) {
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const isAdditionalCharge = raw.isAdditionalCharge === true;
+      if (isAdditionalCharge && (orderUnits || raw.itemId || raw.unitName || raw.unitId)) {
+        throw new BadRequestException('Additional charges cannot be linked to an item or an order');
+      }
+      const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
+
+      if (isAdditionalCharge && (!quantity.equals(1) || raw.discountType ||
+          raw.discountAmount || raw.discountPercent)) {
+        throw new BadRequestException('An additional charge must have quantity one and no line discount');
+      }
 
       // A price typed on the line is what was charged. When nobody typed one,
       // the customer's agreed list speaks, and failing that the item's own
@@ -806,15 +1215,45 @@ export class SalesInvoicesService {
       } | null = null;
 
       if (raw.itemId) {
-        item = await this.prisma.item.findFirst({
+        item = await client.item.findFirst({
           where: { id: raw.itemId, companyId, deletedAt: null },
-          select: { code: true, nameEn: true, taxRate: true, isActive: true, salePrice: true, unit: true },
+          select: {
+            code: true,
+            nameEn: true,
+            taxRate: true,
+            isActive: true,
+            salePrice: true,
+            unit: true,
+            units: true,
+          },
         });
         if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
         if (!(item as any).isActive) {
           throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
         }
       }
+
+      // Resolve the chosen unit before any money is calculated. The entered
+      // quantity is in the chosen unit; the base quantity is what stock moves.
+      const historical = orderUnitForInvoiceLine(orderUnits, index, raw.itemId, quantity);
+      const resolved = historical ?? (item
+        ? resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: raw.unitName,
+            enteredQuantity: quantity,
+            baseUnitName: item.unit,
+            units: (item as { units?: any[] }).units ?? [],
+          })
+        : {
+            snapshot: { unitName: null, unitFactor: null, unitQuantity: null },
+            baseQuantity: quantity,
+            row: null,
+            isLegacy: true,
+          });
+      // What the user typed, measured in the unit they picked. All money is
+      // computed from this; the base quantity is reserved for stock.
+      const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;
 
       const description = raw.description?.trim() || (item ? `${item.code} ${item.nameEn}` : '');
       if (!description) {
@@ -826,47 +1265,54 @@ export class SalesInvoicesService {
       // What this line costs, when the person did not say.
       let unitPrice: Prisma.Decimal;
       if (typedPrice !== null) {
+        // A price typed on the line is the price of one CHOSEN unit.
         unitPrice = typedPrice;
       } else if (item) {
-        const listed = await this.prices.resolvePrice(this.prisma, companyId, {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
+        const listed = await this.prices.resolvePrice(client, companyId, {
           partyId: customerId ?? null,
           partyKind: 'CUSTOMER',
           itemId: raw.itemId ?? null,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed
-          ? listed.price
-              .mul(new Prisma.Decimal(1).minus(listed.discountPercent.div(100)))
-              .toDecimalPlaces(MONEY_SCALE)
-          : item.salePrice;
+        if (listed) {
+          unitPrice = listed.price
+            .mul(new Prisma.Decimal(1).minus(listed.discountPercent.div(100)))
+            .toDecimalPlaces(MONEY_SCALE);
+        } else {
+          // The unit's own independent price, falling back to the item-level
+          // price when the unit carries none. Always per chosen unit.
+          unitPrice = defaultUnitPrice('sale', resolved.row, item.salePrice);
+        }
       } else {
         throw new BadRequestException(
           `Line ${index + 1}: a price is required when the line names no item`,
         );
       }
 
-      // The rate is decided in this order: what the person typed on the line,
-      // then what the item carries, then the company's own rate. An item with
-      // no rate of its own follows the company; an item explicitly set to 0 is
-      // exempt, which is a different thing.
+      // Missing or cleared tax is zero. Conversion callers pass the stored
+      // rate explicitly so historical document snapshots are preserved.
       const taxRate: Prisma.Decimal =
-        raw.taxRate !== undefined
-          ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
-          : (item?.taxRate ?? new Prisma.Decimal(settings.taxRate));
+        raw.taxRate === undefined || raw.taxRate === null || (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
+          ? new Prisma.Decimal(0)
+          : this.rate(String(raw.taxRate), `Line ${index + 1} taxRate`);
 
       // What the person typed is the price of the goods, unless the company
       // has said its prices already include VAT - in which case the tax is
       // inside the number and has to be taken back out of it, not added on top
-      // of it a second time.
-      const typedTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // of it a second time. Money always follows the entered quantity in the
+      // chosen unit, never the converted base quantity.
+      const typedTotal = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const grossUp = new Prisma.Decimal(1).plus(taxRate.div(100));
 
       // When prices include tax, the typed total is a tax-inclusive number:
       // take the tax back out first, then discount the goods value. Tax is
       // then charged on the discounted value, which is what "discount applied
       // before tax" means on these documents.
-      const grossLineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
+      // Sales orders currently store prices as tax-exclusive when created.
+      // Do not reinterpret an old agreed price using today's company setting.
+      const grossLineTotal = !isAdditionalCharge && !orderUnits && !options.pricesExcludeTax && settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
 
@@ -874,7 +1320,7 @@ export class SalesInvoicesService {
         grossLineTotal,
         raw,
         index,
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
       );
 
       // A cost center must be this company's and active; the posting path
@@ -882,7 +1328,7 @@ export class SalesInvoicesService {
       // prepared today and posted after the centre was retired.
       let costCenterId: string | null = raw.costCenterId ?? null;
       if (costCenterId) {
-        const center = await this.prisma.costCenter.findFirst({
+        const center = await client.costCenter.findFirst({
           where: { id: costCenterId, companyId, deletedAt: null },
           select: { id: true, isActive: true, code: true },
         });
@@ -901,8 +1347,10 @@ export class SalesInvoicesService {
       prepared.push({
         lineNumber: index + 1,
         itemId: raw.itemId ?? null,
+        isAdditionalCharge,
         description,
-        quantity,
+        // Internal base-unit quantity that stock and cost operate on.
+        quantity: resolved.baseQuantity,
         unitPrice,
         taxRate,
         // Replaced below, once the document-level discount has been spread.
@@ -914,6 +1362,10 @@ export class SalesInvoicesService {
         discountAmount: lineDiscount.amount,
         invoiceDiscountAmount: new Prisma.Decimal(0),
         costCenterId,
+        // Frozen display snapshot (null on legacy/base-unit lines).
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
       });
     }
 
@@ -924,7 +1376,7 @@ export class SalesInvoicesService {
     let allocation: ReturnType<typeof allocateDocumentDiscount>;
     try {
       allocation = allocateDocumentDiscount(
-        prepared.map((line) => line.lineTotal),
+        prepared.map((line) => line.isAdditionalCharge ? new Prisma.Decimal(0) : line.lineTotal),
         documentDiscount,
       );
     } catch (error) {
@@ -932,7 +1384,7 @@ export class SalesInvoicesService {
     }
 
     const grossTotal = prepared.reduce(
-      (sum, line) => sum.plus(line.grossLineTotal),
+      (sum, line) => line.isAdditionalCharge ? sum : sum.plus(line.grossLineTotal),
       new Prisma.Decimal(0),
     );
     const lineDiscountTotal = prepared.reduce(
@@ -945,7 +1397,7 @@ export class SalesInvoicesService {
           grossTotal,
           lineDiscountTotal.plus(allocation.discount.amount),
         ),
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
         'Document',
       );
     } catch (error) {
@@ -1035,13 +1487,16 @@ export class SalesInvoicesService {
     scale = MONEY_SCALE,
   ): Prisma.Decimal {
     try {
-      return new Prisma.Decimal(value).toDecimalPlaces(scale);
+      const amount = new Prisma.Decimal(value);
+      if (!amount.isFinite()) throw new Error('Non-finite amount');
+      return amount.toDecimalPlaces(scale);
     } catch {
       throw new BadRequestException(`${field} is not a valid number: ${value}`);
     }
   }
 
-  private toSummary(invoice: {
+  private toSummary(
+    invoice: {
     id: string;
     branchId: string;
     invoiceNumber: string;
@@ -1060,7 +1515,9 @@ export class SalesInvoicesService {
     discountAmount?: Prisma.Decimal;
     lineDiscountTotal?: Prisma.Decimal;
     customer?: { id?: string; code: string; nameEn: string; nameAr: string };
-  }) {
+    },
+    mayReadCost = true,
+  ) {
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1079,8 +1536,11 @@ export class SalesInvoicesService {
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
       balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
-      costOfGoods: invoice.costOfGoods.toFixed(MONEY_SCALE),
-      grossProfit: invoice.subTotal.minus(invoice.costOfGoods).toFixed(MONEY_SCALE),
+      // Cost-derived figures: withheld for callers without inventory.cost.read.
+      costOfGoods: mayReadCost ? invoice.costOfGoods.toFixed(MONEY_SCALE) : null,
+      grossProfit: mayReadCost
+        ? invoice.subTotal.minus(invoice.costOfGoods).toFixed(MONEY_SCALE)
+        : null,
       createdAt: invoice.createdAt.toISOString(),
     };
   }

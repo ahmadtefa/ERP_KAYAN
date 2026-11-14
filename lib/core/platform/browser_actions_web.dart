@@ -202,7 +202,7 @@ String _nameFromUrl(String url) {
 /// page is printed from a hidden frame instead, so the button still produces
 /// a printout rather than doing nothing. In that fallback the page is asked
 /// to auto-print, because there is no tab for anyone to look at first.
-void openInNewTab(String url) {
+Future<void> openInNewTab(String url) async {
   // The declared return type of window.open is not nullable, but the browser
   // returns null when it refuses the tab - hence the dynamic, which is the
   // only honest way to ask "was a tab opened?".

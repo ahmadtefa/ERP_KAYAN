@@ -1,5 +1,8 @@
 import {
   BadRequestException,
+  CanActivate,
+  Injectable,
+  ServiceUnavailableException,
   Body,
   Controller,
   Delete,
@@ -27,6 +30,18 @@ interface UploadedDump {
   mimetype: string;
   size: number;
   buffer: Buffer;
+}
+
+/** Block destructive HTTP restore before the multipart interceptor can read a
+ * large upload. No environment switch can enable an unproven restore. */
+@Injectable()
+export class CompleteRestoreUnavailableGuard implements CanActivate {
+  canActivate(): boolean {
+    throw new ServiceUnavailableException({
+      code: 'FULL_RESTORE_UNAVAILABLE',
+      detail: 'الاستعادة الكاملة متوقفة لحماية البيانات حتى يثبت ربط قاعدة البيانات والملفات والترخيص والتعافي من الانقطاع. / Full restore is unavailable until database, files and licence recovery and interruption safety are verified.',
+    });
+  }
 }
 
 /**
@@ -62,14 +77,26 @@ export class FullBackupController {
 
   /// The backups sitting in the backup folder on the server.
   @Get()
-  list() {
-    return this.service.list();
+  async list() {
+    // Legacy `kind: full` denotes a whole-database dump, not a complete
+    // machine backup. Preserve the field for old clients but make its scope
+    // explicit for every listed archive (including old and safety dumps).
+    const files = await this.service.list();
+    return files.map((file) => ({ ...file, fullBackup: false,
+      includesExternalFiles: false, includesLicence: false }));
   }
 
-  /// Takes a new full backup.
+  /// A complete backup cannot be honestly produced by the legacy pg_dump path.
   @Post()
   create(@CurrentUser() user: AuthUser) {
-    return this.service.createFull(user.userId);
+    return this.service.rejectFullBackup(user.userId, user.companyId ?? null);
+  }
+
+  /// Explicit, partial PostgreSQL archive; not a complete backup.
+  @Post('database-archive')
+  async createDatabaseArchive(@CurrentUser() user: AuthUser) {
+    const result = await this.service.createFull(user.userId);
+    return { ...result, fullBackup: false, includesExternalFiles: false, includesLicence: false };
   }
 
   /// Reads a backup back from disk and reports what is inside it. A backup
@@ -110,6 +137,7 @@ export class FullBackupController {
    * the user type the confirmation before it sends it.
    */
   @Post('restore')
+  @UseGuards(CompleteRestoreUnavailableGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 * 1024 } }),
   )

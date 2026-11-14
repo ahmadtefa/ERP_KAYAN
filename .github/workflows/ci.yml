@@ -1,10 +1,8 @@
 name: ERP KAYAN CI
 
+# Legacy full suite includes tests that create and sign test licences.
+# Retained for review; do not dispatch until signing is moved to an approved VM.
 on:
-  pull_request:
-    branches: [main, 'arena/**']
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -72,27 +70,115 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      # `npm ci` restores node_modules from the lockfile, which overwrites the
+      # adapter patch that keeps `prisma migrate status` and the client's
+      # driver-adapter path working: @prisma/adapter-pg 6.19.3 omits PostgreSQL
+      # type `name` (OID 19) from fieldToColumnType(), so reading current_schema()
+      # throws "Column type 'name' could not be deserialized". The script is
+      # idempotent and exits non-zero if the expected shape is not found, so a
+      # future adapter upgrade cannot silently skip the repair.
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Validate Prisma schema
         run: npx prisma validate
       - name: Type-check
         run: npx tsc --noEmit
+      # The real-PostgreSQL suites (PGlite) load an ES module, which Jest can
+      # only import when the VM has dynamic import enabled. Without this flag
+      # those suites SKIPPED silently and the job reported green while proving
+      # nothing about the SQL they exist to check. They now fail loudly instead,
+      # so the flag has to be on - not optional, not per-file.
+      - name: Prove the real-database suites are not silently skipped
+        run: |
+          node -e "const j=require('./jest.config.cjs');if(!j||!j.rootDir)process.exit(1)"
+          node -e "if(!(process.env.NODE_OPTIONS||'').includes('--experimental-vm-modules')){console.error('NODE_OPTIONS must carry --experimental-vm-modules or the PGlite suites cannot run');process.exit(1)}"
       - name: Run unit tests
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
         # `| tee` reports tee's exit status, not the test run's, so without
         # `-o pipefail` a failing suite would leave this step green and the
         # whole job would pass. The log is kept because the summary step below
         # reads it.
-        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+        # This older CLI integration suite creates a private signing key on disk.
+        # It is retained in source but is not run under the no-private-key-on-disk
+        # constraint. The source-level in-memory generator check is a separate job;
+        # neither that check nor this partial suite proves the packaged generator.
+        run: |
+          echo '::warning title=Generator tests not run::The file-backed generator suite is excluded; the packaged Windows generator is not verified by this job.'
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |
           summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Unit tests::${summary:-summary not captured}"
+      # A green run means nothing if the real-database suites merely skipped.
+      # This reads the log and fails when the PGlite counts are absent, so the
+      # silent-skip failure mode cannot come back through a flag change.
+      - name: Prove the real-database suites actually ran
+        if: always()
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          log = pathlib.Path('/tmp/kayan-jest.log')
+          if not log.exists():
+              print('::error title=PGlite suites::the test log is missing, so nothing can be proven')
+              sys.exit(1)
+          text = log.read_text(errors='replace')
+          # Jest prints one "PASS <path>" line per suite it actually executed.
+          ran = set(re.findall(r'^PASS\s+(\S+(?:stock-takes\.barcode-count|stock-documents\.barcode-posting|expired-issue-policy\.integration|batches\.operations\.integration|batch-transfer-hold\.integration|multi-receipt\.integration|sales-batches\.integration|sales-invoice-posting\.integration)\.spec\.ts)', text, re.M))
+          expected = {
+              'stock-takes.barcode-count.spec.ts',
+              'stock-documents.barcode-posting.spec.ts',
+              'expired-issue-policy.integration.spec.ts',
+              'batches.operations.integration.spec.ts',
+              'batch-transfer-hold.integration.spec.ts',
+              'multi-receipt.integration.spec.ts',
+              'sales-batches.integration.spec.ts',
+              'sales-invoice-posting.integration.spec.ts',
+          }
+          seen = {p.split('/')[-1] for p in ran}
+          missing = sorted(expected - seen)
+          print(f'::notice title=PGlite suites::executed {len(seen)}/{len(expected)}: {sorted(seen)}')
+          if missing:
+              print('::error title=PGlite suites did not run::' + ', '.join(missing))
+              sys.exit(1)
+          print('All 8 real-database suites executed; none were skipped.')
+          PY
       - name: Build API
         run: npm run build
+      # `prisma migrate deploy` cannot run this project's migrations: Prisma
+      # 6.19.3's WASM schema engine splits PL/pgSQL dollar-quoted bodies at
+      # their internal semicolons, so the seven migrations that define
+      # triggers die with `syntax error at or near "this"`. The native engine
+      # cannot be used either - this project disables the engine download so
+      # installs work offline. scripts/apply-migrations.mjs applies the same
+      # files, in the same order, recording them in the same
+      # _prisma_migrations table with the same SHA-256 checksums, so a database
+      # it migrates is reported as up to date by `prisma migrate status`.
       - name: Apply migrations to ephemeral PostgreSQL
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      # Every stock write must go through StockLedgerService, which writes
+      # stock_movements; warehouse_stock_balances is its cached projection. The
+      # two are only ever changed inside one transaction, so on a consistent
+      # database SUM(IN - OUT) per (warehouse, item, location) always equals the
+      # stored balance. This reconciles the whole installation with a FULL OUTER
+      # JOIN so a shelf that was written without a movement - a silent cost or
+      # quantity change - fails the build instead of being found by an accountant.
+      - name: Prove the stock ledger and the shelf balances never disagree
+        run: node scripts/pg-ledger-shelf-agreement.mjs
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 
@@ -130,13 +216,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -219,6 +317,18 @@ jobs:
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
 
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
@@ -291,10 +401,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
+      # See the note on the equivalent step above: the project applies its own
+      # migration files because Prisma's WASM schema engine mis-splits
+      # dollar-quoted function bodies.
       - name: Apply migrations to a freshly created database
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Verify quotation migrations are present in the runtime database

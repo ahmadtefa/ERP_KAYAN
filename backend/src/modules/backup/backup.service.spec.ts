@@ -1,8 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
-import { BackupFile, BackupService } from './backup.service';
+import { BackupFile, BackupService, TABLES } from './backup.service';
+
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('BackupService & BackupController (Company JSON Backup)', () => {
   const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
@@ -95,6 +102,17 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
               code: 'KAYAN',
               nameAr: 'شركة كيان',
               nameEn: 'Kayan Company',
+              taxId: null,
+              commercialRegistration: null,
+              addressEn: null,
+              addressAr: null,
+              phone: null,
+              email: null,
+              address: null,
+              currency: 'EGP',
+              timezone: 'Africa/Cairo',
+              logoData: null,
+              logoMime: null,
             };
           }
           return null;
@@ -139,8 +157,50 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
+  });
+
+  describe('company backup portability', () => {
+    test('includes a legacy logo and fails closed if the referenced file disappears', async () => {
+      const folder = await mkdtemp(join(tmpdir(), 'kayan-legacy-logo-'));
+      const prior = process.env.KAYAN_UPLOAD_DIR;
+      try {
+        process.env.KAYAN_UPLOAD_DIR = folder;
+        const png = Buffer.alloc(24);
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+        png.writeUInt32BE(64, 16);
+        png.writeUInt32BE(48, 20);
+        const path = join(folder, 'legacy.png');
+        await writeFile(path, png);
+        const company = await prismaMock.company.findUnique({ where: { id: COMPANY_ID } });
+        prismaMock.company.findUnique = jest.fn(async () => ({ ...company, logoData: null, logoPath: 'legacy.png' }));
+        const backup = await service.create(COMPANY_ID);
+        expect(backup.companyProfile?.logoBase64).toBe(png.toString('base64'));
+        expect(backup.companyProfile?.logoMime).toBe('image/png');
+        await service.inspect(backup, COMPANY_ID);
+        await rm(path);
+        await expect(service.create(COMPANY_ID)).rejects.toThrow(/include the legacy company logo/);
+      } finally {
+        if (prior === undefined) delete process.env.KAYAN_UPLOAD_DIR;
+        else process.env.KAYAN_UPLOAD_DIR = prior;
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    test('does not serialize installation-local backup history into a company archive', async () => {
+      const findMany = jest.fn(async () => [{ id: 'local-run', sizeBytes: BigInt(4096) }]);
+      prismaMock.backupRun = { findMany };
+
+      const backup = await service.create(COMPANY_ID);
+      const inspected = await service.inspect(backup, COMPANY_ID);
+
+      expect(TABLES.some((table) => table.model === 'backupRun')).toBe(false);
+      expect(findMany).not.toHaveBeenCalled();
+      expect(backup.tables).not.toHaveProperty('backupRun');
+      expect(inspected.omitted).toHaveProperty('backupRun');
+      expect(() => JSON.stringify(backup)).not.toThrow();
+    });
   });
 
   describe('Validation & Format checks', () => {
@@ -257,6 +317,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       }).toThrow(
         /هذا الملف هو أرشيف قاعدة بيانات PostgreSQL \(\.dump\) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON/,
       );
+      try {
+        (controller as any).parse(file);
+      } catch (error) {
+        expect((error as Error).message).toContain('الاستعادة الكاملة متوقفة');
+        expect((error as Error).message).not.toContain('/backup/full/restore');
+      }
     });
 
     test('accepts valid JSON file on company restore route', () => {

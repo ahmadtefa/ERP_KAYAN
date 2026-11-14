@@ -77,7 +77,19 @@ export class BackupController {
     @Res() response: Response,
   ): Promise<void> {
     const file = await this.service.create(user.companyId);
-    const body = Buffer.from(JSON.stringify(file, null, 2), 'utf8');
+    // The company backup carries `backupRun`, whose `sizeBytes` is the
+    // schema's only BigInt. Plain JSON.stringify throws on it, which failed
+    // the whole download rather than one number. Write it as an exact decimal
+    // string, the same way the reset safety backup does.
+    const body = Buffer.from(
+      JSON.stringify(
+        file,
+        (_key, value: unknown) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        2,
+      ),
+      'utf8',
+    );
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -157,7 +169,7 @@ export class BackupController {
     ) {
       throw new BadRequestException(
         'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON. ' +
-          'لاستعادة ملف DUMP، يرجى استخدام قسم "النسخ الاحتياطي الكامل لقاعدة البيانات" (/api/v1/backup/full/restore).',
+          'الملف يحتوي قاعدة البيانات فقط ولا يشمل الملفات والترخيص؛ الاستعادة الكاملة متوقفة حاليًا لحماية البيانات. احتفظ بالأرشيف وتواصل مع الدعم.',
       );
     }
     try {

@@ -26,7 +26,7 @@
  *   8. a partially invoiced order says so, and can be finished later
  *   9. a cancelled order, or one that is fully invoiced, refuses more invoices
  *  10. an order computes its own totals: quantity x price, less discount, plus
- *      the tax rate that applies - the item's own, or the company's
+ *      the explicitly entered line tax rate; omitted rates are zero
  *  11. the permissions hold: a user who may not manage warehouses is refused,
  *      and so is one who may not approve orders
  *  12. everything the new screens do is written to the audit log
@@ -197,8 +197,7 @@ async function main() {
   });
   if (!item || !supplier || !customer) { process.exitCode = 1; return; }
 
-  const settings = await must('the company policy is readable', '/accounting/settings');
-  const taxRate = Number(settings?.taxRate ?? 0);
+  await must('the company policy is readable', '/accounting/settings');
 
   // ─────────────────────────── goods received into one warehouse, not the other
   const purchase = await must('a purchase invoice can name the warehouse it arrives in', '/purchases/invoices', {
@@ -361,9 +360,9 @@ async function main() {
     `unit price ${lineOf(pricedTyped)?.unitPrice}`,
   );
   check(
-    'the invoice total follows the price the list produced, plus the company tax rate',
-    near(priced1?.taxAmount, (120 * taxRate) / 100) && near(priced1?.totalAmount, 120 + (120 * taxRate) / 100),
-    `tax ${priced1?.taxAmount}, total ${priced1?.totalAmount}, rate ${taxRate}`,
+    'an omitted invoice tax is zero even when company tax is set',
+    near(priced1?.taxAmount, 0) && near(priced1?.totalAmount, 120),
+    `tax ${priced1?.taxAmount}, total ${priced1?.totalAmount}`,
   );
 
   // ────────────────────────────────────────────── purchase orders
@@ -375,16 +374,16 @@ async function main() {
       supplierId: supplier.id,
       lines: [
         { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000' },
-        { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000', discountPercent: '10.0000' },
+        { itemId: item.id, quantity: '5.0000', unitPrice: '100.0000', discountPercent: '10.0000', taxRate: '14' },
       ],
     },
   });
   if (!po) { process.exitCode = 1; return; }
 
   const expectedNet = 500 + 450;
-  const expectedTax = (expectedNet * taxRate) / 100;
+  const expectedTax = (450 * 14) / 100;
   check(
-    'an order computes its own totals: list price, then discount, then tax',
+    'an order computes omitted and explicit line taxes after discount',
     near(po.subTotal, expectedNet) &&
       near(po.taxAmount, expectedTax) &&
       near(po.totalAmount, expectedNet + expectedTax),
@@ -405,7 +404,10 @@ async function main() {
   await must('the order is approved', `/purchases/orders/${po.id}/approve`, { method: 'POST' });
   const partial = await must('part of the order becomes a draft invoice', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
-    json: { lines: [{ orderLineId: po.lines[0].id, quantity: '3.0000' }] },
+    json: {
+      idempotencyKey: `scenario-partial-${stamp}`,
+      lines: [{ orderLineId: po.lines[0].id, quantity: '3.0000' }],
+    },
   });
   if (!partial) { process.exitCode = 1; return; }
 
@@ -430,11 +432,22 @@ async function main() {
 
   await mustRefuse('an order cannot be invoiced for more than is outstanding', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
-    json: { lines: [{ orderLineId: po.lines[0].id, quantity: '99.0000' }] },
+    json: {
+      idempotencyKey: `scenario-over-${stamp}`,
+      lines: [{ orderLineId: po.lines[0].id, quantity: '99.0000' }],
+    },
   });
 
   const rest = await must('the rest of the order can be invoiced later', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
+    json: {
+      idempotencyKey: `scenario-rest-${stamp}`,
+      // What is still outstanding: 2 left on the first line, all 5 of the second.
+      lines: [
+        { orderLineId: po.lines[0].id, quantity: '2.0000' },
+        { orderLineId: po.lines[1].id, quantity: '5.0000' },
+      ],
+    },
   });
   check(
     'the order is fulfilled once everything on it has been invoiced',
@@ -443,6 +456,7 @@ async function main() {
   );
   await mustRefuse('a fully invoiced order refuses another invoice', `/purchases/orders/${po.id}/invoice`, {
     method: 'POST',
+    json: { idempotencyKey: `scenario-again-${stamp}` },
   });
 
   const purchaseFromOrder = partial.invoice?.id;
@@ -475,12 +489,17 @@ async function main() {
   await mustRefuse(
     'an unapproved sales order refuses to be invoiced',
     `/sales/orders/${so.id}/invoice`,
-    { method: 'POST' },
+    { method: 'POST', json: { idempotencyKey: `scenario-unapproved-${stamp}` } },
   );
 
   await must('the sales order is approved', `/sales/orders/${so.id}/approve`, { method: 'POST' });
   const soInvoiced = await must('the approved sales order becomes a draft invoice', `/sales/orders/${so.id}/invoice`, {
     method: 'POST',
+    json: {
+      idempotencyKey: `scenario-sales-${stamp}`,
+      // The order asked for 2; invoice all of it.
+      lines: so.lines.map((line) => ({ orderLineId: line.id, quantity: '2.0000' })),
+    },
   });
   check(
     'the sales order is fulfilled and linked to its invoice',
@@ -508,6 +527,7 @@ async function main() {
   });
   await mustRefuse('a cancelled order refuses to be invoiced', `/purchases/orders/${cancellable.id}/invoice`, {
     method: 'POST',
+    json: { idempotencyKey: `scenario-cancelled-${stamp}` },
   });
 
   // ─────────────────────────────────────────────────── permissions hold

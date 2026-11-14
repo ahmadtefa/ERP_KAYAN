@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/user_photo.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
@@ -79,6 +82,8 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
+        const UserPhotoCard(),
+        const SizedBox(height: 16),
         const TextScaleCard(),
         const SizedBox(height: 16),
         const LanAccessCard(),
@@ -115,6 +120,19 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // The licence screen: state, the activation code, and the one place a
+        // key is entered. Visible to everyone, because the person at the
+        // machine is often the one who has to read the code out.
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: Text(l10n.licence),
+            subtitle: Text(l10n.licenceSettingsSubtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go(AppRoutes.licence),
           ),
         ),
         const SizedBox(height: 16),

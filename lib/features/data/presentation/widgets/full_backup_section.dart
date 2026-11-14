@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -83,7 +84,6 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   Future<void> _createBackup() async {
     final l10n = context.l10n;
-    final knownNames = {for (final file in _files) '${file['name']}'};
     setState(() {
       _busy = true;
       _notice = l10n.backupInProgress;
@@ -91,36 +91,29 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     });
     try {
       final result = await ref.read(fullBackupServiceProvider).create();
-      final file = result['file'] as Map<String, dynamic>?;
+      final file = result['file'];
+      if (file is! Map<String, dynamic> ||
+          file['name'] is! String || (file['name'] as String).trim().isEmpty) {
+        throw const FormatException('The backup response did not identify a file.');
+      }
       if (!mounted) return;
       setState(() => _notice = _createdNotice(file));
       await _load();
     } catch (error) {
       if (!mounted) return;
-      // The request can fail on this side (a timeout, a dropped
-      // connection) while the server finishes the dump anyway. Before
-      // declaring failure, look at the folder: a file that was not there
-      // when we started means the backup actually happened, and saying
-      // "failed" over a good backup would be its own kind of lie.
-      var recovered = false;
-      try {
-        final files = await ref.read(fullBackupServiceProvider).list();
-        final fresh = files.where(
-          (file) => !knownNames.contains('${file['name']}'),
-        );
-        if (fresh.isNotEmpty && mounted) {
-          recovered = true;
-          setState(() {
-            _files = files;
-            _notice = _createdNotice(fresh.first);
-          });
-        }
-      } catch (_) {
-        // The list could not be read either; the original error stands.
-      }
-      if (!recovered && mounted) {
-        setState(() => _failure = describeApiError(error));
-      }
+      // A timeout can happen after the server has finished, but a new file
+      // may also be another user's concurrent backup. Refresh the list without
+      // claiming that any file belongs to this request or is restorable.
+      final message = describeApiError(error);
+      final arabic = Localizations.localeOf(context).languageCode == 'ar';
+      await _load();
+      if (!mounted) return;
+      setState(() {
+        _notice = null;
+        _failure = '$message\n${arabic
+            ? 'تعذر تأكيد نتيجة الطلب. قد تنتمي الملفات الجديدة إلى عملية أخرى؛ افحص النسخة قبل الاعتماد عليها.'
+            : 'The request outcome could not be confirmed. A new file may belong to another backup; inspect it before relying on it.'}';
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -135,15 +128,25 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     final name = file == null ? '' : '${file['name'] ?? ''}';
     final size = file == null ? null : file['sizeBytes'];
     final directory = '${_capabilities?['backupDirectory'] ?? ''}';
-    return '${l10n.createdSuccessfully}${name.isEmpty ? '' : ': $name'}'
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final archiveLabel = arabic ? 'تم حفظ أرشيف قاعدة البيانات فقط' : 'Database archive saved (not a complete backup)';
+    final warning = arabic
+        ? 'لم تُحفظ الملفات الخارجية والترخيص في هذا الأرشيف، ولم تثبت استعادة كاملة.'
+        : 'External files and the licence are not included, and a complete restore has not been verified.';
+    return '$archiveLabel${name.isEmpty ? '' : ': $name'}'
         '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}'
-        '${directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}'}';
+        '${directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}'}\n$warning';
   }
 
   Future<void> _download(String name) => runDownload(
     context,
     ref.read(reportLinkProvider).fullBackupDownload(name),
   );
+
+  String _deleteProtectionMessage() =>
+      Localizations.localeOf(context).languageCode == 'ar'
+          ? 'حذف النسخ متوقف لحمايتها حتى يثبت استرجاع نسخة بديلة كاملة تشمل البيانات والملفات والترخيص.'
+          : 'Deletion is paused to protect backups until a complete replacement restore, including files and licence, is verified.';
 
   Future<void> _delete(String name) async {
     final l10n = context.l10n;
@@ -170,7 +173,13 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       await _load();
     } catch (error) {
       if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      final protected = error is DioException &&
+          error.response?.statusCode == 409 &&
+          error.response?.data is Map &&
+          (error.response?.data as Map)['code'] == 'BACKUP_DELETE_PROTECTED';
+      setState(() => _failure = protected
+          ? _deleteProtectionMessage()
+          : describeApiError(error));
     }
   }
 
@@ -261,10 +270,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
           ),
           content: const Text(
             'تمت استعادة قاعدة البيانات الكاملة بنجاح واستبدال البيانات السابقة.\n\n'
-            'لتحديث البيانات وعرضها داخل البرنامج، يجب تسجيل الدخول مجددًا باستخدام بيانات الدخول الموجودة في النسخة المستعادة.\n\n'
-            'مثال للنسخة التجريبية (Demo Backup):\n'
-            '• اسم المستخدم: admin\n'
-            '• كلمة المرور: Admin@12345',
+            'لتحديث البيانات وعرضها داخل البرنامج، يجب تسجيل الدخول مجددًا باستخدام بيانات الدخول الموجودة في النسخة المستعادة.',
           ),
           actions: [
             FilledButton(
@@ -323,6 +329,9 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     // (capabilities still null after a failed load) leaves them enabled:
     // the server's own reply to the attempt is clearer than a grey button.
     final toolsUnavailable = capabilities != null && !toolsAvailable;
+    // An absent capability must not enable an unproven destructive restore.
+    final restoreAvailable = !_loading && _failure == null &&
+        capabilities?['fullRestoreSupported'] == true;
 
     return Card(
       child: Padding(
@@ -339,6 +348,24 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
               l10n.fullBackupDescription,
               style: theme.textTheme.bodySmall,
             ),
+            if (!restoreAvailable) ...[
+              const SizedBox(height: 8),
+              _Notice(
+                icon: Icons.warning_amber_outlined,
+                color: theme.colorScheme.error,
+                text: Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'الاستعادة الكاملة متوقفة لحماية البيانات حتى يثبت ربط قاعدة البيانات والملفات والترخيص والتعافي من الانقطاع.'
+                    : 'Full restore is paused until database, files and licence recovery and interruption safety are verified.',
+              ),
+            ],
+            if (capabilities?['deletionProtected'] == true) ...[
+              const SizedBox(height: 8),
+              _Notice(
+                icon: Icons.warning_amber_outlined,
+                color: theme.colorScheme.error,
+                text: _deleteProtectionMessage(),
+              ),
+            ],
             const SizedBox(height: 12),
             // The actions are always on the screen once the first load has
             // answered — success or failure. They used to exist only in the
@@ -380,13 +407,12 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                     icon: const Icon(Icons.save_alt),
                     label: Text(l10n.createFullBackup),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: _busy || toolsUnavailable
-                        ? null
-                        : _uploadAndRestore,
-                    icon: const Icon(Icons.restore),
-                    label: Text(l10n.uploadDumpFile),
-                  ),
+                  if (restoreAvailable)
+                    OutlinedButton.icon(
+                      onPressed: _busy || toolsUnavailable ? null : _uploadAndRestore,
+                      icon: const Icon(Icons.restore),
+                      label: Text(l10n.uploadDumpFile),
+                    ),
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _load,
                     icon: const Icon(Icons.refresh),
@@ -444,17 +470,16 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                             ? null
                             : () => _download('${file['name']}'),
                       ),
-                      IconButton(
-                        tooltip: l10n.restoreFullDatabase,
-                        icon: const Icon(Icons.restore, size: 20),
-                        onPressed: _busy
-                            ? null
-                            : () => _restore(fileName: '${file['name']}'),
-                      ),
+                      if (restoreAvailable)
+                        IconButton(
+                          tooltip: l10n.restoreFullDatabase,
+                          icon: const Icon(Icons.restore, size: 20),
+                          onPressed: _busy ? null : () => _restore(fileName: '${file['name']}'),
+                        ),
                       IconButton(
                         tooltip: l10n.deleteBackup,
                         icon: const Icon(Icons.delete_outline, size: 20),
-                        onPressed: _busy
+                        onPressed: _busy || capabilities?['deletionProtected'] == true
                             ? null
                             : () => _delete('${file['name']}'),
                       ),

@@ -25,6 +25,14 @@ export class ExportQueryDto extends PeriodQueryDto {
   @IsOptional() @IsIn(['1', '0'])
   auto?: string;
 
+  /// Price visibility is applied only to printable/PDF copies. Defaults to visible
+  /// to preserve the existing output when older clients do not send these.
+  @IsOptional() @IsIn(['true', 'false'])
+  showSalePrice?: string;
+
+  @IsOptional() @IsIn(['true', 'false'])
+  showCost?: string;
+
   /// A one-minute download ticket, in the query string.
   ///
   /// A print page is opened as a navigation - the browser cannot attach an

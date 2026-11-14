@@ -1,5 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  Allow,
+  IsArray,
   IsBoolean,
   IsNumber,
   IsOptional,
@@ -10,8 +12,8 @@ import {
 
 export class CreateItemDto {
   @IsString() @MaxLength(30) code!: string;
-  @IsString() @MaxLength(200) nameEn!: string;
-  @IsString() @MaxLength(200) nameAr!: string;
+  @IsOptional() @IsString() @MaxLength(200) nameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) nameAr?: string;
 
   @IsOptional() @IsString() @MaxLength(20) unit?: string;
   @IsOptional() @IsString() @MaxLength(60) barcode?: string;
@@ -32,7 +34,7 @@ export class CreateItemDto {
 
   /// Percent, e.g. "14" for 14%.
   /// REQUIRES BUSINESS DECISION: the statutory rate.
-  @IsOptional() @IsString() taxRate?: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
 
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   /// Where the item was made, printed on quotations. Optional: the program
@@ -48,6 +50,37 @@ export class CreateItemDto {
   /// then the item belongs in that document instead.
   @IsOptional() @IsString() openingQuantity?: string;
   @IsOptional() @IsString() openingUnitCost?: string;
+
+  /// The packing table: one row per unit, each carrying its own factor back
+  /// to the base unit, barcode and prices. Left `undefined` the catalogue is
+  /// not touched; an empty list is a statement that the form showed none.
+  ///
+  /// Rows are deliberately loose here and validated in `unit-input.ts`, so
+  /// the messages that reach an operator come from one place with the numbers
+  /// they typed quoted back at them, not from a decorator.
+  @IsOptional() @IsArray() @Allow() units?: ItemUnitRowDto[];
+}
+
+export class ItemUnitRowDto {
+  /// Present when the row already exists; the server then edits that row
+  /// instead of matching on a name that may have just changed.
+  @IsOptional() @IsString() id?: string;
+
+  @IsString() @MaxLength(40) unit!: string;
+
+  /// How many base units one of these is, e.g. "12" for a carton of 12.
+  @IsOptional() @IsString() factor?: string;
+
+  @IsOptional() @IsString() @MaxLength(60) barcode?: string;
+
+  @IsOptional() @IsString() salePrice?: string;
+  @IsOptional() @IsString() purchasePrice?: string;
+
+  @IsOptional() @IsString() @MaxLength(20) abbreviation?: string;
+  @IsOptional() @IsBoolean() allowFraction?: boolean;
+  @IsOptional() @IsBoolean() usedInSales?: boolean;
+  @IsOptional() @IsBoolean() usedInPurchases?: boolean;
+  @IsOptional() @IsNumber() sortOrder?: number;
 }
 
 export class UpdateItemDto {
@@ -59,11 +92,15 @@ export class UpdateItemDto {
   @IsOptional() @IsString() purchasePrice?: string;
   @IsOptional() @IsString() reorderLevel?: string;
   @IsOptional() @IsString() categoryId?: string;
-  @IsOptional() @IsString() taxRate?: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(80) countryOfOrigin?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+
+  /// The full packing table as the form currently shows it. Omitting it
+  /// leaves the existing units alone; sending it makes the item match it.
+  @IsOptional() @IsArray() @Allow() units?: ItemUnitRowDto[];
 }
 
 export class ListItemsDto {

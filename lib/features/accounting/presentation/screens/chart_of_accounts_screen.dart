@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -17,14 +18,39 @@ import '../providers/chart_of_accounts_providers.dart';
 
 /// The chart of accounts as a tree: every depth, expandable, searchable, and
 /// editable — with every rule still enforced on the server, never here.
-class ChartOfAccountsScreen extends ConsumerWidget {
-  const ChartOfAccountsScreen({super.key});
+class ChartOfAccountsScreen extends ConsumerStatefulWidget {
+  const ChartOfAccountsScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChartOfAccountsScreen> createState() => _ChartOfAccountsScreenState();
+}
+
+class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final accounts = ref.watch(chartOfAccountsProvider);
     final showSampleNotice = ref.watch(appConfigProvider).useSeedData;
     final l10n = context.l10n;
+    final canCreate = ref.watch(currentUserProvider)?.can('accounting.accounts.create') ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -32,9 +58,14 @@ class ChartOfAccountsScreen extends ConsumerWidget {
         PageHeader(
           title: l10n.chartOfAccounts,
           actions: [
+            IconButton(
+              tooltip: l10n.refresh,
+              onPressed: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
+              icon: const Icon(Icons.refresh),
+            ),
             const ListExportActions(list: 'chart-of-accounts'),
-            FilledButton.icon(
-              onPressed: () => _editAccount(context, ref, null),
+            if (canCreate) FilledButton.icon(
+              onPressed: () => _editAccount(context, ref, null, _exitRelay),
               icon: const Icon(Icons.add, size: 17),
               label: Text(l10n.newAccount),
             ),
@@ -75,7 +106,7 @@ class ChartOfAccountsScreen extends ConsumerWidget {
             onRetry: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
             emptyMessage: l10n.noAccounts,
             isEmpty: (list) => list.isEmpty,
-            data: (_) => const _AccountTree(),
+            data: (_) => _AccountTree(exitRelay: _exitRelay),
           ),
         ),
       ],
@@ -111,57 +142,91 @@ class _TypeFilter extends StatelessWidget {
   }
 }
 
-class _AccountTree extends ConsumerWidget {
-  const _AccountTree();
+class _AccountTree extends ConsumerStatefulWidget {
+  const _AccountTree({required this.exitRelay});
+  final DraftExitRelay exitRelay;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AccountTree> createState() => _AccountTreeState();
+}
+
+class _AccountTreeState extends ConsumerState<_AccountTree> {
+  final Set<String> _collapsed = {};
+
+  @override
+  Widget build(BuildContext context) {
     final nodes = ref.watch(accountTreeProvider);
     final l10n = context.l10n;
     if (nodes.isEmpty) {
       return EmptyView(message: l10n.noAccounts, icon: Icons.search_off);
     }
 
+    // Traverse the original parents-first list. A collapsed node hides every
+    // deeper descendant, not just its immediate children. Child existence is
+    // determined before filtering so the expander remains available to reopen.
+    final visible = <({AccountNode node, bool hasChildren})>[];
+    int? hiddenBelowDepth;
+    for (var index = 0; index < nodes.length; index++) {
+      final node = nodes[index];
+      if (hiddenBelowDepth != null && node.depth <= hiddenBelowDepth) {
+        hiddenBelowDepth = null;
+      }
+      if (hiddenBelowDepth != null) continue;
+      final hasChildren =
+          index + 1 < nodes.length && nodes[index + 1].depth > node.depth;
+      visible.add((node: node, hasChildren: hasChildren));
+      if (hasChildren && _collapsed.contains(node.account.id)) {
+        hiddenBelowDepth = node.depth;
+      }
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: nodes.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) {
-        final node = nodes[index];
+        final entry = visible[index];
+        final id = entry.node.account.id;
         return _AccountTile(
-          key: ValueKey(node.account.id),
-          node: node,
-          hasChildren:
-              nodes.length > index + 1 && nodes[index + 1].depth > node.depth,
+          key: ValueKey(id),
+          node: entry.node,
+          exitRelay: widget.exitRelay,
+          hasChildren: entry.hasChildren,
+          expanded: !_collapsed.contains(id),
+          onToggle: () => setState(() {
+            if (!_collapsed.remove(id)) _collapsed.add(id);
+          }),
         );
       },
     );
   }
 }
 
-class _AccountTile extends ConsumerStatefulWidget {
+class _AccountTile extends ConsumerWidget {
   const _AccountTile({
     super.key,
     required this.node,
+    required this.exitRelay,
     required this.hasChildren,
+    required this.expanded,
+    required this.onToggle,
   });
 
   final AccountNode node;
+  final DraftExitRelay exitRelay;
   final bool hasChildren;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
-  ConsumerState<_AccountTile> createState() => _AccountTileState();
-}
-
-class _AccountTileState extends ConsumerState<_AccountTile> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final account = widget.node.account;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final account = node.account;
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final lang = Localizations.localeOf(context).languageCode;
-    final indent = 8.0 + widget.node.depth * 20.0;
+    final indent = 8.0 + node.depth * 20.0;
+    final user = ref.watch(currentUserProvider);
+    final canUpdate = user?.can('accounting.accounts.update') ?? false;
+    final canDelete = user?.can('accounting.accounts.delete') ?? false;
 
     final nameStyle = TextStyle(
       fontWeight: account.isPostable ? FontWeight.w400 : FontWeight.w600,
@@ -171,10 +236,13 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsetsDirectional.only(start: indent, end: 8),
-      leading: widget.hasChildren
+      leading: hasChildren
           ? IconButton(
-              icon: Icon(_expanded ? Icons.expand_more : Icons.chevron_right),
-              onPressed: () => setState(() => _expanded = !_expanded),
+              tooltip: expanded
+                  ? (lang == 'ar' ? 'طي الحسابات الفرعية' : 'Collapse subaccounts')
+                  : (lang == 'ar' ? 'إظهار الحسابات الفرعية' : 'Expand subaccounts'),
+              icon: Icon(expanded ? Icons.expand_more : Icons.chevron_right),
+              onPressed: onToggle,
             )
           : const SizedBox(width: 24),
       title: Text(
@@ -201,7 +269,7 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
         children: [
           if (!account.isActive)
             Icon(Icons.block, size: 18, color: theme.colorScheme.error),
-          IconButton(
+          if (canUpdate) IconButton(
             tooltip: account.isActive ? l10n.deactivateAccount : l10n.activateAccount,
             icon: Icon(
               account.isActive ? Icons.toggle_on_outlined : Icons.toggle_off_outlined,
@@ -209,12 +277,12 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
             ),
             onPressed: () => _toggleActive(context, ref, account),
           ),
-          IconButton(
+          if (canUpdate) IconButton(
             tooltip: l10n.editAccount,
             icon: const Icon(Icons.edit_outlined, size: 20),
-            onPressed: () => _editAccount(context, ref, account),
+            onPressed: () => _editAccount(context, ref, account, exitRelay),
           ),
-          IconButton(
+          if (canDelete) IconButton(
             tooltip: l10n.deleteAccount,
             icon: const Icon(Icons.delete_outline, size: 20),
             onPressed: () => _deleteAccount(context, ref, account),
@@ -230,6 +298,7 @@ Future<void> _editAccount(
   BuildContext context,
   WidgetRef ref,
   Account? existing,
+  DraftExitRelay exitRelay,
 ) async {
   final all = ref.read(chartOfAccountsProvider).value ?? const <Account>[];
 
@@ -289,21 +358,93 @@ Future<void> _editAccount(
     }
   }
 
-  final result = await showDialog<bool>(
+  final initial = (
+    codeController.text, nameArController.text, nameEnController.text,
+    descriptionController.text, selectedParent, selectedType, isPostable,
+    isActive, selectedCashFlow,
+  );
+  bool saving = false;
+  // The API can commit before its response is lost. Until the server supports
+  // idempotency/version checks, keep the draft but do not blindly resubmit it.
+  bool uncertain = false;
+  bool confirmingDiscard = false;
+  bool hasChanges() => initial != (
+    codeController.text, nameArController.text, nameEnController.text,
+    descriptionController.text, selectedParent, selectedType, isPostable,
+    isActive, selectedCashFlow,
+  );
+
+  BuildContext? editorContext;
+  Future<bool> canLeave() async {
+    final dialogContext = editorContext;
+    if (dialogContext == null || !dialogContext.mounted || saving || confirmingDiscard) return false;
+    if (hasChanges() || uncertain) {
+      final arabic = Localizations.localeOf(dialogContext).languageCode == 'ar';
+      confirmingDiscard = true;
+      try {
+        final discard = await showDialog<bool>(
+          context: dialogContext,
+          barrierDismissible: false,
+          builder: (confirmContext) => AlertDialog(
+            title: Text(arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes'),
+            content: Text(uncertain
+                ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع الحسابات قبل المحاولة مجددًا.' : 'The operation may have completed. Close the form and review the accounts before trying again.')
+                : (arabic ? 'هل تريد الخروج دون حفظ التغييرات؟' : 'Leave without saving your changes?')),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(confirmContext, false),
+                  child: Text(arabic ? 'متابعة التعديل' : 'Keep editing')),
+              FilledButton(onPressed: () => Navigator.pop(confirmContext, true),
+                  child: Text(arabic ? 'الخروج دون حفظ' : 'Discard changes')),
+            ],
+          ),
+        );
+        if (discard != true || !dialogContext.mounted) return false;
+      } finally { confirmingDiscard = false; }
+    }
+    return dialogContext.mounted;
+  }
+  Future<bool> leaveForRoute() async {
+    if (!await canLeave()) return false;
+    final dialogContext = editorContext;
+    if (dialogContext == null || !dialogContext.mounted) return false;
+    Navigator.of(dialogContext).pop(false);
+    return true;
+  }
+  Future<void> closeEditor() async { await leaveForRoute(); }
+
+  exitRelay.attach(leaveForRoute);
+  try {
+  await showDialog<bool>(
     context: context,
+    barrierDismissible: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
+        editorContext = dialogContext;
         final dialogL10n = dialogContext.l10n;
-        return AlertDialog(
+        final arabic = Localizations.localeOf(dialogContext).languageCode == 'ar';
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) closeEditor();
+          },
+          child: AlertDialog(
           title: Text(
             existing == null ? dialogL10n.newAccount : dialogL10n.editAccount,
           ),
-          content: SizedBox(
+          content: IgnorePointer(
+            ignoring: saving,
+            child: SizedBox(
             width: 520,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (uncertain) ...[
+                    Text(arabic
+                        ? 'تعذّر تأكيد نتيجة الحفظ. راجع الحسابات بعد تحديثها قبل المحاولة مجددًا.'
+                        : 'The save result is uncertain. Review the refreshed accounts before trying again.'),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: codeController,
                     decoration: InputDecoration(
@@ -315,14 +456,14 @@ Future<void> _editAccount(
                   TextField(
                     controller: nameArController,
                     decoration: InputDecoration(
-                      labelText: '${dialogL10n.nameArabic} *',
+                      labelText: dialogL10n.nameArabic,
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: nameEnController,
                     decoration: InputDecoration(
-                      labelText: '${dialogL10n.nameEnglish} *',
+                      labelText: dialogL10n.nameEnglish,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -359,6 +500,9 @@ Future<void> _editAccount(
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String?>(
                     initialValue: selectedParent,
+                    // The parent catalogue can contain long codes and names.
+                    // Constrain its selected display to the dialog width.
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: dialogL10n.parentAccount,
                       helperText: dialogL10n.parentAccountHelper,
@@ -373,6 +517,8 @@ Future<void> _editAccount(
                           value: parent.id,
                           child: Text(
                             accountLabel(parent, dialogL10n.localeName),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
@@ -393,7 +539,8 @@ Future<void> _editAccount(
                         final suggestion = await ref
                             .read(chartOfAccountsRepositoryProvider)
                             .suggestCode(parentId: value);
-                        if (suggestion.valueOrNull != null) {
+                        if (dialogContext.mounted && selectedParent == value &&
+                            codeController.text.trim().isEmpty && suggestion.valueOrNull != null) {
                           setDialogState(
                             () => codeController.text = suggestion.valueOrNull!,
                           );
@@ -473,45 +620,62 @@ Future<void> _editAccount(
                 ],
               ),
             ),
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              onPressed: saving ? null : closeEditor,
               child: Text(dialogL10n.cancel),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+              onPressed: saving || uncertain ? null : () async {
+                if (nameArController.text.trim().isEmpty && nameEnController.text.trim().isEmpty) {
+                  showMessage(dialogContext, arabic
+                      ? 'أدخل اسم الحساب بالعربية والإنجليزية.'
+                      : 'Enter both the Arabic and English account names.', error: true);
+                  return;
+                }
+                final input = AccountInput(
+                  code: codeController.text.trim().isEmpty ? null : codeController.text.trim(),
+                  nameAr: nameArController.text.trim(),
+                  nameEn: nameEnController.text.trim(),
+                  type: selectedType,
+                  parentId: selectedParent,
+                  updateParent: existing == null || selectedParent != existing.parentId,
+                  clearParent: selectedParent == null,
+                  checkParent: existing != null && selectedParent != existing.parentId,
+                  expectedParentId: existing?.parentId,
+                  isPostable: isPostable,
+                  isActive: isActive,
+                  description: descriptionController.text.trim(),
+                  cashFlowClass: isPostable ? selectedCashFlow : null,
+                );
+                setDialogState(() => saving = true);
+                final controller = ref.read(chartOfAccountsProvider.notifier);
+                final error = existing == null
+                    ? await controller.create(input)
+                    : await controller.updateAccount(existing.id, input);
+                if (!dialogContext.mounted) return;
+                if (error != null) {
+                  setDialogState(() {
+                    saving = false;
+                    uncertain = true;
+                  });
+                  showMessage(dialogContext, error, error: true);
+                } else {
+                  Navigator.of(dialogContext).pop(true);
+                }
+              },
               child: Text(dialogL10n.save),
             ),
           ],
+          ),
         );
       },
     ),
   );
-
-  if (result != true) return;
-
-  final input = AccountInput(
-    code: codeController.text.trim().isEmpty
-        ? null
-        : codeController.text.trim(),
-    nameAr: nameArController.text.trim(),
-    nameEn: nameEnController.text.trim(),
-    type: selectedType,
-    parentId: selectedParent,
-    isPostable: isPostable,
-    isActive: isActive,
-    description: descriptionController.text.trim(),
-    cashFlowClass: isPostable ? selectedCashFlow : null,
-  );
-
-  final controller = ref.read(chartOfAccountsProvider.notifier);
-  final error = existing == null
-      ? await controller.create(input)
-      : await controller.updateAccount(existing.id, input);
-
-  if (context.mounted && error != null) {
-    showMessage(context, error, error: true);
+  } finally {
+    exitRelay.detach(leaveForRoute);
   }
 }
 

@@ -141,33 +141,33 @@ export class BudgetsService {
       periodEnd,
     });
 
-    const created = await this.prisma.budget.create({
-      data: {
-        companyId,
-        costCenterId,
-        accountId,
-        periodStart,
-        periodEnd,
-        amount,
-        currency,
-        notes: this.optionalText(dto.notes),
-        isActive: dto.isActive === undefined ? true : Boolean(dto.isActive),
-        createdBy: userId,
-        updatedBy: userId,
-      },
-      include: this.relations,
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'budgets',
-      entityId: created.id,
-      after: this.toResponse(created),
-    });
-
-    return this.toResponse(created);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.budget.create({
+          data: {
+            companyId,
+            costCenterId,
+            accountId,
+            periodStart,
+            periodEnd,
+            amount,
+            currency,
+            notes: this.optionalText(dto.notes),
+            isActive: dto.isActive === undefined ? true : Boolean(dto.isActive),
+            createdBy: userId,
+            updatedBy: userId,
+          },
+          include: this.relations,
+        });
+        await this.audit.recordRequired({
+          companyId, userId, action: 'CREATE', entity: 'budgets',
+          entityId: created.id, after: this.auditSnapshot(created),
+        }, tx);
+        return this.toResponse(created);
+      });
+    } catch (error) {
+      throw this.translateDuplicate(error);
+    }
   }
 
   async update(
@@ -242,28 +242,20 @@ export class BudgetsService {
       );
     }
 
-    let updated: BudgetWithRelations;
     try {
-      updated = await this.prisma.budget.update({
-        where: { id },
-        data,
-        include: this.relations,
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.budget.update({
+          where: { id }, data, include: this.relations,
+        });
+        await this.audit.recordRequired({
+          companyId, userId, action: 'UPDATE', entity: 'budgets', entityId: id,
+          before: this.auditSnapshot(before), after: this.auditSnapshot(updated),
+        }, tx);
+        return this.toResponse(updated);
       });
     } catch (error) {
       throw this.translateDuplicate(error);
     }
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'budgets',
-      entityId: id,
-      before: this.toResponse(before),
-      after: this.toResponse(updated),
-    });
-
-    return this.toResponse(updated);
   }
 
   /// A budget is retired, never deleted: the comparison it took part in stays
@@ -278,23 +270,18 @@ export class BudgetsService {
     // Retiring twice is a no-op, so a double click cannot fail the screen.
     if (before.deletedAt) return this.toResponse(before);
 
-    const updated = await this.prisma.budget.update({
-      where: { id },
-      data: { isActive: false, deletedAt: new Date(), updatedBy: userId },
-      include: this.relations,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.budget.update({
+        where: { id },
+        data: { isActive: false, deletedAt: new Date(), updatedBy: userId },
+        include: this.relations,
+      });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'DELETE', entity: 'budgets', entityId: id,
+        before: this.auditSnapshot(before), after: this.auditSnapshot(updated),
+      }, tx);
+      return this.toResponse(updated);
     });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'budgets',
-      entityId: id,
-      before: this.toResponse(before),
-      after: this.toResponse(updated),
-    });
-
-    return this.toResponse(updated);
   }
 
   /**
@@ -655,6 +642,11 @@ export class BudgetsService {
 
   private day(date: Date): string {
     return date.toISOString().slice(0, 10);
+  }
+
+  private auditSnapshot(row: BudgetWithRelations) {
+    // Prisma JSON accepts plain JSON values; response dates need ISO strings.
+    return JSON.parse(JSON.stringify(this.toResponse(row))) as unknown;
   }
 
   private toResponse(row: BudgetWithRelations) {

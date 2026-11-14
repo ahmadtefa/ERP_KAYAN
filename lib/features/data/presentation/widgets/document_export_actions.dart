@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
+import 'price_visibility_dialog.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// Print and download one saved document (invoice, voucher, order, entry).
 class DocumentExportActions extends ConsumerWidget {
@@ -24,36 +26,51 @@ class DocumentExportActions extends ConsumerWidget {
     final capabilities = ref.watch(exportCapabilitiesProvider);
     final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
     final ready = id.isNotEmpty;
+    final canSeeCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+
+    Future<void> printDocument() async {
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: canSeeCost,
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(context, links.documentPrint(
+        kind: kind,
+        id: id,
+        language: language,
+        showSalePrice: visibility['showSalePrice'],
+        showCost: visibility['showCost'],
+      ));
+    }
+
+    Future<void> downloadPdf() async {
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: canSeeCost,
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(context, links.documentPdf(
+        kind: kind,
+        id: id,
+        language: language,
+        showSalePrice: visibility['showSalePrice'],
+        showCost: visibility['showCost'],
+      ));
+    }
 
     return Wrap(
       spacing: 8,
       children: [
         OutlinedButton.icon(
-          onPressed: ready
-              ? () => runPrint(
-                    context,
-                    links.documentPrint(
-                      kind: kind,
-                      id: id,
-                      language: language,
-                    ),
-                  )
-              : null,
+          onPressed: ready ? printDocument : null,
           icon: const Icon(Icons.print_outlined, size: 18),
           label: Text(l10n.print),
         ),
         if (pdfReady)
           OutlinedButton.icon(
-            onPressed: ready
-                ? () => runDownload(
-                      context,
-                      links.documentPdf(
-                        kind: kind,
-                        id: id,
-                        language: language,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? downloadPdf : null,
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
             label: Text(l10n.exportPdf),
           ),

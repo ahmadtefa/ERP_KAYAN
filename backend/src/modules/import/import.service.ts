@@ -7,6 +7,7 @@ import { AccountType, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OpeningBalancesService } from '../accounting/opening-balances.service';
+import { lockChart } from '../accounting/chart-lock';
 import {
   ImportFormatError,
   isXlsx,
@@ -75,6 +76,8 @@ export interface ImportReport {
   unknownColumns: string[];
   /// Rows that are fine and would be imported. Shown before anything is written.
   validRows: number;
+  /// Existing items whose blank tax cells will be cleared with explicit opt-in.
+  clearedBlankTaxRates?: number;
   /// The opening-balance draft created by a committed workbook.
   draft?: { id: string; documentNumber: string; status: string };
 }
@@ -105,12 +108,12 @@ export class ImportService {
         },
         {
           key: 'nameen', labelEn: 'Name (English)', labelAr: 'الاسم (إنجليزي)',
-          required: true, example: 'Office supplies', maxLength: 200,
+          example: 'Office supplies', maxLength: 200,
           aliases: ['name', 'englishname', 'الاسمبالانجليزية', 'الاسمبالانجليزيه'],
         },
         {
           key: 'namear', labelEn: 'Name (Arabic)', labelAr: 'الاسم (عربي)',
-          required: true, example: 'مصروفات مكتبية', maxLength: 200,
+          example: 'مصروفات مكتبية', maxLength: 200,
           aliases: ['arabicname', 'الاسمبالعربية', 'الاسمبالعربيه'],
         },
         {
@@ -211,7 +214,6 @@ export class ImportService {
         key: 'nameen',
         labelEn: 'Name (English)',
         labelAr: 'الاسم (إنجليزي)',
-        required: true,
         example: kind === 'customers' ? 'Alfa Trading' : 'Beta Supplies',
         maxLength: 200,
         aliases: ['name', 'englishname', 'الاسمبالانجليزية', 'الاسمبالانجليزيه'],
@@ -220,7 +222,6 @@ export class ImportService {
         key: 'namear',
         labelEn: 'Name (Arabic)',
         labelAr: 'الاسم (عربي)',
-        required: true,
         example: kind === 'customers' ? 'شركة ألفا' : 'مؤسسة بيتا',
         maxLength: 200,
         aliases: ['arabicname', 'الاسمبالعربية', 'الاسمبالعربيه'],
@@ -292,7 +293,6 @@ export class ImportService {
         key: 'nameen',
         labelEn: 'Name (English)',
         labelAr: 'الاسم (إنجليزي)',
-        required: true,
         example: 'Steel chair',
         maxLength: 200,
         aliases: ['name', 'englishname'],
@@ -301,7 +301,6 @@ export class ImportService {
         key: 'namear',
         labelEn: 'Name (Arabic)',
         labelAr: 'الاسم (عربي)',
-        required: true,
         example: 'كرسي معدني',
         maxLength: 200,
         aliases: ['arabicname'],
@@ -489,7 +488,7 @@ export class ImportService {
     companyId: string,
     userId: string,
     file: { originalname: string; buffer: Buffer },
-    options: { dryRun: boolean; mode: Mode },
+    options: { dryRun: boolean; mode: Mode; clearBlankTaxRates?: boolean },
     branchId: string | null = null,
     canImportAcrossBranches = false,
   ): Promise<ImportReport> {
@@ -559,6 +558,12 @@ export class ImportService {
       );
     }
 
+    // Duplicate aliases for the tax field make a blank/explicit value
+    // ambiguous. Refuse instead of letting column order decide a bulk write.
+    if (kind === 'items' && sheet.headers.filter((header) => byHeader.get(normaliseHeader(header))?.key === 'taxrate').length > 1) {
+      throw new BadRequestException('The file contains multiple tax rate columns. Keep only one.');
+    }
+
     const unknownColumns = sheet.headers
       .map((header) => header.trim())
       .filter((header) => header !== '')
@@ -569,6 +574,7 @@ export class ImportService {
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let clearedBlankTaxRates = 0;
 
     // Existing records, so a file can be re-uploaded without inventing
     // duplicates.
@@ -580,6 +586,7 @@ export class ImportService {
     for (const row of sheet.rows) {
       const values: Record<string, string> = {};
       let rowCode = '';
+      let blankTaxCell = false;
 
       for (const [header, raw] of Object.entries(row.values)) {
         const field = byHeader.get(header);
@@ -590,6 +597,10 @@ export class ImportService {
         if (field.key === 'code') rowCode = value;
 
         if (!value) {
+          if (kind === 'items' && field.key === 'taxrate') {
+            blankTaxCell = true;
+            if (options.clearBlankTaxRates !== false) values.taxrate = '0';
+          }
           if (field.required) {
             errors.push({
               row: row.rowNumber,
@@ -618,6 +629,13 @@ export class ImportService {
           continue;
         }
 
+        if (kind === 'items' && field.key === 'taxrate') {
+          const rate = new Prisma.Decimal(value);
+          if (rate.lessThan(0) || rate.greaterThan(100)) {
+            errors.push({row: row.rowNumber, column: field.labelEn, message: 'Tax rate must be between 0 and 100'});
+            continue;
+          }
+        }
         values[field.key] = field.boolean ? this.truthy(value) : value;
       }
 
@@ -656,7 +674,17 @@ export class ImportService {
         continue;
       }
 
+      if (!exists && !values.nameen && !values.namear) {
+        errors.push({
+          row: row.rowNumber,
+          column: 'Name',
+          message: 'Provide an Arabic or English name',
+        });
+        continue;
+      }
+
       if (exists) {
+        if (blankTaxCell && options.clearBlankTaxRates !== false) clearedBlankTaxRates += 1;
         updated += 1;
         preview.push({ row: row.rowNumber, code: rowCode, action: 'updated' });
         if (!options.dryRun) {
@@ -691,6 +719,7 @@ export class ImportService {
         after: {
           fileName: file.originalname,
           mode: options.mode,
+          ...(kind === 'items' ? { clearBlankTaxRates: options.clearBlankTaxRates !== false, clearedBlankTaxRates } : {}),
           created,
           updated,
           skipped,
@@ -703,6 +732,7 @@ export class ImportService {
       created = 0;
       updated = 0;
       skipped = 0;
+      clearedBlankTaxRates = 0;
       preview.length = 0;
     }
 
@@ -719,6 +749,7 @@ export class ImportService {
       preview: preview.slice(0, 50),
       unknownColumns,
       validRows: created + updated,
+      clearedBlankTaxRates,
     };
   }
 
@@ -894,11 +925,17 @@ export class ImportService {
         errors.push({ row: row.rowNumber, column: 'Currency', message: 'Currency must be a three-letter code such as EGP' });
         continue;
       }
+      const nameEn = row.values.nameen || row.values.namear;
+      const nameAr = row.values.namear || row.values.nameen;
+      if (!nameEn || !nameAr) {
+        errors.push({ row: row.rowNumber, column: 'Name', message: 'Provide an Arabic or English name' });
+        continue;
+      }
       accountRows.set(code, {
         rowNumber: row.rowNumber,
         code,
-        nameEn: row.values.nameen,
-        nameAr: row.values.namear,
+        nameEn,
+        nameAr,
         type: row.values.type as AccountType,
         parentCode: row.values.parentcode?.trim() || null,
         isPostable: row.values.ispostable === undefined ? null : row.values.ispostable === 'true',
@@ -981,11 +1018,21 @@ export class ImportService {
 
     if (!options.dryRun && errors.length === 0 && newRows.size > 0) {
       await this.prisma.$transaction(async (tx) => {
+        await lockChart(tx, companyId);
         const current = await tx.account.findMany({
           where: { companyId, code: { in: codes } },
           select: { id: true, code: true, type: true, parentId: true, isPostable: true, isActive: true, deletedAt: true },
         });
         const currentByCode = new Map(current.map((account) => [account.code, account]));
+        // The preview ran outside this transaction. A chart edit could have
+        // retired or changed a parent before the lock was acquired.
+        for (const row of newRows.values()) {
+          if (!row.parentCode || newRows.has(row.parentCode)) continue;
+          const parent = currentByCode.get(row.parentCode);
+          if (!parent || parent.deletedAt || !parent.isActive || parent.type !== row.type) {
+            throw new BadRequestException('An account parent changed while this workbook was being imported. Read it again and retry.');
+          }
+        }
         for (const row of newRows.values()) {
           if (currentByCode.has(row.code)) {
             throw new BadRequestException(`Account code "${row.code}" changed while this workbook was being imported. Read it again and retry.`);
@@ -1456,15 +1503,15 @@ export class ImportService {
     // Both names are NOT NULL in the database. A file that carries only one of
     // them still imports: the name it has is used for both, which is what a
     // person would do by hand rather than leave a blank.
-    const arabicName = values.namear ?? values.nameen ?? values.code;
-    const englishName = values.nameen ?? values.namear ?? values.code;
+    const arabicName = values.namear || values.nameen;
+    const englishName = values.nameen || values.namear;
 
     if (kind === 'items') {
       await tx.item.create({
         data: {
           companyId,
           code: values.code,
-          nameEn: values.nameen ?? values.namear ?? values.code,
+          nameEn: englishName,
           nameAr: arabicName,
           unit: values.unit ?? 'piece',
           salePrice: this.decimal(values.saleprice) ?? new Prisma.Decimal(0),
@@ -1503,8 +1550,8 @@ export class ImportService {
     }
   }
 
-  /// An upsert only touches the columns the file actually carried: a blank
-  /// cell means "leave it as it is", never "erase it".
+  /// Only updates supplied values. An explicit blank tax cell can also supply
+  /// zero, according to the import policy used when preparing the row.
   private async updateOne(
     tx: Prisma.TransactionClient,
     kind: ImportKind,
