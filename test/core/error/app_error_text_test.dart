@@ -33,6 +33,13 @@ void main() {
   const arabic = AppErrorMessageResolver(isArabic: true);
   const english = AppErrorMessageResolver(isArabic: false);
 
+  test('a known depreciation refusal keeps its reason in English', () {
+    const message = 'Nothing to depreciate for 2024-01 — FA-M-1: already depreciated for 2024-01';
+    final result = english.resolve(const ApiFailure(message, statusCode: 400));
+    expect(result.businessMessage, contains('already depreciated for 2024-01'));
+    expect(result.businessMessage, isNot(contains('The submitted data is not valid')));
+  });
+
   test(
     'licence state mismatch displays fixed guidance, never server details',
     () {

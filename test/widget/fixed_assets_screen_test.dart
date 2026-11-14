@@ -339,7 +339,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('سبق احتساب إهلاك'), findsOneWidget);
+    expect(find.textContaining('already depreciated for 2024-01'), findsOneWidget);
     // The register still shows the figures as they were.
     expect(find.textContaining('114,600'), findsOneWidget);
   });
