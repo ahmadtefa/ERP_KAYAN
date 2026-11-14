@@ -444,7 +444,7 @@ void main() {
     // The error dialog renders its button in Arabic whatever the ambient
     // locale (app_error_dialog.dart uses AppLocalizationsAr), so the test
     // dismisses the button it actually shows.
-    await tester.tap(find.text('حسنًا'));
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
 
     expect(countedValue(tester, 'line-water'), '');

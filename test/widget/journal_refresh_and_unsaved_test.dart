@@ -183,9 +183,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(action)); await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton,action)); await tester.pumpAndSettle();
-      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.text('OK'),findsOneWidget);
       expect(find.textContaining('INTERNAL_JOURNAL_DIAGNOSTIC'),findsNothing);
-      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
       final status=action == 'Post' ? 'posted' : 'reversed';
       expect(api.posts,1);
       expect((await container.read(journalEntriesProvider.future)).single['status'],status);

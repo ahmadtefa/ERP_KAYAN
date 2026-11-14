@@ -435,7 +435,7 @@ void main() {
     // The error dialog renders its button in Arabic whatever the ambient
     // locale (app_error_dialog.dart uses AppLocalizationsAr), so the test
     // dismisses the button it actually shows.
-    await tester.tap(find.text('حسنًا'));
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     expect(quantityText(tester, 0), '1');
     expect(selectedUnit(tester, 0), isNull);
@@ -453,7 +453,7 @@ void main() {
       // The error dialog renders its button in Arabic whatever the ambient
       // locale (app_error_dialog.dart uses AppLocalizationsAr), so the test
       // dismisses the button it actually shows.
-      await tester.tap(find.text('حسنًا'));
+      await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       expect(quantityText(tester, 0), '1');
       expect(selectedUnit(tester, 0), isNull);
@@ -501,7 +501,7 @@ void main() {
       );
       expect(find.textContaining('Nothing was added'), findsOneWidget);
 
-      await tester.tap(find.text('حسنًا'));
+      await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('line-quantity-1')), findsNothing);
     },
@@ -518,7 +518,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await scan(tester, 'CARTON');
-    await tester.tap(find.text('حسنًا'));
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
 
     // The typed figure survived: a failed read never destroys input.

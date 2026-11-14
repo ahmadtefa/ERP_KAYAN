@@ -99,9 +99,9 @@ void main() {
     expect(find.text('This cannot be undone'),findsOneWidget);
     source.result.completeError(StateError('PRIVATE_RESET_DIAGNOSTIC'));
     await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('PRIVATE_RESET_DIAGNOSTIC'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(find.textContaining('operation may have completed'),findsOneWidget);
     final button=tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Reset program').last);
     expect(button.onPressed,isNull);

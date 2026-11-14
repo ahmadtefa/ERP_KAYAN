@@ -190,9 +190,9 @@ void main() {
     // requires reconciliation rather than assuming a retry is safe.
     api.pendingPost!.completeError(StateError('internal diagnostic must not be displayed'));
     await tester.pumpAndSettle();
-    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.text('OK'),findsOneWidget);
     expect(find.textContaining('internal diagnostic'),findsNothing);
-    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     expect(tester.widget<AbsorbPointer>(formLock).absorbing,isFalse);
     expect(find.byType(QuotationEditorScreen),findsOneWidget);
     api.pendingPost = null;
