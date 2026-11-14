@@ -95,7 +95,7 @@ describe('ProblemDetailsFilter', () => {
         errors:{key:'synthetic private value'},code:'PRIVATE_CODE',license:{token:'synthetic private token'}};
       new ProblemDetailsFilter().catch(new HttpException(body,500),host);
       expect(response.status).toHaveBeenCalledWith(500);
-      expect(response.json).toHaveBeenCalledWith({type:'about:blank',title:'INTERNAL_SERVER_ERROR',status:500,detail:'Unexpected server error'});
+      expect(response.json).toHaveBeenCalledWith({type:'about:blank',title:'INTERNAL_SERVER_ERROR',status:500,detail:'Unexpected server error',message:'Unexpected server error'});
       expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic private');
     } finally {log.mockRestore();}
   });
@@ -140,6 +140,7 @@ describe('ProblemDetailsFilter', () => {
       title: 'CONFLICT',
       status: HttpStatus.CONFLICT,
       detail: 'A record with the same unique value already exists',
+      message: 'A record with the same unique value already exists',
     });
     expect(response.json.mock.calls[0][0].detail).not.toContain(
       'Company_one_active_company_idx',

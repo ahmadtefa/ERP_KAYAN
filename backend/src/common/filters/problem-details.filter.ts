@@ -130,7 +130,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       status,
       detail,
       message: detail,
-      errorCode: typeof extra.code === 'string' ? extra.code : undefined,
+      ...(typeof extra.code === 'string' ? { errorCode: extra.code } : {}),
       ...extra,
     });
   }

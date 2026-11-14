@@ -297,8 +297,9 @@ class _FormSheetState extends State<_FormSheet> {
     if (_saving ||
         _uncertain ||
         _confirmingExit ||
-        !(_formKey.currentState?.validate() ?? false))
+        !(_formKey.currentState?.validate() ?? false)) {
       return;
+    }
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
       switch (field.kind) {
@@ -343,7 +344,7 @@ class _FormSheetState extends State<_FormSheet> {
               .firstOrNull;
           if (first != null) {
             final fieldContext = _fieldKeys[first.key]?.currentContext;
-            if (fieldContext != null) {
+            if (fieldContext != null && fieldContext.mounted) {
               Scrollable.ensureVisible(fieldContext);
               _focusNodes[first.key]?.requestFocus();
             }

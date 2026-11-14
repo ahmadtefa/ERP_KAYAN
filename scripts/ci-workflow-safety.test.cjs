@@ -34,6 +34,9 @@ const reviewed = [
   // and four `flutter test` files on a hosted runner. Flutter is pinned to
   // 3.47.6, the version every other workflow here uses.
   'barcode-quantity-focused.yml',
+  // Acceptance evidence only: read-only checkout, locked dependencies,
+  // no signing or publication, and failure remains a failed workflow.
+  'kayan-acceptance.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {

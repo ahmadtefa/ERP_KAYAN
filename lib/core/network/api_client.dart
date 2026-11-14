@@ -328,8 +328,9 @@ class ApiClient {
                 item['message'] is String) {
               final key = item['field'] as String;
               final value = item['message'] as String;
-              if (key.length <= 100 && value.length <= 300)
+              if (key.length <= 100 && value.length <= 300) {
                 fieldErrors[key] = value;
+              }
             }
           }
         }

@@ -167,8 +167,9 @@ class AppErrorMessageResolver {
     bool untrusted = false,
   }) {
     // Do not feed unbounded remote diagnostic blobs into UI or regex rules.
-    if (raw.length > 1024)
+    if (raw.length > 1024) {
       return _fallback(statusCode: statusCode, preferred: preferred);
+    }
     var text = _clean(raw);
 
     // "ServerFailure: no such record" -> "no such record".
