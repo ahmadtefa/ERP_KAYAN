@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -79,10 +80,16 @@ class _NotificationCenterScreenState
       _refresh();
     } catch (error) {
       // A failed action is an error, not a status line. "$error" printed the
-      // raw ApiFailure (transport detail, English, left-to-right) in a passing
-      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
-      // acknowledged.
-      if (mounted) await showAppError(context, error);
+      // raw object in a SnackBar that dismissed itself; the dialog queue says it
+      // once and waits to be acknowledged. The sentence stays the one ApiClient
+      // extracted from the response, because a refusal written for the operator
+      // is more useful than a generic replacement.
+      if (mounted) {
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
     }
   }
 
@@ -92,10 +99,16 @@ class _NotificationCenterScreenState
       _refresh();
     } catch (error) {
       // A failed action is an error, not a status line. "$error" printed the
-      // raw ApiFailure (transport detail, English, left-to-right) in a passing
-      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
-      // acknowledged.
-      if (mounted) await showAppError(context, error);
+      // raw object in a SnackBar that dismissed itself; the dialog queue says it
+      // once and waits to be acknowledged. The sentence stays the one ApiClient
+      // extracted from the response, because a refusal written for the operator
+      // is more useful than a generic replacement.
+      if (mounted) {
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
     }
   }
 
@@ -106,10 +119,16 @@ class _NotificationCenterScreenState
       _refresh();
     } catch (error) {
       // A failed action is an error, not a status line. "$error" printed the
-      // raw ApiFailure (transport detail, English, left-to-right) in a passing
-      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
-      // acknowledged.
-      if (mounted) await showAppError(context, error);
+      // raw object in a SnackBar that dismissed itself; the dialog queue says it
+      // once and waits to be acknowledged. The sentence stays the one ApiClient
+      // extracted from the response, because a refusal written for the operator
+      // is more useful than a generic replacement.
+      if (mounted) {
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

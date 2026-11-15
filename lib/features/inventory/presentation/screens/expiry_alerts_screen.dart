@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../core/network/api_client.dart';
@@ -140,11 +141,19 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
         );
       }
     } catch (error) {
-      // A failed scan is an error, not a status line. "$error" printed the raw
-      // ApiFailure - transport detail, English, left-to-right - in a SnackBar
-      // that vanished before it could be read. The central dialog says it in
-      // Arabic, right-to-left, and waits to be acknowledged.
-      if (mounted) await showAppError(context, error);
+      // A failed scan is an error, not a status line, so it goes to the dialog
+      // rather than a SnackBar that dismisses itself. The sentence is the one
+      // the server wrote ("Scanning is not allowed"), not a generic replacement:
+      // a permission refusal tells the operator exactly what to ask for, and
+      // showAppPlainError renders it right-to-left inside the same acknowledged
+      // dialog. Raw transport objects never arrive here - ApiClient has already
+      // reduced the response to its message.
+      if (mounted) {
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
     } finally {
       if (mounted) setState(() => _scanning = false);
     }

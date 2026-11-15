@@ -39,17 +39,24 @@ Widget harness(void Function(BuildContext) onPressed) => MaterialApp(
   ),
 );
 
+/// What the screens now do: keep the sentence the server wrote, but deliver it
+/// through the acknowledged dialog.
+void reportActionFailure(BuildContext context, Object error) {
+  showAppPlainError(
+    context,
+    error is Failure ? error.message : presentErrorText(context, error),
+  );
+}
+
 void main() {
   testWidgets('a failed action opens the dialog, not a SnackBar', (
     tester,
   ) async {
     await tester.pumpWidget(
-      harness((context) {
-        showAppError(
-          context,
-          const ApiFailure('POST /notifications/x/read failed: connection closed'),
-        );
-      }),
+      harness((context) => reportActionFailure(
+        context,
+        const ApiFailure('Notification already archived', statusCode: 409),
+      )),
     );
 
     await tester.tap(find.text('act'));
@@ -74,18 +81,38 @@ void main() {
     );
   });
 
-  testWidgets('the raw failure text never reaches the screen', (tester) async {
-    // The exact string the old code printed with Text('$error').
-    const raw = 'ApiFailure: POST /notifications/read-all -> 500 Internal Server Error';
+  testWidgets('the sentence the server wrote is kept, not replaced', (
+    tester,
+  ) async {
+    // The regression that this pair of tests exists for: the first fix routed
+    // the error to the dialog but let the resolver swap the server's wording
+    // for a generic sentence, which broke the expiry-alerts contract.
     await tester.pumpWidget(
-      harness((context) => showAppError(context, const ApiFailure(raw))),
+      harness((context) => reportActionFailure(
+        context,
+        const ApiFailure('Scanning is not allowed', statusCode: 403),
+      )),
     );
     await tester.tap(find.text('act'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('ApiFailure'), findsNothing);
-    expect(find.textContaining('Internal Server Error'), findsNothing);
-    expect(find.textContaining('/notifications/read-all'), findsNothing);
+    expect(find.textContaining('Scanning is not allowed'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('the object toString never reaches the screen', (tester) async {
+    // The old code printed Text('$error'), i.e. the exception's toString.
+    await tester.pumpWidget(
+      harness((context) => reportActionFailure(
+        context,
+        const ApiFailure('Request failed', statusCode: 500),
+      )),
+    );
+    await tester.tap(find.text('act'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('ApiFailure:'), findsNothing);
+    expect(find.textContaining('Instance of'), findsNothing);
   });
 
   testWidgets('the dialog does not vanish on its own', (tester) async {
