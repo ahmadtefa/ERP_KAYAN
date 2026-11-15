@@ -267,7 +267,10 @@ jobs:
       # one section open with the rest still closed. Rendered from the real
       # ErpShell so a reviewer sees the accordion rather than reading an
       # assertion about it.
-      - run: flutter test --no-pub test/screenshots/menu_accordion_screenshots_test.dart --update-goldens
+      - name: Render the main menu pictures for review (not golden approval)
+        env:
+          MENU_SCREENSHOTS: '1'
+        run: flutter test --no-pub test/screenshots/menu_accordion_screenshots_test.dart --update-goldens
       - name: Upload menu pictures for review (not golden approval)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

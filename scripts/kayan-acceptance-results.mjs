@@ -16,6 +16,7 @@ const groups = {
   invoice_widget: /invoice_action_refresh_error_test\.dart$/,
   theme_widget: /module_scaffold_navigation_test\.dart$|app_theme_font_test\.dart$/,
   groups_widget: /erp_shell_groups_test\.dart$/,
+  menu_pictures: /menu_accordion_screenshots_test\.dart$/,
   dashboard_widget: /dashboard_screen_test\.dart$/,
   tax_widget: /item_blank_tax_test\.dart$/,
   photo_widget: /user_photo_test\.dart$/,
