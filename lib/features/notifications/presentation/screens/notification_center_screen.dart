@@ -6,6 +6,7 @@ import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 
 /// The unread count, as the badge in the top bar reads it.
@@ -77,7 +78,11 @@ class _NotificationCenterScreenState
       await ref.read(apiClientProvider).post('/notifications/${row['id']}/read');
       _refresh();
     } catch (error) {
-      _say('$error');
+      // A failed action is an error, not a status line. "$error" printed the
+      // raw ApiFailure (transport detail, English, left-to-right) in a passing
+      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
+      // acknowledged.
+      if (mounted) await showAppError(context, error);
     }
   }
 
@@ -86,7 +91,11 @@ class _NotificationCenterScreenState
       await ref.read(apiClientProvider).post('/notifications/${row['id']}/archive');
       _refresh();
     } catch (error) {
-      _say('$error');
+      // A failed action is an error, not a status line. "$error" printed the
+      // raw ApiFailure (transport detail, English, left-to-right) in a passing
+      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
+      // acknowledged.
+      if (mounted) await showAppError(context, error);
     }
   }
 
@@ -96,7 +105,11 @@ class _NotificationCenterScreenState
       await ref.read(apiClientProvider).post('/notifications/read-all');
       _refresh();
     } catch (error) {
-      _say('$error');
+      // A failed action is an error, not a status line. "$error" printed the
+      // raw ApiFailure (transport detail, English, left-to-right) in a passing
+      // SnackBar; the dialog queue says it once, in Arabic, and waits to be
+      // acknowledged.
+      if (mounted) await showAppError(context, error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -122,6 +135,8 @@ class _NotificationCenterScreenState
     );
   }
 
+  /// For the one message here that is a notice and not a failure: an alert
+  /// that belongs to another screen. Errors use [showAppError].
   void _say(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
