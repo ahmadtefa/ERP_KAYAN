@@ -263,6 +263,20 @@ jobs:
       # Render independently for visual review; the regular test job must
       # still compare against independently reviewed, committed baselines.
       - run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      # The main menu in its two required states: all eight sections closed, and
+      # one section open with the rest still closed. Rendered from the real
+      # ErpShell so a reviewer sees the accordion rather than reading an
+      # assertion about it.
+      - run: flutter test --no-pub test/screenshots/menu_accordion_screenshots_test.dart --update-goldens
+      - name: Upload menu pictures for review (not golden approval)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: menu-accordion-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test/screenshots/goldens/menu_closed_ar.png
+            test/screenshots/goldens/menu_inventory_open_ar.png
+            test/screenshots/goldens/menu_sales_open_ar.png
+          if-no-files-found: error
       - run: node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
       - run: node scripts/emit-synthetic-screenshot-previews.cjs customers_ar.png
       - run: node scripts/emit-synthetic-screenshot-previews.cjs sales_invoices_ar.png
