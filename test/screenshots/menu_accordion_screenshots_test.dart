@@ -5,7 +5,6 @@ import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
-import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import '../widget/test_harness.dart';
+import 'screenshot_fixtures.dart';
 
 /// Pictures of the main menu, so the accordion is looked at and not only
 /// asserted.
@@ -50,35 +50,6 @@ class _ShellApi extends ApiClient {
     Map<String, dynamic>? query,
   }) async => {'blocked': false};
 }
-
-/// Every permission the menu can act on, so no heading is hidden by the access
-/// filter. This picture is about the menu's shape; the filtered case is covered
-/// by `erp_shell_groups_test.dart`.
-const _admin = AppUser(
-  id: 'u',
-  username: 'admin',
-  fullName: 'مدير النظام',
-  companyId: 'c',
-  permissions: [
-    'accounting.chart.manage',
-    'accounting.journal.post',
-    'accounting.reports.read',
-    'parties.customers.read',
-    'parties.suppliers.read',
-    'inventory.items.read',
-    'inventory.warehouses.read',
-    'inventory.stock.read',
-    'inventory.reports.read',
-    'sales.invoices.read',
-    'sales.orders.read',
-    'purchases.invoices.read',
-    'purchases.orders.read',
-    'reports.read',
-    'settings.company.manage',
-    'settings.users.manage',
-    'notifications.manage',
-  ],
-);
 
 Future<void> _loadFonts() async {
   final loader = FontLoader('IBMPlexSansArabic');
@@ -159,8 +130,17 @@ Future<void> _pumpShell(WidgetTester tester) async {
     ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+        authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_ShellApi()),
-        currentUserProvider.overrideWithValue(_admin),
+        currentUserProvider.overrideWithValue(screenshotAdmin),
+        // The shell builds the section rail plus its own header and footer; the
+        // reviewed screenshots override these too, so the frame under test is
+        // the same one they draw.
+        chartOfAccountsProvider.overrideWith(
+          FakeChartOfAccountsController.new,
+        ),
+        companyProfileProvider.overrideWith(FakeCompanyProfileController.new),
+        branchesProvider.overrideWith(FakeBranchesController.new),
       ],
       child: MaterialApp.router(
         debugShowCheckedModeBanner: false,

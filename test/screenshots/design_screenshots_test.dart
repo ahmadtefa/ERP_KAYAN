@@ -6,7 +6,6 @@ import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
-import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -24,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import '../widget/test_harness.dart';
+import 'screenshot_fixtures.dart';
 
 /// Design screenshots, rendered from the real screens.
 ///
@@ -116,49 +116,6 @@ const _invoices = <Map<String, dynamic>>[
   },
 ];
 
-class _FakeChartOfAccountsController extends ChartOfAccountsController {
-  @override
-  Future<List<Account>> build() async => const [];
-}
-
-class _FakeCompanyProfileController extends CompanyProfileController {
-  @override
-  Future<Map<String, dynamic>> build() async => const {
-    'id': 'company-1',
-    'code': 'KAYAN-01',
-    'nameAr': 'شركة الكيان للتجارة',
-    'nameEn': 'Kayan Trading Co',
-    'taxId': '300123456',
-    'phone': '+20100000000',
-    'email': 'info@kayan.test',
-    'address': 'Cairo, Egypt',
-    'hasLogo': false,
-  };
-}
-
-class _FakeBranchesController extends BranchesController {
-  @override
-  Future<List<Map<String, dynamic>>> build() async => const [
-    {
-      'id': 'branch-1',
-      'code': 'HQ',
-      'nameAr': 'المقر الرئيسي',
-      'nameEn': 'Headquarters',
-      'kind': 'HEADQUARTERS',
-      'isActive': true,
-    },
-  ];
-}
-
-const _adminUser = AppUser(
-  id: 'admin-1',
-  username: 'admin',
-  fullName: 'مدير النظام',
-  companyId: 'company-1',
-  branchId: 'branch-1',
-  roles: ['ADMIN'],
-  isSuperAdmin: true,
-);
 
 final Json _summary = <String, dynamic>{
   'from': '2026-01-01',
@@ -305,12 +262,12 @@ Future<void> _pumpShot(
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
         authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_FakeApiClient()),
-        currentUserProvider.overrideWithValue(_adminUser),
+        currentUserProvider.overrideWithValue(screenshotAdmin),
         chartOfAccountsProvider.overrideWith(
-          _FakeChartOfAccountsController.new,
+          FakeChartOfAccountsController.new,
         ),
-        companyProfileProvider.overrideWith(_FakeCompanyProfileController.new),
-        branchesProvider.overrideWith(_FakeBranchesController.new),
+        companyProfileProvider.overrideWith(FakeCompanyProfileController.new),
+        branchesProvider.overrideWith(FakeBranchesController.new),
         dashboardSummaryProvider.overrideWith((ref) async => _summary),
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
       ],

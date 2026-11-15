@@ -71,6 +71,20 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The main-menu pictures are built from the real shell and the checked-in
+  // synthetic user only. Keep the framework diagnosis and the source position;
+  // never the labels or the pixels.
+  if (event.type === 'print' && /^(?:the menu shows eight sections and none of their items|opening a section reveals its items|opening a second section closes the first|tapping the open section closes it again)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual):\s*(?:exactly (?:\d+|one|two|three) matching candidates?|no matching candidates?|<\d+>)/)?.[0]?.trim() ??
+      line.match(/Found (\d+) widgets?/)?.[0] ??
+      line.match(/test\/screenshots\/menu_accordion_screenshots_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/lib\/app\/shell\/erp_shell\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found|No MediaQuery widget found|No Directionality widget found|Cannot hit test a render box that has never been laid out)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown)/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   // The stock-document, warehouse-balance and stock-take screens are driven
   // only by the synthetic fixtures checked into their test files. Keep the
   // fixed assertion shape, the finder counts and the source position - never
