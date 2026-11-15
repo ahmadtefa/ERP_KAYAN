@@ -8,6 +8,11 @@ const groups = {
   network_contract: /order_edit_error_code_test\.dart$/,
   error_resolver: /app_error_text_test\.dart$/,
   dialog_widget: /app_error_dialog_lifecycle_test\.dart$/,
+  // The screens that act on a row - marking a notification read, archiving
+  // one, scanning for expiry - report a failure through the dialog, keep the
+  // server's sentence, and must not leave a spinner running behind it.
+  action_error_widget: /action_errors_use_dialog_test\.dart$/,
+  expiry_scan_widget: /expiry_alerts_screen_test\.dart$/,
   invoice_widget: /invoice_action_refresh_error_test\.dart$/,
   theme_widget: /module_scaffold_navigation_test\.dart$|app_theme_font_test\.dart$/,
   groups_widget: /erp_shell_groups_test\.dart$/,
