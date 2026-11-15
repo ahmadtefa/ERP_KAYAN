@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/settings/data/reset_data_source.dart';
@@ -61,7 +65,49 @@ Future<void> _pump(WidgetTester tester, {required bool superAdmin}) {
   );
 }
 
+class _UncertainReset extends ResetDataSource {
+  _UncertainReset() : super(ApiClient(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore()));
+  final result=Completer<ResetResult>();
+  int calls=0;
+  @override
+  Future<ResetResult> reset({required String password,required String confirmation}) {
+    calls++;
+    return result.future;
+  }
+}
+
 void main() {
+  testWidgets('reset holds the dialog while pending and refuses a blind retry', (tester) async {
+    tester.view.physicalSize=const Size(1400,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final source=_UncertainReset();
+    await tester.pumpWidget(ProviderScope(overrides:[
+      authControllerProvider.overrideWith(_SuperAdminController.new),
+      resetDataSourceProvider.overrideWithValue(source),
+      resetPreviewProvider.overrideWith((ref) async => const ResetPreview(
+        companyCode:'synthetic',companyName:'Synthetic',counts:{'accounts':3},confirmationWord:'RESET'))],
+      child:wrapWithApp(child:const Scaffold(body:SingleChildScrollView(child:ResetDataCard())))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('not a complete restore'),findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton,'Reset program')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first,'synthetic-password');
+    await tester.enterText(find.byType(TextField).last,'RESET'); await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton,'Reset program').last); await tester.pump();
+    expect(source.calls,1);
+    await tester.binding.handlePopRoute(); await tester.pump();
+    expect(find.text('This cannot be undone'),findsOneWidget);
+    source.result.completeError(StateError('PRIVATE_RESET_DIAGNOSTIC'));
+    await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('PRIVATE_RESET_DIAGNOSTIC'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.textContaining('operation may have completed'),findsOneWidget);
+    final button=tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Reset program').last);
+    expect(button.onPressed,isNull);
+    expect(source.calls,1);
+    expect(tester.takeException(),isNull);
+  });
   testWidgets('the super administrator is offered the program reset', (
     tester,
   ) async {

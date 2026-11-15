@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/error/failure.dart';
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/status_pill.dart';
@@ -29,7 +30,9 @@ import '../widgets/voucher_details_view.dart';
 /// holds. A box is bound to a ledger account, so "how much is in the safe?"
 /// has exactly one answer.
 class CashScreen extends ConsumerStatefulWidget {
-  const CashScreen({super.key});
+  const CashScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<CashScreen> createState() => _CashScreenState();
@@ -39,40 +42,79 @@ class _CashScreenState extends ConsumerState<CashScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _busy = false;
+  bool _refreshing = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
 
   @override
   void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
     _tabs.dispose();
     super.dispose();
   }
 
+  /// Re-reads everything a saved receipt, payment or transfer changes.
+  ///
+  /// The cash lists are the obvious half. The partner's card and statement,
+  /// the party lists, the invoices the money settled and the dashboard are
+  /// the other half, and they are the half that used to stay stale until the
+  /// program was restarted.
   void _reloadAll() {
-    ref.invalidate(cashAccountsProvider);
-    ref.invalidate(cashBalancesProvider);
-    ref.invalidate(cashVouchersProvider);
-    ref.invalidate(cashTransfersProvider);
+    invalidateMoneyViews(ref);
   }
 
-  /// Everything thrown is shown as the server worded it, never as a stack.
+  Future<void> _refreshAll() async {
+    if (_busy || _refreshing) return;
+    setState(() => _refreshing = true);
+    _reloadAll();
+    try {
+      await Future.wait([
+        ref.read(cashAccountsProvider.future),
+        ref.read(cashBalancesProvider.future),
+        ref.read(cashVouchersProvider.future),
+        ref.read(cashTransfersProvider.future),
+      ]);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  /// A failed response may follow a committed cash action. Refresh all
+  /// dependent lists and figures without logging the exception or payload.
   Future<void> _run(Future<void> Function() action) async {
     setState(() => _busy = true);
     try {
       await action();
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-    } catch (error, stackTrace) {
-      // A malformed response or an unexpected client exception must never
-      // leave an action looking as if it succeeded.
-      debugPrint('Cash action failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(
-          context,
-          context.l10n.unexpectedError,
-          error: true,
-        );
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        _reloadAll();
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  /// Cash creation endpoints do not yet provide idempotency. After a lost
+  /// response, refresh and prevent this form from issuing the same POST again.
+  Future<void> _submitCreation(String path, Json body) async {
+    try {
+      await ref.read(apiClientProvider).post(path, body: body);
+    } catch (error) {
+      throw UncertainFormSubmission(error);
+    } finally {
+      if (mounted) _reloadAll();
     }
   }
 
@@ -84,14 +126,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
       accounts = await ref
           .read(apiClientProvider)
           .getList('/accounting/chart-of-accounts');
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading ledger accounts failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(context, context.l10n.unexpectedError, error: true);
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -103,6 +139,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newCashAccount,
       fields: [
         FieldSpec('code', l10n.accountCode, required: true),
@@ -133,14 +170,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
         FieldSpec('bankName', l10n.bankName),
         FieldSpec('iban', l10n.iban),
       ],
+      onSubmit: (values) => _submitCreation('/cash/accounts', values),
     );
-    if (values == null || !mounted) return;
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/accounts', body: values);
-      _reloadAll();
-      if (mounted) showMessage(context, l10n.saved);
-    });
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _newVoucher() async {
@@ -148,12 +180,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> accounts;
     try {
       accounts = await ref.read(cashAccountsProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading cash accounts for voucher failed: $error\\n$stackTrace');
-      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     }
     if (!mounted) return;
@@ -164,12 +192,14 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final kindValues = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newVoucher,
       fields: [
         FieldSpec(
           'kind',
           l10n.voucherType,
           kind: FieldKind.select,
+          required: true,
           options: [
             FieldOption('RECEIPT', l10n.receipt),
             FieldOption('PAYMENT', l10n.payment),
@@ -186,8 +216,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> costCenters = const <Json>[];
     try {
       costCenters = await ref.read(activeCostCentersProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
     }
     if (!mounted) return;
 
@@ -196,20 +227,15 @@ class _CashScreenState extends ConsumerState<CashScreen>
       parties = isReceipt
           ? await ref.read(activeCustomersProvider.future)
           : await ref.read(activeSuppliersProvider.future);
-    } on Failure catch (error) {
-      // A party is optional for an on-account voucher. Keep the workflow
-      // available if this auxiliary picker cannot load.
-      if (mounted) showMessage(context, error.message, error: true);
-    } catch (error, stackTrace) {
-      debugPrint('Loading voucher parties failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(context, l10n.unexpectedError, error: true);
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
     }
     if (!mounted) return;
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isReceipt ? l10n.receipt : l10n.payment,
       fields: [
         FieldSpec(
@@ -273,60 +299,34 @@ class _CashScreenState extends ConsumerState<CashScreen>
       initial: {
         'voucherDate': DateTime.now().toIso8601String().substring(0, 10),
       },
-    );
-    if (values == null || !mounted) return;
-
-    // What is still open for this party, oldest first: money is applied to the
-    // oldest debt unless somebody says otherwise, and the screen says so.
-    final partyId = text(values, isReceipt ? 'customerId' : 'supplierId');
-    var allocations = const <Json>[];
-    var allocationLookupFailed = false;
-    if (partyId.isNotEmpty) {
-      setState(() => _busy = true);
-      try {
-        final open = await ref.read(
-          openInvoicesProvider((
+      onSubmit: (values) async {
+        // Lookup occurs before the POST. A failed lookup leaves the form
+        // editable and retryable; a failed POST is conservatively uncertain.
+        final partyId = text(values, isReceipt ? 'customerId' : 'supplierId');
+        var allocations = const <Json>[];
+        if (partyId.isNotEmpty) {
+          final invoices = openInvoicesProvider((
             kind: isReceipt ? 'customer' : 'supplier',
             partyId: partyId,
-          )).future,
-        );
-        allocations = planAllocations(
-          openInvoices: open,
-          amount: text(values, 'amount'),
-          isReceipt: isReceipt,
-        );
-      } on Failure catch (error) {
-        allocationLookupFailed = true;
-        if (mounted) showMessage(context, error.message, error: true);
-      } catch (error, stackTrace) {
-        allocationLookupFailed = true;
-        debugPrint('Loading open invoices failed: $error\\n$stackTrace');
-        if (mounted) {
-          showMessage(context, l10n.unexpectedError, error: true);
+          ));
+          // Do not allocate against a cached or previously failed lookup.
+          ref.invalidate(invoices);
+          final open = await ref.read(invoices.future);
+          allocations = planAllocations(
+            openInvoices: open,
+            amount: text(values, 'amount'),
+            isReceipt: isReceipt,
+          );
         }
-      } finally {
-        if (mounted) setState(() => _busy = false);
-      }
-      if (!mounted || allocationLookupFailed) return;
-    }
-
-    final body = <String, dynamic>{
-      ...values,
-      'kind': isReceipt ? 'RECEIPT' : 'PAYMENT',
-    };
-    if (allocations.isNotEmpty) {
-      body['allocations'] = allocations;
-    } else if (partyId.isNotEmpty) {
-      // Nothing open to settle: the money is carried on account, which is only
-      // allowed when the voucher names the party it belongs to.
-      body[isReceipt ? 'customerId' : 'supplierId'] = partyId;
-    }
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/vouchers', body: body);
-      _reloadAll();
-      if (mounted) showMessage(context, l10n.saved);
-    });
+        final body = <String, dynamic>{
+          ...values,
+          'kind': isReceipt ? 'RECEIPT' : 'PAYMENT',
+          if (allocations.isNotEmpty) 'allocations': allocations,
+        };
+        await _submitCreation('/cash/vouchers', body);
+      },
+    );
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _newTransfer() async {
@@ -334,12 +334,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> accounts;
     try {
       accounts = await ref.read(cashAccountsProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading cash accounts for transfer failed: $error\\n$stackTrace');
-      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     }
     if (!mounted) return;
@@ -350,6 +346,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newTransfer,
       fields: [
         FieldSpec(
@@ -378,21 +375,26 @@ class _CashScreenState extends ConsumerState<CashScreen>
               ),
           ],
         ),
-        FieldSpec('transferDate', l10n.invoiceDate, kind: FieldKind.date, required: true),
-        FieldSpec('amount', l10n.amount, kind: FieldKind.decimal, required: true),
+        FieldSpec(
+          'transferDate',
+          l10n.invoiceDate,
+          kind: FieldKind.date,
+          required: true,
+        ),
+        FieldSpec(
+          'amount',
+          l10n.amount,
+          kind: FieldKind.decimal,
+          required: true,
+        ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {
         'transferDate': DateTime.now().toIso8601String().substring(0, 10),
       },
+      onSubmit: (values) => _submitCreation('/cash/transfers', values),
     );
-    if (values == null || !mounted) return;
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/transfers', body: values);
-      _reloadAll();
-      if (mounted) showMessage(context, l10n.saved);
-    });
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _post(String path, String confirmMessage, String done) async {
@@ -405,7 +407,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (!ok || !mounted) return;
     await _run(() async {
       await ref.read(apiClientProvider).post(path);
-      _reloadAll();
       if (mounted) showMessage(context, done);
     });
   }
@@ -422,7 +423,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (!ok || !mounted) return;
     await _run(() async {
       await ref.read(apiClientProvider).post(path);
-      _reloadAll();
       if (mounted) showMessage(context, l10n.entryReversed);
     });
   }
@@ -452,44 +452,29 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
   /// The chain behind one row: what the voucher settled and which entry it
   /// wrote. Opened from the list, read from the server, never recomputed here.
-  void _showVoucher(Json voucher) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(text(voucher, 'voucherNumber')),
-        content: SizedBox(
-          width: 820,
-          height: 520,
-          child: _VoucherDetails(
-            id: text(voucher, 'id'),
-            onOpen: (path) {
-              Navigator.of(dialogContext).pop();
-              context.go(path);
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(context.l10n.close),
-          ),
-        ],
-      ),
-    );
-  }
+  void _showVoucher(Json voucher) => showVoucherDetail(
+    context,
+    id: text(voucher, 'id'),
+    title: text(voucher, 'voucherNumber'),
+  );
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return ModuleScaffold(
       title: l10n.cashAndBanks,
-      trailing: _busy
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : null,
+      trailing: IconButton(
+        tooltip: l10n.refresh,
+        onPressed: _busy || _refreshing ? null : _refreshAll,
+        icon: _refreshing
+            ? const SizedBox(
+                key: Key('cash-refresh-loading'),
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.refresh),
+      ),
       body: Column(
         children: [
           TabBar(
@@ -516,19 +501,19 @@ class _CashScreenState extends ConsumerState<CashScreen>
     final accounts = ref.watch(cashAccountsProvider);
     final balances = ref.watch(cashBalancesProvider);
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-    final balanceByCode = {
-      for (final row in balances.value ?? const <Json>[]) text(row, 'code'): row,
+    // Absence, loading, and errors are not zero balances. Match on the
+    // stable account id, and only display amounts from a successful response.
+    final balanceById = {
+      if (!balances.hasError && !balances.isLoading)
+        for (final row in balances.value ?? const <Json>[])
+          text(row, 'cashAccountId'): row,
     };
 
     return Column(
       children: [
         if (balances.hasError)
           MaterialBanner(
-            content: Text(
-              balances.error is Failure
-                  ? (balances.error as Failure).message
-                  : l10n.unexpectedError,
-            ),
+            content: Text(l10n.unexpectedError),
             leading: const Icon(Icons.warning_amber_outlined),
             actions: [
               TextButton(
@@ -597,9 +582,14 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   l10n.balance,
                   numeric: true,
                   emphasise: true,
-                  value: (r) => formatAmount(
-                    amount(balanceByCode[text(r, 'code')] ?? const {}, 'balance'),
-                  ),
+                  value: (r) {
+                    final balance = asString(
+                      balanceById[text(r, 'id')]?['balance'],
+                    );
+                    return balance == null || balance.isEmpty
+                        ? '—'
+                        : formatAmount(balance);
+                  },
                 ),
               ],
               actions: (row) => [
@@ -616,8 +606,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                       : () => _run(() async {
                           await ref
                               .read(apiClientProvider)
-                              .post('/cash/accounts/${text(row, 'id')}/deactivate');
-                          _reloadAll();
+                              .post(
+                                '/cash/accounts/${text(row, 'id')}/deactivate',
+                              );
                         }),
                 ),
               ],
@@ -668,11 +659,15 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   value: (r) => text(r, 'voucherNumber'),
                   emphasise: true,
                 ),
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'voucherDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'voucherDate'),
+                ),
                 ColumnSpec(
                   l10n.voucherType,
-                  value: (r) =>
-                      text(r, 'kind').toUpperCase() == 'RECEIPT' ? l10n.receipt : l10n.payment,
+                  value: (r) => text(r, 'kind').toUpperCase() == 'RECEIPT'
+                      ? l10n.receipt
+                      : l10n.payment,
                 ),
                 ColumnSpec(
                   l10n.party,
@@ -700,7 +695,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   onPressed: () => _showVoucher(row),
                 ),
                 IconButton(
-                  tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
+                  tooltip: isArabic
+                      ? 'طباعة وتنزيل المستند'
+                      : 'Print and download document',
                   icon: const Icon(Icons.print_outlined, size: 20),
                   onPressed: () => showDialog<void>(
                     context: context,
@@ -739,7 +736,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                     icon: const Icon(Icons.undo, size: 20),
                     onPressed: _busy
                         ? null
-                        : () => _reverse('/cash/vouchers/${text(row, 'id')}/reverse'),
+                        : () => _reverse(
+                            '/cash/vouchers/${text(row, 'id')}/reverse',
+                          ),
                   ),
               ],
             ),
@@ -788,7 +787,10 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   value: (r) => text(r, 'transferNumber'),
                   emphasise: true,
                 ),
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'transferDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'transferDate'),
+                ),
                 ColumnSpec(l10n.fromAccount, value: (r) => text(r, 'fromCode')),
                 ColumnSpec(l10n.toAccount, value: (r) => text(r, 'toCode')),
                 ColumnSpec(
@@ -839,45 +841,86 @@ class _AccountStatement extends ConsumerWidget {
 
     return statement.when(
       loading: () => const LoadingView(),
-      error: (error, _) => ErrorView(message: error.toString()),
+      error: (error, _) => ErrorView(message: error),
       data: (rows) => rows.isEmpty
           ? EmptyView(message: l10n.noMovements)
           : RecordsTable(
               rows: rows,
               columns: [
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'entryDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'entryDate'),
+                ),
                 ColumnSpec(
                   l10n.description,
                   flex: 2,
-                  value: (r) => text(
-                    r,
-                    'description',
-                    fallback: text(r, 'entryNumber'),
-                  ),
+                  value: (r) =>
+                      text(r, 'description', fallback: text(r, 'entryNumber')),
                 ),
                 ColumnSpec(
                   l10n.debit,
                   numeric: true,
-                  value: (r) => formatAmount(amount(r, 'debit'), locale: locale),
+                  value: (r) =>
+                      formatAmount(amount(r, 'debit'), locale: locale),
                 ),
                 ColumnSpec(
                   l10n.credit,
                   numeric: true,
-                  value: (r) => formatAmount(amount(r, 'credit'), locale: locale),
+                  value: (r) =>
+                      formatAmount(amount(r, 'credit'), locale: locale),
                 ),
                 ColumnSpec(
                   l10n.balance,
                   numeric: true,
                   emphasise: true,
-                  value: (r) => formatAmount(
-                    amount(r, 'runningBalance'),
-                    locale: locale,
-                  ),
+                  value: (r) =>
+                      formatAmount(amount(r, 'runningBalance'), locale: locale),
                 ),
               ],
             ),
     );
   }
+}
+
+/// The chain behind one voucher: what it settled and which entry it wrote.
+///
+/// Opened from the cash list and from a partner's statement of account; the
+/// dialog is the same one in both places, read from the server either way.
+/// `onOpen` is how the caller answers "show me the screen behind this": the
+/// list simply goes there, while a statement closes itself first.
+void showVoucherDetail(
+  BuildContext context, {
+  required String id,
+  required String title,
+  void Function(String path)? onOpen,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 820,
+        height: 520,
+        child: _VoucherDetails(
+          id: id,
+          onOpen: (path) {
+            Navigator.of(dialogContext).pop();
+            if (onOpen != null) {
+              onOpen(path);
+            } else {
+              context.go(path);
+            }
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(context.l10n.close),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Loads one voucher and hands it to the view that draws it.
@@ -892,7 +935,7 @@ class _VoucherDetails extends ConsumerWidget {
     final detail = ref.watch(cashVoucherProvider(id));
     return detail.when(
       loading: () => const LoadingView(),
-      error: (error, _) => ErrorView(message: error.toString()),
+      error: (error, _) => ErrorView(message: error),
       data: (voucher) => VoucherDetailsView(voucher: voucher, onOpen: onOpen),
     );
   }

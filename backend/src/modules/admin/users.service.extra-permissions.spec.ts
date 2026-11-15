@@ -2,6 +2,10 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 import { UsersService } from './users.service';
 
+// The seat reservation happens inside user creation; its behaviour is covered
+// by the licensing specs, so the constructor gets a stand-in here.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({}) } as any;
+
 function build(known: string[]) {
   const prisma = {
     permission: {
@@ -11,6 +15,7 @@ function build(known: string[]) {
   const service = new UsersService(
     prisma as any,
     { record: jest.fn() } as any,
+    licensingStub,
   );
   return { service, prisma };
 }

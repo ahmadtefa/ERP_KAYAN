@@ -12,6 +12,35 @@ import 'package:go_router/go_router.dart';
 import 'test_harness.dart';
 
 void main() {
+  test('selected navigation glyphs meet contrast on every section accent', () {
+    const accents = [SectionAccents.overview, SectionAccents.accounting,
+      SectionAccents.cash, SectionAccents.parties, SectionAccents.inventory,
+      SectionAccents.sales, SectionAccents.purchases, SectionAccents.insights,
+      SectionAccents.administration];
+    final foreground = AppColors.navyDeep.computeLuminance();
+    for (final accent in accents) {
+      final background = accent.darkBase.computeLuminance();
+      final ratio = (background + 0.05) / (foreground + 0.05);
+      expect(ratio, greaterThanOrEqualTo(4.5));
+    }
+  });
+  testWidgets('Home shortcut fits a narrow shell and navigates to the dashboard', (tester) async {
+    tester.view.physicalSize=const Size(320,700); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final router=GoRouter(initialLocation:AppRoutes.customers,routes:[
+      GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Dashboard destination'))),
+      GoRoute(path:AppRoutes.customers,builder:(_,_) => const ErpShell(currentPath:AppRoutes.customers,child:SizedBox.expand())),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(ProviderScope(overrides:[tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+      authRepositoryProvider.overrideWithValue(FakeAuthRepository())],child:MaterialApp.router(
+        locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(),isNull);
+    await tester.tap(find.byKey(const ValueKey('erp-home-shortcut'))); await tester.pumpAndSettle();
+    expect(find.text('Dashboard destination'),findsOneWidget);
+  });
   testWidgets(
     'Arabic RTL side navigation is on the right, scrollable up/down, and reaches the last item',
     (tester) async {
@@ -87,6 +116,21 @@ void main() {
       expect(navRect.right, closeTo(1366.0, 1.0));
 
       // Scroll down to the very last item (الإعدادات / Settings) and tap it.
+      // The menu is an accordion: the administration section has to be opened
+      // before its entry exists, so this opens it the way an operator would
+      // rather than assuming the whole tree is laid out at once.
+      final settingsGroup = find.byKey(const ValueKey('nav-group-administration'));
+      await tester.scrollUntilVisible(
+        settingsGroup,
+        150.0,
+        scrollable: find.descendant(
+          of: navListFinder,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(settingsGroup);
+      await tester.pumpAndSettle();
       final lastItemFinder = find.widgetWithText(ListTile, 'الإعدادات');
       await tester.scrollUntilVisible(
         lastItemFinder,
@@ -103,7 +147,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(currentRoute, AppRoutes.settings);
 
-      // Scroll back up to the first item (لوحة التحكم / Dashboard).
+      // Scroll back up to the first item (لوحة التحكم / Dashboard), which
+      // lives in the overview section; opening it closes administration.
+      final overviewGroup = find.byKey(const ValueKey('nav-group-overview'));
+      // The list is scrolled to the bottom, so the first heading is off screen
+      // and a tap on it would miss. Scroll back up to it first.
+      await tester.scrollUntilVisible(
+        overviewGroup,
+        -150.0,
+        scrollable: find.descendant(
+          of: navListFinder,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(overviewGroup);
+      await tester.pumpAndSettle();
       final firstItemFinder = find.widgetWithText(ListTile, 'لوحة التحكم');
       await tester.scrollUntilVisible(
         firstItemFinder,
@@ -171,14 +230,30 @@ void main() {
       // does not hold the separate returns.read or opening-balances.manage
       // codes; a view-only grant must still reveal the screen whose API GET is
       // allowed, and manage must not be required just to look.
-      for (final label in [
-        'الخزائن والبنوك',
-        'الأرصدة الافتتاحية',
-        'مرتجعات المبيعات',
-        'مرتجعات المشتريات',
-        'عروض الأسعار',
-      ]) {
-        expect(find.widgetWithText(ListTile, label), findsOneWidget, reason: label);
+      //
+      // The menu is an accordion, so each label is looked for inside its own
+      // section: the entries of five different sections cannot be on screen at
+      // once by design. Opening each one is what an operator does to find it.
+      // Grouped by section: the two accounting entries and the two sales ones
+      // share a heading, and tapping a heading twice would close it again.
+      const entries = <String, List<String>>{
+        'nav-group-accounting': ['الخزائن والبنوك', 'الأرصدة الافتتاحية'],
+        'nav-group-sales': ['مرتجعات المبيعات', 'عروض الأسعار'],
+        'nav-group-purchases': ['مرتجعات المشتريات'],
+      };
+      for (final MapEntry(key: group, value: labels) in entries.entries) {
+        final header = find.byKey(ValueKey(group));
+        expect(header, findsOneWidget, reason: 'section $group must exist');
+        await tester.ensureVisible(header);
+        await tester.tap(header);
+        await tester.pumpAndSettle();
+        for (final label in labels) {
+          expect(
+            find.widgetWithText(ListTile, label),
+            findsOneWidget,
+            reason: label,
+          );
+        }
       }
     },
   );
@@ -292,6 +367,11 @@ void main() {
       // step mixed for the navy sidebar, and the (light) top bar names
       // the section in the base step of the same hue.
       expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
+      final salesIcon = find.descendant(
+        of: find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
+        matching: find.byIcon(Icons.point_of_sale_outlined, skipOffstage: false),
+      );
+      expect(tester.widget<Icon>(salesIcon).color, AppColors.navyDeep);
       expect(
         find.byWidgetPredicate(
           (w) =>
@@ -301,10 +381,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      // Customers is not active yet, so its rose stays out of its label.
+      // Customers is not active yet, and its section is closed, so its row is
+      // not on screen at all - an accordion does not list another section's
+      // entries. That is stronger than checking the rose is absent from a
+      // visible row, which is what this asserted when every section was open.
       expect(
-        titleColorOf('العملاء'),
-        isNot(SectionAccents.parties.base),
+        find.widgetWithText(ListTile, 'العملاء', skipOffstage: false),
+        findsNothing,
       );
 
       // Move to customers & suppliers: the rose section identity takes
@@ -321,9 +404,12 @@ void main() {
         ),
         findsOneWidget,
       );
+      // Moving to another section closed sales, so its rows are gone rather
+      // than merely repainted - the strongest form of "sales is no longer the
+      // active section".
       expect(
-        titleColorOf('فواتير البيع'),
-        isNot(SectionAccents.sales.base),
+        find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
+        findsNothing,
       );
     },
   );

@@ -173,7 +173,9 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
   const targets: Record<string, string> = {
     title: '.title-band h2', company: '.brand h1', customer: '.panels .panel',
     sectionTitle: '.section-head h3', tableHeader: '.items thead th', tableCell: '.items tbody td',
-    totalsLabel: '.totals td:first-child', totalsValue: '.totals td.num', finalTotal: '.totals tr.grand td',
+    totalsLabel: '.summary tbody tr.discount td:first-child, .summary tbody tr.tax td:first-child, .totals td:first-child',
+    totalsValue: '.summary tbody tr.discount td.num, .summary tbody tr.tax td.num, .totals td.num',
+    finalTotal: '.summary tr.grand td, .totals tr.grand td',
     header: '.masthead, .custom-header', footer: '.page-footer',
   };
   for (const [key, selector] of Object.entries(targets)) {
@@ -512,39 +514,34 @@ export function renderQuotationDocument(
   const taxAmount = Number(content.totals.taxAmount ?? 0);
   const showTax = taxAmount > 0;
 
+  // Keep the gross, table-level discount and net visible per table.
+  // The offer-level discount is separate; totals are displayed, never recalculated.
   const summaryRows = content.tables
     .map(
       (table) => `<tr>
         <td>${escapeHtml(table.title)}</td>
         <td class="num">${money(table.subTotal)}</td>
-        <td class="num">${Number(table.discountAmount) > 0 ? `− ${money(table.discountAmount)}` : '—'}</td>
+        <td class="num discount-value">${Number(table.discountAmount) > 0 ? '− ' : ''}${money(table.discountAmount)}</td>
         <td class="num strong">${money(table.netTotal)}</td>
       </tr>`,
     )
     .join('');
-
-  const totalsRows = [
-    `<tr><td>${L('Subtotal before discount', 'الإجمالي قبل الخصم')}</td><td class="num">${money(
-      content.totals.subTotal,
-    )}</td></tr>`,
-    tableDiscountTotal > 0
-      ? `<tr><td>${L('Table discounts', 'خصومات الجداول')}</td><td class="num">− ${money(
-          tableDiscountTotal.toFixed(2),
-        )}</td></tr>`
-      : '',
+  const summarySubtotalRow = `<tr class="subtotal"><td colspan="3">${L(
+    'Subtotal before discount',
+    'الإجمالي قبل الخصم',
+  )}</td><td class="num">${money(content.totals.subTotal)}</td></tr>`;
+  const summaryDiscountRow =
     quotationDiscount > 0
-      ? `<tr><td>${L('Quotation discount', 'خصم العرض')}</td><td class="num">− ${money(
-          quotationDiscount.toFixed(2),
-        )}</td></tr>`
-      : '',
-    showTax
-      ? `<tr class="tax"><td>${L('Tax (VAT)', 'الضريبة المضافة')}${
-          taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
-        }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('');
+      ? `<tr class="discount"><td colspan="3">${L(
+          'Quotation discount',
+          'خصم العرض',
+        )}</td><td class="num">− ${money(quotationDiscount.toFixed(2))}</td></tr>`
+      : '';
+  const summaryTaxRow = showTax
+    ? `<tr class="tax"><td colspan="3">${L('Tax (VAT)', 'الضريبة المضافة')}${
+        taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
+      }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
+    : '';
 
   const terms = content.terms?.trim()
     ? `<section class="terms">
@@ -744,6 +741,11 @@ ${NASKH_FONT_FACE}
   .summary thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; text-align: start; padding: 1.6mm 2mm; border-bottom: 0.4mm solid ${SECONDARY}; }
   .summary tbody td { padding: 1.4mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
   .summary thead th.num { text-align: ${numAlign}; }
+  .summary tbody tr.discount td { color: ${MUTED}; }
+  .summary tbody td.discount-value { color: ${MUTED}; }
+  .summary tbody tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
+  .summary tbody tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
+  .summary tbody tr.grand td:first-child { color: #fff; }
   .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 2mm; }
   .totals table { width: 82mm; border: 0.3mm solid ${LINE}; }
   .totals td { padding: 1.3mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
@@ -865,27 +867,27 @@ ${
   ${tables}
 
   <section class="summary">
-    <h3>${L('Section summary', 'ملخص الأقسام')}</h3>
+    <h3>${L('Tables summary', 'ملخص الجداول')}</h3>
     <table>
       <thead>
         <tr>
-          <th>${L('Section', 'القسم')}</th>
+          <th>${L('Table', 'الجدول')}</th>
           <th class="num">${L('Before discount', 'قبل الخصم')}</th>
-          <th class="num">${L('Discount', 'الخصم')}</th>
+          <th class="num">${L('Table discount', 'خصم الجدول')}</th>
           <th class="num">${L('Net', 'الصافي')}</th>
         </tr>
       </thead>
-      <tbody>${summaryRows}</tbody>
-    </table>
-    <div class="totals">
-      <table>
-        ${totalsRows}
+      <tbody>
+        ${summaryRows}
+        ${summarySubtotalRow}
+        ${summaryDiscountRow}
+        ${summaryTaxRow}
         <tr class="grand">
-          <td>${L('Final total', 'الإجمالي النهائي')}</td>
+          <td colspan="3">${L('Final total', 'الإجمالي النهائي')}</td>
           <td class="num">${money(content.totals.totalAmount)}</td>
         </tr>
-      </table>
-    </div>
+      </tbody>
+    </table>
   </section>
 
   ${terms}

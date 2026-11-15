@@ -20,8 +20,8 @@ String localizedError(BuildContext context, Object error) {
     // act on; a validation message about a DTO field is replaced by the
     // explanation the central dialog uses, so the sign-in form cannot show
     // `property type should not exist` either.
-    ApiFailure(:final message, :final statusCode) when message.isNotEmpty =>
-      presentErrorText(context, message, statusCode: statusCode),
+    ApiFailure(:final message) when message.isNotEmpty =>
+      presentErrorText(context, error),
     _ => l10n.unexpectedError,
   };
 }

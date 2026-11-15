@@ -1,8 +1,17 @@
 # The demo backup file
 
-A ready-made ERP KAYAN company you can put into your own copy of the program
-with one button. Everything in it is invented: the company, the branches, the
-people, the customers, the suppliers and every number. It exists so that the
+> **Historical document — NOT current instructions (PR #70).** The full-dump
+> workflow/restore route described below is not available in the current
+> release candidate. Full Restore is blocked; a DB-only dump is not a complete
+> backup. Do not run the legacy builder or restore commands against a real
+> installation. The current repository also has a separate company JSON demo
+> download; JSON restore replaces company data and is not Full Restore. See
+> [current backup safety](BACKUP_RESTORE.md) and the dated release review.
+
+
+The historical sample described below was an invented ERP KAYAN company.
+The former one-button full-dump restore is now blocked. The company, branches,
+people, customers, suppliers and numbers described below were invented. It existed so that the
 screens, the lists, the reports and the exports have something real-looking to
 show, and so that a new installation can be tried without typing in a chart of
 accounts by hand.
@@ -16,46 +25,18 @@ accounts by hand.
 
 ---
 
-## 1. Getting the file
+## 1. Current availability
 
-1. Open the **Actions** tab of the repository.
-2. Choose **Demo backup file** in the list on the left.
-3. Open the newest successful run (green tick).
-4. Under **Artifacts**, download **kayan-demo-backup**.
-
-The download is a small ZIP containing:
-
-| File | What it is |
-| --- | --- |
-| `kayan-demo-backup-<date>.dump` | the backup itself |
-| `SHA256SUMS.txt` | its fingerprint, so you can check the download arrived whole |
-
-On Linux or macOS: `sha256sum -c SHA256SUMS.txt`. On Windows PowerShell:
-`Get-FileHash .\kayan-demo-backup-<date>.dump -Algorithm SHA256`.
-
-Artifacts are kept for 90 days. If you need one after that, re-run the
-workflow: **Actions → Demo backup file → Run workflow**.
-
-### Building it yourself
-
-```bash
-cd backend
-npm install
-npx prisma generate
-npm run build
-npm run build:demo          # writes backend/dist-demo/kayan-demo-backup-<date>.dump
-```
-
-`build:demo` needs `psql` and `pg_restore` on the `PATH`, and a PostgreSQL
-server it may create and drop two throwaway databases on. Tell it which one
-with `DATABASE_URL`, `KAYAN_RESTORE_URL` and `ADMIN_DATABASE_URL`. It never
-touches the database your program is actually running on: both databases it
-uses are named by the script and dropped when they are no longer needed.
+The historical workflow artifact is not current release evidence. The current
+source exposes a separate company JSON demo download when packaged; it can be
+absent and returns an error in that case. It is not a PostgreSQL full-machine
+archive. Do not use this demo on a company with real data.
 
 ---
 
-## 2. What is in it
+## 2. Historical sample contents
 
+The following describes an old synthetic fixture, not verified current content.
 One company, three branches, two financial years, and a full year of trade.
 
 **The company** — Al Nakheel Trading & Distribution
@@ -68,13 +49,8 @@ an address, a tax number and three branches:
 | `ALX` | Alexandria Branch | فرع الإسكندرية |
 | `MNS` | Mansoura Branch | فرع المنصورة |
 
-**Sign in with any of these:**
-
-| User name | Password | Can do |
-| --- | --- | --- |
-| `admin` | `Admin@12345` | everything, including backups and reset |
-| `accountant` | `Accountant@12345` | the ledger, the reports, the day books |
-| `sales` | `Sales@12345` | customers, sales invoices, the catalogue |
+Historical demo credentials are not appropriate for customer installations;
+never use a demo account or default password in production.
 
 **What there is to look at:**
 
@@ -130,77 +106,31 @@ status that the migrations do not already make.
 
 ---
 
-## 3. Format and compatibility
+## 3. Compatibility
 
-| | |
-| --- | --- |
-| Format | PostgreSQL Custom archive, made by `pg_dump -Fc` |
-| First five bytes | `PGDMP` |
-| Produced with | PostgreSQL 16 |
-| Needs | PostgreSQL 14 or newer; `pg_restore` no older than the server |
-| Typical size | about 150 KB |
-
-This is the format the program understands. The Restore screen reads an upload
-with `pg_restore --list` before it will accept it, so a CSV, an Excel file, a
-JSON collection, a plain SQL script or a folder copy will be refused with a
-message — and a corrupt or truncated archive will be refused too.
-
-A full backup holds **the whole database**, not one company. Restoring one
-replaces every company and every user on that server. That is why the screen
-makes you confirm, and why the section below matters.
+Historical `.dump` examples are database archives, not complete backups. The
+current company demo uses a separate JSON format; neither format proves a full
+machine restore. Verify the exact format and capabilities of the running
+version and keep demo data isolated from real company data.
 
 ---
 
-## 4. Restoring it — read this first
+## 4. Restore status
 
-> **A full restore replaces everything.** Every company, every user, every
-> invoice and every setting on that database is gone and replaced by what is
-> in the file. There is no undo.
-
-Before you restore anywhere:
-
-1. **Take a backup of what you have now.** Settings → Backup → *Take full
-   backup*, then download it and keep it somewhere else.
-2. **Try it on a copy first, if there is anything you care about.** The
-   instruction in the program's own documentation is that a restore is only
-   safe when nothing of value can be lost — a spare machine, a second
-   database, or a scratch installation.
-3. **Do not restore into a database you are relying on** just to see whether
-   the demo works.
-
-To restore it:
-
-1. Sign in as `admin`.
-2. Go to **Settings → Backup → Restore backup**.
-3. Choose the file, type the confirmation the screen asks for, and confirm.
-
-What then happens, in order:
-
-1. The file is read with `pg_restore --list`. If it is not a real archive, it
-   is refused here and nothing else moves.
-2. It is restored into a scratch database the program creates for the purpose.
-   If that fails, the file is rejected and your data is untouched.
-3. A safety backup of your current database is taken.
-4. Writes are blocked for a moment, the file is restored over the database,
-   and the safety copy is put back automatically if anything goes wrong.
-5. The restored data is checked: the tables have to be there and the entries
-   have to agree with their own lines. If they do not, the safety copy is put
-   back.
-
-You cannot start this by accident. The route refuses a request without
-`confirm=true`, the screen makes you type a confirmation before it sends one,
-and a second restore cannot start while the first is running.
-
-### After restoring the demo
-
-You are signed in as nobody — sign in again with `admin` / `Admin@12345`. The
-company setup is already marked complete, so you go straight into a working
-company. Change the passwords before this is anywhere near anything real; they
-are published here.
+The full-dump restore described in historical versions is blocked. Do not
+restore a demo into a company or server containing valuable data. A separate
+company JSON restore exists but is destructive, is not complete machine
+recovery, and is not a substitute for a verified full backup. No production
+restore procedure is approved by this document.
 
 ---
 
-## 5. How the file is checked before it is published
+## 5. Historical build checks (not evidence for current HEAD)
+
+The historical steps below are retained as design history only. They are not
+approval to run the old builder, and the HTTP endpoints they describe do not
+work as stated on this PR. No current artifact or installed-product result is
+claimed.
 
 `backend/scripts/build-demo-backup.mjs` builds the file and refuses to finish
 unless all of this passes:

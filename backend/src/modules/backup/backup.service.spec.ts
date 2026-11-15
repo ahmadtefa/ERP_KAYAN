@@ -2,7 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
-import { BackupFile, BackupService } from './backup.service';
+import { BackupFile, BackupService, TABLES } from './backup.service';
+
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('BackupService & BackupController (Company JSON Backup)', () => {
   const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
@@ -95,6 +99,17 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
               code: 'KAYAN',
               nameAr: 'شركة كيان',
               nameEn: 'Kayan Company',
+              taxId: null,
+              commercialRegistration: null,
+              addressEn: null,
+              addressAr: null,
+              phone: null,
+              email: null,
+              address: null,
+              currency: 'EGP',
+              timezone: 'Africa/Cairo',
+              logoData: null,
+              logoMime: null,
             };
           }
           return null;
@@ -139,8 +154,24 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
+  });
+
+  describe('company backup portability', () => {
+    test('does not serialize installation-local backup history into a company archive', async () => {
+      const findMany = jest.fn(async () => [{ id: 'local-run', sizeBytes: BigInt(4096) }]);
+      prismaMock.backupRun = { findMany };
+
+      const backup = await service.create(COMPANY_ID);
+      const inspected = await service.inspect(backup, COMPANY_ID);
+
+      expect(TABLES.some((table) => table.model === 'backupRun')).toBe(false);
+      expect(findMany).not.toHaveBeenCalled();
+      expect(backup.tables).not.toHaveProperty('backupRun');
+      expect(inspected.omitted).toHaveProperty('backupRun');
+      expect(() => JSON.stringify(backup)).not.toThrow();
+    });
   });
 
   describe('Validation & Format checks', () => {
@@ -257,6 +288,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       }).toThrow(
         /هذا الملف هو أرشيف قاعدة بيانات PostgreSQL \(\.dump\) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON/,
       );
+      try {
+        (controller as any).parse(file);
+      } catch (error) {
+        expect((error as Error).message).toContain('الاستعادة الكاملة متوقفة');
+        expect((error as Error).message).not.toContain('/backup/full/restore');
+      }
     });
 
     test('accepts valid JSON file on company restore route', () => {

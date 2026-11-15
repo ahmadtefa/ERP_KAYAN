@@ -51,7 +51,9 @@ export class UpdateAccountDto {
 
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameEn?: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameAr?: string;
-  @IsOptional() @IsUUID() parentId?: string;
+  @IsOptional() @IsUUID() parentId?: string | null;
+  /// Compare the original parent before a requested move. null means root.
+  @IsOptional() @IsUUID() expectedParentId?: string | null;
   @IsOptional() @IsBoolean() isPostable?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(3) currency?: string;

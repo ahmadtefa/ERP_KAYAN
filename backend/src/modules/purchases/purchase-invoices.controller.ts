@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import {
   AuthUser,
   CurrentUser,
@@ -40,6 +40,18 @@ export class PurchaseInvoicesController {
     @Body() dto: CreatePurchaseInvoiceDto,
   ) {
     return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto);
+  }
+
+  @Put(':id/order-allocation')
+  @RequirePermissions('purchases.orders.read', 'purchases.invoices.create')
+  updateOrderAllocation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.updateOrderAllocation(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
+  @Delete(':id')
+  @RequirePermissions('purchases.invoices.create')
+  cancelDraft(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.cancelDraft(user.companyId, user.branchId, user.userId, id);
   }
 
   @Post(':id/post')

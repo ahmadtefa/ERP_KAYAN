@@ -71,9 +71,9 @@ class ResetDataSource {
 
   /// Clears the company's data.
   ///
-  /// The server takes and checks a backup first and refuses outright if
-  /// either fails, so a successful answer always means the old data is
-  /// sitting in a file that can be read back.
+  /// The server attempts an archive or company JSON backup first. Its
+  /// index/format checks do not prove complete restoration or include all
+  /// external files and license state.
   Future<ResetResult> reset({
     required String password,
     required String confirmation,

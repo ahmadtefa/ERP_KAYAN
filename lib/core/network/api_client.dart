@@ -60,6 +60,12 @@ class ApiClient {
             if (renewed != null) {
               try {
                 options.headers['Authorization'] = 'Bearer $renewed';
+                // Dio finalizes multipart streams on the first attempt. A
+                // byte-backed file needs a fresh FormData instance for the
+                // authenticated retry; replaying the consumed object fails.
+                if (options.data is FormData) {
+                  options.data = (options.data as FormData).clone();
+                }
                 options.extra[_retriedKey] = true;
                 handler.resolve(await _dio.fetch<dynamic>(options));
                 return;
@@ -161,7 +167,7 @@ class ApiClient {
       _log.warning('Could not renew the access token: ${e.type}');
       return const _RefreshOutcome.unavailable();
     } catch (error) {
-      _log.warning('Could not renew the access token: $error');
+      _log.warning('Could not renew the access token (${error.runtimeType})');
       return const _RefreshOutcome.unavailable();
     }
   }
@@ -294,10 +300,13 @@ class ApiClient {
           }
           return SessionExpiredFailure(message);
         }
-        if (status == 403) {
+        final data = e.response?.data;
+        final rawCode = data is Map ? data['code'] : null;
+        final code = rawCode is String && RegExp(r'^[A-Z0-9_]{3,64}$').hasMatch(rawCode) ? rawCode : null;
+        if (status == 403 && code != 'LICENSE_STATE_ID_MISMATCH') {
           return PermissionFailure(message);
         }
-        return ApiFailure(message, statusCode: status);
+        return ApiFailure(message, statusCode: status, code: code);
       case DioExceptionType.unknown:
         return const NetworkFailure();
     }

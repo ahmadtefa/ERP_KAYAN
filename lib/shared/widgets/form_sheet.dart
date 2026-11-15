@@ -1,18 +1,25 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../../app/router/draft_exit_guard.dart';
 import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
+import 'confirm_dialog.dart';
+import 'app_error_dialog.dart';
 
 /// What kind of input a field collects.
 enum FieldKind { text, multiline, decimal, integer, date, toggle, select, multiSelect }
 
 /// One choice in a [FieldKind.select] field.
 class FieldOption {
-  const FieldOption(this.value, this.label);
+  const FieldOption(this.value, this.label, {this.enabled = true});
 
   final String value;
   final String label;
+  /// An existing unavailable value can stay visible without becoming a new choice.
+  final bool enabled;
 }
 
 /// Declarative description of one input in a [showFormSheet].
@@ -28,6 +35,9 @@ class FieldSpec {
     this.helper,
     this.options = const [],
     this.maxLines = 1,
+    this.emptyValue,
+    this.clearable = false,
+    this.obscure = false,
   });
 
   final String key;
@@ -37,6 +47,26 @@ class FieldSpec {
   final String? helper;
   final List<FieldOption> options;
   final int maxLines;
+  /// Explicit payload when an optional field is blank; null keeps omission.
+  final String? emptyValue;
+  /// Optional date fields can expose a clear button in addition to the picker.
+  final bool clearable;
+  /// Sensitive fields must not be shown in clear text or offered to the IME.
+  final bool obscure;
+}
+
+/// The server may have committed a non-idempotent submission despite an
+/// error response. The caller must refresh the relevant lists before throwing
+/// this, and the form will prevent an immediate blind retry.
+class UncertainFormSubmission implements Exception {
+  const UncertainFormSubmission(this.cause);
+  final Object cause;
+}
+
+/// A nested confirmation was cancelled before a request was sent. Leave the
+/// form open without treating the cancellation as a server error.
+class FormSubmissionCancelled implements Exception {
+  const FormSubmissionCancelled();
 }
 
 /// Opens a modal form built from [fields].
@@ -51,15 +81,20 @@ Future<Json?> showFormSheet(
   Json? initial,
   String? submitLabel,
   bool readOnly = false,
+  Future<void> Function(Json values)? onSubmit,
+  DraftExitRelay? exitRelay,
 }) {
   return showDialog<Json>(
     context: context,
+    barrierDismissible: false,
     builder: (context) => _FormSheet(
       title: title,
       fields: fields,
       initial: initial ?? const {},
       submitLabel: submitLabel,
       readOnly: readOnly,
+      onSubmit: onSubmit,
+      exitRelay: exitRelay,
     ),
   );
 }
@@ -71,6 +106,8 @@ class _FormSheet extends StatefulWidget {
     required this.initial,
     this.submitLabel,
     this.readOnly = false,
+    this.onSubmit,
+    this.exitRelay,
   });
 
   final String title;
@@ -78,6 +115,8 @@ class _FormSheet extends StatefulWidget {
   final Json initial;
   final String? submitLabel;
   final bool readOnly;
+  final Future<void> Function(Json values)? onSubmit;
+  final DraftExitRelay? exitRelay;
 
   @override
   State<_FormSheet> createState() => _FormSheetState();
@@ -89,6 +128,8 @@ class _FormSheetState extends State<_FormSheet> {
   final _toggles = <String, bool>{};
   final _selections = <String, String?>{};
   final _multiSelections = <String, Set<String>>{};
+  late final String _initialSnapshot;
+  bool _confirmingExit = false, _saving = false, _uncertain = false;
 
   @override
   void initState() {
@@ -114,10 +155,50 @@ class _FormSheetState extends State<_FormSheet> {
           );
       }
     }
+    _initialSnapshot = _snapshot();
+    widget.exitRelay?.attach(_leaveForRoute);
+  }
+
+  String _snapshot() => jsonEncode({
+    'text': {for (final entry in _controllers.entries) entry.key: entry.value.text},
+    'toggles': _toggles,
+    'selections': _selections,
+    'multi': {for (final entry in _multiSelections.entries) entry.key: (entry.value.toList()..sort())},
+  });
+
+  Future<bool> _canLeave() async {
+    if (_confirmingExit || _saving) return false;
+    if (!widget.readOnly && (_uncertain || _snapshot() != _initialSnapshot)) {
+      _confirmingExit = true;
+      try {
+        final arabic = Localizations.localeOf(context).languageCode == 'ar';
+        final discard = await confirmAction(context,
+          title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+          message: _uncertain
+              ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع القائمة قبل إنشاء سجل آخر.' : 'The operation may have completed. Close this form and review the list before creating another record.')
+              : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
+          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',destructive:true);
+        if (!discard || !mounted) return false;
+      } finally { _confirmingExit = false; }
+    }
+    return mounted;
+  }
+
+  Future<void> _close() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop();
+  }
+
+  /// A routed navigation or sign-out must also remove the dialog after the
+  /// user confirms. Otherwise it can remain on top of the destination page.
+  Future<bool> _leaveForRoute() async {
+    if (!await _canLeave() || !mounted) return false;
+    Navigator.of(context).pop();
+    return true;
   }
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_leaveForRoute);
     for (final controller in _controllers.values) {
       controller.dispose();
     }
@@ -149,22 +230,30 @@ class _FormSheetState extends State<_FormSheet> {
     final controller = _controllers[field.key]!;
     final now = DateTime.now();
     final initial = DateTime.tryParse(controller.text) ?? now;
+    final defaultFirst = DateTime(now.year - 5);
+    final defaultLast = DateTime(now.year + 5, 12, 31);
+    // Historical or future records must remain editable; showDatePicker
+    // asserts when its initial value lies outside the supplied range.
+    final first = initial.isBefore(defaultFirst) ? DateTime(initial.year) : defaultFirst;
+    final last = initial.isAfter(defaultLast) ? DateTime(initial.year, 12, 31) : defaultLast;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 5),
+      firstDate: first,
+      lastDate: last,
     );
-    if (picked != null) {
-      controller.text =
-          '${picked.year.toString().padLeft(4, '0')}-'
-          '${picked.month.toString().padLeft(2, '0')}-'
-          '${picked.day.toString().padLeft(2, '0')}';
+    if (picked != null && mounted) {
+      setState(() {
+        controller.text =
+            '${picked.year.toString().padLeft(4, '0')}-'
+            '${picked.month.toString().padLeft(2, '0')}-'
+            '${picked.day.toString().padLeft(2, '0')}';
+      });
     }
   }
 
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+  Future<void> _submit() async {
+    if (_saving || _uncertain || _confirmingExit || !(_formKey.currentState?.validate() ?? false)) return;
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
       switch (field.kind) {
@@ -180,45 +269,72 @@ class _FormSheetState extends State<_FormSheet> {
               .toList(growable: false);
         default:
           final text = _controllers[field.key]!.text.trim();
-          if (text.isNotEmpty) result[field.key] = text;
+          if (text.isNotEmpty) {
+            result[field.key] = text;
+          } else if (field.emptyValue != null) {
+            result[field.key] = field.emptyValue;
+          }
       }
     }
-    Navigator.of(context).pop(result);
+    if (widget.onSubmit == null) {
+      Navigator.of(context).pop(result);
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSubmit!(result);
+      if (mounted) Navigator.of(context).pop(result);
+    } catch (error) {
+      if (mounted && error is! FormSubmissionCancelled) {
+        if (error is UncertainFormSubmission) setState(() => _uncertain = true);
+        await showAppError(context, error is UncertainFormSubmission ? error.cause : error);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return AlertDialog(
+    return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
+      child:AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(top: AppSpacing.xs),
-          child: Form(
+          child: AbsorbPointer(absorbing:_saving || _uncertain,child:Form(
             key: _formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_uncertain)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: Text(Localizations.localeOf(context).languageCode == 'ar'
+                      ? 'قد تكون العملية قد اكتملت. راجع القائمة قبل إنشاء سجل آخر؛ لا يمكن إعادة الإرسال من هذا النموذج.'
+                      : 'The operation may have completed. Review the list before creating another record; this form cannot be resubmitted.'),
+                  ),
                 for (final field in widget.fields) _buildField(field),
               ],
             ),
-          ),
+          )),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _saving ? null : _close,
           child: Text(widget.readOnly ? l10n.close : l10n.cancel),
         ),
         if (!widget.readOnly)
           FilledButton(
-            onPressed: _submit,
+            onPressed: _saving || _uncertain ? null : _submit,
             child: Text(widget.submitLabel ?? l10n.save),
           ),
       ],
-    );
+    ));
   }
 
   Widget _buildField(FieldSpec field) {
@@ -252,7 +368,7 @@ class _FormSheetState extends State<_FormSheet> {
             ),
             items: [
               for (final option in field.options)
-                DropdownMenuItem(value: option.value, child: Text(option.label)),
+                DropdownMenuItem(value: option.value, enabled: option.enabled, child: Text(option.label)),
             ],
             validator: field.required
                 ? (value) => (value == null || value.isEmpty)
@@ -297,7 +413,8 @@ class _FormSheetState extends State<_FormSheet> {
                     selected:
                         _multiSelections[field.key]?.contains(option.value) ??
                         false,
-                    onSelected: widget.readOnly
+                    onSelected: widget.readOnly ||
+                            (!option.enabled && !(_multiSelections[field.key]?.contains(option.value) ?? false))
                         ? null
                         : (selected) => setState(() {
                             final chosen =
@@ -324,7 +441,13 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              suffixIcon: const Icon(Icons.calendar_today_outlined),
+              suffixIcon: field.clearable && !widget.readOnly && _controllers[field.key]!.text.isNotEmpty
+                  ? IconButton(
+                      tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'مسح التاريخ' : 'Clear date',
+                      onPressed: () => setState(() => _controllers[field.key]!.clear()),
+                      icon: const Icon(Icons.clear),
+                    )
+                  : const Icon(Icons.calendar_today_outlined),
             ),
             onTap: widget.readOnly ? null : () => _pickDate(field),
             validator: (value) => _validate(field, value),
@@ -336,6 +459,10 @@ class _FormSheetState extends State<_FormSheet> {
           child: TextFormField(
             controller: _controllers[field.key],
             readOnly: widget.readOnly,
+            obscureText: field.obscure,
+            enableSuggestions: !field.obscure,
+            autocorrect: !field.obscure,
+            enableIMEPersonalizedLearning: !field.obscure,
             maxLines: field.kind == FieldKind.multiline ? field.maxLines : 1,
             keyboardType: switch (field.kind) {
               FieldKind.decimal => const TextInputType.numberWithOptions(

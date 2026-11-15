@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -21,15 +21,23 @@ export class SalesInvoiceLineDto {
   @IsOptional() @IsString() @MaxLength(300) description?: string;
 
   /// Quantities and prices are strings so no binary floating-point rounding
-  /// happens before the value reaches the server.
+  /// happens before the value reaches the server. This is the quantity in the
+  /// CHOSEN unit (e.g. 1 carton); the server converts it to the base unit for
+  /// stock using the item's factor.
   @IsString() quantity!: string;
+
+  /// The unit the quantity is expressed in. Omit for legacy/base-unit lines.
+  /// Either the ItemUnit id or its label may be sent; the resolved factor and
+  /// label are frozen onto the document.
+  @IsOptional() @IsString() @MaxLength(40) unitName?: string;
+  @IsOptional() @IsUUID() unitId?: string;
 
   /// When omitted, the customer's price list (or the item's own price)
   /// decides, so the same list is not retyped on every invoice.
   @IsOptional() @IsString() unitPrice?: string;
 
-  /// Percent. When omitted the item's own rate is used.
-  @IsOptional() @IsString() taxRate?: string;
+  /// Percent. Omitted, null, blank and whitespace-only values mean zero.
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
 
   /// The department, administrative unit or project this revenue belongs to.
   /// Optional: an invoice that does not need cost analysis stays as it was.

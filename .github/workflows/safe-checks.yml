@@ -1,0 +1,307 @@
+name: Safe backend and Flutter checks (not release approval)
+
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-safe:
+    name: Backend focused non-signing tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate standard Prisma Client
+        run: npx prisma generate
+      - name: Verify startup database state classification
+        run: node scripts/check-database-state.mjs
+      - name: Validate schema and typecheck
+        run: |
+          npx prisma validate
+          npx tsc --noEmit
+      - name: Audit automatic workflow triggers
+        run: node ../scripts/ci-workflow-safety.test.cjs
+      - name: Check retained Windows preflight policy without running it
+        run: node --test ../scripts/windows-candidate-preflight.test.mjs
+      - name: Verify the build-only path can only build and inspect
+        run: node --test ../scripts/windows-build-only.test.mjs
+      - name: Verify complete removal cannot delete what it does not own
+        run: node --test ../scripts/remove-everything-safety.test.mjs
+      # A wrong Inno constant is a total build failure, and it cost a thirteen
+      # minute Windows build before anything local noticed. The compiler is the
+      # only real judge, but this catches the cheap spelling class it dislikes.
+      - name: Verify the installer [Code] only uses constants Inno defines
+        run: node ../scripts/inno-code-constants.test.cjs
+      # An unattended uninstall that waits on an invisible dialog does not fail,
+      # it hangs until the job budget ends and reports nothing useful.
+      - name: Verify the uninstall step waits with a deadline, not forever
+        run: node --test ../scripts/smoke-uninstall-timeout.test.cjs
+      # Complete removal must be exercised against a real install and must
+      # check every component, never fabricate one.
+      - name: Verify the Complete Uninstall exercise cannot fake a pass
+        run: node --test ../scripts/complete-uninstall-exercise.test.cjs
+      # Nine inventory routes asked the exit guard for permission to leave
+      # while nothing had registered a guard for them, and the guard answers
+      # "no" by default. To the operator the menu simply stopped responding.
+      # The shell now holds a permissive floor for such routes.
+      - name: Verify no guarded route is left unregistered
+        run: node ../scripts/navigation-guard.test.cjs
+      - name: Verify public-key transition inventory without signing
+        run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
+      - name: Verify release evidence requirements without signing
+        run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/release-evidence-requirements.test.mjs
+      - name: Test limited non-HMAC CI guard without creating key material
+        run: node --test ../scripts/ci-no-hmac-policy.test.mjs
+      - name: Check signing guard fails closed without creating a key
+        run: >-
+          node --require ../scripts/ci-no-hmac.cjs -e "const c=require('node:crypto');
+          for(const name of ['generateKeyPairSync','sign','createPrivateKey','createSecretKey','createHmac']) {
+          let blocked=false; try { c[name](); } catch(e) { blocked=e.message.includes('CI policy forbids'); }
+          if(!blocked) throw Error(name+' was not blocked'); }"
+      - name: Run reviewed non-signing backend and authorization tests
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-hmac.cjs
+        run: >-
+          npm test -- --runInBand
+          src/common/maintenance/maintenance.spec.ts
+          src/modules/health/health.controller.spec.ts
+          src/common/audit/audit.service.spec.ts
+          src/common/filters/problem-details.filter.spec.ts
+          src/common/settings/company-settings-atomic.spec.ts
+          src/modules/auth/profile-photo.service.spec.ts
+          src/modules/auth/profile-photo.controller.spec.ts
+          src/modules/admin/permissions.catalogue.spec.ts
+          src/modules/admin/role-permission-concurrency.spec.ts
+          src/modules/admin/user-grant-concurrency.spec.ts
+          src/modules/accounting/account-update-contract.spec.ts
+          src/modules/accounting/chart-of-accounts.service.spec.ts
+          src/modules/accounting/journal-transition-safety.spec.ts
+          src/modules/import/import.service.spec.ts
+          src/modules/import/import.controller.spec.ts
+          src/modules/import/item-tax-import.spec.ts
+          src/modules/reports/trial-balance-groups.spec.ts
+          src/modules/accounting/year-end-close.service.spec.ts
+          src/modules/accounting/fiscal-periods-safety.spec.ts
+          src/modules/accounting/cost-center-dates.spec.ts
+          src/modules/accounting/budgets.service.spec.ts
+          src/modules/inventory/stock-document-response-permissions.spec.ts
+          src/modules/inventory/stock-voucher-permissions.spec.ts
+          src/modules/inventory/unit-barcode-permissions.spec.ts
+          src/modules/inventory/stock-voucher-edit.spec.ts
+          src/modules/inventory/stock-voucher-search.spec.ts
+          src/modules/inventory/item-tax-blank.spec.ts
+          src/modules/inventory/item-tax-http.spec.ts
+          src/modules/export/stock-voucher-export.spec.ts
+          src/modules/export/documents.service.spec.ts
+          src/modules/inventory/cost-redaction.spec.ts
+          src/modules/sales/cost-redaction.spec.ts
+          src/modules/inventory/stock-documents.warehouse-guard.spec.ts
+          src/modules/inventory/stock-documents.units.spec.ts
+          src/modules/inventory/original-stock-movement.spec.ts
+          src/modules/backup/backup.service.spec.ts
+          src/modules/backup/full-backup.service.spec.ts
+          src/modules/backup/full-backup-http-safety.spec.ts
+          src/modules/backup/full-backup-recovery-safety.spec.ts
+          src/modules/backup/backup-schedule-safety.spec.ts
+          src/modules/backup/pg-backup-connection.spec.ts
+          src/modules/sales/order-draft-edit-permissions.spec.ts
+          src/modules/sales/sales-orders.pricing-tax.spec.ts
+          src/modules/purchases/purchase-orders.units.spec.ts
+          src/common/units/unit-math.spec.ts
+          src/common/units/order-draft-edit.spec.ts
+          src/common/units/order-amendment-allocation.spec.ts
+          src/common/units/order-creation-identity.spec.ts
+          src/common/units/order-conversion-selection.spec.ts
+          src/common/units/order-conversion-unit.spec.ts
+          src/common/units/order-conversion-identity.spec.ts
+          src/common/units/order-reallocation.spec.ts
+          src/modules/sales/quotations.columns.spec.ts
+          src/modules/sales/quotations.conversion-atomic.spec.ts
+          src/modules/sales/quotations.removal-safety.spec.ts
+          src/modules/sales/quotations.issue-safety.spec.ts
+          src/modules/sales/quotations.expiry-safety.spec.ts
+          src/modules/sales/sales-invoices.units.spec.ts
+          src/modules/sales/sales-invoices.service.spec.ts
+          src/modules/sales/sales-invoices.update.spec.ts
+          src/modules/purchases/order-allocation-permissions.spec.ts
+          src/modules/purchases/purchase-invoices.units.spec.ts
+          src/modules/purchases/purchase-invoices.service.spec.ts
+          src/modules/licensing/license.guard.spec.ts
+          src/modules/licensing/license-status-safety.spec.ts
+          src/modules/licensing/license-keyring.spec.ts
+          src/common/guards/super-admin.guard.spec.ts
+          src/modules/company/setup.service.spec.ts
+          src/modules/company/setup-safety.spec.ts
+          src/modules/company/company-profile.guard.spec.ts
+          src/modules/company/company.service.spec.ts
+          src/modules/company/company-audit-atomic.spec.ts
+
+  prisma-upgrade:
+    name: Native Prisma and PostgreSQL 16 upgrade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?schema=public
+      KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate production Prisma client for the isolated stock fixture
+        run: npx prisma generate
+      - name: Install Flutter for the real HTTP and PostgreSQL widget fixture
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Resolve Flutter integration dependencies from lockfile
+        working-directory: .
+        run: flutter pub get --enforce-lockfile
+      - name: Verify populated upgrade and stock posting on isolated PostgreSQL
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+          KAYAN_RUN_FLUTTER_PG_TESTS: 'true'
+        run: python ../scripts/ci-diagnose.py node scripts/verify-prisma-native-upgrade.mjs
+      - name: Verify archive content and scratch cleanup against isolated PostgreSQL
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        run: python ../scripts/ci-diagnose.py node scripts/verify-restore-scratch-cleanup.cjs
+
+  flutter:
+    name: Flutter analyze and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: python scripts/ci-diagnose.py flutter analyze --no-pub
+      - name: Run Flutter tests and report failures
+        shell: bash
+        run: |
+          status=0
+          flutter test --no-pub --reporter json > "$RUNNER_TEMP/flutter-tests.json" || status=$?
+          node scripts/report-flutter-test-counts.mjs "$RUNNER_TEMP/flutter-tests.json"
+          if [ "$status" -ne 0 ]; then
+            node scripts/report-flutter-test-failures.mjs "$RUNNER_TEMP/flutter-tests.json"
+            exit "$status"
+          fi
+      - run: flutter build web --release --no-pub
+
+  screenshot-diagnostic:
+    name: Synthetic screenshot preview (not golden approval)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Install locked preview encoder without lifecycle scripts
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: flutter pub get --enforce-lockfile
+      # Render independently for visual review; the regular test job must
+      # still compare against independently reviewed, committed baselines.
+      - run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs customers_ar.png
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs sales_invoices_ar.png
+
+  screenshot-lossless-diagnostic:
+    name: Full-resolution synthetic review (${{ matrix.screen }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        screen: [dashboard_ar.png, customers_ar.png, sales_invoices_ar.png]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Install locked lossless encoder without lifecycle scripts
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: flutter pub get --enforce-lockfile
+      # A separate workspace produces synthetic pixels for human review only.
+      # This does not change, create, or approve the committed test goldens.
+      - run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 0
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 1
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 2
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 3
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 4
+      - name: Upload rendered screenshot for human review (not golden approval)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: screenshot-review-${{ matrix.screen }}-${{ github.sha }}
+          path: test/screenshots/goldens/${{ matrix.screen }}
+          if-no-files-found: error
+          retention-days: 3

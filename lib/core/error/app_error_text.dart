@@ -86,12 +86,22 @@ class AppErrorMessageResolver {
     // has no HTTP status at all, and must still be explained as "the server
     // could not be reached" rather than "an unexpected error".
     if (error is Failure) {
+      if (error is ApiFailure && error.statusCode == 403 && error.code == 'LICENSE_STATE_ID_MISMATCH') {
+        return AppErrorText(
+          reason: AppErrorReason.conflict,
+          severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+              ? 'حالة الترخيص المحمية لا تطابق سجل قاعدة البيانات. احتفظ بالبيانات وتواصل مع الدعم للتحقق من النقل أو الاستعادة.'
+              : 'The protected licence state does not match the database. Preserve the data and contact support for an authorised recovery or transfer.',
+        );
+      }
       final preferred = _reasonOf(error);
       final code = _statusOf(error) ?? statusCode;
       final text = _resolveText(
         error.message,
         statusCode: code,
         preferred: preferred,
+        untrusted: error is! ValidationFailure,
       );
       final reason = text.reason;
       return AppErrorText(
@@ -101,7 +111,9 @@ class AppErrorMessageResolver {
       );
     }
 
-    if (error is String) return _resolveText(error, statusCode: statusCode);
+    if (error is String) {
+      return _resolveText(error, statusCode: statusCode, untrusted: statusCode != null);
+    }
 
     // Anything else (FormatException, TypeError, ...) is by definition not
     // written for a person.
@@ -146,7 +158,10 @@ class AppErrorMessageResolver {
     String raw, {
     int? statusCode,
     AppErrorReason? preferred,
+    bool untrusted = false,
   }) {
+    // Do not feed unbounded remote diagnostic blobs into UI or regex rules.
+    if (raw.length > 1024) return _fallback(statusCode: statusCode, preferred: preferred);
     var text = _clean(raw);
 
     // "ServerFailure: no such record" -> "no such record".
@@ -157,9 +172,21 @@ class AppErrorMessageResolver {
       return _fallback(statusCode: statusCode, preferred: preferred);
     }
 
-    // Something already written in Arabic is a business message by
-    // definition; keep it verbatim.
+    // Never relay the body of a server failure, even when it is written in
+    // Arabic: arbitrary diagnostics or customer data can appear in a 5xx.
+    if (statusCode != null && statusCode >= 500) {
+      return _fallback(statusCode: statusCode, preferred: preferred);
+    }
+
+    // Arabic in a server or exception message is not proof that the rest of
+    // the message is safe: it can also contain a stack trace, SQL, a URL or a
+    // credential assignment. Filter those before preserving a business reason.
     if (_containsArabic(text)) {
+      // Local validation may be Arabic already, but a server response must
+      // not become trusted just because it contains Arabic characters.
+      if (untrusted || _looksTechnical(text)) {
+        return _fallback(statusCode: statusCode, preferred: preferred);
+      }
       final reason = _reasonFor(statusCode, preferred);
       return AppErrorText(
         reason: reason,
@@ -211,7 +238,8 @@ class AppErrorMessageResolver {
     //    written; in Arabic it is not, because an English sentence is no
     //    more readable than a generic Arabic one and it may still be a
     //    technical detail we did not recognise.
-    if (!isArabic && _looksLikeSentence(body)) {
+    if (!isArabic && _looksLikeSentence(body) &&
+        (!untrusted || _exactArLower.containsKey(body.toLowerCase()))) {
       final reason = _reasonFor(statusCode, preferred);
       return AppErrorText(
         reason: reason,
@@ -242,6 +270,7 @@ class AppErrorMessageResolver {
       : AppErrorSeverity.error;
 
   static AppErrorReason _reasonForStatus(int? status) {
+    if (status != null && status >= 500) return AppErrorReason.server;
     switch (status) {
       case 400:
       case 422:
@@ -254,11 +283,6 @@ class AppErrorMessageResolver {
         return AppErrorReason.notFound;
       case 409:
         return AppErrorReason.conflict;
-      case 500:
-      case 502:
-      case 503:
-      case 504:
-        return AppErrorReason.server;
       default:
         return AppErrorReason.unknown;
     }
@@ -297,6 +321,10 @@ class AppErrorMessageResolver {
     RegExp(r'\b(json|base64|hex digest|sha-256|encoding)\b', caseSensitive: false),
     RegExp(r'column "|table "|row \d', caseSensitive: false),
     RegExp(r'no such (column|table)', caseSensitive: false),
+    RegExp(r'\b(?:postgres(?:ql)?|https?)://', caseSensitive: false),
+    RegExp(r'\b(?:password|passwd|token|secret|authorization|api[_-]?key)\s*[:=]', caseSensitive: false),
+    RegExp(r'\bbearer\s+\S+', caseSensitive: false),
+    RegExp(r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----', caseSensitive: false),
   ];
 
   static bool _looksTechnical(String text) =>
@@ -365,7 +393,21 @@ class AppErrorMessageResolver {
     'The cost center does not exist': 'مركز التكلفة غير موجود.',
     'The parent cost center does not exist': 'مركز التكلفة الأب غير موجود.',
     'A closed period cannot be changed': 'لا يمكن التعديل في فترة محاسبية مغلقة.',
+    'Role permissions changed since they were loaded. Refresh and review them before saving.':
+        'تغيّرت صلاحيات الدور منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
+    'User roles changed since they were loaded. Refresh and review them before saving.':
+        'تغيّرت أدوار المستخدم منذ فتحها؛ حدّث القائمة وراجع الأدوار قبل الحفظ.',
+    'The account parent changed since it was loaded. Refresh and review it before saving.':
+        'تغيّر الحساب الأب منذ فتح النموذج؛ حدّث الدليل وراجع التعديل قبل الحفظ.',
+    'An account or its subaccounts have journal movements; moving them would change historical reports.':
+        'لا يمكن نقل الحساب أو فصله لوجود قيود عليه أو على حساباته الفرعية؛ حفاظًا على التقارير التاريخية.',
+    'User permissions changed since they were loaded. Refresh and review them before saving.':
+        'تغيّرت صلاحيات المستخدم منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
+    'The changed dates contain posted history; the fiscal period boundaries cannot be changed.':
+        'تتضمن التواريخ المتغيرة حركات مُرحّلة؛ لا يمكن تعديل حدود الفترة حفاظًا على التاريخ.',
     'This period is already closed': 'هذه الفترة مغلقة بالفعل.',
+    'This fiscal period overlaps another period; correct the ranges before closing.':
+        'تتداخل هذه الفترة مع فترة أخرى. صحّح التواريخ قبل الإقفال.',
     'A period with that code already exists': 'توجد فترة محاسبية بهذا الكود بالفعل.',
     'Fiscal period not found': 'لم يتم العثور على الفترة المحاسبية.',
     'The end date must be after the start date': 'يجب أن يكون تاريخ النهاية بعد تاريخ البداية.',
@@ -424,10 +466,13 @@ class AppErrorMessageResolver {
     'Sales order not found': 'لم يتم العثور على أمر البيع.',
     'Purchase order not found': 'لم يتم العثور على أمر الشراء.',
     'Only a draft quotation can be edited': 'لا يمكن تعديل عرض السعر إلا وهو مسودة.',
+    'Only a draft quotation can be deleted': 'لم يُحذف عرض السعر لأنه لم يعد مسودة. حدّث البيانات وحاول مرة أخرى.',
     'Only a draft quotation can be issued': 'لا يمكن إصدار عرض السعر إلا وهو مسودة.',
     'A converted quotation can no longer change status': 'عرض السعر المحوّل إلى فاتورة لا يمكنه تغيير حالته.',
     'This quotation has already been converted to an invoice': 'تم تحويل عرض السعر إلى فاتورة بالفعل.',
     'This quotation has no lines to convert': 'عرض السعر لا يحتوي على سطور لتحويلها.',
+    'Invoice totals differ from the accepted quotation; review tax and discounts before conversion':
+        'إجماليات الفاتورة لا تطابق عرض السعر المقبول. راجع الضريبة والخصومات قبل التحويل؛ لم تُنشأ فاتورة.',
     'This quotation changed while the decision was being saved':
         'تم تعديل عرض السعر أثناء حفظ القرار. أعد تحميل الصفحة وحاول مرة أخرى.',
     'This quotation was converted by someone else a moment ago':
@@ -584,36 +629,38 @@ class AppErrorMessageResolver {
 
   /// Messages with a variable inside them.
   static final List<_BusinessRule> _patterns = <_BusinessRule>[
+    _BusinessRule(_ci(r'^Nothing to depreciate for (\d{4}-\d{2})\s+[—-]\s+.*already depreciated for \1(?:;.*)?$'),
+        (m) => 'لا توجد أصول مؤهلة للإهلاك في ${m.group(1)}؛ سبق احتساب إهلاك أصل واحد على الأقل لهذه الفترة.'),
     _BusinessRule(_ci(r'^Account (\S+) is inactive$'), (m) =>
-        'الحساب ${m.group(1)} غير نشط.'),
+        'الحساب${_codeSuffix(m.group(1))} غير نشط.'),
     _BusinessRule(_ci(r'^Account (\S+) cannot receive postings$'), (m) =>
-        'الحساب ${m.group(1)} لا يمكن الترحيل عليه.'),
+        'الحساب${_codeSuffix(m.group(1))} لا يمكن الترحيل عليه.'),
     _BusinessRule(_ci(r'^Account (\S+) is a grouping account$'), (m) =>
-        'الحساب ${m.group(1)} حساب تجميعي ولا يمكن الترحيل عليه.'),
+        'الحساب${_codeSuffix(m.group(1))} حساب تجميعي ولا يمكن الترحيل عليه.'),
     _BusinessRule(_ci(r'^Account (\S+) does not exist$'), (m) =>
-        'الحساب ${m.group(1)} غير موجود.'),
+        'الحساب${_codeSuffix(m.group(1))} غير موجود.'),
     _BusinessRule(_ci(r'^Account (\S+) is (?:already )?used'),
-        (m) => 'الحساب ${m.group(1)} مستخدم بالفعل.'),
+        (m) => 'الحساب${_codeSuffix(m.group(1))} مستخدم بالفعل.'),
     _BusinessRule(_ci(r'^Account (\S+) cannot be deleted'), (m) =>
-        'لا يمكن حذف الحساب ${m.group(1)}.'),
+        'لا يمكن حذف الحساب${_codeSuffix(m.group(1))}.'),
     _BusinessRule(_ci(r'^(.+) code (\S+) is already used$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : 'كود $noun رقم ${m.group(2)} مستخدم بالفعل.';
+      return noun == null ? null : 'كود $noun${_codeSuffix(m.group(2))} مستخدم بالفعل.';
     }),
     _BusinessRule(_ci(r'^The code "(\S+)" is already used by another account in this company$'),
-        (m) => 'الكود ${m.group(1)} مستخدم بالفعل في حساب آخر بهذه الشركة.'),
+        (m) => 'الكود${_codeSuffix(m.group(1))} مستخدم بالفعل في حساب آخر بهذه الشركة.'),
     _BusinessRule(_ci(r'^Cash account code (\S+) is already used$'), (m) =>
-        'كود الحساب النقدي رقم ${m.group(1)} مستخدم بالفعل.'),
+        'كود الحساب النقدي${_codeSuffix(m.group(1))} مستخدم بالفعل.'),
     _BusinessRule(_ci(r'^(.+) code (\S+) does not exist$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : '$noun رقم ${m.group(2)} غير موجود.';
+      return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير موجود.';
     }),
     _BusinessRule(_ci(r'^(.+?) (\S+) is inactive$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : '$noun ${m.group(2)} غير نشط.';
+      return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير نشط.';
     }),
-    _BusinessRule(_ci(r'^Missing permission: (.+)$'), (m) =>
-        'ليس لديك صلاحية «${m.group(1)}». راجع مسؤول النظام.'),
+    _BusinessRule(_ci(r'^Missing permission: (.+)$'), (_) =>
+        'ليس لديك الصلاحية المطلوبة. راجع مسؤول النظام.'),
     _BusinessRule(_ci(r'^(The )?(\w+) does not exist$'), (m) {
       final noun = m.group(2) ?? '';
       final translated = _nounsAr[noun.toLowerCase()];
@@ -687,8 +734,8 @@ class AppErrorMessageResolver {
       final noun = _nounOrNull(m.group(1));
       return noun == null ? null : 'لا يمكن اعتماد $noun إلا وهو مسودة.';
     }),
-    _BusinessRule(_ci(r'^(?:Line \\d+: )?item (\\S+) is not stock-tracked$'), (m) =>
-        'الصنف ${m.group(1)} غير متتبع في المخزون.'),
+    _BusinessRule(_ci(r'^item (\S+) is not stock-tracked$'), (m) =>
+        'الصنف${_codeSuffix(m.group(1))} غير متتبع في المخزون.'),
 
     // ---- the same sentences the import, returns and validation paths write --
     // A date is a date: these arrive from the DTO when a date field is typed
@@ -767,7 +814,7 @@ class AppErrorMessageResolver {
     // Quotation editor and cash documents.
     _BusinessRule(_ci(r'^Quotation: (?:the )?(\w+) (does not exist|is inactive)$'),
         (m) {
-      final noun = _nounsAr[m.group(1)!.toLowerCase()] ?? m.group(1);
+      final noun = _nounsAr[m.group(1)!.toLowerCase()] ?? 'البيانات';
       return m.group(2)!.toLowerCase() == 'is inactive'
           ? 'العرض: $noun غير نشط.'
           : 'العرض: $noun غير موجود.';
@@ -785,7 +832,7 @@ class AppErrorMessageResolver {
         'is inactive': 'غير نشط',
         'is required': 'مطلوب',
       };
-      return 'الحساب النقدي ${m.group(1)} ${reasons[what] ?? 'غير صالح'}.';
+      return 'الحساب النقدي ${reasons[what] ?? 'غير صالح'}.';
     }),
     _BusinessRule(
         _ci(r'^This company has no active branch to post the closing entry to$'),
@@ -802,8 +849,8 @@ class AppErrorMessageResolver {
         'ملف النسخة الاحتياطية لا يحتوي على جداول. تأكد أنه ملف نسخة صحيح.'),
     _BusinessRule(_ci(r'^That file is outside the backup folder\.?$'), (_) =>
         'هذا الملف خارج مجلد النسخ الاحتياطية، ولا يمكن قراءته.'),
-    _BusinessRule(_ci(r'^No backup file named "(.+)" on this server\.?$'), (m) =>
-        'لا توجد نسخة احتياطية باسم «${m.group(1)}» على الخادم.'),
+    _BusinessRule(_ci(r'^No backup file named "(.+)" on this server\.?$'), (_) =>
+        'لم يتم العثور على ملف النسخة الاحتياطية على الخادم.'),
   ];
 
   /// A pattern that ignores capitalisation: the API writes "The item does
@@ -815,9 +862,16 @@ class AppErrorMessageResolver {
   static String? _nounOrNull(String? raw) =>
       _nounsAr[(raw ?? '').trim().toLowerCase()];
 
+  // Only short numeric codes are safe to echo from server-side patterns;
+  // arbitrary tokens and file paths can contain credentials or customer data.
+  static String _codeSuffix(String? raw) {
+    final code = raw ?? '';
+    return RegExp(r'^\d{1,12}$').hasMatch(code) ? ' $code' : '';
+  }
+
   static String _fieldAr(String? raw) {
     final key = (raw ?? '').trim().toLowerCase();
-    return _fieldsAr[key] ?? (raw ?? '').trim();
+    return _fieldsAr[key] ?? 'الحقل';
   }
 
   static const _nounsAr = <String, String>{

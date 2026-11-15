@@ -36,6 +36,24 @@ describe('MaintenanceInterceptor', () => {
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['/api/v1/invoices', '/reports', '/api/v1/backup/full/unsafe', '/healthcare'])('blocks business GET %s during maintenance', (path) => {
+    const maintenance = new MaintenanceService();
+    maintenance.begin('Restoring database');
+    const interceptor = new MaintenanceInterceptor(maintenance);
+    const next = { handle: jest.fn(() => of('ok')) };
+    expect(() => interceptor.intercept(context('GET', path), next as any)).toThrow(ServiceUnavailableException);
+    expect(next.handle).not.toHaveBeenCalled();
+  });
+
+  it.each(['/api/v1/health', '/backup/full', '/api/v1/backup/full/synthetic.dump/download'])('allows safe diagnostic or backup file GET %s', (path) => {
+    const maintenance = new MaintenanceService();
+    maintenance.begin('Restoring database');
+    const interceptor = new MaintenanceInterceptor(maintenance);
+    const next = { handle: jest.fn(() => of('ok')) };
+    interceptor.intercept(context('GET', path), next as any);
+    expect(next.handle).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps GET status requests available while maintenance is active', () => {
     const maintenance = new MaintenanceService();
     maintenance.begin('Restoring database');

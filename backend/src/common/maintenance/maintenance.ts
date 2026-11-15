@@ -10,15 +10,13 @@ import { Observable } from 'rxjs';
 /**
  * The maintenance switch.
  *
- * A full restore replaces the database under the program's feet. While it
- * runs, every request that would write — anything but a read, a sign-in, or a
- * backup operation itself — is turned away with a clear message instead of
- * being let loose on a database that is mid-replacement.
+ * A full restore replaces the database under the program's feet. This local
+ * switch rejects business requests while data may be incomplete; only
+ * diagnostics and access to already-created backup files remain available.
  *
- * The flag lives in memory of the process doing the restore. That is exactly
- * where it belongs for the supported single-server deployment. The in-flight
- * restore request is already admitted before maintenance starts; while it runs,
- * new write requests (including new backup/restore operations) are blocked.
+ * IMPORTANT: this switch is process-local and does not drain in-flight work,
+ * coordinate other backend processes or survive a restart. It is not by itself
+ * a production-safe restore protocol.
  */
 @Injectable()
 export class MaintenanceService {
@@ -52,9 +50,9 @@ export class MaintenanceService {
 }
 
 /**
- * Blocks writes while maintenance is on. Reads keep working so the screens
- * can still show the state of the system — people can see what is happening,
- * they simply cannot change anything mid-restore.
+ * Blocks business reads and writes while maintenance is on. Reporting an
+ * incomplete database as real books is unsafe even when no row is changed.
+ * A narrow set of diagnostics and pre-existing backup file reads remains.
  */
 @Injectable()
 export class MaintenanceInterceptor implements NestInterceptor {
@@ -68,17 +66,21 @@ export class MaintenanceInterceptor implements NestInterceptor {
       path: string;
     }>();
     const method = request.method.toUpperCase();
-    const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
-
+    const path = request.path.replace(/^\/api\/v1(?=\/|$)/, '').replace(/\/+$/, '') || '/';
+    const isRead = method === 'GET' || method === 'HEAD';
+    const safeDiagnostic = path === '/health' || path.startsWith('/health/');
+    const safeBackup = path === '/backup/full' ||
+      path === '/backup/full/status' || path === '/backup/full/capabilities' ||
+      /^\/backup\/full\/[^/]+\/download\/?$/.test(path);
     // The in-flight restore continues in its already-admitted request.
-    // Only the full-restore endpoint may start a recovery attempt while
-    // maintenance is active; FullBackupService serializes those requests.
+    // Any fresh attempt still goes through the service's own concurrency and
+    // maintenance checks; admission here is not permission to mutate data.
     const isRestoreRequest =
-      method === 'POST' && /\/backup\/full\/restore\/?$/.test(request.path);
-    if (isRead || isRestoreRequest) return next.handle();
+      method === 'POST' && path === '/backup/full/restore';
+    if ((isRead && (safeDiagnostic || safeBackup)) || isRestoreRequest) return next.handle();
 
     throw new ServiceUnavailableException(
-      'The database is in maintenance mode. Write operations are blocked; ' +
+      'The database is in maintenance mode. Business reads and writes are blocked; ' +
         'check the restore status before trying again.',
     );
   }

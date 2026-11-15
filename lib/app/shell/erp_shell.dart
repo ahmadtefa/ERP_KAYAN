@@ -4,9 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/auth/presentation/widgets/user_photo.dart';
+import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
+import '../../shared/widgets/app_error_dialog.dart';
+import '../router/draft_exit_guard.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -56,6 +60,50 @@ class _NavItem {
 /// "Accounting" heading.
 enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
 
+/// Which section is open. Exactly one, or none - the menu is an accordion, not
+/// a tree that happens to have headings. Opening a section closes the previous
+/// one, and nothing is open on first paint, so the operator sees the eight
+/// groups and nothing else until they choose one.
+@immutable
+class _NavOpenSection {
+  const _NavOpenSection(this.open);
+  final _NavGroup? open;
+
+  // Riverpod compares with ==, and a fresh instance holding the same section
+  // must not rebuild the whole menu (or fail to rebuild when it changes).
+  @override
+  bool operator ==(Object other) =>
+      other is _NavOpenSection && other.open == open;
+
+  @override
+  int get hashCode => open.hashCode;
+
+  /// Asked by the sidebar and the drawer, which receive this value rather than
+  /// the notifier. It lived on the notifier first, where nothing could call it:
+  /// the widgets hold the state, not the controller.
+  bool isOpen(_NavGroup group) => open == group;
+}
+
+class _CollapsedNav extends Notifier<_NavOpenSection> {
+  @override
+  _NavOpenSection build() => const _NavOpenSection(null);
+
+  void toggle(_NavGroup group) {
+    // Tapping the open section closes it; tapping another moves the open
+    // section rather than adding to it.
+    state = _NavOpenSection(state.open == group ? null : group);
+  }
+
+  /// Opens the section that owns an entry, used when the current route is
+  /// restored on start or reached from a deep link. Without it the menu would
+  /// show a selected screen inside a closed section.
+  void revealOf(_NavGroup group) {
+    if (state.open != group) state = _NavOpenSection(group);
+  }
+
+}
+final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_CollapsedNav.new);
+
 /// Each section owns one colour (see [SectionAccents]): the selected entry
 /// is recognisable by its text, icon tile, background and edge indicator
 /// all switching to it, and the top bar repeats it — so where you are is
@@ -81,10 +129,12 @@ SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
 /// The navigation model itself changes with the available width; this is not
 /// a phone layout stretched across a monitor.
 class ErpShell extends ConsumerStatefulWidget {
-  const ErpShell({super.key, required this.currentPath, required this.child});
+  const ErpShell({super.key, required this.currentPath, required this.child, this.guardKey});
 
   final String currentPath;
   final Widget child;
+  /// Key for the current route when it registers a draft exit guard.
+  final ValueKey<String>? guardKey;
 
   static const _wideBreakpoint = 900.0;
   static const _extendedBreakpoint = 1280.0;
@@ -95,9 +145,143 @@ class ErpShell extends ConsumerStatefulWidget {
 
 class _ErpShellState extends ConsumerState<ErpShell> {
   final ScrollController _navScrollController = ScrollController();
+  final GlobalKey _selectedNavKey = GlobalKey();
+
+  /// Answers "may I leave this guard?" on behalf of screens that hold no
+  /// page-level draft.
+  ///
+  /// `DraftExitGuard.canLeave` answers false for a key nobody registered, which
+  /// is the right default: a missing registration is not evidence that a draft
+  /// is clean. But nine inventory screens are listed in `_guardedShellPaths`
+  /// and never register, so their answer was always "no" and go_router refused
+  /// to leave the route. Nothing was thrown and nothing was drawn - the menu
+  /// simply did not respond, which is the freeze the operator reported.
+  ///
+  /// The shell sits above every screen and already knows the route's
+  /// [ErpShell.guardKey], so it can hold the floor: register a guard that
+  /// permits leaving unless the screen itself registered a stricter one. The
+  /// screens that do own drafts keep their own guard, because `register` for
+  /// the same key replaces this one. Replacing is not stacking, so when such a
+  /// screen later removes its guard the floor is *not* restored - [build] has
+  /// to claim it again, or the restrictive default returns while the shell is
+  /// still on screen.
+  late Future<bool> Function() _permissiveExit;
+
+  /// Captured in initState: `ref` may no longer be usable while this state is
+  /// being disposed, and leaving a key registered is worse than a lookup.
+  late DraftExitGuard _guard;
+
+  /// The exact key this shell registered, so it can only ever release its own.
+  ValueKey<String>? _heldKey;
+
+  bool _floorCheckScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _permissiveExit = () async => true;
+    _guard = ref.read(draftExitGuardProvider);
+    _claimGuardFloor();
+    _openSectionOfCurrentRoute();
+  }
+
+  /// Registers the permissive guard for the route's key. A parent's
+  /// `initState` runs before its child's, so this floor is claimed first and a
+  /// screen that owns a draft registers afterwards for the same key, replacing
+  /// it - a real draft guard always outranks this one.
+  void _claimGuardFloor() {
+    final key = widget.guardKey;
+    // Ask the map, not `_heldKey`: a screen may have replaced the floor since it
+    // was last claimed, and `_heldKey` would then be stale while the map holds
+    // somebody else's callback. Registering over that would disarm a real draft
+    // guard, so the map is the only safe question.
+    if (key == null || _guard.has(key)) return;
+    _guard.register(key, _permissiveExit);
+    _heldKey = key;
+  }
+
+  @override
+  void didUpdateWidget(covariant ErpShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.guardKey != widget.guardKey) {
+      // Release the key we actually hold. `widget` is already the new widget
+      // here, so reading `widget.guardKey` would leave the old key registered
+      // and open for the rest of the session.
+      _releaseGuardFloor();
+      _claimGuardFloor();
+    }
+    if (oldWidget.currentPath != widget.currentPath) {
+      _openSectionOfCurrentRoute();
+    }
+  }
+
+  void _releaseGuardFloor() {
+    final key = _heldKey;
+    if (key == null) return;
+    _guard.unregister(key, _permissiveExit);
+    _heldKey = null;
+  }
+
+  /// Re-establishes the floor if the key is free.
+  ///
+  /// A draft screen replaces the floor with its own guard and removes it again
+  /// when it closes. The map holds one callback per key, so that removal does
+  /// not restore the floor - the key would simply be gone, and the restrictive
+  /// default would take over while the shell is still on screen. That is the
+  /// original freeze, arriving late. Called from `build`, which runs whenever a
+  /// child removes its guard, so the floor is re-claimed exactly when needed.
+  void _scheduleGuardFloor() {
+    if (widget.guardKey == null || _floorCheckScheduled) return;
+    _floorCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _floorCheckScheduled = false;
+      if (!mounted) return;
+      final key = widget.guardKey;
+      if (key == null) return;
+      if (!_guard.has(key)) _claimGuardFloor();
+    });
+  }
+
+  /// The section that owns the current screen must be the open one. The menu
+  /// starts with everything closed, so without this a restored route or a deep
+  /// link would show a highlighted entry that the operator cannot see.
+  void _openSectionOfCurrentRoute() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final item in _navigationItems(context)) {
+        if (item.path == widget.currentPath ||
+            widget.currentPath.startsWith('${item.path}/')) {
+          ref.read(_collapsedNavProvider.notifier).revealOf(item.group);
+          // Opening the section schedules a rebuild; the selected entry only
+          // exists in the tree after that, so the scroll has to wait for it.
+          // Calling it in initState alongside the reveal would find nothing.
+          _revealSelection();
+          return;
+        }
+      }
+    });
+  }
+
+  void _revealSelection() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final target = _selectedNavKey.currentContext;
+      if (target == null) return; // A narrow viewport uses a drawer instead.
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+      if (!mounted || !target.mounted || _selectedNavKey.currentContext != target) return;
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      );
+    });
+  }
 
   @override
   void dispose() {
+    _releaseGuardFloor();
     _navScrollController.dispose();
     super.dispose();
   }
@@ -108,7 +292,16 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final isWide = width >= ErpShell._wideBreakpoint;
     final isExtended = width >= ErpShell._extendedBreakpoint;
     final items = _navigationItems(context);
+    final collapsed = ref.watch(_collapsedNavProvider);
+    void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
     final selectedIndex = _selectedIndex(items);
+
+    // A draft screen that closes removes its guard, and the map keeps one
+    // callback per key, so the floor does not come back on its own. Re-claim it
+    // after this frame if the key is free, otherwise the restrictive default
+    // would take over while this shell is still on screen - the original freeze
+    // arriving late.
+    _scheduleGuardFloor();
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -117,6 +310,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           : _ModuleDrawer(
               items: items,
               current: widget.currentPath,
+              collapsed:collapsed,
+              onToggle:toggleGroup,
             ),
       body: SafeArea(
         bottom: false,
@@ -125,9 +320,12 @@ class _ErpShellState extends ConsumerState<ErpShell> {
             if (isWide)
               _Sidebar(
                 items: items,
-                current: widget.currentPath,
+                selectedPath: items[selectedIndex].path,
+                selectedKey: _selectedNavKey,
                 extended: isExtended,
                 scrollController: _navScrollController,
+                collapsed:collapsed,
+                onToggle:toggleGroup,
               ),
             Expanded(
               child: Column(
@@ -140,8 +338,14 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     ),
                     isWide: isWide,
                     isExtended: isExtended,
+                    guardKey: widget.guardKey,
                   ),
-                  Expanded(child: widget.child),
+                  Expanded(
+                    child: LicenceGate(
+                      currentPath: widget.currentPath,
+                      child: widget.child,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -278,6 +482,127 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
+      // The twenty reports the inventory module can answer, read from the
+      // server's own catalogue so the two lists cannot drift apart.
+      _NavItem(
+        AppRoutes.inventoryReports,
+        Icons.insights_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'تقارير المخزون'
+            : 'Inventory reports',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Everything that is not a voucher. The voucher list is its own screen
+      // and is left exactly as it is.
+      _NavItem(
+        AppRoutes.stockDocuments,
+        Icons.description_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'مستندات المخزون'
+            : 'Stock documents',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Where the stock above is actually kept. Reading the list needs the
+      // warehouses grant, which is a different question from reading stock.
+      _NavItem(
+        AppRoutes.warehouses,
+        Icons.warehouse_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'المستودعات'
+            : 'Warehouses',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // The reorder numbers behind the reorder report. Reading them is the
+      // warehouse grant, which is what the backend checks on this route -
+      // there is no inventory.thresholds.read in the catalogue.
+      _NavItem(
+        AppRoutes.itemThresholds,
+        Icons.rule_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'حدود الأصناف'
+            : 'Item thresholds',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // The lots behind the stock. Reading them is its own grant: a person can
+      // be allowed to see quantities without seeing what each lot cost.
+      _NavItem(
+        AppRoutes.batches,
+        Icons.qr_code_scanner_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الدفعات'
+            : 'Batches',
+        permissions: const ['inventory.batches.read'],
+        group: _NavGroup.inventory,
+      ),
+      // The shelf list behind the alerts: what has expired, what is about to
+      // and what is still good. Same grant as the lots themselves - a person
+      // allowed to see a lot is allowed to know its date - while pressing
+      // "scan now" additionally needs the notification-management grant, which
+      // the screen checks and the server enforces.
+      _NavItem(
+        AppRoutes.expiryAlerts,
+        Icons.event_busy_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'تنبيهات الصلاحية'
+            : 'Expiry alerts',
+        permissions: const ['inventory.batches.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Where inside the warehouse the goods are. The backend serves these
+      // under the warehouse grants, so no new permission is invented here.
+      _NavItem(
+        AppRoutes.storageLocations,
+        Icons.grid_view_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'مواقع التخزين'
+            : 'Storage locations',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Counting, and the approval that makes a difference real.
+      _NavItem(
+        AppRoutes.stockTakes,
+        Icons.fact_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الجرد'
+            : 'Stock takes',
+        permissions: const ['inventory.stocktake.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Losses with their own number, their own approval and their own
+      // journal: a stock document of kind WRITE_OFF, not a mystery adjustment.
+      _NavItem(
+        AppRoutes.writeOffs,
+        Icons.delete_forever_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الإعدام'
+            : 'Write-offs',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      // Who may enter which shelf. Reading it and changing it are two grants,
+      // and the entry needs only the first: the screen says which is missing
+      // rather than hiding itself from someone allowed to look.
+      _NavItem(
+        AppRoutes.warehouseAccess,
+        Icons.key_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'صلاحيات المستودعات'
+            : 'Warehouse access',
+        permissions: const ['inventory.warehouse.access.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
+        AppRoutes.salesOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر البيع' : 'Sales orders',
+        permissions: const ['sales.orders.read'],
+        group: _NavGroup.sales,
+      ),
       _NavItem(
         AppRoutes.salesInvoices,
         Icons.point_of_sale_outlined,
@@ -305,6 +630,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           'sales.invoices.create',
         ],
         group: _NavGroup.sales,
+      ),
+      _NavItem(
+        AppRoutes.purchaseOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر الشراء' : 'Purchase orders',
+        permissions: const ['purchases.orders.read'],
+        group: _NavGroup.purchases,
       ),
       _NavItem(
         AppRoutes.purchaseInvoices,
@@ -389,13 +721,19 @@ bool _belongsTo(String path, String current) =>
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.items,
-    required this.current,
+    required this.selectedPath,
+    required this.selectedKey,
     required this.extended,
     required this.scrollController,
+    required this.collapsed,
+    required this.onToggle,
   });
 
+  final _NavOpenSection collapsed;
+  final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
-  final String current;
+  final String selectedPath;
+  final GlobalKey selectedKey;
   final bool extended;
   final ScrollController scrollController;
 
@@ -449,15 +787,19 @@ class _Sidebar extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
+                        key:ValueKey('nav-group-${group.name}'),
                         extended: extended,
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        expanded: collapsed.isOpen(group),
+                        onToggle: () => onToggle(group),
                       ),
-                      for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
                         _NavEntry(
+                          key: item.path == selectedPath ? selectedKey : null,
                           item: item,
-                          selected: _belongsTo(item.path, current),
+                          selected: item.path == selectedPath,
                           extended: extended,
                         ),
                     ],
@@ -553,12 +895,17 @@ class _SidebarBrand extends StatelessWidget {
 
 class _GroupLabel extends StatelessWidget {
   const _GroupLabel({
+    super.key,
     required this.extended,
     required this.first,
     required this.label,
     required this.accent,
+    required this.expanded,
+    required this.onToggle,
   });
 
+  final bool expanded;
+  final VoidCallback onToggle;
   final bool extended;
   final bool first;
   final String label;
@@ -566,13 +913,17 @@ class _GroupLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final action = expanded ? (arabic ? 'طي' : 'Collapse') : (arabic ? 'فتح' : 'Expand');
     if (!extended) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(10, first ? 4 : 12, 10, 6),
-        child: Container(height: 1, color: AppColors.sidebarHairline),
-      );
+      return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
+        message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
+          padding: EdgeInsets.fromLTRB(10, first ? 8 : 12, 10, 8),
+          child: Container(height: 1, color: AppColors.sidebarHairline),
+        ))));
     }
-    return Padding(
+    return Semantics(button:true,expanded:expanded,label:'$action $label',child:Tooltip(
+      message:'$action $label',child:InkWell(onTap:onToggle,child:Padding(
       padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
       child: Row(
         children: [
@@ -602,14 +953,16 @@ class _GroupLabel extends StatelessWidget {
               ),
             ),
           ),
+          if (!expanded) const Icon(Icons.chevron_right, size:14,color:AppColors.onSidebarMuted),
         ],
       ),
-    );
+    ))));
   }
 }
 
 class _NavEntry extends StatelessWidget {
   const _NavEntry({
+    super.key,
     required this.item,
     required this.selected,
     required this.extended,
@@ -651,7 +1004,10 @@ class _NavEntry extends StatelessWidget {
       child: Icon(
         item.icon,
         size: iconSize,
-        color: selected ? Colors.white : accentColor,
+        // The selected tile uses the light accent step. A white glyph on
+        // those pastel fills has insufficient contrast; navy remains legible
+        // for every section while retaining the section's colour on the tile.
+        color: selected ? AppColors.navyDeep : accentColor,
       ),
     );
 
@@ -754,6 +1110,7 @@ class _SidebarFooter extends ConsumerWidget {
     if (user == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final initials = _initials(user.fullName, user.username);
+    final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
     return Container(
       decoration: const BoxDecoration(
@@ -770,14 +1127,15 @@ class _SidebarFooter extends ConsumerWidget {
               color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
-            child: Text(
+            child: photo == null ? Text(
               initials,
               style: const TextStyle(
                 color: AppColors.onSidebar,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
-            ),
+            ) : ClipOval(child:Image.memory(photo,width:30,height:30,fit:BoxFit.cover,
+              errorBuilder:(_, _, _) => Text(initials))),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -831,12 +1189,14 @@ class _TopBar extends StatelessWidget {
     required this.sectionLabel,
     required this.isWide,
     required this.isExtended,
+    required this.guardKey,
   });
 
   final _NavItem item;
   final String sectionLabel;
   final bool isWide;
   final bool isExtended;
+  final ValueKey<String>? guardKey;
 
   @override
   Widget build(BuildContext context) {
@@ -936,11 +1296,17 @@ class _TopBar extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            key: const ValueKey('erp-home-shortcut'),
+            tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'الرئيسية' : 'Home',
+            icon: const Icon(Icons.home_outlined, size: 20),
+            onPressed: () => context.go(AppRoutes.dashboard),
+          ),
           _SearchTrigger(expanded: isExtended),
           const SizedBox(width: AppSpacing.xs),
           const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xxs),
-          const _SignOutButton(),
+          _SignOutButton(guardKey: guardKey),
         ],
       ),
     );
@@ -1022,24 +1388,47 @@ class _LanguageMenu extends ConsumerWidget {
   }
 }
 
-class _SignOutButton extends ConsumerWidget {
-  const _SignOutButton();
+class _SignOutButton extends ConsumerStatefulWidget {
+  const _SignOutButton({required this.guardKey});
+  final ValueKey<String>? guardKey;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return IconButton(
-      icon: const Icon(Icons.logout_rounded, size: 19),
-      tooltip: context.l10n.signOut,
-      onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-    );
+  ConsumerState<_SignOutButton> createState() => _SignOutButtonState();
+}
+
+class _SignOutButtonState extends ConsumerState<_SignOutButton> {
+  bool _busy = false;
+
+  Future<void> _signOut() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final key = widget.guardKey;
+      if (key != null && !await ref.read(draftExitGuardProvider).canLeave(key)) return;
+      if (!mounted) return;
+      await ref.read(authControllerProvider.notifier).signOut();
+    } catch (error) {
+      if (mounted) await showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: const Icon(Icons.logout_rounded, size: 19),
+    tooltip: context.l10n.signOut,
+    onPressed: _busy ? null : _signOut,
+  );
 }
 
 /// The navigation for narrow windows: the same items, the same permissions,
 /// the same order — inside the standard drawer.
 class _ModuleDrawer extends StatelessWidget {
-  const _ModuleDrawer({required this.items, required this.current});
+  const _ModuleDrawer({required this.items, required this.current, required this.collapsed, required this.onToggle});
 
+  final _NavOpenSection collapsed;
+  final ValueChanged<_NavGroup> onToggle;
   final List<_NavItem> items;
   final String current;
 
@@ -1066,12 +1455,15 @@ class _ModuleDrawer extends StatelessWidget {
                   for (final group in _NavGroup.values)
                     if (groups[group]?.isNotEmpty ?? false) ...[
                       _GroupLabel(
+                        key:ValueKey('nav-group-${group.name}'),
                         extended: true,
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
                         accent: _accentForGroup(group),
+                        expanded: collapsed.isOpen(group),
+                        onToggle: () => onToggle(group),
                       ),
-                      for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
                         _NavEntry(
                           item: item,
                           selected: _belongsTo(item.path, current),

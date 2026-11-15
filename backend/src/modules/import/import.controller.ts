@@ -96,7 +96,7 @@ export class ImportController {
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
     @UploadedFile() file: UploadedSpreadsheet | undefined,
-    @Query() query: { dryRun?: string; mode?: string },
+    @Query() query: { dryRun?: string; mode?: string; clearBlankTaxRates?: string },
   ) {
     const slug = this.kind(kind);
     this.allowed(user, [PERMISSION[slug]]);
@@ -127,6 +127,7 @@ export class ImportController {
     return this.service.run(slug, user.companyId, user.userId, file, {
       dryRun: query.dryRun === 'true' || query.dryRun === '1',
       mode: query.mode === 'upsert' ? 'upsert' : 'insert',
+      clearBlankTaxRates: slug === 'items' && query.clearBlankTaxRates === 'true',
     }, user.branchId, user.isSuperAdmin);
   }
 

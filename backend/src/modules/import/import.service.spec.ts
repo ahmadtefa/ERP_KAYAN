@@ -219,6 +219,7 @@ describe('ImportService', () => {
   it('creates chart accounts in parent-first order and demotes a grouping parent atomically', async () => {
     const createdCodes: string[] = [];
     const tx = {
+      $queryRaw: jest.fn(async () => [{locked:1}]),
       account: {
         findMany: jest.fn(async () => []),
         create: jest.fn(async ({ data }: { data: { code: string } }) => {
@@ -253,6 +254,24 @@ describe('ImportService', () => {
       data: { isPostable: false, updatedBy: USER },
     });
     expect(root.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks an existing parent after acquiring the chart lock', async () => {
+    const parent = {id:'parent-id',code:'100',type:'ASSET',parentId:null,isPostable:false,isActive:true,deletedAt:null};
+    const tx = {
+      $queryRaw:jest.fn(async()=>[{locked:1}]),
+      account:{findMany:jest.fn(async()=>[{...parent,isActive:false}]),create:jest.fn()},
+    };
+    const root:any = {account:{findMany:jest.fn(async()=>[parent])},
+      $transaction:jest.fn(async(fn:(client:unknown)=>unknown)=>fn(tx))};
+    const importer = new ImportService(root,{record:jest.fn()} as never,openingBalances() as never);
+    const csv = 'Code,Name (English),Name (Arabic),Account type,Parent code,Can receive postings,Active\n'
+      + '101,Child,فرعي,ASSET,100,yes,yes\n';
+    await expect(importer.run('chart-of-accounts',COMPANY,USER,
+      {originalname:'accounts.csv',buffer:Buffer.from(csv,'utf8')},{dryRun:false,mode:'insert'}))
+      .rejects.toThrow(/parent changed/);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.account.create).not.toHaveBeenCalled();
   });
 
   it('keeps assigned-branch imports scoped while allowing super-admin branch selection', async () => {

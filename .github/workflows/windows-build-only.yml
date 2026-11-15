@@ -1,0 +1,243 @@
+name: Windows build only (no install, no release)
+
+# Manual dispatch only. Nothing runs on a push, so this path cannot be started
+# by anything except an operator typing its name.
+#
+# A separate, narrow path that builds the Windows Setup and inspects what is
+# inside it, without touching windows-installer.yml, its protected smoke job,
+# or anything that could publish.
+#
+# What this workflow deliberately does NOT do:
+#   - it does not run smoke-final or install the product anywhere;
+#   - it does not request the windows-installer-test environment;
+#   - it does not create a release, a tag, or a published download;
+#   - it does not modify or bypass the protection gate in windows-installer.yml.
+#
+# A green run here proves the package was BUILT and what it CONTAINS. It is not
+# evidence that it installs, starts or survives a restart. That requires a real
+# Windows host and the separate plan in review/WINDOWS-GATE-STATUS.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-only-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-only:
+    name: Build the Setup and inspect its contents
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read application version
+        id: app-version
+        shell: powershell
+        run: |
+          $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
+          if (-not $line) { throw 'Could not read app version from pubspec.yaml' }
+          $version = $line.Matches[0].Groups[1].Value.Split('+')[0]
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # The same payload and policy gates the real build runs. They must pass
+      # before a package is produced, so a Setup missing the migration runner
+      # cannot be built here either.
+      - name: Payload contract and build policy
+        run: >
+          node --experimental-transform-types --test
+          scripts/windows-release-policy.test.mjs
+          scripts/windows-payload-contract.test.mjs
+          scripts/license-key-compatibility.test.mjs
+          scripts/inspect-final-inno.test.mjs
+          scripts/verify-extracted-windows-installer.test.mjs
+          scripts/remove-everything-safety.test.mjs
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+
+      - name: Set up Python for CI diagnostics
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Enable Flutter Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup --version=6.2.2 -y --no-progress
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            throw 'ISCC.exe was not installed.'
+          }
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      - name: Clean build backend
+        working-directory: backend
+        run: npm run build:clean
+
+      - name: Get Flutter dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build Windows installer
+        id: installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Product mode uses only the pinned PUBLIC key that is already in the
+          # repository. No private key is generated, requested or stored.
+          $operatorKey = ''
+          foreach ($candidate in @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem')) {
+            if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
+          }
+          if (-not $operatorKey) { throw 'The approved licence public key is missing.' }
+          & node .\scripts\license-build-policy.mjs --mode product --public-key $operatorKey
+          if ($LASTEXITCODE -ne 0) { throw 'Licence public key validation failed.' }
+
+          & .\distribution\windows\build-installer.ps1 -DisposableSource
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
+
+          $setup = 'build\windows-installer\KAYAN-ERP-Setup.exe'
+          if (-not (Test-Path -LiteralPath $setup)) { throw "Expected installer not found: $setup" }
+          $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash
+          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$hash"
+          "path=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Extraction, not installation. The payload is a tree, and the only
+      # honest way to check it is to unpack the package without running its
+      # installer: a silent install would create services, write to ProgramData
+      # and leave the runner in a state nobody asked for.
+      - name: Build the pinned extractor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 1.9 https://github.com/dscharrer/innoextract.git "$RUNNER_TEMP/innoextract-src"
+          cmake -S "$RUNNER_TEMP/innoextract-src" -B "$RUNNER_TEMP/innoextract-build" \
+            -DCMAKE_BUILD_TYPE=Release -DUSE_STATIC_LIBS=ON
+          cmake --build "$RUNNER_TEMP/innoextract-build" --parallel 2
+          find "$RUNNER_TEMP/innoextract-build" -name 'innoextract' -type f -perm -u+x
+
+      - name: Extract the built Setup
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          extractor="$(find "$RUNNER_TEMP/innoextract-build" -name 'innoextract' -type f -perm -u+x | head -1)"
+          test -n "$extractor"
+          sha256sum "$extractor"
+          mkdir -p "$RUNNER_TEMP/kayan-extracted"
+          "$extractor" --silent --lowercase --output-dir "$RUNNER_TEMP/kayan-extracted" \
+            '${{ steps.installer.outputs.path }}'
+          test -d "$RUNNER_TEMP/kayan-extracted"
+          echo "dir=$RUNNER_TEMP/kayan-extracted" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the extracted payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-transform-types scripts/verify-extracted-windows-installer.mjs \
+            --artifact '${{ steps.installer.outputs.path }}' \
+            --root "${{ steps.extract.outputs.dir }}" \
+            --source-commit "${{ github.sha }}" \
+            --report "$RUNNER_TEMP/payload-report.json"
+
+      - name: Report what the payload contains
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='${{ steps.extract.outputs.dir }}'
+          echo '::notice title=Payload checks::runtime expectations against the extracted tree'
+          node --experimental-transform-types scripts/verify-installed-runtime.mjs "$root" || \
+            echo '::warning title=Runtime expectations::verify-installed-runtime reported a problem; see the step log'
+
+          echo '── migration.sql files in the package ──'
+          find "$root" -name 'migration.sql' | wc -l
+          echo '── migration folders ──'
+          find "$root" -type d -path '*prisma/migrations/*' -maxdepth 6 | wc -l
+          echo '── runtimes present ──'
+          find "$root" \( -name 'node.exe' -o -name 'pg_ctl.exe' -o -name 'pg_dump.exe' -o -name 'pg_restore.exe' -o -name 'erp_kayan.exe' -o -name 'RepairTool.exe' \) | sort
+
+          echo '── nothing empty or a stub ──'
+          # A file that exists but is zero bytes is not "present" in any useful
+          # sense; the installer would fail at the customer.
+          empties=0
+          for required in \
+            backend/scripts/apply-migrations.mjs \
+            backend/scripts/prepare-database.mjs \
+            backend/scripts/migrate-deploy.mjs \
+            backend/node/node.exe \
+            backend/postgres/bin/pg_ctl.exe \
+            backend/postgres/bin/pg_dump.exe \
+            backend/postgres/bin/pg_restore.exe \
+            remove-everything.ps1 \
+            remove-runtime.ps1 \
+            RepairTool.exe \
+            erp_kayan.exe; do
+            file="$root/$required"
+            if [ ! -s "$file" ]; then
+              echo "MISSING OR EMPTY: $required"
+              empties=$((empties + 1))
+            else
+              printf '  %8s  %s\n' "$(stat -c%s "$file")" "$required"
+            fi
+          done
+          test "$empties" -eq 0
+
+          echo '── no private key anywhere in the package ──'
+          if grep -rlI --include='*.pem' --include='*.key' --include='*.txt' \
+               'BEGIN .*PRIVATE KEY' "$root" 2>/dev/null | head -5 | grep -q .; then
+            echo 'A private key is inside the payload'
+            exit 1
+          fi
+          echo 'no private key found'
+
+      - name: Upload the inspected Setup and its report
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-only-${{ github.sha }}
+          path: |
+            ${{ steps.installer.outputs.path }}
+            build/windows-installer/build-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the payload inspection report
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-payload-report-${{ github.sha }}
+          path: ${{ runner.temp }}/payload-report.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Record what was and was not proven
+        shell: bash
+        run: |
+          echo '::notice title=Build only::The package was built and its contents inspected. Nothing was installed.'
+          echo '::notice title=Not proven::Installation, service start, migrations on a real machine, restart survival, upgrade, repair, backup/restore and uninstall are NOT proven by this run.'

@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -20,8 +21,36 @@ import '../../../data/presentation/widgets/list_export_actions.dart';
 ///
 /// The three belong together because they answer one question — who may do
 /// what, and who actually did it.
-class AdminScreen extends StatelessWidget {
-  const AdminScreen({super.key});
+class AdminScreen extends ConsumerStatefulWidget {
+  const AdminScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
+
+  @override
+  ConsumerState<AdminScreen> createState() => _AdminScreenState();
+}
+
+class _AdminScreenState extends ConsumerState<AdminScreen> {
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+  int _pendingActions = 0;
+  void _actionStarted() => _pendingActions++;
+  void _actionFinished() => _pendingActions--;
+  Future<bool> _canLeave() => _pendingActions > 0 ? Future.value(false) : _exitRelay.canLeave();
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _canLeave);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,15 +63,16 @@ class AdminScreen extends StatelessWidget {
             tabs: [
               Tab(text: l10n.users, icon: const Icon(Icons.person_outline)),
               Tab(text: l10n.roles, icon: const Icon(Icons.badge_outlined)),
-              Tab(
-                text: l10n.auditTrail,
-                icon: const Icon(Icons.history_outlined),
-              ),
+              Tab(text: l10n.auditTrail, icon: const Icon(Icons.history_outlined)),
             ],
           ),
-          const Expanded(
+          Expanded(
             child: TabBarView(
-              children: [_UsersTab(), _RolesTab(), _AuditTab()],
+              children: [
+                _UsersTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
+                _RolesTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
+                const _AuditTab(),
+              ],
             ),
           ),
         ],
@@ -51,10 +81,17 @@ class AdminScreen extends StatelessWidget {
   }
 }
 
+Set<String>? _permissionCodes(Object? value) {
+  if (value is! List || value.any((item) => item is! String || item.isEmpty)) return null;
+  return value.cast<String>().toSet();
+}
+
 // ═════════════════════════════════════════════════════════════ users
 
 class _UsersTab extends ConsumerStatefulWidget {
-  const _UsersTab();
+  const _UsersTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
+  final DraftExitRelay exitRelay;
+  final VoidCallback actionStarted, actionFinished;
 
   @override
   ConsumerState<_UsersTab> createState() => _UsersTabState();
@@ -70,6 +107,10 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     // Read the locale before the await: the widget may be rebuilt meanwhile.
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
     final roles = await ref.read(rolesListProvider.future);
+    final ids = [for (final role in roles) text(role, 'id')];
+    if (ids.any((id) => id.isEmpty) || ids.toSet().length != ids.length) {
+      throw const FormatException();
+    }
     return [
       for (final role in roles)
         FieldOption(
@@ -83,8 +124,32 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
   Future<void> _edit({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
-    final roles = await _roleOptions();
+    List<FieldOption> roles;
+    try {
+      roles = await _roleOptions();
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
+    }
     if (!mounted) return;
+    // The API returns `roles`, not `roleIds`. A missing initial selection
+    // used to send [] on every edit and silently strip all existing roles.
+    final rawRoles = existing?['roles'];
+    final assigned = listOf(rawRoles);
+    if (isEdit && (rawRoles is! List || rawRoles.length != assigned.length ||
+        assigned.any((role) => text(role, 'id').isEmpty))) {
+      // Never turn a malformed or incomplete response into a role removal.
+      showAppError(context, const FormatException());
+      return;
+    }
+    final roleIds = {for (final role in assigned) text(role, 'id')}.toList();
+    for (final role in assigned) {
+      final id = text(role, 'id');
+      if (id.isNotEmpty && !roles.any((option) => option.value == id)) {
+        roles.add(FieldOption(id, '${text(role, 'code')} — ${text(role, 'nameEn')} '
+            '${Localizations.localeOf(context).languageCode == 'ar' ? '(غير متاح)' : '(unavailable)'}', enabled: false));
+      }
+    }
 
     final fields = <FieldSpec>[
       if (!isEdit)
@@ -103,6 +168,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           l10n.password,
           required: true,
           helper: l10n.passwordHelper,
+          obscure: true,
         ),
       FieldSpec(
         'roleIds',
@@ -115,82 +181,90 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 
     final values = await showFormSheet(
       context,
+      exitRelay: widget.exitRelay,
       title: isEdit ? l10n.editUser : l10n.newUser,
       fields: fields,
-      initial: existing,
+      initial: {...?existing, if (isEdit) 'roleIds': roleIds},
+      onSubmit: (draft) async {
+        try {
+          final client = ref.read(apiClientProvider);
+          final payload = Map<String, dynamic>.from(draft);
+          final selected = (payload['roleIds'] as List).cast<String>().toSet();
+          if (isEdit && selected.length == roleIds.length && selected.containsAll(roleIds)) {
+            // Omission means unchanged on the server. This also avoids
+            // overwriting a concurrent role change on a name-only edit.
+            payload.remove('roleIds');
+          } else if (isEdit) {
+            payload['expectedRoleIds'] = roleIds;
+          }
+          if (isEdit && payload['isActive'] == existing['isActive']) {
+            payload.remove('isActive');
+          }
+          if (isEdit) {
+            await client.patch('/admin/users/${existing['id']}', body: payload);
+          } else {
+            await client.post('/admin/users', body: payload);
+          }
+        } catch (error) {
+          throw UncertainFormSubmission(error);
+        } finally {
+          if (mounted) ref.invalidate(usersListProvider);
+        }
+      },
     );
-    if (values == null || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch('/admin/users/${existing['id']}', body: values);
-      } else {
-        await client.post('/admin/users', body: values);
-      }
-      await ref.read(usersListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _editExtraPermissions(Json row) async {
     final l10n = context.l10n;
-    final chosen = await showDialog<Set<String>>(
+    final selected = _permissionCodes(row['extraPermissions']);
+    if (selected == null) {
+      showAppError(context, const FormatException());
+      return;
+    }
+    final saved = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _PermissionsDialog(
         title: '${l10n.extraPermissions} — ${text(row, 'username')}',
-        selected: listOf(row['extraPermissions']).map((e) => e.toString()).toSet(),
+        selected: selected,
+        exitRelay: widget.exitRelay,
+        onSubmit: (chosen) async {
+          try {
+            await ref.read(apiClientProvider).patch('/admin/users/${row['id']}',
+              body: {'extraPermissions': chosen.toList(growable: false),
+                'expectedExtraPermissions': selected.toList(growable: false)});
+          } finally {
+            if (mounted) ref.invalidate(usersListProvider);
+          }
+        },
       ),
     );
-    if (chosen == null || !mounted) return;
-    setState(() => _busy = true);
-    try {
-      await ref.read(apiClientProvider).patch(
-        '/admin/users/${row['id']}',
-        body: {'extraPermissions': chosen.toList(growable: false)},
-      );
-      await ref.read(usersListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (saved == true && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _changePassword(Json row) async {
     final l10n = context.l10n;
     final values = await showFormSheet(
       context,
+      exitRelay: widget.exitRelay,
       title: '${l10n.changePassword} — ${text(row, 'username')}',
-      fields: [
-        FieldSpec(
-          'password',
-          l10n.password,
-          required: true,
-          helper: l10n.passwordHelper,
-        ),
-      ],
+      fields: [FieldSpec('password', l10n.password, required: true,
+          helper: l10n.passwordHelper, obscure: true)],
       submitLabel: l10n.save,
+      onSubmit: (draft) async {
+        try {
+          await ref.read(apiClientProvider)
+              .post('/admin/users/${row['id']}/password', body: draft);
+        } catch (error) {
+          // A password response can be lost after sessions have been revoked.
+          throw UncertainFormSubmission(error);
+        } finally {
+          if (mounted) ref.invalidate(usersListProvider);
+        }
+      },
     );
-    if (values == null || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post('/admin/users/${row['id']}/password', body: values);
-      if (mounted) showMessage(context, l10n.passwordChanged);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (values != null && mounted) showMessage(context, l10n.passwordChanged);
   }
 
   Future<void> _toggleActive(Json row) async {
@@ -207,6 +281,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       if (!ok || !mounted) return;
     }
 
+    final actionFinished = widget.actionFinished;
+    widget.actionStarted();
     setState(() => _busy = true);
     try {
       final client = ref.read(apiClientProvider);
@@ -215,12 +291,16 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       } else {
         await client.patch('/admin/users/${row['id']}', body: {'isActive': true});
       }
-      await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        // A failed response can follow a committed status change.
+        ref.invalidate(usersListProvider);
+        setState(() => _busy = false);
+      }
+      actionFinished();
     }
   }
 
@@ -344,7 +424,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 // ═════════════════════════════════════════════════════════════ roles
 
 class _RolesTab extends ConsumerStatefulWidget {
-  const _RolesTab();
+  const _RolesTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
+  final DraftExitRelay exitRelay;
+  final VoidCallback actionStarted, actionFinished;
 
   @override
   ConsumerState<_RolesTab> createState() => _RolesTabState();
@@ -358,6 +440,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     final isEdit = existing != null;
     final values = await showFormSheet(
       context,
+      exitRelay: widget.exitRelay,
       title: isEdit ? l10n.editRole : l10n.newRole,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.roleCode, required: true),
@@ -365,51 +448,57 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         FieldSpec('nameAr', l10n.fullNameAr, required: true),
       ],
       initial: existing,
+      onSubmit: (draft) async {
+        try {
+          final client = ref.read(apiClientProvider);
+          if (isEdit) {
+            await client.patch('/admin/roles/${existing['id']}', body: draft);
+          } else {
+            await client.post('/admin/roles', body: draft);
+          }
+        } catch (error) {
+          throw UncertainFormSubmission(error);
+        } finally {
+          if (mounted) {
+            ref.invalidate(rolesListProvider);
+            ref.invalidate(usersListProvider);
+          }
+        }
+      },
     );
-    if (values == null || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch('/admin/roles/${existing['id']}', body: values);
-      } else {
-        await client.post('/admin/roles', body: values);
-      }
-      await ref.read(rolesListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _choosePermissions(Json role) async {
     final l10n = context.l10n;
-    final chosen = await showDialog<Set<String>>(
+    final selected = _permissionCodes(role['permissions']);
+    if (selected == null) {
+      showAppError(context, const FormatException());
+      return;
+    }
+    final saved = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _PermissionsDialog(
         title: '${l10n.setPermissions} — '
             '${Localizations.localeOf(context).languageCode == 'ar' ? text(role, 'nameAr') : text(role, 'nameEn')}',
-        selected: listOf(role['permissions']).map((e) => e.toString()).toSet(),
+        selected: selected,
+        exitRelay: widget.exitRelay,
+        onSubmit: (chosen) async {
+          try {
+            await ref.read(apiClientProvider).post('/admin/roles/${role['id']}/permissions',
+              body: {'permissions': chosen.toList(growable: false),
+                'expectedPermissions': selected.toList(growable: false)});
+          } finally {
+            if (mounted) {
+              ref.invalidate(rolesListProvider);
+              ref.invalidate(usersListProvider);
+            }
+          }
+        },
       ),
     );
-    if (chosen == null || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      await ref.read(apiClientProvider).post(
-        '/admin/roles/${role['id']}/permissions',
-        body: {'permissions': chosen.toList(growable: false)},
-      );
-      await ref.read(rolesListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (saved == true && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _remove(Json role) async {
@@ -423,15 +512,21 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     );
     if (!ok || !mounted) return;
 
+    final actionFinished = widget.actionFinished;
+    widget.actionStarted();
     setState(() => _busy = true);
     try {
       await ref.read(apiClientProvider).delete('/admin/roles/${role['id']}');
-      await ref.read(rolesListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(rolesListProvider);
+        ref.invalidate(usersListProvider);
+        setState(() => _busy = false);
+      }
+      actionFinished();
     }
   }
 
@@ -478,7 +573,10 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             ColumnSpec(
               l10n.permissions,
               numeric: true,
-              value: (r) => '${listOf(r['permissions']).length}',
+              value: (r) {
+                final permissions = _permissionCodes(r['permissions']);
+                return permissions == null ? '—' : '${permissions.length}';
+              },
             ),
             ColumnSpec(
               l10n.status,
@@ -518,10 +616,13 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
 /// Picks permissions from the catalogue the server publishes, grouped by the
 /// module each permission belongs to.
 class _PermissionsDialog extends ConsumerStatefulWidget {
-  const _PermissionsDialog({required this.title, required this.selected});
+  const _PermissionsDialog({required this.title, required this.selected,
+    required this.exitRelay, required this.onSubmit});
 
   final String title;
   final Set<String> selected;
+  final DraftExitRelay exitRelay;
+  final Future<void> Function(Set<String>) onSubmit;
 
   @override
   ConsumerState<_PermissionsDialog> createState() => _PermissionsDialogState();
@@ -529,13 +630,84 @@ class _PermissionsDialog extends ConsumerStatefulWidget {
 
 class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
   late final Set<String> _selected = {...widget.selected};
+  bool _saving = false, _uncertain = false, _confirmingExit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.exitRelay.attach(_leaveForRoute);
+  }
+
+  @override
+  void dispose() {
+    widget.exitRelay.detach(_leaveForRoute);
+    super.dispose();
+  }
+
+  Future<bool> _canLeave() async {
+    if (_saving || _confirmingExit) return false;
+    if (_uncertain || _selected.length != widget.selected.length || !widget.selected.containsAll(_selected)) {
+      _confirmingExit = true;
+      try {
+        final arabic = Localizations.localeOf(context).languageCode == 'ar';
+        final ok = await confirmAction(context,
+          title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+          message: _uncertain
+              ? (arabic ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل التكرار.' : 'The operation may have completed. Review permissions before retrying.')
+              : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
+          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes', destructive: true);
+        if (!ok || !mounted) return false;
+      } finally { _confirmingExit = false; }
+    }
+    return mounted;
+  }
+
+  Future<void> _close() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop();
+  }
+
+  Future<bool> _leaveForRoute() async {
+    if (!await _canLeave() || !mounted) return false;
+    Navigator.of(context).pop();
+    return true;
+  }
+
+  bool _validCatalogue(Json? catalogue) {
+    final raw = catalogue?['items'];
+    if (raw is! List) return false;
+    final items = listOf(raw);
+    if (raw.length != items.length || items.any((item) => text(item, 'code').isEmpty)) return false;
+    return {for (final item in items) text(item, 'code')}.length == items.length;
+  }
+
+  Future<void> _submit() async {
+    if (_saving || _uncertain || _confirmingExit || !_validCatalogue(ref.read(permissionsProvider).asData?.value)) return;
+    if (_selected.length == widget.selected.length && widget.selected.containsAll(_selected)) {
+      // A no-op must not replace newer grants read by another administrator.
+      Navigator.of(context).pop(true);
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSubmit(Set<String>.from(_selected));
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _uncertain = true);
+        await showAppError(context, error);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(permissionsProvider);
 
-    return AlertDialog(
+    return PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
+      child: AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: 520,
@@ -543,10 +715,13 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
         child: async.when(
           loading: () => const LoadingView(),
           error: (error, _) => ErrorView(
-            message: describeError(context, error),
+            message: error,
             onRetry: () => ref.invalidate(permissionsProvider),
           ),
           data: (catalogue) {
+            if (!_validCatalogue(catalogue)) {
+              return ErrorView(message: const FormatException(), onRetry: () => ref.invalidate(permissionsProvider));
+            }
             final items = listOf(catalogue['items']);
             final grouped = listOf(catalogue['modules']);
             final isArabic =
@@ -567,16 +742,19 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                       ),
                   ];
 
-            return Column(
+            final known = {for (final item in items) text(item, 'code')};
+            final unavailable = _selected.difference(known).toList()..sort();
+            return AbsorbPointer(absorbing: _saving || _uncertain, child: Column(
               children: [
+                if (_uncertain) Text(isArabic
+                    ? 'قد تكون العملية قد اكتملت. راجع الصلاحيات قبل تكرار الحفظ.'
+                    : 'The operation may have completed. Review permissions before saving again.'),
                 Wrap(
                   spacing: 8,
                   children: [
                     TextButton(
                       onPressed: () => setState(() {
-                        _selected
-                          ..clear()
-                          ..addAll(items.map((p) => text(p, 'code')));
+                        _selected.addAll(items.map((p) => text(p, 'code')));
                       }),
                       child: Text(l10n.selectAll),
                     ),
@@ -589,27 +767,32 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                 Expanded(
                   child: ListView(
                     children: [
+                      for (final code in unavailable)
+                        CheckboxListTile(value: true,
+                          title: Text(isArabic ? 'صلاحية غير متاحة' : 'Unavailable permission'),
+                          subtitle: Text(code),
+                          onChanged: (_) => setState(() => _selected.remove(code))),
                       for (final section in sections)
                         _moduleSection(section.$1, section.$2, isArabic),
                     ],
                   ),
                 ),
               ],
-            );
+            ));
           },
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _saving ? null : _close,
           child: Text(l10n.cancel),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(_selected),
+          onPressed: _saving || _uncertain || !_validCatalogue(async.asData?.value) ? null : _submit,
           child: Text(l10n.save),
         ),
       ],
-    );
+    ));
   }
 
   Widget _moduleSection(String module, List<Json> permissions, bool isArabic) {

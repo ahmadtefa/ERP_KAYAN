@@ -1,0 +1,27 @@
+name: kayan_key_generator
+description: "KAYAN licence key generator for Android - the same keys, from a phone."
+publish_to: 'none'
+version: 1.1.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  # Ed25519 (the same curve the product verifies with) and SHA-256/HMAC.
+  # Both are pure Dart: no platform channel, no plugin, nothing to build.
+  crypto: ^3.0.6
+  cryptography: ^2.7.0
+  flutter:
+    sdk: flutter
+  # The one plugin: it says where the app may keep its files.
+  path_provider: ^2.1.5
+  # Path joining only. Pure Dart, already in Flutter's own dependency tree.
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

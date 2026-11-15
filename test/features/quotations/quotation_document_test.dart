@@ -295,6 +295,18 @@ void main() {
       );
     });
 
+    test('versions a direct logo URL after the company profile changes', () {
+      expect(
+        companyLogoUrl('http://localhost:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': true,
+          'logoUrl': '/companies/logo/company-1?existing=1',
+          'updatedAt': '2026-10-27T10:00:00.000Z',
+        }),
+        'http://localhost:3000/api/v1/companies/logo/company-1?existing=1&v=2026-10-27T10%3A00%3A00.000Z',
+      );
+    });
+
     test('leaves a relative path when the base is unusable', () {
       expect(
         resolveCompanyLogoUrl('not a url', '/companies/logo/c1'),

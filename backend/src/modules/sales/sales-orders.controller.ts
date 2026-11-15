@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 
 import {
   AuthUser,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { SalesOrdersService } from './sales-orders.service';
 
 /**
@@ -38,6 +39,18 @@ export class SalesOrdersController {
     return this.service.create(user.companyId, user.branchId, user.userId, dto);
   }
 
+  @Put(':id')
+  @RequirePermissions('sales.orders.read', 'sales.orders.manage')
+  updateDraft(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
+  @Put(':id/amend')
+  @RequirePermissions('sales.orders.read', 'sales.orders.manage')
+  amend(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.amend(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
   @Post(':id/approve')
   @RequirePermissions('sales.orders.approve')
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -67,6 +80,7 @@ export class SalesOrdersController {
       user.userId,
       id,
       dto ?? {},
+      canReadCost(user),
     );
   }
 }

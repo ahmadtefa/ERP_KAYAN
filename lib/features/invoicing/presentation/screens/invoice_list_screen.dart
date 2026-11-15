@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/providers/stock_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 import 'invoice_detail_dialog.dart';
@@ -23,9 +28,10 @@ import '../../../data/presentation/widgets/list_export_actions.dart';
 /// is therefore the moment the figures become real, and it is always behind a
 /// confirmation.
 class InvoiceListScreen extends ConsumerStatefulWidget {
-  const InvoiceListScreen({super.key, required this.kind});
+  const InvoiceListScreen({super.key, required this.kind, this.navigationKey});
 
   final InvoiceKind kind;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<InvoiceListScreen> createState() => _InvoiceListScreenState();
@@ -34,6 +40,23 @@ class InvoiceListScreen extends ConsumerStatefulWidget {
 class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   String _status = '';
   bool _busy = false;
+  final _exitRelay = InvoiceDraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   String get _basePath => widget.kind.basePath;
 
@@ -43,6 +66,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
         builder: (_) => InvoiceEditorScreen(
           kind: widget.kind,
           invoiceId: invoiceId,
+          exitRelay: _exitRelay,
         ),
       ),
     );
@@ -60,15 +84,27 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
     setState(() => _busy = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post('$_basePath/${row['id']}/post');
+      await ref.read(apiClientProvider).post('$_basePath/${row['id']}/post');
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoicePosted);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) {
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showMessage(context, e, error: true);
+      }
+    } catch (error) {
+      if (mounted) {
+        // An unexpected failure may still follow a committed server action.
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showAppError(context, error);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        invalidateDashboardAndReports(ref);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -85,15 +121,27 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
     setState(() => _busy = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post('$_basePath/${row['id']}/reverse');
+      await ref.read(apiClientProvider).post('$_basePath/${row['id']}/reverse');
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoiceReversed);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) {
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showMessage(context, e, error: true);
+      }
+    } catch (error) {
+      if (mounted) {
+        // An unexpected failure may still follow a committed server action.
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showAppError(context, error);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        invalidateDashboardAndReports(ref);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -129,10 +177,20 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
             onChanged: (value) => setState(() => _status = value ?? ''),
           ),
           const SizedBox(width: 12),
+          IconButton(
+            tooltip: l10n.refresh,
+            onPressed: _busy || async.isLoading
+                ? null
+                : () => ref.read(provider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
+          const SizedBox(width: 8),
           FilledButton.icon(
             onPressed: _busy ? null : _openEditor,
             icon: const Icon(Icons.add),
-            label: Text(isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice),
+            label: Text(
+              isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+            ),
           ),
         ],
       ),
@@ -150,10 +208,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
               value: (r) => text(r, 'invoiceNumber'),
               emphasise: true,
             ),
-            ColumnSpec(
-              l10n.invoiceDate,
-              value: (r) => text(r, 'invoiceDate'),
-            ),
+            ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'invoiceDate')),
             ColumnSpec(
               isSales ? l10n.customer : l10n.supplier,
               value: (r) {

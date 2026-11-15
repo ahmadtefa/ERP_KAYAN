@@ -10,7 +10,6 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["queryCompiler", "driverAdapters"]
   engineType        = "client"
 }
 
@@ -88,9 +87,22 @@ model Company {
   quotationColumnTemplates QuotationColumnTemplate[]
 
   warehouses     Warehouse[]
+  storageLocations StorageLocation[]
+  itemBatches    ItemBatch[]
+  itemCostHistory ItemCostHistory[]
+  itemWarehouseSettings ItemWarehouseSetting[]
+  notifications  Notification[]
+  notificationSettings NotificationSetting[]
+  printPriceSettings   PrintPriceSetting[]
+  warehouseBalances   WarehouseStockBalance[]
+  stockTakeSessions   StockTakeSession[]
+  userWarehouseAccess UserWarehouseAccess[]
   priceLists     PriceList[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
+
+  userProfilePhotos UserProfilePhoto[]
+  itemImages        ItemImage[]
 
   @@map("companies")
 }
@@ -138,6 +150,12 @@ model Branch {
   depreciationRuns DepreciationRun[]
   stockDocuments   StockDocument[]
   warehouses       Warehouse[]
+  storageLocations StorageLocation[]
+  itemBatches      ItemBatch[]
+  itemCostHistory  ItemCostHistory[]
+  notifications    Notification[]
+  warehouseBalances WarehouseStockBalance[]
+  stockTakeSessions StockTakeSession[]
   purchaseOrders   PurchaseOrder[]
   salesOrders      SalesOrder[]
   quotations       Quotation[]
@@ -176,13 +194,29 @@ model User {
   company      Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   userRoles    UserRole[]
   userPermissions UserPermission[]
+  warehouseAccess UserWarehouseAccess[]
   branches     UserBranch[]
   refreshToken RefreshToken[]
   auditLogs    AuditLog[]
   journalEntry JournalEntry[]   @relation("JournalCreatedBy")
+  profilePhoto UserProfilePhoto?
 
   @@index([companyId])
   @@map("users")
+}
+
+model UserProfilePhoto {
+  userId    String   @id @db.Uuid
+  companyId String   @db.Uuid
+  data      Bytes
+  /// Always the mime type of the re-encoded image, never the uploader's.
+  mime      String   @db.VarChar(64)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("user_profile_photos")
 }
 
 model Role {
@@ -480,6 +514,7 @@ model CostCenter {
   budgets         Budget[]         @relation("CostCenterBudgets")
   fixedAssets     FixedAsset[]
   stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
+  stockMovements  StockMovement[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -655,9 +690,18 @@ model AssetDepreciation {
 model CompanySetting {
   companyId String @id @db.Uuid
 
-  /// Default VAT rate in percent, used when neither the item nor the line
-  /// carries one. 0 means "this company does not charge VAT".
-  taxRate Decimal @default(14) @db.Decimal(9, 4)
+  /// Default VAT rate in percent, in force when a document does not state one.
+  ///
+  /// Sales and purchase invoices do **not** inherit this: a line that omits
+  /// the rate is charged at 0, deliberately, because a rate the server guessed
+  /// would appear on a tax document that nobody chose (see
+  /// `sales-invoices.service.spec.ts` / `purchase-invoices.service.spec.ts`,
+  /// "line tax defaults", and the invoice form, which sends an explicit "0"
+  /// so that blank and omitted never mean the same thing). Quotations do use
+  /// it, which is why `quotations.service.ts` reads it.
+  ///
+  /// 0 means "this company does not charge VAT".
+  taxRate Decimal @default(0) @db.Decimal(9, 4)
 
   /// When true, the prices typed on a sales line already include VAT and the
   /// tax is backed out of them instead of being added.
@@ -991,6 +1035,9 @@ enum StockDocumentKind {
   TRANSFER
   COUNT
   OPENING
+  /// Goods destroyed, spoiled, stolen or expired: a loss with its own number,
+  /// its own approval and its own journal, not a mystery adjustment.
+  WRITE_OFF
 }
 
 /// Stock changes that are not an invoice: a write-off, a transfer between
@@ -1015,8 +1062,32 @@ model StockDocument {
   fromWarehouseId String?          @db.Uuid
   toWarehouseId   String?          @db.Uuid
   status         InvoiceStatus     @default(DRAFT)
+  editVersion    Int               @default(0)
+  voucherKind    String?           @db.VarChar(10)
+  counterpartyName String?          @db.VarChar(200)
+  reviewedAt     DateTime?
+  reviewedBy     String?           @db.Uuid
+  /// Who approved the document and when. For a write-off (and for a stock
+  /// voucher) posting is only possible after this is set, and the approver may
+  /// not be the person who created the document.
+  approvedAt     DateTime?
+  approvedBy     String?           @db.Uuid
   reason         String?
   notes          String?
+
+  /// A duplicate submission of the same request must not become a second
+  /// document. The unique index on (companyId, idempotencyKey) is the guard:
+  /// a retry finds the first document instead of adding another. The older
+  /// StockDocumentCreationRequest table stays for legacy voucher clients.
+  idempotencyKey String? @db.VarChar(120)
+
+  /// Optional attachment carried with a write-off (the photo of the damaged
+  /// goods, the disposal certificate).
+  attachmentName String? @db.VarChar(120)
+  attachmentPath String? @db.VarChar(240)
+
+  /// The stock-take this adjustment was born from, when it was.
+  stockTakeSessionId String? @db.Uuid
 
   /// The centre that bears the loss or gain of an adjustment or a count.
   /// Transfers never carry one: a movement between two warehouses is not a
@@ -1038,11 +1109,27 @@ model StockDocument {
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
+  creationRequests StockDocumentCreationRequest[]
 
   @@unique([companyId, documentNumber])
+  @@unique([companyId, idempotencyKey])
   @@index([companyId, kind, documentDate])
   @@index([costCenterId])
   @@map("stock_documents")
+}
+
+/// Idempotency records for stock-document creation; legacy clients may omit a key.
+model StockDocumentCreationRequest {
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  requestKey  String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  documentId  String @db.Uuid
+  createdAt   DateTime @default(now())
+  document    StockDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, requestKey])
+  @@map("stock_document_creation_requests")
 }
 
 model StockDocumentLine {
@@ -1051,15 +1138,31 @@ model StockDocumentLine {
   itemId          String  @db.Uuid
   quantity        Decimal @db.Decimal(19, 4)
   unitCost        Decimal @default(0) @db.Decimal(19, 4)
+  /// quantity x unitCost, snapshotted so a line's share of the loss cannot
+  /// drift when the warehouse average moves afterwards.
+  totalCost       Decimal @default(0) @db.Decimal(19, 4)
   countedQuantity Decimal? @db.Decimal(19, 4)
   notes           String?
   lineNumber      Int
 
-  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  // ── Multi-unit snapshot (null on legacy rows). `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  /// A write-off (or a lot-controlled transfer) may name the lot it moves,
+  /// and the shelf it sat on. Null on legacy rows.
+  batchId           String? @db.Uuid
+  storageLocationId String? @db.Uuid
+
+  document        StockDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item            Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  batch           ItemBatch?       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
 
   @@unique([documentId, lineNumber])
   @@index([documentId])
+  @@index([batchId])
   @@map("stock_document_lines")
 }
 
@@ -1296,6 +1399,25 @@ model Item {
   /// quotations. Optional: the program never guesses a country.
   countryOfOrigin String? @db.VarChar(80)
 
+  // ── Batch and expiry policy ──────────────────────────────────────────
+  //
+  // Not every item has a lot number and not every lot expires: a bag of
+  // cement and a box of insulin are both stock, and only one of them can go
+  // off. Each switch is off by default, so an existing item keeps behaving
+  // exactly as it did and a business opts in per item.
+  /// A receipt has to name a lot, and an issue allocates one.
+  requiresBatch        Boolean @default(false)
+  /// The receipt has to carry the day the lot was made.
+  requiresProductionDate Boolean @default(false)
+  /// The receipt has to carry the day the lot expires.
+  requiresExpiryDate Boolean @default(false)
+  /// Pick the earliest-expiring lot first. On by default.
+  useFefo              Boolean @default(true)
+  /// Whether an expired lot may be issued at all. Off by default.
+  allowExpiredIssue    Boolean @default(false)
+  /// When an expired lot may be issued, does it need a second person?
+  expiredIssueNeedsApproval Boolean @default(false)
+
   notes          String?
 
   createdAt DateTime  @default(now())
@@ -1317,6 +1439,12 @@ model Item {
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines SalesOrderLine[]
   quotationLines QuotationLine[]
+  batches        ItemBatch[]
+  costHistory    ItemCostHistory[]
+  warehouseSettings ItemWarehouseSetting[]
+  warehouseBalances WarehouseStockBalance[]
+  stockTakeLines    StockTakeLine[]
+  image             ItemImage?
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -1362,12 +1490,31 @@ model StockMovement {
   /// before warehouses existed, or without naming one; the warehouse reports
   /// treat it as the branch's default warehouse.
   warehouseId  String?        @db.Uuid
+  /// Snapshot of the source stock document's analytical dimension. Null is
+  /// valid for legacy movements and for internal warehouse transfers.
+  costCenterId String?        @db.Uuid
   itemId       String         @db.Uuid
   movementDate DateTime       @db.Date
   direction    StockDirection
   quantity     Decimal        @db.Decimal(19, 4)
   unitCost     Decimal        @db.Decimal(19, 4)
   totalCost    Decimal        @db.Decimal(19, 4)
+
+  /// What the person actually typed: the unit, the quantity in that unit and
+  /// the conversion factor applied. `quantity` above is always the base-unit
+  /// quantity; these three say how it was entered ("1 reel of 500 m" rather
+  /// than "500"), and the factor is frozen at the moment of the movement so a
+  /// later change to the unit's definition cannot restate history.
+  /// Null on movements recorded before units were snapshotted.
+  enteredUnit     String?        @db.VarChar(40)
+  enteredQuantity Decimal?       @db.Decimal(19, 4)
+  unitFactor      Decimal?       @db.Decimal(19, 6)
+
+  /// Which lot moved, and from which shelf. Null on movements recorded
+  /// before batches and locations existed; those are still valid, they simply
+  /// do not name a lot. A batch movement always names both.
+  batchId           String? @db.Uuid
+  storageLocationId String? @db.Uuid
 
   referenceType   String  @db.VarChar(32)
   referenceId     String? @db.Uuid
@@ -1381,10 +1528,16 @@ model StockMovement {
   branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
   item      Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  batch     ItemBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
 
   @@index([companyId, itemId, movementDate])
   @@index([companyId, referenceType, referenceId])
   @@index([companyId, warehouseId, itemId])
+  @@index([companyId, costCenterId, movementDate])
+  @@index([batchId])
+  @@index([storageLocationId])
   @@map("stock_movements")
 }
 
@@ -1464,6 +1617,8 @@ model SalesInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   salesOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1490,6 +1645,7 @@ model SalesInvoice {
   /// makes a second conversion impossible even under two simultaneous clicks.
   sourceQuotation Quotation?
 
+  @@unique([companyId, salesOrderId, orderConversionKey], map: "sales_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1499,6 +1655,7 @@ model SalesInvoice {
 model SalesInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1550,6 +1707,21 @@ model SalesInvoiceLine {
   /// historical invoices keep meaning exactly what they meant before.
   costCenterId String? @db.Uuid
 
+  // ── Multi-unit of measure snapshot ──────────────────────────────────────
+  // All three are null on rows written before multi-unit existed. A null row
+  // behaves exactly as before: `quantity` is the entered quantity in the
+  // item's base unit and `unitPrice` is the price of that base unit. On a new
+  // row they record what the user actually chose, frozen at document time so a
+  // later change to the item's unit factor or price never rewrites history.
+  // `quantity` always stays the internal, base-unit quantity used by stock.
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 1 carton).
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  orderLine SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1557,6 +1729,7 @@ model SalesInvoiceLine {
   returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("sales_invoice_lines")
 }
@@ -1602,6 +1775,8 @@ model PurchaseInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   purchaseOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1623,6 +1798,7 @@ model PurchaseInvoice {
   originalInvoice PurchaseInvoice?  @relation("PurchaseReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returns         PurchaseInvoice[] @relation("PurchaseReturns")
 
+  @@unique([companyId, purchaseOrderId, orderConversionKey], map: "purchase_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1632,6 +1808,7 @@ model PurchaseInvoice {
 model PurchaseInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1668,13 +1845,35 @@ model PurchaseInvoiceLine {
   /// cost was incurred for. Optional, and never guessed for old rows.
   costCenterId String? @db.Uuid
 
+  // ── Multi-unit of measure snapshot (null on legacy rows; see SalesInvoiceLine) ──
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 5 cartons).
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  // ── The lot this line received ──
+  /// The supplier's lot or batch number. Required for a lot-controlled item,
+  /// optional for everything else: the column exists on every line so that a
+  /// receipt says which goods arrived, not just how many.
+  batchNumber         String?   @db.VarChar(60)
+  batchProductionDate DateTime? @db.Date
+  batchExpiryDate     DateTime? @db.Date
+  /// The bin the goods were put away in, when the person who received them
+  /// knew it. Null means the warehouse, without a shelf.
+  storageLocationId String? @db.Uuid
+
+  orderLine PurchaseOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
   costCenter CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   originalLine PurchaseInvoiceLine?  @relation("PurchaseReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
   returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("purchase_invoice_lines")
 }
@@ -1964,12 +2163,21 @@ model ItemUnit {
   barcode       String?
   salePrice     Decimal? @db.Decimal(19, 4)
   purchasePrice Decimal? @db.Decimal(19, 4)
+  isDefaultSale Boolean  @default(false)
+  isDefaultPurchase Boolean @default(false)
+
+  /// A unit used on a saved document is never hard-deleted: it is deactivated
+  /// instead, so old documents still name a unit that exists. New documents
+  /// reject an inactive unit.
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@unique([itemId, unit])
+  @@index([itemId, isActive])
   @@map("item_units")
 }
 
@@ -1995,6 +2203,13 @@ model Warehouse {
   isDefault Boolean @default(false)
   isActive  Boolean @default(true)
 
+  /// MAIN is a warehouse the company keeps stock in; SUB is a store room
+  /// inside it (a shop floor, a van, a quarantine cage). A sub-warehouse
+  /// points at the warehouse it belongs to and may not cross a branch, which
+  /// is the rule the service enforces. Null means a main warehouse.
+  parentId String? @db.Uuid
+  kind     String  @default("MAIN") @db.VarChar(16)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?   @db.Uuid
@@ -2004,7 +2219,18 @@ model Warehouse {
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
 
+  parent               Warehouse?        @relation("WarehouseTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children             Warehouse[]       @relation("WarehouseTree")
+
   movements            StockMovement[]
+  storageLocations     StorageLocation[]
+  batches              ItemBatch[]
+  costHistory          ItemCostHistory[]
+  itemSettings         ItemWarehouseSetting[]
+  notifications        Notification[]
+  balances             WarehouseStockBalance[]
+  stockTakeSessions    StockTakeSession[]
+  userAccess           UserWarehouseAccess[]
   salesInvoices        SalesInvoice[]
   purchaseInvoices     PurchaseInvoice[]
   stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
@@ -2013,6 +2239,7 @@ model Warehouse {
 
   @@unique([companyId, code])
   @@index([companyId, branchId])
+  @@index([parentId])
   @@map("warehouses")
 }
 
@@ -2083,6 +2310,12 @@ model PurchaseOrderLine {
 
   notes String?
 
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  invoiceLines PurchaseInvoiceLine[]
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2146,6 +2379,12 @@ model SalesOrderLine {
 
   notes String?
 
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
+  invoiceLines SalesInvoiceLine[]
   order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2256,4 +2495,565 @@ model Budget {
   @@index([companyId, costCenterId])
   @@index([accountId])
   @@map("budgets")
+}
+
+// ------------------------------------------------------- offline licensing
+//
+// The licence belongs to the installation, not to a company: one machine runs
+// one KAYAN database, and the company rows inside it are the customer's
+// business data. Nothing here is derived from the company name, the tax
+// number or the books - only from the machine id and the signed keys the
+// operator issues with the offline key generator.
+//
+// These tables are deliberately not part of the company JSON backup: a
+// restored backup must not be able to roll the seat counter back. The
+// protected state file beside the database is the watermark, and the restore
+// path re-syncs it after the rows come back (see LicensingService.reconcile).
+
+model LicenseInstallation {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// The identifier the issuing tool wrote into every key it made.
+  licenseId    String    @unique
+  machineId    String
+  /// Free text the operator typed into the issuing tool. Never the company's
+  /// trade name, tax number or anything read from the books.
+  customerRef  String?
+  issuedAt     DateTime
+  startsAt     DateTime
+  /// null means perpetual: no renewal date and no expiry.
+  expiresAt    DateTime?
+  seatLimit    Int
+  /// ACTIVE, or SUSPENDED when a confirmed clock tamper stops the program.
+  status       String    @default("ACTIVE")
+  lastKeyId    String?
+  lastSeenAt   DateTime?
+  clockState   String    @default("OK")
+  clockNote    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("license_installations")
+}
+
+/// Every key this installation has accepted, once.
+///
+/// `keyId` is unique, which is what makes re-entering the same renewal (or the
+/// same seat increase) a no-op instead of a second grant: the insert fails and
+/// the service answers "already applied".
+model LicenseKeyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  keyId       String   @unique
+  licenseId   String
+  type        String
+  payloadJson String   @db.Text
+  /// Original verified signed key. Null on legacy rows that predate this field;
+  /// payloadJson alone is not cryptographic proof and cannot recover a licence.
+  signedKey   String?  @db.Text
+  machineId   String?
+  appliedAt   DateTime @default(now())
+  appliedBy   String?  @db.Uuid
+  ipAddress   String?
+  note        String?
+
+  @@index([licenseId])
+  @@map("license_keys")
+}
+
+/// One row per user account ever created through this installation.
+///
+/// The row survives the user: deleting or deactivating an account does not
+/// give the seat back, which is the whole point of counting here rather than
+/// counting `users`. Existing accounts are inserted by the migration.
+model LicenseSeatUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Null for rows the migration wrote before a licence existed.
+  licenseId      String?
+  userId         String?  @db.Uuid
+  username       String
+  /// SETUP_ADMIN, USER_CREATE or MIGRATION_EXISTING.
+  reason         String
+  /// Prevents a retried request from consuming a second seat.
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([licenseId])
+  @@index([userId])
+  @@map("license_seat_usage")
+}
+
+/// The licence's own history: issued, renewed, seats, transferred, clock
+/// warnings. Append-only from the application's point of view.
+model LicenseEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  licenseId   String?
+  type        String
+  detail      String?  @db.Text
+  occurredAt  DateTime @default(now())
+
+  @@index([licenseId, occurredAt])
+  @@map("license_events")
+}
+
+/// Durable identities for retrying order creation and draft edits.
+/// Legacy order-creation clients may omit a key; draft edits require one.
+model OrderCreationRequest {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @db.Uuid
+  branchId  String @db.Uuid
+  kind      String @db.VarChar(8)
+  requestKey String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  orderId   String @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, branchId, kind, requestKey])
+  @@map("order_creation_requests")
+}
+/// The tree is a self-reference rather than five tables, because a warehouse
+/// that names only a zone must still be addressable, and a shop that adds a
+/// fifth level next year must not need a migration. `kind` says which level a
+/// node is, so a screen can ask for "the bins of rack R3" without walking the
+/// whole tree, and a code is unique inside its warehouse rather than globally.
+model StorageLocation {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @db.Uuid
+  branchId    String  @db.Uuid
+  warehouseId String  @db.Uuid
+  parentId    String? @db.Uuid
+
+  /// ZONE, AISLE, RACK, SHELF or BIN.
+  kind   String @default("BIN") @db.VarChar(16)
+  code   String @db.VarChar(40)
+  nameEn String
+  nameAr String
+
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? @db.Uuid
+  deletedAt DateTime?
+
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  parent    StorageLocation?  @relation("LocationTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  StorageLocation[] @relation("LocationTree")
+  movements StockMovement[]
+  stockDocumentLines StockDocumentLine[]
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+
+  @@unique([warehouseId, code])
+  @@index([companyId, warehouseId, kind])
+  @@index([parentId])
+  @@map("storage_locations")
+}
+
+/// The level of an item that belongs to the place, not to the item.
+///
+/// A minimum in the main store is not a minimum in the van: the same item is
+/// over-stocked in one and short in the other. The item keeps its own global
+/// `reorderLevel` for the reports that predate warehouses; this table answers
+/// the per-warehouse question the alerting centre asks.
+model ItemWarehouseSetting {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  warehouseId String @db.Uuid
+  itemId      String @db.Uuid
+
+  minQuantity     Decimal @default(0) @db.Decimal(19, 4)
+  reorderQuantity Decimal @default(0) @db.Decimal(19, 4)
+  maxQuantity     Decimal @default(0) @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([warehouseId, itemId])
+  @@index([companyId, itemId])
+  @@map("item_warehouse_settings")
+}
+
+/// One received lot: what arrived, when it was made, when it expires, and
+/// what is left of it.
+///
+/// The lot is the unit of traceability. A stock movement that names a batch is
+/// a statement about *that* lot - "twelve bottles left lot B-77" - so the
+/// purchase, the shelf, the transfer, the sale and the customer can be read
+/// back from the same row. `remainingQuantity` is the running figure; the
+/// movements are the audit trail.
+model ItemBatch {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  warehouseId String @db.Uuid
+  itemId      String @db.Uuid
+
+  batchNumber String @db.VarChar(60)
+
+  /// The day it was made, and the day it stops being sellable. Both optional:
+  /// an item that does not expire has no dates, and a lot whose maker did not
+  /// print a production date is still a lot.
+  productionDate DateTime? @db.Date
+  expiryDate     DateTime? @db.Date
+
+  receivedQuantity  Decimal @db.Decimal(19, 4)
+  remainingQuantity Decimal @db.Decimal(19, 4)
+  reservedQuantity  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Cost of this lot per base unit, frozen at receipt. A lot is valued at
+  /// what it cost; the moving average of the warehouse answers a different
+  /// question (what an issue costs), and both are kept.
+  unitCost Decimal @default(0) @db.Decimal(19, 4)
+
+  /// OPEN, QUARANTINE, EXPIRED, WRITTEN_OFF or CLOSED.
+  status String @default("OPEN") @db.VarChar(16)
+
+  /// Where the goods came from: the purchase invoice or the receipt document.
+  sourceType   String? @db.VarChar(32)
+  sourceId     String? @db.Uuid
+  sourceNumber String? @db.VarChar(48)
+
+  storageLocationId String? @db.Uuid
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String?  @db.Uuid
+  updatedBy         String?  @db.Uuid
+  deletedAt         DateTime?
+
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  item      Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  movements StockMovement[]
+  stockDocumentLines StockDocumentLine[]
+  stockTakeLines     StockTakeLine[]
+
+  @@unique([warehouseId, itemId, batchNumber])
+  @@index([companyId, itemId, expiryDate])
+  @@index([companyId, expiryDate, status])
+  @@index([companyId, warehouseId, itemId])
+  @@map("item_batches")
+}
+
+/// The moving average, written down every time it moves.
+///
+/// The running figure already lives on `stock_balances`; this table is the
+/// history that answers "why is this item worth 12.40 today?" - one row per
+/// event that changed the average, with the figures before and after. It is
+/// append-only for the same reason the ledger is.
+model ItemCostHistory {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  warehouseId String? @db.Uuid
+  itemId      String @db.Uuid
+
+  occurredAt DateTime @db.Date
+  quantityIn Decimal  @default(0) @db.Decimal(19, 4)
+  valueIn    Decimal  @default(0) @db.Decimal(19, 4)
+  quantityAfter Decimal @db.Decimal(19, 4)
+  valueAfter    Decimal @db.Decimal(19, 4)
+  unitCostAfter Decimal @db.Decimal(19, 6)
+
+  sourceType String  @db.VarChar(32)
+  sourceId   String? @db.Uuid
+  createdAt  DateTime @default(now())
+  createdBy  String?  @db.Uuid
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  item      Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, itemId, occurredAt])
+  @@index([companyId, warehouseId, itemId, occurredAt])
+  @@map("item_cost_history")
+}
+
+// ══════════════════════════════════════════ the per-warehouse cost book
+
+/// The cost book: one row per item per warehouse.
+///
+/// `stock_balances` answers "what does this branch hold" and stays as the
+/// roll-up every existing report already reads. This table answers the
+/// question the costing rules are actually about - what does *this shelf*
+/// hold, what is it worth, and at what average did it get there - so a
+/// warehouse that bought at 30 is not priced at the average of a warehouse
+/// that bought at 15.
+model WarehouseStockBalance {
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  warehouseId String @db.Uuid
+  itemId      String @db.Uuid
+
+  quantity Decimal @default(0) @db.Decimal(19, 4)
+  value    Decimal @default(0) @db.Decimal(19, 4)
+
+  updatedAt DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, warehouseId, itemId])
+  @@index([companyId, warehouseId, itemId])
+  @@index([companyId, itemId])
+  @@map("warehouse_stock_balances")
+}
+
+/// What one person may do in one warehouse.
+///
+/// A branch is the accounting boundary; a warehouse is where the work happens.
+/// A storekeeper on the shop floor must not post a receipt into the main store
+/// merely because both belong to the same branch.
+model UserWarehouseAccess {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  userId      String @db.Uuid
+  warehouseId String @db.Uuid
+
+  canView     Boolean @default(true)
+  canReceive  Boolean @default(false)
+  canIssue    Boolean @default(false)
+  canTransfer Boolean @default(false)
+  canCount    Boolean @default(false)
+  canApprove  Boolean @default(false)
+  canSeeCost  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+  updatedAt DateTime @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, warehouseId])
+  @@index([companyId, warehouseId])
+  @@map("user_warehouse_access")
+}
+
+// ════════════════════════════════════════════════════ counting sessions
+
+/// One counting session: what the system thought, what a person counted, and
+/// the single approval that turns the difference into an adjustment.
+model StockTakeSession {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @db.Uuid
+  branchId    String  @db.Uuid
+  warehouseId String? @db.Uuid
+  code        String  @db.VarChar(32)
+  /// FULL or PARTIAL. A partial count names the items it covers.
+  scope       String  @db.VarChar(16) @default("FULL")
+  /// DRAFT -> COUNTING -> REVIEW -> APPROVED -> POSTED, or CANCELLED.
+  status      String  @db.VarChar(16) @default("DRAFT")
+
+  /// Set the moment the session starts: the quantities it compares against are
+  /// frozen here, so counting for an hour does not shift the target.
+  frozenAt DateTime?
+  notes    String?
+
+  documentId     String? @db.Uuid
+  journalEntryId String? @db.Uuid
+
+  approvedAt  DateTime?
+  approvedBy  String?   @db.Uuid
+  postedAt    DateTime?
+  postedBy    String?   @db.Uuid
+  cancelledAt DateTime?
+  cancelledBy String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+  updatedAt DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  lines     StockTakeLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status, createdAt])
+  @@index([warehouseId])
+  @@map("stock_take_sessions")
+}
+
+model StockTakeLine {
+  id        String  @id @default(uuid()) @db.Uuid
+  sessionId String  @db.Uuid
+  itemId    String  @db.Uuid
+  batchId   String? @db.Uuid
+
+  systemQuantity  Decimal  @default(0) @db.Decimal(19, 4)
+  countedQuantity Decimal? @db.Decimal(19, 4)
+  /// The warehouse average when the session froze it: the variance is valued at
+  /// the cost that was true at the moment it was counted.
+  unitCost        Decimal  @default(0) @db.Decimal(19, 4)
+  varianceQuantity Decimal @default(0) @db.Decimal(19, 4)
+  varianceValue    Decimal @default(0) @db.Decimal(19, 4)
+
+  countedAt DateTime?
+  countedBy String?   @db.Uuid
+  notes     String?
+
+  session StockTakeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  item    Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  batch   ItemBatch?       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@index([itemId])
+  @@map("stock_take_lines")
+}
+
+// ═════════════════════════════════════════════════ the notification centre
+
+/// One thing somebody should know about, in one table for the whole program.
+///
+/// Every module writes here - stock today, sales and licensing later - so the
+/// top bar has a single badge and the centre has a single list. `dedupeKey` is
+/// what makes that safe: a scanner that runs every hour may decide the same
+/// fact a hundred times, and the unique index turns the ninety-nine repeats
+/// into no-ops instead of a wall of identical alarms.
+model Notification {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  branchId  String? @db.Uuid
+  warehouseId String? @db.Uuid
+
+  /// STOCK_EXPIRY_SOON, STOCK_EXPIRED, STOCK_BELOW_MINIMUM, ... A string,
+  /// because a new kind of alert must not need a migration.
+  type     String @db.VarChar(48)
+  /// INFO, WARNING or CRITICAL.
+  severity String @default("INFO") @db.VarChar(16)
+  /// 1, 2 or 3. Ordering a text column alphabetically puts WARNING last, so
+  /// the rank is stored beside the word a person reads.
+  severityRank Int @default(1)
+  status   String @default("OPEN") @db.VarChar(16)
+
+  /// Which roles the setting addressed. Empty means every role that holds the
+  /// permission. A list on the row, not a join, so an alert raised yesterday
+  /// does not change audience when somebody edits the setting today.
+  audienceRoles String[] @default([])
+
+  /// When the fact was last confirmed and how many times it has been raised,
+  /// so `repeatAfterHours` can turn a still-true fact into a fresh prompt
+  /// instead of a single row nobody looks at twice.
+  lastRaisedAt DateTime?
+  raisedCount  Int       @default(1)
+
+  titleEn String
+  titleAr String
+  bodyEn  String?
+  bodyAr  String?
+
+  /// What to open when the alert is clicked, and what may not be shown to a
+  /// person without the permission to see it.
+  entityType String? @db.VarChar(32)
+  entityId   String? @db.Uuid
+  entityRef  String? @db.VarChar(120)
+  actionPath String? @db.VarChar(200)
+  permission String? @db.VarChar(64)
+
+  /// One fact, one row: the unique index below is the whole duplicate policy.
+  dedupeKey String @db.VarChar(200)
+  dueAt     DateTime?
+
+  createdAt  DateTime  @default(now())
+  readAt     DateTime?
+  archivedAt DateTime?
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, dedupeKey])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, type, status])
+  @@index([companyId, entityId])
+  @@map("notifications")
+}
+
+/// How one company wants one kind of alert to behave.
+///
+/// Absent means "default": the scanner's own interval and severity. A row can
+/// switch a kind off, move its severity, restrict it to warehouses, and - for
+/// expiry - choose which bands to announce, because a pharmacy and a cement
+/// yard do not care about the same 90 days.
+model NotificationSetting {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  type      String @db.VarChar(48)
+
+  isEnabled       Boolean @default(true)
+  severity        String? @db.VarChar(16)
+  /// Which roles may see it. Empty means everybody who may see the module.
+  roles           Json?
+  /// Which warehouses it covers. Empty means all of them.
+  warehouseIds    Json?
+  /// Days before expiry to announce, e.g. [90, 60, 30, 7, 0].
+  expiryDays      Json?
+  /// How often the scanner may raise this kind again for the same fact.
+  repeatAfterHours Int   @default(24)
+
+  updatedAt DateTime @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, type])
+  @@map("notification_settings")
+}
+
+// ----------------------------------------------------- print visibility
+
+/// What a printed copy of one kind of document may show.
+///
+/// This is policy, not data: the invoice keeps every price it was posted with.
+/// The row decides only what leaves the program on paper or as a PDF, and the
+/// `inventory.cost.read` permission always has the last word over `showCost`,
+/// so a hand-made request cannot restore a cost the role was never granted.
+model PrintPriceSetting {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+
+  /// A print type from the catalogue (a document kind, a list slug, a report
+  /// slug, a stock document or the label sheet), or "default".
+  documentType String @db.VarChar(48)
+
+  showSalePrice Boolean @default(true)
+  showCost      Boolean @default(true)
+
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, documentType])
+  @@map("print_price_settings")
+}
+
+/// The picture shown for an item: on its catalogue row, in the item picker and
+/// on an invoice line. Kept in its own table rather than as columns on `items`
+/// so listing the catalogue never drags image bytes through the database.
+model ItemImage {
+  /// One picture per item, so the item is the key.
+  itemId    String   @id @db.Uuid
+  companyId String   @db.Uuid
+  data      Bytes
+  mime      String   @db.VarChar(64)
+  width     Int
+  height    Int
+  updatedAt DateTime @updatedAt
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("item_images")
 }

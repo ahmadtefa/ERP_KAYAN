@@ -19,6 +19,7 @@ function stub(options: {
       dueDate: null,
       totalAmount: money(options.total),
       paidAmount: money(options.paid),
+      documentType: 'INVOICE',
       status: 'POSTED',
     },
   ];
@@ -29,6 +30,9 @@ function stub(options: {
     kind: options.kind === 'customer' ? 'RECEIPT' : 'PAYMENT',
     amount: money(voucher.amount),
     status: 'POSTED',
+    // The voucher names its partner; that is what makes it theirs.
+    customerId: options.kind === 'customer' ? 'c-1' : null,
+    supplierId: options.kind === 'supplier' ? 's-1' : null,
     allocations: voucher.settled ? [{ amount: money(voucher.settled) }] : [],
   }));
   const party = {
@@ -106,8 +110,8 @@ describe('PartiesService summary money on account', () => {
     // The stub makes every voucher the party's normal kind; make the second a
     // refund explicitly, because that is the case being pinned here.
     (prisma.cashVoucher.findMany as jest.Mock).mockImplementation(async () => [
-      { id: 'v1', voucherNumber: 'RC-1', voucherDate: new Date('2026-10-02'), kind: 'RECEIPT', amount: money(200), status: 'POSTED', allocations: [] },
-      { id: 'v2', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(50), status: 'POSTED', allocations: [] },
+      { id: 'v1', voucherNumber: 'RC-1', voucherDate: new Date('2026-10-02'), kind: 'RECEIPT', amount: money(200), status: 'POSTED', customerId: 'c-1', supplierId: null, allocations: [] },
+      { id: 'v2', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(50), status: 'POSTED', customerId: 'c-1', supplierId: null, allocations: [] },
     ]);
     const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'customer', 'c-1');
 
@@ -138,6 +142,47 @@ describe('PartiesService summary money on account', () => {
     expect(summary.totals.paid).toBe('1000.0000');
   });
 
+  it('nets a credit note against the invoices instead of leaving it out', async () => {
+    // A sales return is stored as an invoice with the opposite meaning. The
+    // card and the statement are shown side by side, and the control account
+    // carries the net figure; if the card ignored the note it would sit above
+    // both of them by exactly the value of the return.
+    const prisma = stub({ kind: 'customer', total: 1000, paid: 0, vouchers: [] });
+    (prisma.salesInvoice.findMany as jest.Mock).mockImplementation(async () => [
+      {
+        id: 'inv-1',
+        invoiceNumber: 'SI-1',
+        invoiceDate: new Date('2026-10-01'),
+        dueDate: null,
+        totalAmount: money(1000),
+        paidAmount: money(0),
+        documentType: 'INVOICE',
+        status: 'POSTED',
+      },
+      {
+        id: 'cn-1',
+        invoiceNumber: 'SR-1',
+        invoiceDate: new Date('2026-10-05'),
+        dueDate: null,
+        totalAmount: money(200),
+        paidAmount: money(0),
+        documentType: 'CREDIT_NOTE',
+        status: 'POSTED',
+      },
+    ]);
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'customer', 'c-1');
+
+    // 1000 invoiced less the 200 that came back.
+    expect(summary.totals.invoiced).toBe('800.0000');
+    expect(summary.totals.outstanding).toBe('800.0000');
+    expect(summary.totals.netBalance).toBe('800.0000');
+    // The tile says "invoices": a return is not one.
+    expect(summary.totals.invoices).toBe(1);
+    // And the row carries the kind a tap should open.
+    expect(summary.recentDocuments.find((doc) => doc.id === 'cn-1')?.kind).toBe('CREDIT_NOTE');
+    expect(summary.recentDocuments.find((doc) => doc.id === 'cn-1')?.amount).toBe('-200.0000');
+  });
+
   it('treats money back from a supplier as a reduction of what was paid', async () => {
     const prisma = stub({
       kind: 'supplier',
@@ -146,9 +191,9 @@ describe('PartiesService summary money on account', () => {
       vouchers: [{ amount: 960, settled: 960 }],
     });
     (prisma.cashVoucher.findMany as jest.Mock).mockImplementation(async () => [
-      { id: 'v1', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-02'), kind: 'PAYMENT', amount: money(960), status: 'POSTED', allocations: [{ amount: money(960) }] },
-      { id: 'v2', voucherNumber: 'PV-2', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(40), status: 'POSTED', allocations: [] },
-      { id: 'v3', voucherNumber: 'RC-9', voucherDate: new Date('2026-10-04'), kind: 'RECEIPT', amount: money(10), status: 'POSTED', allocations: [] },
+      { id: 'v1', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-02'), kind: 'PAYMENT', amount: money(960), status: 'POSTED', customerId: null, supplierId: 's-1', allocations: [{ amount: money(960) }] },
+      { id: 'v2', voucherNumber: 'PV-2', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(40), status: 'POSTED', customerId: null, supplierId: 's-1', allocations: [] },
+      { id: 'v3', voucherNumber: 'RC-9', voucherDate: new Date('2026-10-04'), kind: 'RECEIPT', amount: money(10), status: 'POSTED', customerId: null, supplierId: 's-1', allocations: [] },
     ]);
     const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'supplier', 's-1');
 

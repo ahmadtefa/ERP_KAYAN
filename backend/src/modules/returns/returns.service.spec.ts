@@ -36,6 +36,9 @@ function dependencies(prisma: Record<string, any>, posting = { post: jest.fn(), 
   const warehouses = {
     resolve: jest.fn().mockResolvedValue(WAREHOUSE_ID),
     resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID),
+    // Behaviour of the warehouse-level guard is covered in the dedicated
+    // warehouse-guard suites; here it stays a permissive no-op mock.
+    assertWarehouseAvailable: jest.fn().mockResolvedValue(undefined),
   };
   const service = new ReturnsService(
     prisma as never,
@@ -294,6 +297,108 @@ describe('ReturnsService', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ entity: 'purchase_returns' }));
   });
 
+  it('puts returned goods back into the very lot the invoice took them from', async () => {
+    // A posted invoice took the goods out of a named lot. Crediting the shelf
+    // alone would leave that lot short for ever: FEFO would stop seeing the
+    // stock, and a lot the sale had emptied would stay closed.
+    const LOT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const document = {
+      ...summaryFields({
+        id: RETURN_ID,
+        invoiceNumber: 'SR-0002',
+        status: InvoiceStatus.DRAFT,
+        documentType: InvoiceDocumentType.CREDIT_NOTE,
+        subTotal: D(4),
+        taxAmount: D(0),
+        landedCostAmount: undefined,
+        totalAmount: D(4),
+        originalInvoiceId: SOURCE_INVOICE_ID,
+        originalInvoice: { invoiceNumber: 'SI-0002' },
+      }),
+      branchId: BRANCH_ID,
+      warehouseId: WAREHOUSE_ID,
+      journalEntryId: null,
+      lines: [
+        {
+          id: RETURN_LINE_ID,
+          lineNumber: 1,
+          originalLineId: SOURCE_LINE_ID,
+          itemId: ITEM_ID,
+          description: 'Widget',
+          quantity: D(2),
+          unitPrice: D(2),
+          taxRate: D(0),
+          taxAmount: D(0),
+          lineTotal: D(4),
+          unitCost: D(5),
+          costTotal: D(10),
+          item: null,
+        },
+      ],
+    };
+    const sourceLine = {
+      id: SOURCE_LINE_ID,
+      quantity: D(5),
+      returnedQuantity: D(0),
+      unitPrice: D(2),
+      lineTotal: D(10),
+      taxRate: D(0),
+      taxAmount: D(0),
+      costTotal: D(25),
+      returnedCostTotal: D(0),
+      returnedSubTotal: D(0),
+      returnedTaxTotal: D(0),
+      description: 'Widget',
+      costCenterId: null,
+      itemId: ITEM_ID,
+    };
+    const tx = {
+      salesInvoice: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      salesInvoiceLine: { update: jest.fn().mockResolvedValue({}) },
+      item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // The original OUT movement names the lot the sale consumed.
+        findMany: jest.fn().mockResolvedValue([
+          { batchId: LOT_ID, quantity: D(2), unitCost: D(5) },
+        ]),
+      },
+      itemBatch: {
+        findFirst: jest.fn().mockResolvedValue({ id: LOT_ID, unitCost: D(5), status: 'CLOSED' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([{ status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE }])
+        .mockResolvedValueOnce([sourceLine])
+        .mockResolvedValueOnce([{ quantity: D(5), value: D(1) }]),
+    };
+    const prisma = transactionPrisma(tx, 'salesInvoice', [document, document]);
+    const posting = { post: jest.fn().mockResolvedValue({ id: 'journal-1', entryNumber: 'JE-0001' }), reverse: jest.fn() };
+    const { service } = dependencies(prisma, posting);
+
+    await service.postSalesReturn(COMPANY_ID, USER_ID, RETURN_ID);
+
+    // The lot gets its two units back and is reopened, because the sale is
+    // being undone and leaving it CLOSED would lose the stock.
+    expect(tx.itemBatch.update).toHaveBeenCalledWith({
+      where: { id: LOT_ID },
+      data: { remainingQuantity: { increment: expect.anything() }, status: 'OPEN' },
+    });
+    expect(
+      (tx.itemBatch.update.mock.calls[0][0].data.remainingQuantity.increment as Prisma.Decimal).toString(),
+    ).toBe('2');
+    // The movement that records the return names the same lot.
+    const credited = tx.stockMovement.create.mock.calls.map((call: any[]) => call[0].data);
+    expect(credited).toHaveLength(1);
+    expect(credited[0].batchId).toBe(LOT_ID);
+    expect(credited[0].direction).toBe('IN');
+    expect((credited[0].quantity as Prisma.Decimal).toString()).toBe('2');
+  });
+
   it('posts a sales return at exact original net, tax, and inventory cost totals', async () => {
     const document = {
       ...summaryFields({
@@ -350,7 +455,12 @@ describe('ReturnsService', () => {
       },
       salesInvoiceLine: { update: jest.fn().mockResolvedValue({}) },
       item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
-      stockMovement: { create: jest.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // No original OUT movements in these fixtures: the return then falls
+        // back to the single unbatched credit it always wrote.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn()
         .mockResolvedValueOnce([{ status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE }])
@@ -435,7 +545,12 @@ describe('ReturnsService', () => {
       },
       purchaseInvoiceLine: { update: jest.fn().mockResolvedValue({}) },
       item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
-      stockMovement: { create: jest.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // No original OUT movements in these fixtures: the return then falls
+        // back to the single unbatched credit it always wrote.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn()
         .mockResolvedValueOnce([{ status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE }])
@@ -510,7 +625,12 @@ describe('ReturnsService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
-      stockMovement: { create: jest.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // No original OUT movements in these fixtures: the return then falls
+        // back to the single unbatched credit it always wrote.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn().mockResolvedValue([{ quantity: D(5), value: D(1) }]),
     };
@@ -573,7 +693,12 @@ describe('ReturnsService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
-      stockMovement: { create: jest.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // No original OUT movements in these fixtures: the return then falls
+        // back to the single unbatched credit it always wrote.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn().mockResolvedValue([{ quantity: D(1), value: D(0) }]),
     };
@@ -631,7 +756,12 @@ describe('ReturnsService', () => {
         findUnique: jest.fn().mockResolvedValue(originalLine),
         update: jest.fn().mockResolvedValue({}),
       },
-      stockMovement: { create: jest.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: jest.fn().mockResolvedValue({}),
+        // No original OUT movements in these fixtures: the return then falls
+        // back to the single unbatched credit it always wrote.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
     };
     const prisma = transactionPrisma(tx, 'purchaseInvoice', [document, document]);

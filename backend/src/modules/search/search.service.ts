@@ -168,7 +168,7 @@ export class SearchService {
           where: {
             companyId,
             deletedAt: null,
-            OR: [ { code: contains }, { nameEn: contains }, { nameAr: contains }, { barcode: contains } ],
+            OR: [ { code: contains }, { nameEn: contains }, { nameAr: contains }, { barcode: contains }, { units: { some: { barcode: contains } } } ],
           },
           take,
           orderBy: { code: 'asc' },

@@ -76,6 +76,7 @@ export class RolesController {
       dto.permissions,
       user.permissions,
       user.isSuperAdmin,
+      dto.expectedPermissions,
     );
   }
 

@@ -9,12 +9,21 @@ describe('document export catalogue', () => {
       'purchase-order',
       'sales-quotation',
       'cash-voucher',
+      'stock-voucher',
       'journal-entry',
     ]);
     for (const kind of DOCUMENT_KINDS) {
       expect(DOCUMENT_SPECS[kind].readPermission).toMatch(/\./);
       expect(DOCUMENT_SPECS[kind].exportPermission).toMatch(/\./);
     }
+  });
+
+  it('requires inventory read and export permissions for stock vouchers', () => {
+    expect(DOCUMENT_SPECS['stock-voucher']).toEqual({
+      kind: 'stock-voucher',
+      readPermission: 'inventory.stock.read',
+      exportPermission: 'inventory.export',
+    });
   });
 
   it('exports a quotation with the permissions its own screens use', () => {
