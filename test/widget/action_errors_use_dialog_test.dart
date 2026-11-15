@@ -155,4 +155,59 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppErrorDialog), findsNothing);
   });
+  testWidgets('a screen that waits for the dialog still settles', (
+    tester,
+  ) async {
+    // The trap this covers: _scan and _markAllRead await the dialog. If the
+    // spinner they started is still running, the frame never settles - the app
+    // looks frozen behind the modal barrier, and a test that waits for it times
+    // out instead of reading the message. The busy flag must be cleared before
+    // the dialog is awaited.
+    var busy = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ar'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => StatefulBuilder(
+              builder: (context, setState) => TextButton(
+                onPressed: () async {
+                  setState(() => busy = true);
+                  try {
+                    throw const ApiFailure('Scanning is not allowed',
+                        statusCode: 403);
+                  } catch (error) {
+                    setState(() => busy = false);
+                    await showAppPlainError(
+                      context,
+                      error is Failure ? error.message : '$error',
+                    );
+                  } finally {
+                    if (busy) setState(() => busy = false);
+                  }
+                },
+                child: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('scan'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(TextButton));
+    // Must not time out: a spinner left running behind the dialog never settles.
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.textContaining('Scanning is not allowed'), findsOneWidget);
+  });
+
 }

@@ -123,14 +123,18 @@ class _NotificationCenterScreenState
       // once and waits to be acknowledged. The sentence stays the one ApiClient
       // extracted from the response, because a refusal written for the operator
       // is more useful than a generic replacement.
+      //
+      // The busy flag is cleared first: the dialog is awaited, and a spinner
+      // still turning behind the modal barrier means the screen does not settle.
       if (mounted) {
+        setState(() => _busy = false);
         await showAppPlainError(
           context,
           error is Failure ? error.message : presentErrorText(context, error),
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && _busy) setState(() => _busy = false);
     }
   }
 

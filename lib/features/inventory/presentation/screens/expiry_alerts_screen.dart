@@ -149,13 +149,18 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
       // dialog. Raw transport objects never arrive here - ApiClient has already
       // reduced the response to its message.
       if (mounted) {
+        // Clear the spinner before opening the dialog. Awaiting the dialog with
+        // the button still in flight leaves a CircularProgressIndicator
+        // animating under a modal barrier: the screen never settles, and a
+        // test that waits for it times out instead of reading the message.
+        setState(() => _scanning = false);
         await showAppPlainError(
           context,
           error is Failure ? error.message : presentErrorText(context, error),
         );
       }
     } finally {
-      if (mounted) setState(() => _scanning = false);
+      if (mounted && _scanning) setState(() => _scanning = false);
     }
   }
 

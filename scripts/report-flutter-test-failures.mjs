@@ -58,6 +58,19 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The expiry-alerts screen is driven only by the synthetic lots checked into
+  // its test file. Report the assertion shape, the finder counts and the source
+  // position, never the row text or the server sentence.
+  if (event.type === 'print' && /^a refused scan is reported as the server worded it$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected|Actual):\s*(?:exactly (?:\d+|one|two|three) matching candidates?|no matching candidates?|<\d+>)/)?.[0]?.trim() ??
+      line.match(/Found (\d+) widgets?/)?.[0] ??
+      line.match(/test\/widget\/expiry_alerts_screen_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found|No ScaffoldMessenger widget found|No Scaffold widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown)/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   // The stock-document, warehouse-balance and stock-take screens are driven
   // only by the synthetic fixtures checked into their test files. Keep the
   // fixed assertion shape, the finder counts and the source position - never
