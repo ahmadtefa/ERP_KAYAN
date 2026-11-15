@@ -5,6 +5,8 @@ import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
+import 'package:erp_kayan/features/settings/presentation/providers/company_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
