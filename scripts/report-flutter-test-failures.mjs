@@ -74,7 +74,7 @@ for (const line of lines) {
   // The main-menu pictures are built from the real shell and the checked-in
   // synthetic user only. Keep the framework diagnosis and the source position;
   // never the labels or the pixels.
-  if (event.type === 'print' && /^(?:the menu shows eight sections and none of their items|opening a section reveals its items|opening a second section closes the first|tapping the open section closes it again)$/.test(tests.get(event.testID) ?? '')) {
+  if (event.type === 'print' && /^(?:the menu shows eight sections and none of their items|opening a section reveals its items|opening a second section closes the first|tapping the open section closes it again|a refused scan is shown in the Arabic dialog, not a SnackBar)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected|Actual):\s*(?:exactly (?:\d+|one|two|three) matching candidates?|no matching candidates?|<\d+>)/)?.[0]?.trim() ??
       line.match(/Found (\d+) widgets?/)?.[0] ??

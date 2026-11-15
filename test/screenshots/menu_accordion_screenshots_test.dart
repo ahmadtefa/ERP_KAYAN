@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:erp_kayan/app/router/app_router.dart';
@@ -9,6 +10,7 @@ import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_ac
 import 'package:erp_kayan/features/settings/presentation/providers/company_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:erp_kayan/shared/widgets/app_error_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -276,4 +278,33 @@ void main() {
       reason: 'a section must close when its own heading is tapped again',
     );
   });
+  testWidgets('a refused scan is shown in the Arabic dialog, not a SnackBar', (
+    tester,
+  ) async {
+    await _pumpShell(tester);
+
+    // The exact call the expiry screen now makes. Before this branch it was
+    // ScaffoldMessenger...SnackBar(Text('$error')), which printed the raw
+    // failure and slid away on its own.
+    unawaited(
+      showAppPlainError(
+        tester.element(_menu),
+        'Scanning is not allowed',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+    expect(find.textContaining('Scanning is not allowed'), findsOneWidget);
+    // Right-to-left inside an Arabic app, left-to-right in an English one; the
+    // dialog takes the direction of the screen it is opened over.
+    expect(
+      Directionality.of(tester.element(find.byType(AppErrorDialog))),
+      TextDirection.rtl,
+    );
+
+    await _shoot(tester, 'error_dialog_ar');
+  });
+
 }

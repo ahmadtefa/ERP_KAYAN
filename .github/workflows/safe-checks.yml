@@ -279,6 +279,7 @@ jobs:
             test/screenshots/goldens/menu_closed_ar.png
             test/screenshots/goldens/menu_inventory_open_ar.png
             test/screenshots/goldens/menu_sales_open_ar.png
+            test/screenshots/goldens/error_dialog_ar.png
           if-no-files-found: error
       - run: node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
       - run: node scripts/emit-synthetic-screenshot-previews.cjs customers_ar.png
