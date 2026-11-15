@@ -96,6 +96,27 @@ final _menu = find.byKey(const Key('erp-shell-nav-list'));
 Finder _inMenu(String label) =>
     find.descendant(of: _menu, matching: find.text(label));
 
+/// The heading of one section, by key.
+///
+/// Text cannot be used to open a section: "المخزون" is both the inventory
+/// heading and the name of an item inside it, so a text finder matches two
+/// widgets and the tap is ambiguous. Scrolling first matters too - with a
+/// section open the list is taller than the window and the next heading may not
+/// have been built yet.
+Future<void> _tapGroup(WidgetTester tester, String key) async {
+  final heading = find.byKey(ValueKey(key));
+  await tester.scrollUntilVisible(
+    heading,
+    120,
+    scrollable: find.descendant(
+      of: _menu,
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.tap(heading);
+  await tester.pumpAndSettle();
+}
+
 /// The eight headings, by the key the shell gives each one.
 const _groupKeys = [
   'nav-group-overview',
@@ -206,8 +227,7 @@ void main() {
   testWidgets('opening a section reveals its items', (tester) async {
     await _pumpShell(tester);
 
-    await tester.tap(_inMenu('المخزون'));
-    await tester.pumpAndSettle();
+    await _tapGroup(tester, 'nav-group-inventory');
 
     expect(_inMenu('المستودعات'), findsOneWidget);
     expect(_inMenu('الدفعات'), findsOneWidget);
@@ -218,12 +238,10 @@ void main() {
   testWidgets('opening a second section closes the first', (tester) async {
     await _pumpShell(tester);
 
-    await tester.tap(_inMenu('المخزون'));
-    await tester.pumpAndSettle();
+    await _tapGroup(tester, 'nav-group-inventory');
     expect(_inMenu('المستودعات'), findsOneWidget);
 
-    await tester.tap(_inMenu('المبيعات'));
-    await tester.pumpAndSettle();
+    await _tapGroup(tester, 'nav-group-sales');
 
     expect(
       _inMenu('المستودعات'),
@@ -247,12 +265,10 @@ void main() {
   testWidgets('tapping the open section closes it again', (tester) async {
     await _pumpShell(tester);
 
-    await tester.tap(_inMenu('المخزون'));
-    await tester.pumpAndSettle();
+    await _tapGroup(tester, 'nav-group-inventory');
     expect(_inMenu('المستودعات'), findsOneWidget);
 
-    await tester.tap(_inMenu('المخزون'));
-    await tester.pumpAndSettle();
+    await _tapGroup(tester, 'nav-group-inventory');
 
     expect(
       _inMenu('المستودعات'),
