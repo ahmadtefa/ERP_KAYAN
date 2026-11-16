@@ -1,4 +1,7 @@
-import { resolveDatabaseConnection } from './database-connection';
+import {
+  resolveDatabaseConnection,
+  resolveMigrationDatabaseConnection,
+} from './database-connection';
 
 const poolerUrl = (username = 'kayan_runtime.yyaodengmthijrqxyczf', port = 5432, sslmode = 'require') =>
   `postgresql://${username}:secret@aws-0-eu-central-1.pooler.supabase.com:${port}/postgres?sslmode=${sslmode}`;
@@ -67,6 +70,26 @@ describe('resolveDatabaseConnection', () => {
           6543,
         ),
       } as NodeJS.ProcessEnv),
-    ).toThrow('session pooler on port 5432');
+    ).toThrow('port 5432');
+  });
+
+  it('uses a separate TLS migration URL in cloud Prisma CLI mode', () => {
+    const migrationUrl = 'postgresql://kayan_migrator:secret@db.yyaodengmthijrqxyczf.supabase.co:5432/postgres?sslmode=require';
+    const result = resolveMigrationDatabaseConnection({
+      DATABASE_PROFILE: 'supabase',
+      SUPABASE_DATABASE_URL: poolerUrl(),
+      SUPABASE_MIGRATION_DATABASE_URL: migrationUrl,
+    } as NodeJS.ProcessEnv);
+
+    expect(result).toEqual({ profile: 'supabase', connectionString: migrationUrl });
+  });
+
+  it('refuses cloud migrations when the separate migration secret is missing', () => {
+    expect(() =>
+      resolveMigrationDatabaseConnection({
+        DATABASE_PROFILE: 'supabase',
+        SUPABASE_DATABASE_URL: poolerUrl(),
+      } as NodeJS.ProcessEnv),
+    ).toThrow('SUPABASE_MIGRATION_DATABASE_URL is required');
   });
 });

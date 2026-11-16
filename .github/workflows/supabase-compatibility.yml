@@ -1,28 +1,42 @@
-name: Supabase connection profile tests
+name: Supabase compatibility preflight
 
 on:
   push:
     branches: [feature/supabase-pilot]
     paths:
+      - 'backend/prisma/**'
+      - 'backend/prisma.config.ts'
       - 'backend/src/common/prisma/**'
+      - 'backend/scripts/supabase-*'
+      - 'backend/scripts/check-supabase-roles.mjs'
+      - 'backend/docs/supabase-cloud-pilot.md'
       - '.github/workflows/supabase-compatibility.yml'
   pull_request:
     branches: [feature/supabase-pilot]
     paths:
+      - 'backend/prisma/**'
+      - 'backend/prisma.config.ts'
       - 'backend/src/common/prisma/**'
+      - 'backend/scripts/supabase-*'
+      - 'backend/scripts/check-supabase-roles.mjs'
+      - 'backend/docs/supabase-cloud-pilot.md'
       - '.github/workflows/supabase-compatibility.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  profile-tests:
+  static-preflight:
+    name: Static Prisma and migration checks (no secrets)
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/feature/supabase-pilot'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
     env:
+      DATABASE_PROFILE: local
       DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -35,4 +49,38 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm test -- --runInBand src/common/prisma/database-connection.spec.ts
+      - name: Audit all Prisma SQL migrations for Supabase hazards
+        run: node --test scripts/supabase-migration-audit.test.mjs
+      - name: Validate Prisma schema without connecting
+        run: |
+          npx prisma generate
+          npx prisma validate
+      - name: Test local and cloud Prisma connection profiles
+        run: npm test -- --runInBand src/common/prisma/database-connection.spec.ts
+      - name: Typecheck backend
+        run: npx tsc --noEmit
+
+  read-only-supabase-role-check:
+    name: Read-only Supabase role and RLS check
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
+      SUPABASE_MIGRATION_DATABASE_URL: ${{ secrets.SUPABASE_MIGRATION_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check database roles and RLS without applying DDL
+        run: node scripts/check-supabase-roles.mjs
