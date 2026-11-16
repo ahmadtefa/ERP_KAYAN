@@ -1,0 +1,38 @@
+name: Supabase connection profile tests
+
+on:
+  push:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'backend/src/common/prisma/**'
+      - '.github/workflows/supabase-compatibility.yml'
+  pull_request:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'backend/src/common/prisma/**'
+      - '.github/workflows/supabase-compatibility.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  profile-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test -- --runInBand src/common/prisma/database-connection.spec.ts
