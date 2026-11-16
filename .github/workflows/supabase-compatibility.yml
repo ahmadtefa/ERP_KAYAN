@@ -51,6 +51,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Audit all Prisma SQL migrations for Supabase hazards
         run: node --test scripts/supabase-migration-audit.test.mjs
+      - name: Pin the committed Supabase root CA identity
+        run: node --test scripts/supabase-db-ca.test.mjs
       - name: Validate Prisma schema without connecting
         run: |
           npx prisma generate
@@ -116,8 +118,12 @@ jobs:
         run: node --test scripts/supabase-migration-audit.test.mjs
 
   read-only-supabase-role-check:
-    name: Read-only Supabase role and RLS check
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/supabase-pilot'
+    name: Read-only Supabase role, TLS, and RLS check (live)
+    # Runs for real on every push to the branch and on manual dispatch. It is
+    # intentionally NOT skipped when secrets are missing: that case fails with
+    # an explicit error so a red X replaces a silent green skip. Pull requests
+    # do not run it (fork PRs have no secrets); the push run is the gate.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
@@ -130,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -138,5 +144,19 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Check database roles and RLS without applying DDL
+      - name: Fail loudly when live-check secrets are missing (never skip silently)
+        run: |
+          missing=""
+          [ -n "$SUPABASE_DATABASE_URL" ] || missing="$missing SUPABASE_RUNTIME_DATABASE_URL"
+          [ -n "$SUPABASE_MIGRATION_DATABASE_URL" ] || missing="$missing SUPABASE_MIGRATION_DATABASE_URL"
+          if [ -n "$missing" ]; then
+            echo "::error::Live Supabase check was NOT performed. Set the missing GitHub secrets:$missing (secret values only; never commit them)."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_DB_CA_CERT" ]; then
+            echo "::notice::SUPABASE_DB_CA_CERT secret not set; falling back to the pinned public Supabase Root 2021 CA at backend/certs/supabase-prod-ca-2021.crt"
+          fi
+      - name: Check database roles and RLS without applying DDL (TLS verified)
+        env:
+          SUPABASE_DB_CA_CERT_FILE: ${{ github.workspace }}/backend/certs/supabase-prod-ca-2021.crt
         run: node scripts/check-supabase-roles.mjs

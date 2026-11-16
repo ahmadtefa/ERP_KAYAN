@@ -25,6 +25,22 @@ The NestJS runtime cloud profile is explicit: `DATABASE_PROFILE=supabase` reads 
 
 Prisma CLI database commands in cloud mode use `SUPABASE_MIGRATION_DATABASE_URL`, separate from the runtime secret, and use the same verified CA configuration. Migration URLs may use the direct endpoint or session pooler, both on port 5432 and TLS. Schema-only commands such as `prisma validate` and `prisma generate` do not need database credentials. Never run `scripts/prepare-database.mjs` against Supabase: it creates roles/databases for desktop installs.
 
+## Supabase database CA (`SUPABASE_DB_CA_CERT`)
+
+Supabase's database/pooler certificates chain to the private **Supabase Root 2021 CA**, which is not in Node's or libpq's public trust store. Without it every verified connection fails with `self-signed certificate in certificate chain`. The CA is public (not a secret): it is pinned in `backend/certs/supabase-prod-ca-2021.crt` (`certs/README.md` documents its fingerprint and rotation; `scripts/supabase-db-ca.test.mjs` enforces the pin) and is the same file the dashboard serves under **Database Settings → SSL Configuration → Download certificate**.
+
+- GitHub secret `SUPABASE_DB_CA_CERT` = the full PEM text of that certificate (optional; the workflow falls back to the pinned file). The connection secrets stay in `SUPABASE_RUNTIME_DATABASE_URL` / `SUPABASE_MIGRATION_DATABASE_URL`.
+- Local runs: `SUPABASE_DB_CA_CERT_FILE=certs/supabase-prod-ca-2021.crt`.
+- `check-supabase-roles.mjs` and the runtime pool refuse to connect without it (fail closed, `rejectUnauthorized: true`, ssl-mode URL parameters are stripped so they cannot downgrade verification).
+
+## External backup and restore drill
+
+`scripts/cloud-backup-drill.mjs` (`npm run cloud:backup-drill`) provides the pre-migration backup gate from `supabase-tenant-rls.md` §7:
+
+- `backup --url <source> --out <dir>`: `pg_dump -Fc --schema=public` (all program objects; Supabase-managed schemas such as `auth`/`storage` are excluded - the app keeps its own users in `public.users`) with verified TLS (`verify-full` + the pinned CA) for Supabase hosts; set `KAYAN_BACKUP_PASSPHRASE` to store the artifact AES-256 encrypted, otherwise it is written with mode 0600. The dump is an external copy - keep it outside the repository and outside the database host.
+- `drill --dump <file> --admin-url <local-url>`: restores into a scratch database on an isolated local PostgreSQL 17 (loopback admin URL only - a drill can never touch Supabase), verifies tables/RLS/policies/`_prisma_migrations`, and drops the scratch database. `scripts/cloud-backup-drill.test.mjs` proves the guards (no ssl downgrade, CA required, loopback-only).
+- Take the backup with `SUPABASE_MIGRATION_DATABASE_URL` (read access to all schemas) before any migration run, and run the drill after it. Both are read-only with respect to Supabase.
+
 ## Required database roles
 
 Provision two different custom roles through a secure Supabase administration channel:
