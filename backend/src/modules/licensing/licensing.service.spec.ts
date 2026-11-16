@@ -1,7 +1,14 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { loadPublicKey, signPayload, verifyKey } from './license-key';
+import { PublicLicenseKeyring } from './license-keyring';
+import { LicenseStore } from './license-store';
+import { LicensingService } from './licensing.service';
 import {
+  FakeDb,
   LICENSE,
   MACHINE,
   OTHER_MACHINE,
@@ -14,6 +21,15 @@ import {
   seatsKey,
   transferKey,
 } from './licensing.harness';
+
+const legacyVerifierPem = readFileSync(
+  resolve(__dirname, '../../../../distribution/windows/public-key.pem'),
+  'utf8',
+);
+const replacementVerifierPem = readFileSync(
+  resolve(__dirname, '../../../../distribution/windows/public-key-next.pem'),
+  'utf8',
+);
 
 describe('readiness', () => {
   it('tries again after a startup that could not read the database', async () => {
@@ -72,6 +88,49 @@ describe('before activation', () => {
 });
 
 describe('activation', () => {
+  it('blocks an installed keyring when its secondary file disappears', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kayan-keyring-'));
+    try {
+      writeFileSync(join(dir, 'public-key.pem'), legacyVerifierPem);
+      writeFileSync(join(dir, 'public-key-next.pem'), replacementVerifierPem);
+      writeFileSync(join(dir, 'keyring.required'), 'required');
+      const now = new Date('2026-05-01T09:00:00.000Z');
+      const service = new LicensingService(new FakeDb(() => now) as any, {} as any, {
+        installedDirectory: dir, machineId: MACHINE, clock: () => now,
+        trustStore: new LicenseStore(dir),
+      });
+      expect((await service.status({ fresh: true })).configured).toBe(true);
+      unlinkSync(join(dir, 'public-key-next.pem'));
+      expect((await service.status({ fresh: true })).configured).toBe(false);
+      expect((await service.status({ fresh: true })).blocked).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('uses the pinned dual verifier while retaining machine binding', async () => {
+    const h = harness({
+      publicKeyText: legacyVerifierPem,
+      publicKeyNextText: replacementVerifierPem,
+    });
+    const keyringVerify = jest
+      .spyOn(PublicLicenseKeyring.prototype, 'verify')
+      .mockImplementation((raw) => ({
+        parsed: verifyKey(raw, loadPublicKey(PUBLIC_PEM)),
+        signerSha256: 'f93238b0cdc0a81d345f160cf8dcdbb7de5e4d20fa99959b7e4b165ac1ebb5c3',
+      }));
+    try {
+      await activation(h);
+      expect(keyringVerify).toHaveBeenCalledTimes(1);
+      await expectCode(
+        activation(h, { keyId: 'key_wrong-machine-2', machineId: OTHER_MACHINE }),
+        'LICENSE_KEY_WRONG_MACHINE',
+      );
+      expect(h.db.installations).toHaveLength(1);
+    } finally {
+      keyringVerify.mockRestore();
+      h.dispose();
+    }
+  });
+
   it('installs a one-year licence that ends a calendar year later', async () => {
     const h = harness();
     try {

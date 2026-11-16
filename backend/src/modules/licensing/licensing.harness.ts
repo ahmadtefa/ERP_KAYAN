@@ -215,6 +215,8 @@ export function harness(
     machineId?: string;
     /** The operator's public key; the generator spec supplies its own. */
     publicKeyText?: string;
+    /** A replacement verifier used only to exercise dual-verifier control flow. */
+    publicKeyNextText?: string;
     /** Signs the keys built by `h.key`, for a key pair of the caller's making. */
     signWith?: KeyObject;
     /** The wall clock the service starts at; real time for real issued keys. */
@@ -228,10 +230,12 @@ export function harness(
   const service = new LicensingService(db as any, {} as any, {
     directory: dir,
     publicKeyText: options.publicKeyText ?? PUBLIC_PEM,
+    publicKeyNextText: options.publicKeyNextText,
     enforcement: options.enforcement ?? 'enforce',
     clock: () => now,
     appVersion: '0.1.0-test',
     machineId: options.machineId ?? MACHINE,
+    installedDirectory: null,
     trustStore: store,
   });
 

@@ -15,6 +15,16 @@ test('both installer key comparisons use the built-in SHA-256 helper', async () 
   assert.doesNotMatch(source, /\(Get-FileHash\s/);
 });
 
+test('Windows product staging preserves a pinned replacement public verifier', async () => {
+  const build = await readFile(new URL('../distribution/windows/build-installer.ps1', import.meta.url), 'utf8');
+  const runtime = await readFile(new URL('../distribution/windows/install-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(build, /public-key-next\.pem/);
+  assert.match(runtime, /public-key-next\.pem/);
+  assert.match(runtime, /The installed replacement licence key changed during setup; refusing replacement\./);
+  assert.doesNotMatch(build, /private-key\.pem/);
+  assert.doesNotMatch(runtime, /private-key\.pem/);
+});
+
 // Windows PowerShell 5.1 is the same host invoked by Inno Setup. This test
 // executes only the real script's preflight prefix against disposable paths:
 // it must never start services, configure databases or write signing keys.

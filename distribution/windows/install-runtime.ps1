@@ -776,6 +776,8 @@ function Add-LicenceSettings([hashtable]$Values) {
   )
   $source = $candidates | Where-Object { Test-ExistingPath $_ } | Select-Object -First 1
   $target = Join-Path $licenceDirectory 'public-key.pem'
+  $replacementSource = Join-Path $PSScriptRoot 'public-key-next.pem'
+  $replacementTarget = Join-Path $licenceDirectory 'public-key-next.pem'
   # A file that the backend reads as "this installation must hold a licence".
   # It is written only when the build really carries a verification key, and it
   # is what makes enforcement survive a build that forgot the key, a missing
@@ -795,6 +797,23 @@ function Add-LicenceSettings([hashtable]$Values) {
       Copy-Item -LiteralPath $source -Destination $target
     }
     Set-PrivateAcl $target @('BUILTIN\Administrators', $serviceAccount)
+    $keyringMarkerSource = Join-Path $PSScriptRoot 'keyring.required'
+    if (Test-Path -LiteralPath $keyringMarkerSource -PathType Leaf) {
+    if (-not (Test-Path -LiteralPath $replacementSource -PathType Leaf)) { throw 'Replacement licence public key is missing.' }
+    if (Test-Path -LiteralPath $replacementTarget -PathType Leaf) {
+      if ((Get-KayanFileSha256 $replacementSource) -ne (Get-KayanFileSha256 $replacementTarget)) {
+        throw 'The installed replacement licence key changed during setup; refusing replacement.'
+      }
+    } else {
+      Copy-Item -LiteralPath $replacementSource -Destination $replacementTarget
+    }
+    Set-PrivateAcl $replacementTarget @('BUILTIN\Administrators', $serviceAccount)
+    $keyringMarkerTarget = Join-Path $licenceDirectory 'keyring.required'
+    if (-not (Test-Path -LiteralPath $keyringMarkerTarget -PathType Leaf)) {
+      Copy-Item -LiteralPath $keyringMarkerSource -Destination $keyringMarkerTarget
+    }
+    Set-PrivateAcl $keyringMarkerTarget @('BUILTIN\Administrators', $serviceAccount)
+    }
     if (-not (Test-Path -LiteralPath $enforcementMarker)) {
       Set-Content -LiteralPath $enforcementMarker -Value ('KAYAN ERP enforces offline licences on this installation since ' + (Get-Date).ToString('u')) -Encoding ASCII
     }

@@ -403,6 +403,14 @@ if ($licencePublicKey) {
   if ($LASTEXITCODE -ne 0) { throw 'Staged licence public key failed policy validation.' }
   $licenceMode = 'enforce'
   $licenceKeySha256 = (Get-FileHash -LiteralPath $stagedPublicKey -Algorithm SHA256).Hash
+  if ($buildKind -eq 'product') {
+    $replacementPublicKey = Join-Path $PSScriptRoot 'public-key-next.pem'
+    if (-not (Test-Path -LiteralPath $replacementPublicKey -PathType Leaf)) { throw 'Replacement licence public key is missing.' }
+    & node --test (Join-Path $root 'scripts\license-public-key-transition.test.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Approved licence public-key fingerprints did not validate.' }
+    Copy-Item -LiteralPath $replacementPublicKey -Destination (Join-Path $app 'public-key-next.pem') -Force
+    Set-Content -LiteralPath (Join-Path $app 'keyring.required') -Value 'Both pinned Ed25519 public keys are required.' -Encoding ASCII
+  }
   Write-Host "Licensing: enforcement ON ($buildKind); staged public key SHA256 $licenceKeySha256"
 } else {
   $licenceMode = 'warn'

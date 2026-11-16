@@ -30,6 +30,7 @@ import {
   publicKeyFingerprint,
   verifyKey,
 } from './license-key';
+import { PublicLicenseKeyring } from './license-keyring';
 import {
   ClockState,
   EnforcementMode,
@@ -132,6 +133,8 @@ const STATUS_CACHE_MS = 3_000;
 export interface LicensingOptions {
   directory?: string;
   publicKeyText?: string | null;
+  /** Public replacement verifier. Installed copies load this only from their protected folder. */
+  publicKeyNextText?: string | null;
   enforcement?: EnforcementMode;
   clock?: () => Date;
   appVersion?: string;
@@ -152,6 +155,7 @@ export class LicensingService implements OnModuleInit {
   private readonly logger = new Logger('Licensing');
   private readonly directory: string;
   private readonly publicKeyTextOverride: string | null;
+  private readonly publicKeyNextTextOverride: string | null;
   private readonly clock: () => Date;
   private readonly appVersion: string;
   private readonly machineIdOverride: string | null;
@@ -170,6 +174,8 @@ export class LicensingService implements OnModuleInit {
   private installedStateError: 'LICENSE_STATE_DAMAGED' | null = null;
   private publicKeyPem: string | null = null;
   private publicKeyPrint: string | null = null;
+  private publicKeyNextPem: string | null = null;
+  private publicKeyNextPrint: string | null = null;
   // Last completed check, for non-blocking health diagnostics only. A guard
   // decision always uses its own fresh check, never this shared observation.
   private installedKeyAvailable = false;
@@ -204,6 +210,7 @@ export class LicensingService implements OnModuleInit {
       (platform() === 'win32' &&
         resolve(this.directory).toLowerCase() === resolve(defaultStateDirectory()).toLowerCase());
     this.publicKeyTextOverride = options.publicKeyText ?? null;
+    this.publicKeyNextTextOverride = options.publicKeyNextText ?? null;
     this.clock = options.clock ?? (() => new Date());
     this.appVersion =
       options.appVersion ??
@@ -302,6 +309,8 @@ export class LicensingService implements OnModuleInit {
     // from that failed attempt into a later attempt with a missing/bad file.
     this.publicKeyPem = null;
     this.publicKeyPrint = null;
+    this.publicKeyNextPem = null;
+    this.publicKeyNextPrint = null;
     this.installedKeyAvailable = false;
     const candidates: string[] = [];
 
@@ -322,6 +331,16 @@ export class LicensingService implements OnModuleInit {
         );
       }
       this.adoptPublicKey(candidates);
+      if (existsSync(join(this.installedDirectory, 'keyring.required'))) {
+        const next = readTextIfPresent(join(this.installedDirectory, 'public-key-next.pem'));
+        if (next) this.adoptSecondaryPublicKey(next);
+        if (!this.publicKeyNextPem) {
+          this.publicKeyPem = null;
+          this.publicKeyPrint = null;
+          this.installedKeyAvailable = false;
+          this.logger.error('The installed licence keyring is incomplete. Business operations are blocked.');
+        }
+      }
       return;
     }
 
@@ -334,6 +353,9 @@ export class LicensingService implements OnModuleInit {
     const fromFile = readTextIfPresent(file);
     if (fromFile) candidates.push(fromFile);
     this.adoptPublicKey(candidates);
+    if (this.publicKeyNextTextOverride) {
+      this.adoptSecondaryPublicKey(this.publicKeyNextTextOverride);
+    }
   }
 
   /** Uses the first candidate that really is an Ed25519 public key. */
@@ -371,6 +393,27 @@ export class LicensingService implements OnModuleInit {
   }
 
   /**
+   * The replacement verifier is accepted only as the exact, pinned companion
+   * to the legacy verifier. It is public material; a malformed or substituted
+   * file cannot widen the set of accepted signers.
+   */
+  private adoptSecondaryPublicKey(candidate: string): void {
+    if (!this.publicKeyPem) return;
+    try {
+      const keyring = PublicLicenseKeyring.fromPinnedPem(this.publicKeyPem, candidate);
+      const next = loadPublicKey(candidate);
+      this.publicKeyNextPem = candidate;
+      this.publicKeyNextPrint = publicKeyFingerprint(next);
+      // Constructing the pinned ring above verifies both SPKI fingerprints.
+      void keyring;
+    } catch (error) {
+      this.logger.warn(
+        `The replacement licence public key was rejected: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
    * Revalidate the installed public-key source at each protected request and
    * immediately before a licence mutation. Do not use a time-based cache:
    * removal or replacement must fail the next check. Only a small regular
@@ -381,15 +424,22 @@ export class LicensingService implements OnModuleInit {
    */
   private async verificationKeyAvailable(): Promise<boolean> {
     if (!this.installedDirectory) return Boolean(this.publicKeyPrint);
+    if (this.publicKeyNextPem && !existsSync(join(this.installedDirectory, 'keyring.required'))) {
+      this.installedKeyAvailable = false;
+      return false;
+    }
     if (!this.publicKeyPem || !this.publicKeyPrint || !this.store.current.publicKeyFingerprint) {
       this.installedKeyAvailable = false;
       return false;
     }
-    const path = join(this.installedDirectory, 'public-key.pem');
+    const paths = [join(this.installedDirectory, 'public-key.pem')];
+    if (this.publicKeyNextPem) paths.push(join(this.installedDirectory, 'public-key-next.pem'));
     const maxBytes = 16 * 1024;
-    let file: Awaited<ReturnType<typeof fs.open>> | undefined;
-    let valid = false;
+    let valid = true;
     try {
+      for (const path of paths) {
+      let file: Awaited<ReturnType<typeof fs.open>> | undefined;
+      try {
       const before = await fs.lstat(path);
       if (!before.isFile() || before.size <= 0 || before.size > maxBytes) throw new Error('invalid public key file');
       const flags = platform() === 'win32'
@@ -407,13 +457,17 @@ export class LicensingService implements OnModuleInit {
         throw new Error('public key file changed during verification');
       }
       const fingerprint = publicKeyFingerprint(loadPublicKey(buffer.subarray(0, bytesRead).toString('utf8')));
-      valid = fingerprint === this.publicKeyPrint && fingerprint === this.store.current.publicKeyFingerprint;
+      const expected = path === paths[0] ? this.publicKeyPrint : this.publicKeyNextPrint;
+      valid = valid && fingerprint === expected;
+      } finally {
+        if (file) await file.close().catch(() => undefined);
+      }
+      }
+      valid = valid && this.publicKeyPrint === this.store.current.publicKeyFingerprint;
     } catch {
       // Missing, unreadable, malformed or different key: fail closed without
       // logging file contents or changing any protected state.
       valid = false;
-    } finally {
-      if (file) await file.close().catch(() => undefined);
     }
     this.installedKeyAvailable = valid;
     return valid;
@@ -898,6 +952,11 @@ export class LicensingService implements OnModuleInit {
       });
     }
     try {
+      if (this.publicKeyNextPem) {
+        return PublicLicenseKeyring
+          .fromPinnedPem(this.publicKeyPem, this.publicKeyNextPem)
+          .verify(rawKey).parsed;
+      }
       return verifyKey(rawKey, loadPublicKey(this.publicKeyPem));
     } catch (error) {
       if (error instanceof LicenseKeyError) {
