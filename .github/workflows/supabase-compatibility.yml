@@ -57,6 +57,8 @@ jobs:
           npx prisma validate
       - name: Test local and cloud Prisma connection profiles
         run: npm test -- --runInBand src/common/prisma/database-connection.spec.ts
+      - name: Validate read-only role checker syntax
+        run: node --check scripts/check-supabase-roles.mjs
       - name: Typecheck backend
         run: npx tsc --noEmit
 
