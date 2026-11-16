@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { resolveDatabaseConnection } from './database-connection';
+import { resolveRuntimePgPoolConfig } from './database-connection';
 import { TenantPrismaPg } from './tenant-prisma-pg';
 
 /**
@@ -16,8 +16,7 @@ import { TenantPrismaPg } from './tenant-prisma-pg';
  * every transaction so row-level security can scope each row to one company.
  */
 export function createPgAdapter(): TenantPrismaPg {
-  const { connectionString } = resolveDatabaseConnection();
-  return new TenantPrismaPg({ connectionString });
+  return new TenantPrismaPg(resolveRuntimePgPoolConfig());
 }
 
 @Injectable()

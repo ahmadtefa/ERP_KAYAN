@@ -21,9 +21,9 @@
 
 Local remains the default: `DATABASE_PROFILE=local` (or unset) uses the existing `DATABASE_URL`, so Windows can continue to run against its bundled/local PostgreSQL without internet.
 
-The NestJS runtime cloud profile is explicit: `DATABASE_PROFILE=supabase` reads `SUPABASE_DATABASE_URL`. It accepts TLS only and the shared Supavisor session pooler on port 5432. Transaction pooling is intentionally rejected because the persistent PrismaPg client uses session semantics and prepared statements.
+The NestJS runtime cloud profile is explicit: `DATABASE_PROFILE=supabase` reads `SUPABASE_DATABASE_URL`. It requires verified TLS with the Supabase CA certificate from `SUPABASE_DB_CA_CERT` or `SUPABASE_DB_CA_CERT_FILE`, and the shared Supavisor session pooler on port 5432. Transaction pooling is intentionally rejected because the persistent PrismaPg client uses session semantics and prepared statements.
 
-Prisma CLI database commands in cloud mode use `SUPABASE_MIGRATION_DATABASE_URL`, separate from the runtime secret. Migration URLs may use the direct endpoint or session pooler, both on port 5432 and TLS. Schema-only commands such as `prisma validate` and `prisma generate` do not need database credentials. Never run `scripts/prepare-database.mjs` against Supabase: it creates roles/databases for desktop installs.
+Prisma CLI database commands in cloud mode use `SUPABASE_MIGRATION_DATABASE_URL`, separate from the runtime secret, and use the same verified CA configuration. Migration URLs may use the direct endpoint or session pooler, both on port 5432 and TLS. Schema-only commands such as `prisma validate` and `prisma generate` do not need database credentials. Never run `scripts/prepare-database.mjs` against Supabase: it creates roles/databases for desktop installs.
 
 ## Required database roles
 
@@ -42,3 +42,12 @@ The checked-in Prisma migrations create no RLS policies. Supabase's `ensure_rls`
 The schema's tenant root is `companies.id`; tables carrying `companyId` must scope it to the authenticated company. Child rows without `companyId` must inherit the same scope through their parent relation, including journal lines/allocations, voucher allocations, opening-balance lines, stock-document lines, invoice lines, quotation tables/lines/events, item units, order lines, price-list items, user permissions, role permissions/branches, refresh tokens, and stock-take lines. System permission catalog rows, system roles, audit rows with null company IDs, and device-level licence records need explicit, separate access rules rather than a blanket tenant policy.
 
 Current NestJS services use a process-wide Prisma client and the public login looks up a globally unique username before a company is known. There is no transaction-local authenticated company context yet. A secure implementation must establish that context from the verified principal for each request and apply it with transaction-local state; login and background/license operations need separate reviewed paths. Until that work and cross-company denial tests exist, do not apply the Prisma migrations or grant runtime DML.
+
+
+## HTTPS browser pilot packaging
+
+The deployment/cloud files and backend/Dockerfile.cloud provide a cloud-only container with Caddy in front of NestJS. Flutter Web is built with API_BASE_URL=/api/v1, so requests stay same-origin; no Supabase URL, password, or key is compiled into Flutter. The existing Windows/offline profile remains DATABASE_PROFILE=local.
+
+The Cloud web package preflight builds Flutter Web and the Docker image on feature/supabase-pilot. It does not publish or deploy either artifact. The Compose template does not run migrations or prepare-database.mjs.
+
+Before running the browser container, set a DNS name and copy deployment/cloud/.env.cloud.example to the ignored .env.cloud; provide the runtime URL and JWT secrets there, and place the downloaded Supabase database CA at the ignored deployment/cloud/supabase-ca.crt. The migration URL stays out of the app container. Caddy obtains the HTTPS certificate after DNS points to the host and inbound ports 80/443 are available.

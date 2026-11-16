@@ -1,0 +1,62 @@
+services:
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile.cloud
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.cloud
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      NODE_ENV: production
+      DATABASE_PROFILE: supabase
+      KAYAN_WEB_ROOT: /app/build/web
+      KAYAN_TLS_TERMINATED: "1"
+      KAYAN_ALLOW_PUBLIC_HTTP: "1"
+      KAYAN_TRUST_PROXY: loopback,linklocal,uniquelocal
+      SUPABASE_DB_CA_CERT_FILE: /run/secrets/supabase_db_ca
+    expose:
+      - "3000"
+    secrets:
+      - supabase_db_ca
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  https:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ERP_DOMAIN: ${ERP_DOMAIN:?Set ERP_DOMAIN in .env.cloud}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  supabase_db_ca:
+    file: ./supabase-ca.crt
+
+volumes:
+  caddy_data:
+  caddy_config:

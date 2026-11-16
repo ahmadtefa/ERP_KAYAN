@@ -1,6 +1,8 @@
 import {
   resolveDatabaseConnection,
   resolveMigrationDatabaseConnection,
+  resolveRuntimePgPoolConfig,
+  resolveMigrationPgPoolConfig,
 } from './database-connection';
 
 const poolerUrl = (username = 'kayan_runtime.yyaodengmthijrqxyczf', port = 5432, sslmode = 'require') =>
@@ -91,5 +93,43 @@ describe('resolveDatabaseConnection', () => {
         SUPABASE_DATABASE_URL: poolerUrl(),
       } as NodeJS.ProcessEnv),
     ).toThrow('SUPABASE_MIGRATION_DATABASE_URL is required');
+  });
+});
+
+
+describe('verified Supabase PostgreSQL TLS configuration', () => {
+  const ca = '-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----';
+
+  it('pins runtime TLS to the supplied CA and strips URL TLS overrides', () => {
+    const config = resolveRuntimePgPoolConfig({
+      DATABASE_PROFILE: 'supabase',
+      SUPABASE_DATABASE_URL:
+        poolerUrl('kayan_runtime.yyaodengmthijrqxyczf', 5432, 'verify-full') +
+        '&sslrootcert=/tmp/ignored.crt',
+      SUPABASE_DB_CA_CERT: ca,
+    } as NodeJS.ProcessEnv);
+    expect(config.ssl).toEqual({ ca, rejectUnauthorized: true });
+    expect(config.connectionString).not.toContain('sslmode');
+    expect(config.connectionString).not.toContain('sslrootcert');
+    expect(new URL(config.connectionString).hostname).toContain('.pooler.supabase.com');
+  });
+
+  it('keeps local PostgreSQL unchanged and does not require a cloud CA', () => {
+    expect(resolveRuntimePgPoolConfig({
+      DATABASE_URL: 'postgresql://local:secret@127.0.0.1:5432/kayan',
+    } as NodeJS.ProcessEnv)).toEqual({
+      connectionString: 'postgresql://local:secret@127.0.0.1:5432/kayan',
+    });
+  });
+
+  it('requires the CA certificate for cloud runtime and migration clients', () => {
+    const env = {
+      DATABASE_PROFILE: 'supabase',
+      SUPABASE_DATABASE_URL: poolerUrl(),
+      SUPABASE_MIGRATION_DATABASE_URL:
+        'postgresql://kayan_migrator:secret@db.yyaodengmthijrqxyczf.supabase.co:5432/postgres?sslmode=require',
+    } as NodeJS.ProcessEnv;
+    expect(() => resolveRuntimePgPoolConfig(env)).toThrow('SUPABASE_DB_CA_CERT');
+    expect(() => resolveMigrationPgPoolConfig(env)).toThrow('SUPABASE_DB_CA_CERT');
   });
 });

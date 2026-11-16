@@ -59,6 +59,8 @@ jobs:
         run: npm test -- --runInBand src/common/prisma/database-connection.spec.ts
       - name: Validate read-only role checker syntax
         run: node --check scripts/check-supabase-roles.mjs
+      - name: Test verified TLS options for Supabase role checker
+        run: node --test scripts/check-supabase-roles.test.mjs
       - name: Typecheck backend
         run: npx tsc --noEmit
 
@@ -124,6 +126,7 @@ jobs:
     env:
       SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
       SUPABASE_MIGRATION_DATABASE_URL: ${{ secrets.SUPABASE_MIGRATION_DATABASE_URL }}
+      SUPABASE_DB_CA_CERT: ${{ secrets.SUPABASE_DB_CA_CERT }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

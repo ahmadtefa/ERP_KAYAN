@@ -1,0 +1,66 @@
+name: Cloud web package preflight
+
+on:
+  push:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'backend/Dockerfile.cloud'
+      - 'deployment/cloud/**'
+      - '.github/workflows/cloud-web-package.yml'
+  pull_request:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'backend/Dockerfile.cloud'
+      - 'deployment/cloud/**'
+      - '.github/workflows/cloud-web-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-cloud-web:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Build browser client with same-origin API
+        run: flutter build web --release --dart-define=APP_ENV=production --dart-define=API_BASE_URL=/api/v1
+      - name: Stage browser client in cloud image context
+        run: |
+          mkdir -p backend/build
+          cp -a build/web backend/build/web
+      - name: Validate cloud image build
+        run: docker build --file Dockerfile.cloud --tag kayan-erp-cloud:ci .
+        working-directory: backend
+      - name: Validate HTTPS Compose configuration without secrets
+        run: |
+          cp deployment/cloud/.env.cloud.example deployment/cloud/.env.cloud
+          touch deployment/cloud/supabase-ca.crt
+          docker compose --env-file deployment/cloud/.env.cloud --file deployment/cloud/compose.yaml config --quiet
+          rm -f deployment/cloud/.env.cloud deployment/cloud/supabase-ca.crt
+      - name: Upload browser build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-erp-flutter-web
+          path: build/web
+          if-no-files-found: error
+          retention-days: 7

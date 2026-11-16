@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { Client } from 'pg';
 
 const runtimeUrl = process.env.SUPABASE_DATABASE_URL;
@@ -6,7 +8,7 @@ const forbiddenRoles = new Set([
   'postgres', 'service_role', 'supabase_admin', 'authenticator', 'authenticated', 'anon',
 ]);
 
-function parseAndValidate(name, value, kind) {
+export function parseAndValidate(name, value, kind) {
   if (!value) throw new Error(name + ' GitHub Secret is missing.');
   let url;
   try { url = new URL(value); } catch { throw new Error(name + ' is not a valid PostgreSQL URL.'); }
@@ -28,8 +30,38 @@ function parseAndValidate(name, value, kind) {
   return { role, connectionString: value };
 }
 
+function readCaCertificate(env = process.env) {
+  let certificate = env.SUPABASE_DB_CA_CERT?.trim() || '';
+  if (!certificate && env.SUPABASE_DB_CA_CERT_FILE) {
+    try { certificate = readFileSync(env.SUPABASE_DB_CA_CERT_FILE, 'utf8').trim(); }
+    catch { throw new Error('Supabase CA certificate file could not be read.'); }
+  }
+  if (!certificate) {
+    throw new Error('SUPABASE_DB_CA_CERT GitHub Secret is missing; provide the PEM CA certificate from Supabase Database Settings.');
+  }
+  if (!/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(certificate)) {
+    throw new Error('SUPABASE_DB_CA_CERT must contain a PEM encoded certificate.');
+  }
+  return certificate;
+}
+
+export function secureClientOptions(connectionString, env = process.env) {
+  const url = new URL(connectionString);
+  for (const parameter of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) {
+    url.searchParams.delete(parameter);
+  }
+  return {
+    connectionString: url.toString(),
+    ssl: { ca: readCaCertificate(env), rejectUnauthorized: true },
+  };
+}
+
+function errorCode(error) {
+  return error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+}
+
 async function inspect(label, connectionString) {
-  const client = new Client({ connectionString });
+  const client = new Client(secureClientOptions(connectionString));
   try {
     await client.connect();
     const result = await client.query([
@@ -65,6 +97,10 @@ async function inspect(label, connectionString) {
     if (state.data_api_grants > 0) throw new Error('anon/authenticated have table privileges; this would expose tables to the Data API.');
     return { role: role.role, tableCount: state.table_count };
   } catch (error) {
+    const code = errorCode(error);
+    if (/SELF_SIGNED_CERT|CERT_SIGNATURE_FAILURE|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|ERR_TLS_CERT_ALTNAME_INVALID|CERT_HAS_EXPIRED/.test(code)) {
+      throw new Error(label + ' TLS certificate verification failed; set SUPABASE_DB_CA_CERT to the CA certificate from Supabase Database Settings.');
+    }
     if (error instanceof Error && !/password|connection string|postgresql:\/\//i.test(error.message)) throw error;
     throw new Error(label + ' connection or credential check failed; details withheld.');
   } finally {
@@ -72,7 +108,7 @@ async function inspect(label, connectionString) {
   }
 }
 
-async function main() {
+export async function main() {
   const runtime = parseAndValidate('SUPABASE_DATABASE_URL', runtimeUrl, 'runtime');
   const migration = parseAndValidate('SUPABASE_MIGRATION_DATABASE_URL', migrationUrl, 'migration');
   if (runtime.role === migration.role) throw new Error('Runtime and migration secrets must authenticate as different database roles.');
@@ -83,7 +119,9 @@ async function main() {
     '. No schema changes were applied.');
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : 'Supabase role preflight failed; details withheld.');
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : 'Supabase role preflight failed; details withheld.');
+    process.exitCode = 1;
+  });
+}

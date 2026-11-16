@@ -143,8 +143,13 @@ following are true (user constraint; also `supabase-cloud-pilot.md`):
 2. `tenant-rls.integration.spec.ts` is green in CI on a real database;
 3. `check-supabase-roles.mjs` passes against the project (read-only) with the
    runtime and migration roles provisioned as specified;
-4. only then run `apply-migrations.mjs` with `SUPABASE_MIGRATION_DATABASE_URL`
-   (never the runtime URL), and grant the runtime role DML.
+4. create an encrypted custom-format database dump, restore it into a separate
+   disposable PostgreSQL 17 target, and verify the restore; confirm the project's
+   backup/PITR retention and restore permissions in the Supabase dashboard;
+5. obtain explicit approval for the migration operation;
+6. only then run the reviewed migration command with
+   `SUPABASE_MIGRATION_DATABASE_URL` (never the runtime URL), and verify
+   `_prisma_migrations`, RLS policies, and runtime grants before starting NestJS.
 
 ## 8. Known limitations / follow-ups
 

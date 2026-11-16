@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { resolveMigrationDatabaseConnection } from './src/common/prisma/database-connection';
+import { resolveMigrationPgPoolConfig } from './src/common/prisma/database-connection';
 
 const databaseProfile = process.env.DATABASE_PROFILE?.trim().toLowerCase() || 'local';
 const schemaOnlyUrl = 'postgresql://127.0.0.1:1/kayan_schema_only?schema=public';
@@ -35,8 +35,7 @@ export default defineConfig({
   },
   adapter: async () => {
     if (databaseProfile === 'supabase') {
-      const { connectionString } = resolveMigrationDatabaseConnection();
-      return new PrismaPg({ connectionString });
+      return new PrismaPg(resolveMigrationPgPoolConfig());
     }
     if (!configuredDatabaseUrl) {
       throw new Error(

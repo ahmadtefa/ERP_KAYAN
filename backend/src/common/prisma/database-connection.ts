@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 export type DatabaseProfile = 'local' | 'supabase';
 
 export interface ResolvedDatabaseConnection {
@@ -110,4 +112,59 @@ export function resolveMigrationDatabaseConnection(
   const connectionString = requiredValue(env, 'SUPABASE_MIGRATION_DATABASE_URL');
   validateCloudUrl(connectionString, 'migration');
   return { profile, connectionString };
+}
+
+
+export interface PostgresPoolConfiguration {
+  connectionString: string;
+  ssl?: { ca: string; rejectUnauthorized: true };
+}
+
+function supabaseCaCertificate(env: ConnectionEnvironment): string {
+  let certificate = env.SUPABASE_DB_CA_CERT?.trim() ?? '';
+  if (!certificate && env.SUPABASE_DB_CA_CERT_FILE?.trim()) {
+    try {
+      certificate = readFileSync(env.SUPABASE_DB_CA_CERT_FILE.trim(), 'utf8').trim();
+    } catch {
+      throw new Error('Supabase CA certificate file could not be read.');
+    }
+  }
+  if (!certificate) {
+    throw new Error(
+      'SUPABASE_DB_CA_CERT or SUPABASE_DB_CA_CERT_FILE is required for verified Supabase TLS.',
+    );
+  }
+  if (!/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(certificate)) {
+    throw new Error('Supabase CA certificate must be PEM encoded.');
+  }
+  return certificate;
+}
+
+function verifiedPoolConfiguration(
+  resolved: ResolvedDatabaseConnection,
+  env: ConnectionEnvironment,
+): PostgresPoolConfiguration {
+  if (resolved.profile === 'local') return { connectionString: resolved.connectionString };
+
+  const url = new URL(resolved.connectionString);
+  // URL TLS options can override pg's explicit TLS configuration.
+  for (const parameter of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) {
+    url.searchParams.delete(parameter);
+  }
+  return {
+    connectionString: url.toString(),
+    ssl: { ca: supabaseCaCertificate(env), rejectUnauthorized: true },
+  };
+}
+
+export function resolveRuntimePgPoolConfig(
+  env: ConnectionEnvironment = process.env,
+): PostgresPoolConfiguration {
+  return verifiedPoolConfiguration(resolveDatabaseConnection(env), env);
+}
+
+export function resolveMigrationPgPoolConfig(
+  env: ConnectionEnvironment = process.env,
+): PostgresPoolConfiguration {
+  return verifiedPoolConfiguration(resolveMigrationDatabaseConnection(env), env);
 }
