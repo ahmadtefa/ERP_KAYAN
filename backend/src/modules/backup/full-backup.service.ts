@@ -30,6 +30,29 @@ import { reconcileRestoredAccess } from './restore-access';
 import { pgBackupConnectionEnv } from './pg-backup-connection';
 
 /**
+ * Full-database archives capture EVERY company in the database. That is the
+ * right shape for a desktop installation (one company per database) and the
+ * wrong one for the cloud profile, where one archive would bundle every tenant
+ * and downloading or restoring it would cross all of them. The cloud profile
+ * uses the external per-project backup mechanism instead
+ * (backend/scripts/cloud-backup-drill.mjs), so this feature refuses to run
+ * there by design - not by accident because a binary happens to be missing.
+ *
+ * Local (the default, and the Windows Offline profile) is unchanged.
+ */
+export function fullArchiveAllowedForProfile(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const profile = (env.DATABASE_PROFILE ?? '').trim().toLowerCase();
+  return profile === '' || profile === 'local';
+}
+
+export const FULL_ARCHIVE_CLOUD_REFUSAL =
+  'Full-database archives belong to the desktop (local) profile: one archive ' +
+  'contains every company in the database. In the cloud profile use the ' +
+  'external backup mechanism (backend/scripts/cloud-backup-drill.mjs) instead.';
+
+/**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
  *
  * The company-level JSON backup (see backup.service.ts) moves one company's
@@ -134,6 +157,23 @@ export class FullBackupService {
    * work and can explain the ones it hides.
    */
   async capabilities() {
+    if (!fullArchiveAllowedForProfile()) {
+      return {
+        available: false,
+        pgDump: null,
+        pgRestore: null,
+        version: null,
+        serverVersion: null,
+        warning: FULL_ARCHIVE_CLOUD_REFUSAL,
+        backupDirectory: this.backupDir(),
+        deletionProtected: true,
+        fullBackupSupported: false,
+        fullRestoreSupported: false,
+        canRehearseRestore: false,
+        rehearsalNote: null,
+        reason: FULL_ARCHIVE_CLOUD_REFUSAL,
+      };
+    }
     const tools = this.findTools();
     const available = Boolean(tools.pgDump && tools.pgRestore);
 
@@ -688,6 +728,11 @@ export class FullBackupService {
    * before production data is touched — every step of it is deliberate.
    */
   async restore(options: RestoreOptions, userId: string) {
+    // The profile gate comes before every other check: in the cloud profile
+    // this operation must not exist at all, whatever options are sent.
+    if (!fullArchiveAllowedForProfile()) {
+      throw new ServiceUnavailableException(FULL_ARCHIVE_CLOUD_REFUSAL);
+    }
     if (!options.confirm) {
       throw new BadRequestException(
         'A full restore replaces the whole database. Send confirm=true to say you understand that.',
@@ -1071,6 +1116,9 @@ export class FullBackupService {
   /// ───────────────────────────────────────────────────────────── helpers
 
   private requireTools(): { pgDump: string | null; pgRestore: string | null } {
+    if (!fullArchiveAllowedForProfile()) {
+      throw new ServiceUnavailableException(FULL_ARCHIVE_CLOUD_REFUSAL);
+    }
     const tools = this.findTools();
     if (!tools.pgDump || !tools.pgRestore) {
       throw new ServiceUnavailableException(

@@ -2,8 +2,15 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  listCompaniesForSystemJobs,
+  runCompanyJob,
+} from '../../common/tenant/system-jobs';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
-import { FullBackupService } from './full-backup.service';
+import {
+  FullBackupService,
+  fullArchiveAllowedForProfile,
+} from './full-backup.service';
 
 /// How often the timer wakes up to ask whether a backup is due. The interval
 /// itself is a per-company setting; this is only how promptly the setting is
@@ -41,6 +48,17 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     // Tests and one-off commands should not leave a timer behind.
     if (process.env.KAYAN_DISABLE_BACKUP_SCHEDULE === 'on') {
       this.logger.log('Scheduled backups are switched off by configuration.');
+      return;
+    }
+
+    // Full-database archives are a desktop-profile feature (they contain every
+    // company). In the cloud profile the external backup mechanism is the
+    // scheduled path, so this timer does not start at all.
+    if (!fullArchiveAllowedForProfile()) {
+      this.logger.log(
+        'Scheduled full-database backups are desktop-only; the cloud profile ' +
+          'uses the external backup mechanism (scripts/cloud-backup-drill.mjs).',
+      );
       return;
     }
 
@@ -136,10 +154,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
-      const companies = await this.prisma.company.findMany({
-        where: { deletedAt: null },
-        select: { id: true, code: true, nameEn: true },
-      });
+      const companies = await listCompaniesForSystemJobs(this.prisma);
 
       for (const company of companies) {
         try {
@@ -161,10 +176,9 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
   async runNow(companyId?: string): Promise<
     Array<{ companyId: string; fileName: string; status: string; message: string | null }>
   > {
-    const companies = await this.prisma.company.findMany({
-      where: { deletedAt: null, ...(companyId ? { id: companyId } : {}) },
-      select: { id: true, code: true, nameEn: true },
-    });
+    const companies = (
+      await listCompaniesForSystemJobs(this.prisma)
+    ).filter((company) => !companyId || company.id === companyId);
     const results: Array<{
       companyId: string;
       fileName: string;
@@ -182,12 +196,31 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     company: { id: string; code: string; nameEn: string },
     force = false,
   ): Promise<{ fileName: string; status: string; message: string | null } | null> {
+    // Everything this company's pass touches - settings, run history, the run
+    // record it writes - happens inside the company's own strict tenant
+    // context, so RLS scopes every query and write to this company alone.
+    return runCompanyJob(company.id, () =>
+      this.runForCompanyInContext(company, force),
+    );
+  }
+
+  private async runForCompanyInContext(
+    company: { id: string; code: string; nameEn: string },
+    force = false,
+  ): Promise<{ fileName: string; status: string; message: string | null } | null> {
     const settings = await this.settings.get(company.id);
     const intervalHours = settings.backupIntervalHours;
     if (intervalHours <= 0 && !force) return null;
 
+    // Scoped to this company's runs plus system-level (NULL) events, so one
+    // company's schedule can never be shifted by another company's history -
+    // also where RLS is not active (local superuser installs).
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
+      where: {
+        kind: 'SCHEDULED',
+        status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] },
+        OR: [{ companyId: company.id }, { companyId: null }],
+      },
       orderBy: { createdAt: 'desc' },
     });
     const dueAt = lastRun
@@ -208,6 +241,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
         fileName: '-',
         status: 'FAILED',
         message,
+        companyId: company.id,
       });
       return { fileName: '-', status: 'FAILED', message };
     }

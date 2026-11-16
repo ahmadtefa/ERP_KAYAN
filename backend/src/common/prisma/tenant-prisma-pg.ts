@@ -63,9 +63,15 @@ function tenantContextQuery(): SqlQuery {
   const companyId = currentTenantCompanyId() ?? '';
   const mode = currentTenantMode() ?? '';
   return {
-    sql: "SELECT set_config('app.company_id', $1, true), set_config('app.login_mode', $2, true), set_config('app.setup_mode', $3, true)",
-    args: [companyId, mode === 'login' ? '1' : '', mode === 'setup' ? '1' : ''],
+    sql: "SELECT set_config('app.company_id', $1, true), set_config('app.login_mode', $2, true), set_config('app.setup_mode', $3, true), set_config('app.jobs_mode', $4, true)",
+    args: [
+      companyId,
+      mode === 'login' ? '1' : '',
+      mode === 'setup' ? '1' : '',
+      mode === 'jobs' ? '1' : '',
+    ],
     argTypes: [
+      { scalarType: 'string', arity: 'scalar' },
       { scalarType: 'string', arity: 'scalar' },
       { scalarType: 'string', arity: 'scalar' },
       { scalarType: 'string', arity: 'scalar' },

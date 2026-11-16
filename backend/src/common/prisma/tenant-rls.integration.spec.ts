@@ -143,6 +143,20 @@ describeDb('tenant row-level security (real database)', () => {
     }
   }
 
+  /** Runs `fn` inside a transaction in the reviewed system-jobs mode. */
+  async function withJobsMode<T>(client: Client, fn: () => Promise<T>) {
+    await exec(client, 'BEGIN');
+    await exec(client, `SELECT set_config('app.jobs_mode', '1', true)`);
+    try {
+      const result = await fn();
+      await exec(client, 'COMMIT');
+      return result;
+    } catch (error) {
+      await exec(client, 'ROLLBACK');
+      throw error;
+    }
+  }
+
   beforeAll(async () => {
     // Apply every checked-in migration (idempotent), including the tenant RLS
     // policies. `prisma migrate deploy` cannot run this project's migrations
@@ -594,5 +608,125 @@ describeDb('tenant row-level security (real database)', () => {
       `SELECT coalesce(current_setting('app.company_id', true), '') AS v`,
     );
     expect(rows[0].v).toBe('');
+  });
+
+  // ── background jobs (schedulers) ─────────────────────────────────────────
+
+  it('the reviewed jobs mode reads the company roster and nothing else', async () => {
+    await withJobsMode(app, async () => {
+      const companies = await q(app, `SELECT id FROM companies ORDER BY id`);
+      expect(companies.map((r) => r.id)).toEqual([COMPANY_A, COMPANY_B]);
+      // The roster mode must not open ANY tenant or system business table.
+      for (const table of [
+        'users',
+        'items',
+        'company_settings',
+        'notifications',
+        'notification_settings',
+        'journal_entries',
+        'backup_runs',
+      ]) {
+        const rows = await q(app, `SELECT count(*)::int AS n FROM ${table}`);
+        expect(Number(rows[0].n)).toBe(0);
+      }
+    });
+    // Without the mode (or any context) the roster itself is closed.
+    await withCompany(app, null, async () => {
+      const companies = await q(app, `SELECT id FROM companies`);
+      expect(companies).toHaveLength(0);
+    });
+  });
+
+  it('the jobs mode cannot write companies or tenant rows', async () => {
+    await withJobsMode(app, async () => {
+      // Writes to rows the policy hides affect zero rows - and the row is
+      // provably unchanged (RLS is not an UPDATE oracle).
+      const updated = await exec(
+        app,
+        `UPDATE companies SET "nameEn" = 'hijacked' WHERE id = $1`,
+        [COMPANY_A],
+      );
+      expect(updated.rowCount).toBe(0);
+      const still = await q(app, `SELECT "nameEn" FROM companies WHERE id = $1`, [
+        COMPANY_A,
+      ]);
+      expect(still[0].nameEn).not.toBe('hijacked');
+      const deleted = await exec(app, `DELETE FROM users WHERE id = $1`, [
+        USER_A,
+      ]);
+      expect(deleted.rowCount).toBe(0);
+      // A company-attributed row is refused outright (WITH CHECK): the jobs
+      // mode carries no company, so it can never speak for one. (NULL-company
+      // system events are the documented shared channel - audit/backup rows.)
+      await expect(
+        exec(
+          app,
+          `INSERT INTO backup_runs (id, "companyId", kind, "fileName", status) VALUES ('99999999-9999-4999-8999-999999999901', $1, 'SCHEDULED', '-', 'FAILED')`,
+          [COMPANY_A],
+        ),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('background per-company writes cannot cross companies (WITH CHECK + read scope)', async () => {
+    const RUN_A = '99999999-9999-4999-8999-999999999902';
+    const NOTIF_A = '99999999-9999-4999-8999-999999999903';
+    // A background record that names ANOTHER company is refused outright.
+    // Each refusal gets its own transaction: the failed statement aborts it,
+    // exactly as it would in production.
+    await withCompany(app, COMPANY_A, async () => {
+      await expect(
+        exec(
+          app,
+          `INSERT INTO backup_runs (id, "companyId", kind, "fileName", status) VALUES ($1, $2, 'SCHEDULED', '-', 'FAILED')`,
+          [RUN_A, COMPANY_B],
+        ),
+      ).rejects.toThrow(/row-level security/i);
+    });
+    await withCompany(app, COMPANY_A, async () => {
+      await expect(
+        exec(
+          app,
+          `INSERT INTO notifications (id, "companyId", type, "titleEn", "titleAr", "dedupeKey") VALUES ($1, $2, 'TEST_KIND', 'x', 'y', 'k1')`,
+          [NOTIF_A, COMPANY_B],
+        ),
+      ).rejects.toThrow(/row-level security/i);
+    });
+    await withCompany(app, COMPANY_A, async () => {
+      await expect(
+        exec(
+          app,
+          `INSERT INTO notification_settings (id, "companyId", type, "updatedAt") VALUES ($1, $2, 'TEST_KIND', NOW())`,
+          ['99999999-9999-4999-8999-999999999904', COMPANY_B],
+        ),
+      ).rejects.toThrow(/row-level security/i);
+    });
+    // The same writes for the session company are accepted...
+    await withCompany(app, COMPANY_A, async () => {
+      await exec(
+        app,
+        `INSERT INTO backup_runs (id, "companyId", kind, "fileName", status) VALUES ($1, $2, 'SCHEDULED', '-', 'FAILED')`,
+        [RUN_A, COMPANY_A],
+      );
+      await exec(
+        app,
+        `INSERT INTO notifications (id, "companyId", type, "titleEn", "titleAr", "dedupeKey") VALUES ($1, $2, 'TEST_KIND', 'x', 'y', 'k1')`,
+        [NOTIF_A, COMPANY_A],
+      );
+      const runs = await q(app, `SELECT id FROM backup_runs WHERE id = $1`, [RUN_A]);
+      expect(runs).toHaveLength(1);
+    });
+    // ...and the other company cannot see them (background read isolation).
+    await withCompany(app, COMPANY_B, async () => {
+      const runs = await q(app, `SELECT id FROM backup_runs WHERE id = $1`, [RUN_A]);
+      expect(runs).toHaveLength(0);
+      const notifs = await q(app, `SELECT id FROM notifications WHERE id = $1`, [NOTIF_A]);
+      expect(notifs).toHaveLength(0);
+    });
+    // Cleanup so a re-run of the suite sees the same fixtures.
+    await withCompany(app, COMPANY_A, async () => {
+      await exec(app, `DELETE FROM backup_runs WHERE id = $1`, [RUN_A]);
+      await exec(app, `DELETE FROM notifications WHERE id = $1`, [NOTIF_A]);
+    });
   });
 });

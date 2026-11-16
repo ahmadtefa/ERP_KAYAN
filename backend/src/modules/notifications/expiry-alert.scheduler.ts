@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  listCompaniesForSystemJobs,
+  runCompanyJob,
+} from '../../common/tenant/system-jobs';
 import { NotificationsService } from './notifications.service';
 
 /// How often the timer wakes up and asks every company to look at its shelves.
@@ -143,14 +147,18 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
     let closed = 0;
     let failed = 0;
     try {
-      const rows = await this.prisma.company.findMany({
-        where: { deletedAt: null },
-        select: { id: true },
-      });
+      // The roster is the one pre-context read a scheduler needs (reviewed
+      // jobs mode: companies SELECT and nothing else). Each company's scan
+      // then runs inside that company's own strict tenant context, so every
+      // read and write the scan makes is scoped to that one company by RLS -
+      // exactly like an authenticated request from that company.
+      const rows = await listCompaniesForSystemJobs(this.prisma);
       companies = rows.length;
       for (const company of rows) {
         try {
-          const answer = await this.notifications.scanStock(company.id, now);
+          const answer = await runCompanyJob(company.id, () =>
+            this.notifications.scanStock(company.id, now),
+          );
           raised += answer.raised;
           closed += answer.closed;
         } catch {

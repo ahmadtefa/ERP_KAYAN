@@ -60,6 +60,14 @@ CREATE FUNCTION public.app_setup_mode() RETURNS boolean
   LANGUAGE sql STABLE PARALLEL SAFE
   AS $$ SELECT COALESCE(current_setting('app.setup_mode', true) = '1', false) $$;
 
+-- System jobs (schedulers) read the company roster in this mode and NOTHING
+-- else: only companies_select honours it. The job's real work then runs in a
+-- strict per-company context (app.company_id), so this mode never carries
+-- tenant business data.
+CREATE FUNCTION public.app_jobs_mode() RETURNS boolean
+  LANGUAGE sql STABLE PARALLEL SAFE
+  AS $$ SELECT COALESCE(current_setting('app.jobs_mode', true) = '1', false) $$;
+
 -- ---------------------------------------------------------------------------
 -- Generic tenant scope: "companyId" = app_company_id(), deny when unset
 -- ---------------------------------------------------------------------------
@@ -125,14 +133,15 @@ CREATE POLICY tenant_company ON public."{t}"
 """)
 
 W("""-- ---------------------------------------------------------------------------
--- companies: the tenant root. Readable during the reviewed login and setup
--- paths; writable only by its own context (setup may create the first row).
+-- companies: the tenant root. Readable during the reviewed login, setup, and
+-- system-jobs roster paths; writable only by its own context (setup may create
+-- the first row). The jobs mode opens SELECT on this table and nothing else.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies FORCE ROW LEVEL SECURITY;
 CREATE POLICY companies_select ON public.companies
   FOR SELECT
-  USING (id = public.app_company_id() OR public.app_login_mode() OR public.app_setup_mode());
+  USING (id = public.app_company_id() OR public.app_login_mode() OR public.app_setup_mode() OR public.app_jobs_mode());
 CREATE POLICY companies_insert ON public.companies
   FOR INSERT
   WITH CHECK (public.app_setup_mode() OR id = public.app_company_id());

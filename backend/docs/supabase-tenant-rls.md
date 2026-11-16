@@ -23,7 +23,7 @@ deployment checklist below is completed).
 
 | Class | Tables | Policy |
 |---|---|---|
-| Tenant root | `companies` | `id = app_company_id()`, plus reviewed login/setup read paths |
+| Tenant root | `companies` | `id = app_company_id()`, plus reviewed login/setup read paths and the system-jobs roster (`app_jobs_mode()`, SELECT only) |
 | Direct (`companyId`) | 48 tables (branches, users, items, journal_entries, sales_invoices, quotations, ...) | `companyId = app_company_id()` for SELECT/INSERT/UPDATE/DELETE; deny when the GUC is unset |
 | Child (no `companyId`) | 16 tables (journal_lines, journal_line_allocations, cash_voucher_allocations, opening_balance_lines, stock_document_lines, sales/purchase_invoice_lines, quotation_tables/lines/events, quotation_lines_legacy, item_units, purchase/sales_order_lines, price_list_items, stock_take_lines) | `EXISTS` on the owning parent's company, two hops where the chain is deeper (allocation -> line -> entry; line -> table -> quotation) |
 | Access-control children | user_roles (own `companyId`), user_permissions, user_branches, refresh_tokens | strict write scope; SELECT also allowed in reviewed login/setup mode so sign-in can assemble the permission snapshot |
@@ -43,10 +43,11 @@ The only sanctioned way to carry tenant identity into a database session:
 SELECT set_config('app.company_id', '<uuid>', true);  -- transaction-local
 SELECT set_config('app.login_mode',  '1',     true);  -- reviewed login path
 SELECT set_config('app.setup_mode',  '1',     true);  -- reviewed bootstrap path
+SELECT set_config('app.jobs_mode',   '1',     true);  -- reviewed system-jobs roster
 ```
 
 Readers (STABLE sql functions created by the migration):
-`app_company_id()`, `app_login_mode()`, `app_setup_mode()`.
+`app_company_id()`, `app_login_mode()`, `app_setup_mode()`, `app_jobs_mode()`.
 
 Rules:
 
@@ -68,6 +69,13 @@ JwtAuthGuard (verifies token, reloads principal)
       -> PrismaService = PrismaClient + TenantPrismaPg adapter
         -> every transaction begins with set_config(..., true)
 ```
+
+Background work (schedulers) has no request and therefore no principal. It
+uses exactly two reviewed helpers (`src/common/tenant/system-jobs.ts`):
+`listCompaniesForSystemJobs` reads the company roster in `jobs` mode (the only
+table that mode opens), and `runCompanyJob(companyId, fn)` runs each company's
+unit of work inside a strict per-company context - the same isolation an API
+request gets. Nothing else may use `mode: 'jobs'`.
 
 `TenantPrismaPg` (`src/common/prisma/tenant-prisma-pg.ts`) wraps the pg driver
 adapter: `startTransaction()` binds the context as the first statement of the
@@ -127,7 +135,12 @@ prove:
    not writable from a tenant context);
 8. the role cannot disable RLS, create policies, drop the context functions,
    switch to `postgres`, own tables, or create schema objects;
-9. the transaction-local GUC is gone after COMMIT (pooler safety).
+9. the transaction-local GUC is gone after COMMIT (pooler safety);
+10. the reviewed `jobs` mode reads the company roster and NOTHING else, cannot
+    write companies or tenant rows, and without the mode the roster is closed;
+11. background per-company writes (backup_runs, notifications,
+    notification_settings) naming another company are rejected by `WITH CHECK`,
+    and the other company cannot read what a background pass wrote.
 
 The suite refuses non-local database hosts, so it can never apply migrations to
 Supabase by accident. CI runs it in the `tenant-rls` job of

@@ -35,9 +35,14 @@ export class BackupScheduleController {
 
   /// Take one now: write the dump, read it back to prove it is readable, then
   /// apply retention. The same path the timer takes.
+  ///
+  /// The run always targets the CALLER's company. A body `companyId` is
+  /// deliberately ignored: the system-jobs roster can see every company, so
+  /// honouring a client-supplied id here would let one company's administrator
+  /// trigger writes inside another company's context.
   @Post('run')
-  run(@CurrentUser() user: AuthUser, @Body() body: { companyId?: string }) {
-    return this.schedule.runNow(body?.companyId ?? user.companyId);
+  run(@CurrentUser() user: AuthUser) {
+    return this.schedule.runNow(user.companyId);
   }
 
   /// Apply the retention setting without taking a new backup.

@@ -20,8 +20,11 @@ export interface TenantContext {
    *  - 'login':  username lookup / token refresh (reads access-control rows
    *              across companies, never tenant business data).
    *  - 'setup':  first-run bootstrap that creates the first company + admin.
+   *  - 'jobs':   system jobs reading the company roster (companies SELECT
+   *              only; every other table stays deny-by-default). The job then
+   *              runs its real work inside a strict per-company context.
    */
-  readonly mode?: 'login' | 'setup';
+  readonly mode?: 'login' | 'setup' | 'jobs';
 }
 
 const storage = new AsyncLocalStorage<TenantContext>();
@@ -47,7 +50,7 @@ export function currentTenantCompanyId(): string | null {
   return storage.getStore()?.companyId ?? null;
 }
 
-/** 'login' | 'setup' when the current chain runs a reviewed pre-context flow. */
-export function currentTenantMode(): 'login' | 'setup' | null {
+/** 'login' | 'setup' | 'jobs' when the current chain runs a reviewed mode. */
+export function currentTenantMode(): 'login' | 'setup' | 'jobs' | null {
   return storage.getStore()?.mode ?? null;
 }

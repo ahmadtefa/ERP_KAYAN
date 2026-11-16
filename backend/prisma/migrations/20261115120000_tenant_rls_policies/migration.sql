@@ -7,7 +7,8 @@
 --   SELECT set_config('app.company_id', '<uuid>', true);   -- transaction-local
 --   SELECT set_config('app.login_mode', '1', true);        -- reviewed login path
 --   SELECT set_config('app.setup_mode', '1', true);        -- reviewed bootstrap path
--- All three are transaction-local (the third argument is `true`), so they can
+--   SELECT set_config('app.jobs_mode', '1', true);         -- reviewed system-jobs roster
+-- All four are transaction-local (the last argument is `true`), so they can
 -- never leak to the next query that borrows the pooled connection. Unset
 -- context means "no tenant": every tenant policy denies by default.
 --
@@ -46,6 +47,14 @@ CREATE FUNCTION public.app_login_mode() RETURNS boolean
 CREATE FUNCTION public.app_setup_mode() RETURNS boolean
   LANGUAGE sql STABLE PARALLEL SAFE
   AS $$ SELECT COALESCE(current_setting('app.setup_mode', true) = '1', false) $$;
+
+-- System jobs (schedulers) read the company roster in this mode and NOTHING
+-- else: only companies_select honours it. The job's real work then runs in a
+-- strict per-company context (app.company_id), so this mode never carries
+-- tenant business data.
+CREATE FUNCTION public.app_jobs_mode() RETURNS boolean
+  LANGUAGE sql STABLE PARALLEL SAFE
+  AS $$ SELECT COALESCE(current_setting('app.jobs_mode', true) = '1', false) $$;
 
 -- ---------------------------------------------------------------------------
 -- Generic tenant scope: "companyId" = app_company_id(), deny when unset
@@ -509,14 +518,15 @@ CREATE POLICY tenant_company ON public."stock_take_lines"
   WITH CHECK (EXISTS (SELECT 1 FROM public.stock_take_sessions sts WHERE sts.id = stock_take_lines."sessionId" AND sts."companyId" = public.app_company_id()));
 
 -- ---------------------------------------------------------------------------
--- companies: the tenant root. Readable during the reviewed login and setup
--- paths; writable only by its own context (setup may create the first row).
+-- companies: the tenant root. Readable during the reviewed login, setup, and
+-- system-jobs roster paths; writable only by its own context (setup may create
+-- the first row). The jobs mode opens SELECT on this table and nothing else.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies FORCE ROW LEVEL SECURITY;
 CREATE POLICY companies_select ON public.companies
   FOR SELECT
-  USING (id = public.app_company_id() OR public.app_login_mode() OR public.app_setup_mode());
+  USING (id = public.app_company_id() OR public.app_login_mode() OR public.app_setup_mode() OR public.app_jobs_mode());
 CREATE POLICY companies_insert ON public.companies
   FOR INSERT
   WITH CHECK (public.app_setup_mode() OR id = public.app_company_id());

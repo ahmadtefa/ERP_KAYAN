@@ -60,6 +60,12 @@ The schema's tenant root is `companies.id`; tables carrying `companyId` must sco
 Current NestJS services use a process-wide Prisma client and the public login looks up a globally unique username before a company is known. There is no transaction-local authenticated company context yet. A secure implementation must establish that context from the verified principal for each request and apply it with transaction-local state; login and background/license operations need separate reviewed paths. Until that work and cross-company denial tests exist, do not apply the Prisma migrations or grant runtime DML.
 
 
+## Background jobs and full-database archives
+
+Two schedulers run without an HTTP request (scheduled backups, expiry alerts). They use the reviewed system-jobs bridge (`common/tenant/system-jobs.ts`): the company roster is read in `jobs` mode (companies SELECT only), and each company's pass runs inside that company's strict tenant context, so background reads and writes are RLS-scoped to one company exactly like API requests. The `backup/schedule/run` endpoint always runs for the CALLER's company; a body `companyId` is ignored.
+
+Full-database pg_dump archives (`backup/full`) contain every company in the database and are therefore a **desktop (local profile) only** feature. In the cloud profile (`DATABASE_PROFILE=supabase`) they refuse to run by design (`fullArchiveAllowedForProfile()` in `modules/backup/full-backup.service.ts`); the scheduled-full-backup timer does not start there either. The cloud backup path is the external mechanism in the next section. The per-company JSON backup (`backup/download`) remains available in every profile - it carries one company's books only.
+
 ## HTTPS browser pilot packaging
 
 The deployment/cloud files and backend/Dockerfile.cloud provide a cloud-only container with Caddy in front of NestJS. Flutter Web is built with API_BASE_URL=/api/v1, so requests stay same-origin; no Supabase URL, password, or key is compiled into Flutter. The existing Windows/offline profile remains DATABASE_PROFILE=local.
