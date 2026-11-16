@@ -17,11 +17,16 @@ import { AccountType, PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { PERMISSIONS } from './permissions';
+import { TenantPrismaPg } from '../src/common/prisma/tenant-prisma-pg';
+import { runWithTenantContext } from '../src/common/tenant/tenant-context';
 
 // The client runs on the plain `pg` driver (engine-less Prisma runtime), so
-// the seed opens its connection the same way the server does.
+// the seed opens its connection the same way the server does. TenantPrismaPg
+// binds the reviewed setup mode into every transaction so the seed can create
+// the first company and administrator on a row-level-security database (on a
+// local superuser connection RLS does not apply and nothing changes).
 const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  adapter: new TenantPrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 
 
@@ -414,7 +419,7 @@ async function main(): Promise<void> {
   }
 }
 
-main()
+runWithTenantContext({ companyId: null, mode: 'setup' }, () => main())
   .catch((error) => {
     console.error(error);
     process.exit(1);

@@ -1,5 +1,22 @@
 # Supabase cloud pilot
 
+> **Implementation status (branch `feature/supabase-pilot`)**
+>
+> - Tenant row-level security is **designed and implemented**: migration
+>   `20261115120000_tenant_rls_policies` (79 tables, FORCE RLS, deny-by-default,
+>   reviewed login/setup paths) - see `supabase-tenant-rls.md` for the design.
+> - Trusted company context: `TenantContextInterceptor` + AsyncLocalStorage +
+>   `TenantPrismaPg` transaction-local `set_config` binding (pooler-safe).
+> - Proof: `tenant-rls.integration.spec.ts` (12 tests) runs REAL cross-company
+>   CRUD against a real PostgreSQL as the least-privilege runtime role; wired
+>   into `.github/workflows/supabase-compatibility.yml` (`tenant-rls` job).
+> - **Migrations are still NOT applied to the Supabase project** - the
+>   deployment gate in `supabase-tenant-rls.md` §7 must be completed first.
+>
+> What remains for the cloud pilot after the gate: provision the two roles,
+> run `check-supabase-roles.mjs` read-only, apply migrations with the migration
+> URL, grant runtime DML, and wire background jobs to the tenant context.
+
 ## Connection profiles
 
 Local remains the default: `DATABASE_PROFILE=local` (or unset) uses the existing `DATABASE_URL`, so Windows can continue to run against its bundled/local PostgreSQL without internet.

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { validateEnvironment } from './common/config/validate-environment';
 import { CompanySettingsModule } from './common/settings/company-settings.module';
@@ -14,6 +14,7 @@ import { PrintSettingsModule } from './common/print/print-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { TenantContextInterceptor } from './common/tenant/tenant-context.interceptor';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -83,6 +84,10 @@ import { SearchModule } from './modules/search/search.module';
     // Last: an expired or suspended licence stops business routes, while the
     // licence screen, sign-in and the backup routes stay open (see the guard).
     { provide: APP_GUARD, useClass: LicenseGuard },
+    // Binds the verified company of each request to its async chain so every
+    // database transaction runs behind tenant row-level security. Registered
+    // here because tenant scope is a rule about every authenticated route.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
 export class AppModule {}

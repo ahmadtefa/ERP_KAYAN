@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { resolveDatabaseConnection } from './database-connection';
+import { TenantPrismaPg } from './tenant-prisma-pg';
 
 /**
  * Builds the PostgreSQL driver adapter the client runs on.
@@ -11,10 +11,13 @@ import { resolveDatabaseConnection } from './database-connection';
  * installs continue to use DATABASE_URL. A cloud deployment opts in explicitly
  * with DATABASE_PROFILE=supabase and reads its server-only URL from
  * SUPABASE_DATABASE_URL. Connection strings are never logged.
+ *
+ * The adapter (TenantPrismaPg) also binds the verified tenant context into
+ * every transaction so row-level security can scope each row to one company.
  */
-export function createPgAdapter(): PrismaPg {
+export function createPgAdapter(): TenantPrismaPg {
   const { connectionString } = resolveDatabaseConnection();
-  return new PrismaPg({ connectionString });
+  return new TenantPrismaPg({ connectionString });
 }
 
 @Injectable()

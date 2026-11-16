@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { AuditService } from '../../common/audit/audit.service';
 import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { runWithTenantContext } from '../../common/tenant/tenant-context';
 import { normalizeLogo } from './company.service';
 import { PERMISSIONS } from '../../../prisma/permissions';
 import { InitialSetupDto } from './dto/company.dto';
@@ -34,6 +35,14 @@ export class SetupService {
   ) {}
 
   async status() {
+    // Reviewed pre-context path: the setup check must see whether any company
+    // exists at all (see supabase-tenant-rls.md).
+    return runWithTenantContext({ companyId: null, mode: 'setup' }, () =>
+      this.statusInner(),
+    );
+  }
+
+  private async statusInner() {
     const [companies, users, activeCompanyUsers, retiredCompany] = await Promise.all([
       // A retired company is not a set-up installation. The reset marks the
       // row deleted precisely so setup can be completed again against it, and
@@ -75,6 +84,18 @@ export class SetupService {
   }
 
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
+    // Reviewed pre-context path: first-run bootstrap creates the first
+    // company and admin before any tenant context can exist.
+    return runWithTenantContext({ companyId: null, mode: 'setup' }, () =>
+      this.initialSetupInner(dto, ip, userAgent),
+    );
+  }
+
+  private async initialSetupInner(
+    dto: InitialSetupDto,
+    ip?: string,
+    userAgent?: string,
+  ) {
     // This endpoint is public so a genuinely empty installation can be
     // initialized. It must never become an account-recovery endpoint: any
     // existing account closes it, so a stranger cannot adopt somebody's users.

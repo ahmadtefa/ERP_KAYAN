@@ -13,6 +13,7 @@ import {
   downloadTicketTtl,
 } from '../../common/download-ticket';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { runWithTenantContext } from '../../common/tenant/tenant-context';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -40,6 +41,20 @@ export class AuthService {
   ) {}
 
   async login(
+    username: string,
+    password: string,
+    ip?: string,
+    userAgent?: string,
+  ) {
+    // Reviewed pre-context path: sign-in resolves a user by username before
+    // any company context exists. The mode is transaction-local and grants
+    // read access to access-control rows only (see supabase-tenant-rls.md).
+    return runWithTenantContext({ companyId: null, mode: 'login' }, () =>
+      this.loginInner(username, password, ip, userAgent),
+    );
+  }
+
+  private async loginInner(
     username: string,
     password: string,
     ip?: string,
@@ -198,6 +213,14 @@ export class AuthService {
   }
 
   async refresh(token: string) {
+    // Reviewed pre-context path: the refresh token is resolved before a
+    // company context exists; the fresh session re-establishes it.
+    return runWithTenantContext({ companyId: null, mode: 'login' }, () =>
+      this.refreshInner(token),
+    );
+  }
+
+  private async refreshInner(token: string) {
     const hash = this.hashToken(token);
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: hash },

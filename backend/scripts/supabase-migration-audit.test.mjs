@@ -20,12 +20,15 @@ test('rejects role/database DDL, destructive SQL, extension creation, and bypass
   }
 });
 
-test('reviews every checked-in Prisma migration and records the RLS policy gap', async () => {
+test('reviews every checked-in Prisma migration: clean and tenant RLS policies present', async () => {
   const here = fileURLToPath(new URL('.', import.meta.url));
   const result = await auditMigrationDirectory(join(here, '..', 'prisma', 'migrations'));
 
-  assert.equal(result.migrations.length, 70);
+  assert.equal(result.migrations.length, 71);
   assert.deepEqual(result.violations, []);
-  assert.equal(result.policyMigrations, 0);
+  // The tenant RLS policy migration closes the gap this used to record: at
+  // least one checked-in migration now creates tenant policies, and the
+  // audit's "CLOUD BLOCKER" warning must stay gone.
+  assert.ok(result.policyMigrations >= 1);
   assert.ok(result.dataBackfills > 0);
 });

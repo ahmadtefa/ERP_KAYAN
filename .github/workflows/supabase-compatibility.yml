@@ -6,20 +6,20 @@ on:
     paths:
       - 'backend/prisma/**'
       - 'backend/prisma.config.ts'
-      - 'backend/src/common/prisma/**'
-      - 'backend/scripts/supabase-*'
-      - 'backend/scripts/check-supabase-roles.mjs'
+      - 'backend/src/**'
+      - 'backend/scripts/**'
       - 'backend/docs/supabase-cloud-pilot.md'
+      - 'backend/docs/supabase-tenant-rls.md'
       - '.github/workflows/supabase-compatibility.yml'
   pull_request:
     branches: [feature/supabase-pilot]
     paths:
       - 'backend/prisma/**'
       - 'backend/prisma.config.ts'
-      - 'backend/src/common/prisma/**'
-      - 'backend/scripts/supabase-*'
-      - 'backend/scripts/check-supabase-roles.mjs'
+      - 'backend/src/**'
+      - 'backend/scripts/**'
       - 'backend/docs/supabase-cloud-pilot.md'
+      - 'backend/docs/supabase-tenant-rls.md'
       - '.github/workflows/supabase-compatibility.yml'
   workflow_dispatch:
 
@@ -61,6 +61,57 @@ jobs:
         run: node --check scripts/check-supabase-roles.mjs
       - name: Typecheck backend
         run: npx tsc --noEmit
+
+  tenant-rls-integration:
+    name: Tenant RLS cross-company isolation (real PostgreSQL)
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kayan
+          POSTGRES_PASSWORD: kayan_ci
+          POSTGRES_DB: kayan_test
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U kayan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_PROFILE: local
+      DATABASE_URL: postgresql://kayan:kayan_ci@127.0.0.1:5432/kayan_test
+      TENANT_RLS_TEST_DATABASE_URL: postgresql://kayan:kayan_ci@127.0.0.1:5432/kayan_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
+      - run: npx prisma generate
+      # Real cross-company CRUD against a real database, as the least-privilege
+      # runtime role: the suite applies the migrations itself (local host only,
+      # it refuses remote hosts so it can never touch Supabase) and proves
+      # SELECT/INSERT/UPDATE/DELETE cannot cross companies, children inherit the
+      # parent's scope, deny-by-default without context, and the role cannot
+      # exceed or disable RLS. Required evidence before any Supabase migration.
+      - name: Run tenant RLS integration suite
+        run: npx jest --runInBand src/common/prisma/tenant-rls.integration.spec.ts
+      - name: Audit all Prisma SQL migrations for Supabase hazards
+        run: node --test scripts/supabase-migration-audit.test.mjs
 
   read-only-supabase-role-check:
     name: Read-only Supabase role and RLS check
