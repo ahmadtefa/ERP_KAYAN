@@ -98,7 +98,9 @@ async function inspect(label, connectionString) {
     return { role: role.role, tableCount: state.table_count };
   } catch (error) {
     const code = errorCode(error);
-    if (/SELF_SIGNED_CERT|CERT_SIGNATURE_FAILURE|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|ERR_TLS_CERT_ALTNAME_INVALID|CERT_HAS_EXPIRED/.test(code)) {
+    const tlsMessage = error instanceof Error ? error.message : '';
+    const tlsFailure = /self.signed certificate|unable to verify.*certificate|certificate chain/i.test(tlsMessage);
+    if (tlsFailure || /SELF_SIGNED_CERT|CERT_SIGNATURE_FAILURE|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|ERR_TLS_CERT_ALTNAME_INVALID|CERT_HAS_EXPIRED/.test(code)) {
       throw new Error(label + ' TLS certificate verification failed; set SUPABASE_DB_CA_CERT to the CA certificate from Supabase Database Settings.');
     }
     if (error instanceof Error && !/password|connection string|postgresql:\/\//i.test(error.message)) throw error;
