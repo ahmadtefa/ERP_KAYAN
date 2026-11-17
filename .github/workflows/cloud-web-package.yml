@@ -6,8 +6,14 @@ on:
     paths:
       - 'lib/**'
       - 'web/**'
+      - 'assets/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
+      - 'l10n.yaml'
+      - 'analysis_options.yaml'
+      - 'Dockerfile.render'
+      - '.dockerignore'
+      - 'render.yaml'
       - 'backend/Dockerfile.cloud'
       - 'deployment/cloud/**'
       - '.github/workflows/cloud-web-package.yml'
@@ -16,8 +22,14 @@ on:
     paths:
       - 'lib/**'
       - 'web/**'
+      - 'assets/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
+      - 'l10n.yaml'
+      - 'analysis_options.yaml'
+      - 'Dockerfile.render'
+      - '.dockerignore'
+      - 'render.yaml'
       - 'backend/Dockerfile.cloud'
       - 'deployment/cloud/**'
       - '.github/workflows/cloud-web-package.yml'
@@ -30,7 +42,7 @@ jobs:
   build-cloud-web:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/feature/supabase-pilot'
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -48,9 +60,11 @@ jobs:
         run: |
           mkdir -p backend/build
           cp -a build/web backend/build/web
-      - name: Validate cloud image build
+      - name: Validate existing cloud image build
         run: docker build --file Dockerfile.cloud --tag kayan-erp-cloud:ci .
         working-directory: backend
+      - name: Validate Render integrated web/API Docker build
+        run: docker build --file Dockerfile.render --tag kayan-erp-render:ci .
       - name: Validate HTTPS Compose configuration without secrets
         run: |
           cp deployment/cloud/.env.cloud.example deployment/cloud/.env.cloud
