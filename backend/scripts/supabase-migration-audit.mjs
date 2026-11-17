@@ -23,8 +23,8 @@ export function auditMigrationSql(name, sql) {
   // Prisma's migration script splitter treats semicolons in -- comments as
   // statement boundaries. Prose after such a semicolon becomes raw SQL and
   // causes "syntax error at or near ..." before migration DDL can run.
-  for (const line of sql.split(/\\r?\\n/)) {
-    if (!/^\\s*--/.test(line)) continue;
+  for (const line of sql.split(/\r?\n/)) {
+    if (!/^\s*--/.test(line)) continue;
     const semicolon = line.indexOf(';');
     if (semicolon < 0) continue;
     const remainder = line.slice(semicolon + 1).trim();
