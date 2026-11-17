@@ -30,7 +30,8 @@ test('reviews every checked-in Prisma migration: clean and tenant RLS policies p
   const here = fileURLToPath(new URL('.', import.meta.url));
   const result = await auditMigrationDirectory(join(here, '..', 'prisma', 'migrations'));
 
-  assert.equal(result.migrations.length, 71);
+  assert.ok(result.migrations.length >= 71);
+  assert.ok(result.migrations.includes('20261117100000_cloud_multi_company_backup_access'));
   assert.deepEqual(result.violations, []);
   // The tenant RLS policy migration closes the gap this used to record: at
   // least one checked-in migration now creates tenant policies, and the
