@@ -1,3 +1,4 @@
+# The migration principal has SELECT-only RLS policies for complete, verified snapshots.
 name: Supabase encrypted backup and restore drill
 
 on:
