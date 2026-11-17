@@ -1,6 +1,20 @@
 # Render builds a single same-origin service: Flutter Web is served by NestJS.
 # Keeping both in one image avoids cross-origin cookies and a second free service.
-FROM ghcr.io/cirruslabs/flutter:stable AS flutter-build
+FROM debian:bookworm-slim AS flutter-build
+ARG FLUTTER_VERSION=3.50.0
+ARG FLUTTER_SHA256=6ea2d806fd57269ae783e6788e2a81fc26eaad782f1e0d0ff38623bb765ff9f5
+ENV FLUTTER_HOME=/opt/flutter
+ENV PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:${PATH}
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git unzip xz-utils zip libglu1-mesa \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --fail --location --silent --show-error \
+      "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
+      --output /tmp/flutter.tar.xz \
+    && echo "${FLUTTER_SHA256}  /tmp/flutter.tar.xz" | sha256sum --check --status \
+    && tar -xJf /tmp/flutter.tar.xz -C /opt \
+    && rm -f /tmp/flutter.tar.xz \
+    && git config --global --add safe.directory /opt/flutter \
+    && flutter --version
 WORKDIR /workspace
 COPY pubspec.yaml pubspec.lock l10n.yaml analysis_options.yaml ./
 COPY lib ./lib
