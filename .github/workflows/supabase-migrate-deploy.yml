@@ -52,7 +52,7 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - name: Audit every Prisma migration and Supabase hazard
+      - name: Audit all Prisma SQL, including Prisma comment-splitting hazards
         run: node --test scripts/supabase-migration-audit.test.mjs
       - name: Validate Prisma schema and client
         run: npx prisma generate && npx prisma validate
