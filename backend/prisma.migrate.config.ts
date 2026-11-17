@@ -18,11 +18,13 @@ if (!configuredUrl) {
 let datasourceUrl = configuredUrl;
 if (profile === 'supabase') {
   const url = new URL(configuredUrl);
-  // Prisma's classic PostgreSQL engine reads this CA path relative to
-  // backend/prisma/. sslaccept=strict keeps certificate verification enabled.
+  // Prisma 6's classic engine uses sslcert as the trusted server CA path.
+  // The certificate path is resolved relative to backend/prisma/.
+  // sslaccept=strict keeps certificate verification enabled.
   url.searchParams.set('sslmode', 'require');
   url.searchParams.set('sslaccept', 'strict');
-  url.searchParams.set('sslrootcert', '../certs/supabase-prod-ca-2021.crt');
+  url.searchParams.set('sslcert', '../certs/supabase-prod-ca-2021.crt');
+  url.searchParams.delete('sslrootcert');
   datasourceUrl = url.toString();
 } else if (profile !== 'local') {
   throw new Error("DATABASE_PROFILE must be either 'local' or 'supabase'.");
