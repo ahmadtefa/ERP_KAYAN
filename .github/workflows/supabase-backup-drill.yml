@@ -1,0 +1,98 @@
+name: Supabase encrypted backup and restore drill
+
+on:
+  push:
+    branches: [feature/supabase-pilot]
+    paths:
+      - '.github/workflows/supabase-backup-drill.yml'
+      - 'backend/scripts/cloud-backup-drill.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-backup-drill
+  cancel-in-progress: false
+
+jobs:
+  encrypted-backup-restore:
+    if: github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kayan_restore
+          POSTGRES_PASSWORD: ci_restore_only
+          POSTGRES_DB: postgres
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U kayan_restore -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
+      SUPABASE_DB_CA_CERT_FILE: ${{ github.workspace }}/backend/certs/supabase-prod-ca-2021.crt
+      KAYAN_BACKUP_PASSPHRASE: ${{ secrets.KAYAN_BACKUP_PASSPHRASE }}
+      RESTORE_ADMIN_URL: postgresql://kayan_restore:ci_restore_only@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /etc/apt/keyrings/postgresql.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+          pg_restore --version
+
+      - name: Require secrets without revealing values
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DATABASE_URL" || { echo "::error::Missing SUPABASE_RUNTIME_DATABASE_URL"; exit 1; }
+          test -n "$KAYAN_BACKUP_PASSPHRASE" || { echo "::error::Missing KAYAN_BACKUP_PASSPHRASE"; exit 1; }
+          test -s "$SUPABASE_DB_CA_CERT_FILE"
+
+      - name: Create encrypted public-schema backup with verified TLS
+        id: backup
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/kayan-encrypted-backup"
+          install -d -m 0700 "$out"
+          node scripts/cloud-backup-drill.mjs backup --url "$SUPABASE_DATABASE_URL" --out "$out"
+          dump="$(find "$out" -maxdepth 1 -type f -name '*.dump.enc' -print -quit)"
+          test -n "$dump"
+          echo "dump_path=$dump" >> "$GITHUB_OUTPUT"
+          openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$dump" -pass env:KAYAN_BACKUP_PASSPHRASE -out /dev/null
+
+      - name: Restore encrypted backup into isolated PostgreSQL 17 and verify
+        run: |
+          set -euo pipefail
+          node scripts/cloud-backup-drill.mjs drill --dump "${{ steps.backup.outputs.dump_path }}" --admin-url "$RESTORE_ADMIN_URL"
+
+      - name: Retain encrypted recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-supabase-public-backup-${{ github.run_id }}
+          path: ${{ steps.backup.outputs.dump_path }}
+          if-no-files-found: error
+          retention-days: 30
