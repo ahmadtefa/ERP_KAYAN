@@ -135,7 +135,7 @@ jobs:
           if (!artifact) throw new Error('The verified encrypted backup artifact is missing, empty, or expired.');
           const ageMs = Date.now() - Date.parse(success.run_started_at);
           if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 30 * 24 * 60 * 60 * 1000) throw new Error('The verified backup is older than the permitted recovery window.');
-          core.setOutput('run_id', String(success.id));
+          await import('node:fs/promises').then(fs => fs.appendFile(process.env.GITHUB_OUTPUT, 'run_id=' + success.id + '\n'));
           console.log('verified encrypted backup run=' + success.id + ' artifact_size_bytes=' + artifact.size_in_bytes);
           NODE
 
