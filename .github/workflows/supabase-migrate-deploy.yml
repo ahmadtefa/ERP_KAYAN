@@ -56,13 +56,11 @@ jobs:
         run: node --test scripts/supabase-migration-audit.test.mjs
       - name: Validate Prisma schema and client
         run: npx prisma generate && npx prisma validate
-      - name: Repair Prisma adapter PostgreSQL type map
-        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Exercise official Prisma migration history on isolated PostgreSQL 17
         run: |
           set -euo pipefail
-          npx prisma migrate deploy
-          npx prisma migrate status
+          npx prisma migrate deploy --config prisma.migrate.config.ts
+          npx prisma migrate status --config prisma.migrate.config.ts
 
   supabase-migrate:
     needs: local-preflight
@@ -194,16 +192,13 @@ jobs:
           } finally { await client.end(); }
           NODE
 
-      - name: Repair Prisma adapter PostgreSQL type map
-        run: node scripts/patch-adapter-pg-name-type.mjs
-
-      - name: Apply checked-in migrations with Prisma Migrate
-        run: npx prisma migrate deploy
+      - name: Apply checked-in migrations with official Prisma Migrate CLI
+        run: npx prisma migrate deploy --config prisma.migrate.config.ts
 
       - name: Verify Prisma history, forced RLS, tenant policies, and REST grants
         run: |
           set -euo pipefail
-          npx prisma migrate status
+          npx prisma migrate status --config prisma.migrate.config.ts
           node scripts/check-supabase-roles.mjs
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
