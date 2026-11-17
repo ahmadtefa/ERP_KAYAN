@@ -174,7 +174,7 @@ jobs:
           set -euo pipefail
           node scripts/check-supabase-roles.mjs
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
+          import { readFileSync, readdirSync } from 'node:fs';
           import { Client } from 'pg';
           const url = new URL(process.env.SUPABASE_MIGRATION_DATABASE_URL);
           for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) url.searchParams.delete(key);
@@ -183,13 +183,18 @@ jobs:
           await client.connect();
           try {
             const tables = await client.query("SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname <> '_prisma_migrations'");
-            if (tables.rows[0].n !== 0) throw new Error('Public contains business tables; refusing to migrate.');
             const history = await client.query("SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS exists");
+            let total = 0;
+            let incomplete = 0;
             if (history.rows[0].exists) {
-              const count = await client.query('SELECT count(*)::int AS n FROM public._prisma_migrations');
-              if (count.rows[0].n !== 0) throw new Error('Prisma migration history is non-empty; refusing automatic deployment.');
+              const result = await client.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL)::int AS incomplete FROM public._prisma_migrations");
+              total = result.rows[0].total;
+              incomplete = result.rows[0].incomplete;
             }
-            console.log('target_precondition public_business_tables=0 prisma_history_rows=0 tls=verified');
+            if (incomplete !== 0) throw new Error('Prisma migration history contains an unfinished or rolled-back migration.');
+            if (tables.rows[0].n > 0 && total === 0) throw new Error('Public tables exist without Prisma migration history; refusing deployment.');
+            if (tables.rows[0].n === 0 && total > 0) throw new Error('Prisma history exists but public application tables are missing; refusing deployment.');
+            console.log('target_precondition public_tables=' + tables.rows[0].n + ' complete_prisma_migrations=' + total + ' tls=verified');
           } finally { await client.end(); }
           NODE
 
@@ -211,7 +216,8 @@ jobs:
           await client.connect();
           try {
             const history = await client.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::int AS complete FROM public._prisma_migrations");
-            if (history.rows[0].total !== 71 || history.rows[0].complete !== 71) throw new Error('Prisma history does not contain 71 fully applied migrations.');
+            const expectedMigrations = readdirSync('prisma/migrations', { withFileTypes: true }).filter(entry => entry.isDirectory()).length;
+            if (history.rows[0].total !== expectedMigrations || history.rows[0].complete !== expectedMigrations) throw new Error('Prisma history does not match the checked-in migration set.');
             const state = await client.query(`
               SELECT count(*)::int AS tables,
                      count(*) FILTER (WHERE NOT c.relrowsecurity OR NOT c.relforcerowsecurity)::int AS unforced,
