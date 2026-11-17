@@ -5,6 +5,7 @@ on:
     branches: [feature/supabase-pilot]
     paths:
       - 'backend/prisma/migrations/**'
+      - 'backend/prisma.migrate.config.ts'
       - '.github/workflows/supabase-migrate-deploy.yml'
   workflow_dispatch:
 
