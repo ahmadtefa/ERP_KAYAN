@@ -20,6 +20,7 @@ COPY pubspec.yaml pubspec.lock l10n.yaml analysis_options.yaml ./
 COPY lib ./lib
 COPY web ./web
 COPY assets ./assets
+COPY 1.png ./1.png
 RUN flutter pub get
 RUN flutter build web --release --dart-define=APP_ENV=production --dart-define=API_BASE_URL=/api/v1
 
