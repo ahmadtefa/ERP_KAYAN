@@ -1,0 +1,35 @@
+# Render builds a single same-origin service: Flutter Web is served by NestJS.
+# Keeping both in one image avoids cross-origin cookies and a second free service.
+FROM ghcr.io/cirruslabs/flutter:stable AS flutter-build
+WORKDIR /workspace
+COPY pubspec.yaml pubspec.lock l10n.yaml analysis_options.yaml ./
+COPY lib ./lib
+COPY web ./web
+COPY assets ./assets
+RUN flutter pub get
+RUN flutter build web --release --dart-define=APP_ENV=production --dart-define=API_BASE_URL=/api/v1
+
+FROM node:22-bookworm-slim AS backend-build
+WORKDIR /app
+COPY backend/package*.json ./
+RUN npm ci --no-audit --no-fund
+COPY backend/prisma ./prisma
+COPY backend/prisma.config.ts backend/tsconfig.json backend/nest-cli.json ./
+COPY backend/src ./src
+COPY --from=flutter-build /workspace/build/web ./build/web
+RUN npx prisma generate && npx prisma validate && npm run build && npm prune --omit=dev
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=10000
+ENV KAYAN_WEB_ROOT=/app/build/web
+ENV SUPABASE_DB_CA_CERT_FILE=/app/certs/supabase-prod-ca-2021.crt
+COPY --from=backend-build --chown=node:node /app/node_modules ./node_modules
+COPY --from=backend-build --chown=node:node /app/dist ./dist
+COPY --from=backend-build --chown=node:node /app/build/web ./build/web
+COPY --chown=node:node backend/certs/supabase-prod-ca-2021.crt ./certs/supabase-prod-ca-2021.crt
+USER node
+EXPOSE 10000
+CMD ["node", "dist/src/main.js"]
