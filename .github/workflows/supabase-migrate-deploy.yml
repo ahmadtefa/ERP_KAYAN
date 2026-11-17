@@ -56,6 +56,8 @@ jobs:
         run: node --test scripts/supabase-migration-audit.test.mjs
       - name: Validate Prisma schema and client
         run: npx prisma generate && npx prisma validate
+      - name: Repair Prisma adapter PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Exercise official Prisma migration history on isolated PostgreSQL 17
         run: |
           set -euo pipefail
@@ -191,6 +193,9 @@ jobs:
             console.log('target_precondition public_business_tables=0 prisma_history_rows=0 tls=verified');
           } finally { await client.end(); }
           NODE
+
+      - name: Repair Prisma adapter PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
 
       - name: Apply checked-in migrations with Prisma Migrate
         run: npx prisma migrate deploy
