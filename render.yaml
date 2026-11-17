@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: kayan-erp-cloud
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: feature/supabase-pilot
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PROFILE
+        value: supabase
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: KAYAN_TLS_TERMINATED
+        value: "1"
+      - key: KAYAN_ALLOW_PUBLIC_HTTP
+        value: "1"
+      - key: KAYAN_TRUST_PROXY
+        value: "loopback,linklocal,uniquelocal"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
