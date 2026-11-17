@@ -1,0 +1,225 @@
+name: Apply Prisma migrations to Supabase pilot
+
+on:
+  push:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'backend/prisma/migrations/**'
+      - '.github/workflows/supabase-migrate-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: supabase-prisma-migrations
+  cancel-in-progress: false
+
+jobs:
+  local-preflight:
+    if: github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kayan
+          POSTGRES_PASSWORD: kayan_ci
+          POSTGRES_DB: kayan_test
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U kayan -d kayan_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_PROFILE: local
+      DATABASE_URL: postgresql://kayan:kayan_ci@127.0.0.1:5432/kayan_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Audit every Prisma migration and Supabase hazard
+        run: node --test scripts/supabase-migration-audit.test.mjs
+      - name: Validate Prisma schema and client
+        run: npx prisma generate && npx prisma validate
+      - name: Exercise official Prisma migration history on isolated PostgreSQL 17
+        run: |
+          set -euo pipefail
+          npx prisma migrate deploy
+          npx prisma migrate status
+
+  supabase-migrate:
+    needs: local-preflight
+    if: github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kayan_restore
+          POSTGRES_PASSWORD: ci_restore_only
+          POSTGRES_DB: postgres
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U kayan_restore -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_PROFILE: supabase
+      DATABASE_URL: postgresql://schema-only.invalid/kayan
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
+      SUPABASE_MIGRATION_DATABASE_URL: ${{ secrets.SUPABASE_MIGRATION_DATABASE_URL }}
+      SUPABASE_DB_CA_CERT_FILE: ${{ github.workspace }}/backend/certs/supabase-prod-ca-2021.crt
+      KAYAN_BACKUP_PASSPHRASE: ${{ secrets.KAYAN_BACKUP_PASSPHRASE }}
+      RESTORE_ADMIN_URL: postgresql://kayan_restore:ci_restore_only@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Require scoped database and backup secrets
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DATABASE_URL" || { echo "::error::Missing SUPABASE_RUNTIME_DATABASE_URL"; exit 1; }
+          test -n "$SUPABASE_MIGRATION_DATABASE_URL" || { echo "::error::Missing SUPABASE_MIGRATION_DATABASE_URL"; exit 1; }
+          test -n "$KAYAN_BACKUP_PASSPHRASE" || { echo "::error::Missing KAYAN_BACKUP_PASSPHRASE"; exit 1; }
+          test -s "$SUPABASE_DB_CA_CERT_FILE"
+
+      - name: Verify recent successful backup artifact exists
+        id: backup-proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_API: ${{ github.api_url }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const api = process.env.GH_API;
+          const repo = process.env.GH_REPOSITORY;
+          const headers = { authorization: 'Bearer ' + process.env.GH_TOKEN, accept: 'application/vnd.github+json' };
+          const response = await fetch(api + '/repos/' + repo + '/actions/workflows/supabase-backup-drill.yml/runs?branch=feature%2Fsupabase-pilot&per_page=30', { headers });
+          if (!response.ok) throw new Error('Could not verify backup workflow history (HTTP ' + response.status + ').');
+          const runs = (await response.json()).workflow_runs ?? [];
+          const success = runs.find(run => run.head_branch === 'feature/supabase-pilot' && run.conclusion === 'success');
+          if (!success) throw new Error('No successful encrypted backup/restore drill exists for this branch.');
+          const artifactResponse = await fetch(api + '/repos/' + repo + '/actions/runs/' + success.id + '/artifacts', { headers });
+          if (!artifactResponse.ok) throw new Error('Could not verify retained backup artifact (HTTP ' + artifactResponse.status + ').');
+          const artifacts = (await artifactResponse.json()).artifacts ?? [];
+          const artifact = artifacts.find(item => item.name === 'kayan-supabase-public-backup-' + success.id && !item.expired && item.size_in_bytes > 0);
+          if (!artifact) throw new Error('The verified encrypted backup artifact is missing, empty, or expired.');
+          const ageMs = Date.now() - Date.parse(success.run_started_at);
+          if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 30 * 24 * 60 * 60 * 1000) throw new Error('The verified backup is older than the permitted recovery window.');
+          core.setOutput('run_id', String(success.id));
+          console.log('verified encrypted backup run=' + success.id + ' artifact_size_bytes=' + artifact.size_in_bytes);
+          NODE
+
+      - name: Install PostgreSQL 17 client for the restore drill
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /etc/apt/keyrings/postgresql.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          pg_restore --version
+          pg_restore --version | grep -Eq ' 17\.'
+
+      - name: Re-download and restore the exact retained encrypted backup
+        uses: actions/download-artifact@v4
+        with:
+          name: kayan-supabase-public-backup-${{ steps.backup-proof.outputs.run_id }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.backup-proof.outputs.run_id }}
+          path: ${{ runner.temp }}/kayan-backup-restore
+
+      - name: Decrypt-check and repeat isolated PostgreSQL 17 restore
+        run: |
+          set -euo pipefail
+          dump="$(find "$RUNNER_TEMP/kayan-backup-restore" -type f -name '*.dump.enc' -print -quit)"
+          test -n "$dump"
+          openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$dump" -pass env:KAYAN_BACKUP_PASSPHRASE -out /dev/null
+          node scripts/cloud-backup-drill.mjs drill --dump "$dump" --admin-url "$RESTORE_ADMIN_URL"
+
+      - name: Verify Runtime and Migrator TLS, role limits, RLS and empty target
+        run: |
+          set -euo pipefail
+          node scripts/check-supabase-roles.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { Client } from 'pg';
+          const url = new URL(process.env.SUPABASE_MIGRATION_DATABASE_URL);
+          for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) url.searchParams.delete(key);
+          const ca = readFileSync(process.env.SUPABASE_DB_CA_CERT_FILE, 'utf8');
+          const client = new Client({ connectionString: url.toString(), ssl: { ca, rejectUnauthorized: true } });
+          await client.connect();
+          try {
+            const tables = await client.query("SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname <> '_prisma_migrations'");
+            if (tables.rows[0].n !== 0) throw new Error('Public contains business tables; refusing to migrate.');
+            const history = await client.query("SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS exists");
+            if (history.rows[0].exists) {
+              const count = await client.query('SELECT count(*)::int AS n FROM public._prisma_migrations');
+              if (count.rows[0].n !== 0) throw new Error('Prisma migration history is non-empty; refusing automatic deployment.');
+            }
+            console.log('target_precondition public_business_tables=0 prisma_history_rows=0 tls=verified');
+          } finally { await client.end(); }
+          NODE
+
+      - name: Apply checked-in migrations with Prisma Migrate
+        run: npx prisma migrate deploy
+
+      - name: Verify Prisma history, forced RLS, tenant policies, and REST grants
+        run: |
+          set -euo pipefail
+          npx prisma migrate status
+          node scripts/check-supabase-roles.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { Client } from 'pg';
+          const url = new URL(process.env.SUPABASE_MIGRATION_DATABASE_URL);
+          for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) url.searchParams.delete(key);
+          const ca = readFileSync(process.env.SUPABASE_DB_CA_CERT_FILE, 'utf8');
+          const client = new Client({ connectionString: url.toString(), ssl: { ca, rejectUnauthorized: true } });
+          await client.connect();
+          try {
+            const history = await client.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::int AS complete FROM public._prisma_migrations");
+            if (history.rows[0].total !== 71 || history.rows[0].complete !== 71) throw new Error('Prisma history does not contain 71 fully applied migrations.');
+            const state = await client.query(`
+              SELECT count(*)::int AS tables,
+                     count(*) FILTER (WHERE NOT c.relrowsecurity OR NOT c.relforcerowsecurity)::int AS unforced,
+                     count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname='public' AND p.tablename=c.relname))::int AS no_policy,
+                     count(*) FILTER (WHERE has_table_privilege('anon', c.oid, 'SELECT') OR has_table_privilege('anon', c.oid, 'INSERT') OR has_table_privilege('anon', c.oid, 'UPDATE') OR has_table_privilege('anon', c.oid, 'DELETE') OR has_table_privilege('authenticated', c.oid, 'SELECT') OR has_table_privilege('authenticated', c.oid, 'INSERT') OR has_table_privilege('authenticated', c.oid, 'UPDATE') OR has_table_privilege('authenticated', c.oid, 'DELETE'))::int AS data_api_grants
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname <> '_prisma_migrations'`);
+            const s = state.rows[0];
+            if (s.tables < 1 || s.unforced || s.no_policy || s.data_api_grants) throw new Error('Post-migration public table security check failed.');
+            console.log('post_migration tables=' + s.tables + ' forced_rls=verified tenant_policies=verified anon_authenticated_data_grants=0 prisma_migrations=' + history.rows[0].complete);
+          } finally { await client.end(); }
+          NODE
