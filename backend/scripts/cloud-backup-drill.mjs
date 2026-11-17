@@ -149,8 +149,16 @@ export function drill({ dump, adminUrl, passphrase }, env = process.env) {
     decrypted = true;
   }
 
-  psqlScalar(target.replace(/\/[^/?]+(\?|$)/, '/postgres$1'), 'CREATE DATABASE ' + scratch, adminEnv);
+  const localAdmin = target.replace(/\/[^/?]+(\?|$)/, '/postgres$1');
+  psqlScalar(localAdmin, 'CREATE DATABASE ' + scratch, adminEnv);
   try {
+    // Restored RLS policies reference the migration role. Recreate it only
+    // on the loopback-only disposable PostgreSQL instance used by this drill.
+    psqlScalar(
+      localAdmin,
+      "DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='kayan_migrator') THEN CREATE ROLE kayan_migrator NOLOGIN; END IF; END $",
+      adminEnv,
+    );
     // A custom-format dump taken with --schema=public carries CREATE SCHEMA
     // public; drop the fresh database's default schema so restore is clean.
     psqlScalar(target, 'DROP SCHEMA IF EXISTS public CASCADE', adminEnv);
