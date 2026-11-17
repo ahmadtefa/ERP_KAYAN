@@ -39,7 +39,7 @@ jobs:
       run:
         working-directory: backend
     env:
-      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_MIGRATION_DATABASE_URL }}
       SUPABASE_DB_CA_CERT_FILE: ${{ github.workspace }}/backend/certs/supabase-prod-ca-2021.crt
       KAYAN_BACKUP_PASSPHRASE: ${{ secrets.KAYAN_BACKUP_PASSPHRASE }}
       RESTORE_ADMIN_URL: postgresql://kayan_restore:ci_restore_only@127.0.0.1:5432/postgres
@@ -72,7 +72,7 @@ jobs:
       - name: Require secrets without revealing values
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_DATABASE_URL" || { echo "::error::Missing SUPABASE_RUNTIME_DATABASE_URL"; exit 1; }
+          test -n "$SUPABASE_DATABASE_URL" || { echo "::error::Missing SUPABASE_MIGRATION_DATABASE_URL"; exit 1; }
           test -n "$KAYAN_BACKUP_PASSPHRASE" || { echo "::error::Missing KAYAN_BACKUP_PASSPHRASE"; exit 1; }
           test -s "$SUPABASE_DB_CA_CERT_FILE"
 
