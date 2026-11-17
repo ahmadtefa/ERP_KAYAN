@@ -7,7 +7,7 @@
 -- Rules this migration keeps:
 --   * insert only when the company has no account with that code at
 --     all (the (companyId, code) unique index also covers soft-deleted
---     rows; a company that deliberately deleted the account keeps its
+--     rows, a company that deliberately deleted the account keeps its
 --     decision and can re-add it from the chart screen);
 --   * an account that already exists is never touched, so re-running
 --     this file changes nothing the second time;

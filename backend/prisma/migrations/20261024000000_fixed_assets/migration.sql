@@ -6,7 +6,7 @@
 -- Additive only: new tables and enums, three permission catalogue rows,
 -- and grants for them (mirroring 20261023120000_system_role_grant_top_up:
 -- ADMIN holds the whole catalogue, ACCOUNTANT holds the accounting
--- module). Existing data is untouched; old code ignores the new tables.
+-- module). Existing data is untouched, old code ignores the new tables.
 
 CREATE TYPE "FixedAssetStatus" AS ENUM ('DRAFT', 'ACTIVE', 'FULLY_DEPRECIATED', 'DISPOSED');
 CREATE TYPE "DepreciationMethod" AS ENUM ('STRAIGHT_LINE');
@@ -96,7 +96,7 @@ ALTER TABLE "asset_depreciations" ADD CONSTRAINT "asset_depreciations_runId_fkey
 ALTER TABLE "asset_depreciations" ADD CONSTRAINT "asset_depreciations_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "fixed_assets"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- The permission catalogue rows (seeded identically by prisma/permissions.ts
--- on a fresh company; existing databases get them here).
+-- on a fresh company, existing databases get them here).
 INSERT INTO "permissions" ("id", "code", "nameEn", "nameAr", "module")
 SELECT gen_random_uuid(), v.code, v.name_en, v.name_ar, 'accounting'
   FROM (VALUES

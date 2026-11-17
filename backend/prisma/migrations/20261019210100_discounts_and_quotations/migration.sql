@@ -2,7 +2,7 @@
 --
 -- Everything here is additive. Existing discount columns keep their meaning
 -- (a document-level discount applied before tax) and existing rows keep the
--- values they already had; new columns are nullable or defaulted, so an
+-- values they already had, new columns are nullable or defaulted, so an
 -- upgrade never rewrites history.
 
 -- ------------------------------------------------------------------ items
@@ -307,5 +307,5 @@ FROM "quotation_lines_legacy" l
 JOIN "quotations_legacy" q ON q."id" = l."quotationId";
 
 -- The old tables stay behind, renamed, with every row intact. Nothing in the
--- running program reads them; they remain for an administrator who needs to
+-- running program reads them, they remain for an administrator who needs to
 -- compare a converted document with what the previous build stored.

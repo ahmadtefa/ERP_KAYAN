@@ -20,6 +20,12 @@ test('rejects role/database DDL, destructive SQL, extension creation, and bypass
   }
 });
 
+test('rejects prose after a semicolon inside a line comment because Prisma splits it as SQL', () => {
+  const broken = auditMigrationSql('fixture', '-- application is safe; this comment becomes raw SQL');
+  assert.deepEqual(broken.map((item) => item.code), ['PRISMA_COMMENT_SEMICOLON_SPLIT']);
+  assert.deepEqual(auditMigrationSql('fixture', '-- SELECT 1; -- SQL example comment'), []);
+});
+
 test('reviews every checked-in Prisma migration: clean and tenant RLS policies present', async () => {
   const here = fileURLToPath(new URL('.', import.meta.url));
   const result = await auditMigrationDirectory(join(here, '..', 'prisma', 'migrations'));

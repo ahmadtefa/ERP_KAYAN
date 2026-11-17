@@ -37,7 +37,7 @@ SELECT gen_random_uuid(), v.code, v."nameEn", v."nameAr", v.module
 -- ---------------------------------------------------------------- role grants
 
 -- Accounting: whoever could post entries may approve them, manage cost
--- centers and open the books; whoever could manage periods may close a year.
+-- centers and open the books, whoever could manage periods may close a year.
 INSERT INTO "role_permissions" ("roleId", "permissionId")
 SELECT r.id, p.id
   FROM "roles" r
@@ -95,7 +95,7 @@ SELECT r.id, p.id
    SELECT 1 FROM "role_permissions" x WHERE x."roleId" = r.id AND x."permissionId" = p.id
  );
 
--- Inventory: whoever could add items may deactivate them; whoever could post
+-- Inventory: whoever could add items may deactivate them, whoever could post
 -- an invoice may record a stock adjustment.
 INSERT INTO "role_permissions" ("roleId", "permissionId")
 SELECT r.id, p.id

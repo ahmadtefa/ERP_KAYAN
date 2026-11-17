@@ -7,7 +7,7 @@ ALTER TABLE "stock_documents"
   ADD COLUMN IF NOT EXISTS "reviewedBy" UUID,
   -- A write-off carries its own approval (added by
   -- 20261101190000_warehouse_average_stock_take_writeoffs), so the column may
-  -- already be here; the voucher workflow shares it rather than duplicating it.
+  -- already be here, the voucher workflow shares it rather than duplicating it.
   ADD COLUMN IF NOT EXISTS "approvedAt" TIMESTAMP(3),
   ADD COLUMN IF NOT EXISTS "approvedBy" UUID;
 
@@ -31,7 +31,7 @@ BEGIN
   END IF;
 END $$;
 
--- Administrators explicitly assign these new permissions; no existing role is
+-- Administrators explicitly assign these new permissions, no existing role is
 -- silently granted review or approval authority.
 INSERT INTO permissions (id, code, "nameEn", "nameAr", module)
 VALUES (gen_random_uuid(), 'inventory.stock.review', 'Review stock vouchers', 'مراجعة أذون المخزون', 'inventory'),

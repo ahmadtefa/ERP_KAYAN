@@ -127,7 +127,7 @@ CREATE INDEX IF NOT EXISTS "warehouse_stock_balances_companyId_warehouseId_itemI
 CREATE INDEX IF NOT EXISTS "warehouse_stock_balances_companyId_itemId_idx"
   ON "warehouse_stock_balances"("companyId", "itemId");
 
--- The movements are the ledger; the table is derived from them, so the
+-- The movements are the ledger, the table is derived from them, so the
 -- opening position of every warehouse is what actually moved through it.
 INSERT INTO "warehouse_stock_balances"
   ("companyId", "branchId", "warehouseId", "itemId", "quantity", "value", "updatedAt")

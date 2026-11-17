@@ -45,6 +45,6 @@ CREATE INDEX IF NOT EXISTS "purchase_invoice_lines_originalLineId_idx"
   ON "purchase_invoice_lines" ("originalLineId");
 
 -- The same columns also exist in the migration that introduced the returns
--- module; that one was written for fresh databases. This one brings databases
+-- module, that one was written for fresh databases. This one brings databases
 -- that were already running up to the same shape, and running both in either
 -- order leaves the same schema.

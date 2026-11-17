@@ -1,5 +1,5 @@
 -- Guard status changes so concurrent post/reverse requests cannot both
--- apply business effects. PostgreSQL serializes updates to the same row; after
+-- apply business effects. PostgreSQL serializes updates to the same row, after
 -- waiting, the second update sees the committed old status and is rejected,
 -- rolling back every effect in its transaction. Some accounting workflows
 -- intentionally create a new journal entry directly as POSTED, so INSERTs are

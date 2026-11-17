@@ -6,7 +6,7 @@
 --   * existing cost centers keep their code, names, active flag and history;
 --   * every existing row becomes a DEPARTMENT, which is what a flat centre
 --     effectively was before a type existed;
---   * existing journal lines keep their single `costCenterId`; no allocation
+--   * existing journal lines keep their single `costCenterId`, no allocation
 --     rows are invented for historical entries, and no historical amount is
 --     re-attributed;
 --   * no row is deleted, renamed or reassigned.
@@ -118,7 +118,7 @@ WHERE NOT EXISTS (
   SELECT 1 FROM "permissions" WHERE "code" = 'accounting.costcenters.manage'
 );
 
--- Everyone who can already read reports can read cost centers; that is the
+-- Everyone who can already read reports can read cost centers, that is the
 -- dimension the reports are grouped by. Additive only: no grant is removed.
 INSERT INTO "role_permissions" ("roleId", "permissionId")
 SELECT DISTINCT rp."roleId", target."id"

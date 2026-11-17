@@ -37,7 +37,7 @@ END
 $$;
 
 -- Backfill: the lowest-code active unit of each company without a headquarters
--- becomes its headquarters. Only the "kind" column is changed; no rows are removed.
+-- becomes its headquarters. Only the "kind" column is changed, no rows are removed.
 UPDATE "branches" b
 SET "kind" = 'HEADQUARTERS'
 WHERE b."id" = (

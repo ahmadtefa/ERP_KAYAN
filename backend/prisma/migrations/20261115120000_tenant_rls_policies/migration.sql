@@ -20,9 +20,9 @@
 --
 -- SYSTEM OBJECT EXCEPTIONS (documented, deliberate):
 --   * permissions: shared system catalog (read/write to any application
---     session; contains no tenant data).
+--     session, contains no tenant data).
 --   * license_installations / license_keys / license_seat_usage / license_events:
---     device-level licence records, not tenant rows; only the application role
+--     device-level licence records, not tenant rows, only the application role
 --     holds grants.
 --   * audit_logs / backup_runs: rows with NULL companyId are system-level
 --     events, visible to every tenant context (writes may set NULL or the
@@ -31,7 +31,7 @@
 --     companies - readable everywhere, writable only inside a tenant context.
 --
 -- This migration contains no role/extension DDL, no destructive statements and
--- no SECURITY DEFINER functions; it passes backend/scripts/supabase-migration-audit.mjs.
+-- no SECURITY DEFINER functions, it passes backend/scripts/supabase-migration-audit.mjs.
 
 -- ---------------------------------------------------------------------------
 -- Context readers
@@ -519,7 +519,7 @@ CREATE POLICY tenant_company ON public."stock_take_lines"
 
 -- ---------------------------------------------------------------------------
 -- companies: the tenant root. Readable during the reviewed login, setup, and
--- system-jobs roster paths; writable only by its own context (setup may create
+-- system-jobs roster paths, writable only by its own context (setup may create
 -- the first row). The jobs mode opens SELECT on this table and nothing else.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
@@ -537,7 +537,7 @@ CREATE POLICY companies_update ON public.companies
 
 -- ---------------------------------------------------------------------------
 -- users: login resolves a user by username BEFORE a company context exists,
--- so SELECT is allowed in reviewed login/setup mode only; everything else
+-- so SELECT is allowed in reviewed login/setup mode only, everything else
 -- stays strictly tenant-scoped.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -559,7 +559,7 @@ CREATE POLICY users_delete ON public.users
 -- ---------------------------------------------------------------------------
 -- Access-control children of users. user_roles carries its own companyId;
 -- the others inherit it from their user. SELECT is login/setup-aware so the
--- permission snapshot can be assembled during sign-in; writes stay strict.
+-- permission snapshot can be assembled during sign-in, writes stay strict.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_roles FORCE ROW LEVEL SECURITY;
@@ -615,7 +615,7 @@ CREATE POLICY roles_delete ON public.roles
   USING ("companyId" = public.app_company_id());
 
 -- ---------------------------------------------------------------------------
--- role_permissions: follow the role; system-role grants (NULL company) are a
+-- role_permissions: follow the role, system-role grants (NULL company) are a
 -- readable catalog, writable only through a tenant-owned role.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
@@ -635,7 +635,7 @@ CREATE POLICY role_permissions_write ON public.role_permissions
 -- ---------------------------------------------------------------------------
 -- refresh_tokens: authentication material. Readable/writable in reviewed
 -- login mode so the refresh flow can resolve and rotate a token before a
--- company context exists; afterwards the owning user's tenant applies.
+-- company context exists, afterwards the owning user's tenant applies.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.refresh_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.refresh_tokens FORCE ROW LEVEL SECURITY;
@@ -648,7 +648,7 @@ CREATE POLICY refresh_tokens_all ON public.refresh_tokens
 
 -- ---------------------------------------------------------------------------
 -- audit_logs / backup_runs: NULL companyId rows are system-level records,
--- visible to every context; a context may also manage its own rows.
+-- visible to every context, a context may also manage its own rows.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs FORCE ROW LEVEL SECURITY;

@@ -469,7 +469,7 @@ ALTER TABLE "journal_entries"
 -- ──────────────────────────────────── the audit trail is append-only
 
 -- The audit trail is the one table whose value depends on nobody being able to
--- rewrite it. Application code already only inserts; this makes the database
+-- rewrite it. Application code already only inserts, this makes the database
 -- itself refuse an update, and refuse a delete unless the session has
 -- explicitly announced that it is an audited purge (the "reset company data"
 -- operation, which takes a backup first and needs a permission of its own).

@@ -323,7 +323,7 @@ SELECT r.id, p.id
    SELECT 1 FROM "role_permissions" x WHERE x."roleId" = r.id AND x."permissionId" = p.id
  );
 
--- Someone who could raise an invoice could already buy and sell; an order is
+-- Someone who could raise an invoice could already buy and sell, an order is
 -- the same intention written down earlier, so it is granted alongside.
 INSERT INTO "role_permissions" ("roleId", "permissionId")
 SELECT r.id, p.id
@@ -381,7 +381,7 @@ SELECT gen_random_uuid(), b."companyId", b.id, b.code || '-MAIN', b."nameEn" || 
    );
 
 -- Movements recorded before this migration are attributed to their branch's
--- default warehouse. This is a one-time backfill of a nullable column; the
+-- default warehouse. This is a one-time backfill of a nullable column, the
 -- quantities, costs and dates of the rows are not touched.
 UPDATE "stock_movements" m
    SET "warehouseId" = w.id

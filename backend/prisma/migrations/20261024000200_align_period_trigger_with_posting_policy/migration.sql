@@ -10,7 +10,7 @@
 -- opaque 500 ("Unexpected server error") on the first sale or asset
 -- activation dated in a year whose period had not been created yet —
 -- found by the end-to-end lifecycle scenario posting into 2025 after
--- closing 2024. A missing period now passes; a closed one still
+-- closing 2024. A missing period now passes, a closed one still
 -- raises, and the FOR UPDATE lock on an existing period row still
 -- serialises a close against concurrent postings into it.
 CREATE OR REPLACE FUNCTION kayan_require_open_fiscal_period(

@@ -2,7 +2,7 @@
 --
 -- Until now one layout (quotations."columns") governed every table in an
 -- offer, so two sections could not show different columns. Each table now
--- carries its own optional layout; NULL keeps meaning "use the
+-- carries its own optional layout, NULL keeps meaning "use the
 -- quotation-level layout", so existing offers print byte-for-byte what
 -- they printed before.
 --

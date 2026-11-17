@@ -141,7 +141,7 @@ COMMENT ON COLUMN "items"."useFefo" IS
 COMMENT ON COLUMN "items"."allowExpiredIssue" IS
   'False refuses an issue from an expired lot: the safe default for every item.';
 
--- An item that expires must say so; asking for an expiry-checked item with
+-- An item that expires must say so, asking for an expiry-checked item with
 -- the switch off would silently disable FEFO's only input.
 DO $$
 BEGIN

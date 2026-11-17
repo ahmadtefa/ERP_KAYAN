@@ -85,8 +85,8 @@ JOIN permissions p ON p.code IN (
 )
 ON CONFLICT ("roleId", "permissionId") DO NOTHING;
 
--- 3) Receiving a lot follows creating a purchase invoice; issuing one follows
---    selling; walking a count and recording a loss follow adjusting stock.
+-- 3) Receiving a lot follows creating a purchase invoice, issuing one follows
+--    selling, walking a count and recording a loss follow adjusting stock.
 WITH operational AS (
   SELECT DISTINCT rp."roleId" AS "roleId", p.code AS "code"
   FROM role_permissions rp
