@@ -156,7 +156,7 @@ export function drill({ dump, adminUrl, passphrase }, env = process.env) {
     // on the loopback-only disposable PostgreSQL instance used by this drill.
     psqlScalar(
       localAdmin,
-      "DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='kayan_migrator') THEN CREATE ROLE kayan_migrator NOLOGIN; END IF; END $",
+      "DO $body$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='kayan_migrator') THEN CREATE ROLE kayan_migrator NOLOGIN; END IF; END $body$",
       adminEnv,
     );
     // A custom-format dump taken with --schema=public carries CREATE SCHEMA
