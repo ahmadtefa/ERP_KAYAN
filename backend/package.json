@@ -23,6 +23,7 @@
     "build:demo": "node scripts/build-demo-backup.mjs",
     "check:api": "node scripts/api-check.mjs",
   "cloud:backup-drill": "node scripts/cloud-backup-drill.mjs",
+  "cloud:acceptance": "node scripts/cloud-acceptance.mjs",
   "test:cloud-scripts": "node --test scripts/supabase-db-ca.test.mjs scripts/cloud-backup-drill.test.mjs"
   },
   "dependencies": {
