@@ -1,0 +1,41 @@
+name: Supabase live tenant isolation smoke
+
+on:
+  push:
+    branches: [feature/supabase-pilot]
+    paths:
+      - 'backend/scripts/supabase-live-tenant-drill.mjs'
+      - 'backend/scripts/check-supabase-roles.mjs'
+      - '.github/workflows/supabase-live-tenant-smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-live-tenant-smoke
+  cancel-in-progress: false
+
+jobs:
+  live-tenant-isolation:
+    if: github.ref == 'refs/heads/feature/supabase-pilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_RUNTIME_DATABASE_URL }}
+      SUPABASE_DB_CA_CERT_FILE: ${{ github.workspace }}/backend/certs/supabase-prod-ca-2021.crt
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Verify live tenant isolation under the dedicated runtime role
+        run: node scripts/supabase-live-tenant-drill.mjs
