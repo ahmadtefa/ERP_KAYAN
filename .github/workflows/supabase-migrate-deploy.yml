@@ -207,7 +207,7 @@ jobs:
           npx prisma migrate status --config prisma.migrate.config.ts
           node scripts/check-supabase-roles.mjs
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
+          import { readFileSync, readdirSync } from 'node:fs';
           import { Client } from 'pg';
           const url = new URL(process.env.SUPABASE_MIGRATION_DATABASE_URL);
           for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) url.searchParams.delete(key);
