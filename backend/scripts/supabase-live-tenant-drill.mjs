@@ -50,8 +50,8 @@ async function main() {
     inTransaction = true;
     await setContext('app.setup_mode', '1');
     await client.query(
-      `INSERT INTO public.companies (id, code, "nameEn", "nameAr", "updatedAt")
-       VALUES ($1, $2, $3, $4, now()), ($5, $6, $7, $8, now())`,
+      `INSERT INTO public.companies (id, code, "nameEn", "nameAr", "isActive", "updatedAt")
+       VALUES ($1, $2, $3, $4, true, now()), ($5, $6, $7, $8, false, now())`,
       [companyA, `CI-A-${suffix}`, 'KAYAN isolated test A', 'اختبار عزل أ',
        companyB, `CI-B-${suffix}`, 'KAYAN isolated test B', 'اختبار عزل ب'],
     );
