@@ -94,7 +94,7 @@ export function backup({ url, out, passphrase }, env = process.env) {
   mkdirSync(resolve(out), { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dumpPath = join(resolve(out), 'kayan-backup-' + stamp + '.dump');
-  const res = run('pg_dump', ['-Fc', '--schema=public', '--no-owner', '--no-privileges', '-d', clean, '-f', dumpPath], {
+  const res = run('pg_dump', ['-Fc', '--enable-row-security', '--schema=public', '--no-owner', '--no-privileges', '-d', clean, '-f', dumpPath], {
     env: { ...urlPasswordEnv(clean), ...tlsEnv },
     label: 'pg_dump',
   });
