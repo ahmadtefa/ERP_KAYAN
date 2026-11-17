@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/supabase-backup-drill.yml'
       - 'backend/scripts/cloud-backup-drill.mjs'
+      - 'backend/prisma/migrations/**'
   workflow_dispatch:
 
 permissions:
