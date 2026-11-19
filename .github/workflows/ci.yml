@@ -40,6 +40,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -397,6 +402,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -565,6 +575,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Install Flutter dependencies
@@ -624,6 +638,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Enable Linux desktop
