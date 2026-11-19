@@ -107,8 +107,14 @@ export class RolesService {
     isSuperAdmin: boolean,
   ) {
     const code = dto.code.trim().toUpperCase();
-    if (!/^[A-Z0-9_]{2,40}$/.test(code)) {
-      throw new BadRequestException('A role code is 2-40 letters, digits or underscores');
+    // Letters, digits, underscore and hyphen. A hyphen is what companies put
+    // in a code ("WHREAD-2026"), and a code that already exists in a database
+    // must never be rejected by a rule invented later; spaces and punctuation
+    // are still refused because they make a code impossible to type or search.
+    if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(code)) {
+      throw new BadRequestException(
+        'A role code is 2-40 letters, digits, underscores or hyphens',
+      );
     }
     if (code === 'ADMIN') {
       throw new ConflictException('That role code is reserved');
