@@ -100,7 +100,10 @@ async function main() {
   check(
     'a complete backup is written',
     created.status === 201 && Boolean(created.data?.file?.name),
-    `${created.data?.file?.name ?? ''} (${created.data?.file?.sizeBytes ?? 0} bytes)`,
+    created.status === 201
+      ? `${created.data?.file?.name ?? ''} (${created.data?.file?.sizeBytes ?? 0} bytes)`
+      // The server's own words, so a failure here is not a mystery.
+      : `${created.status}: ${created.text.slice(0, 400)}`,
   );
   const name = created.data?.file?.name;
   const manifest = created.data?.manifest;
@@ -167,10 +170,17 @@ async function main() {
     token,
     form: damagedForm,
   });
+  // Inspection answers with a verdict, not an HTTP error: the file was read,
+  // and the answer is that it is not usable — with the reason that stopped it.
+  const damagedRefused =
+    damagedCheck.data?.ok === false &&
+    String(damagedCheck.data?.failure ?? '').length > 0;
   check(
     'a damaged archive is refused, with the reason named',
-    damagedCheck.status >= 400 && Boolean(damagedCheck.data?.detail),
-    `${damagedCheck.status}: ${String(damagedCheck.data?.detail ?? '').slice(0, 120)}`,
+    (damagedCheck.status >= 400 && Boolean(damagedCheck.data?.detail)) || damagedRefused,
+    `${damagedCheck.status}: ${String(
+      damagedCheck.data?.failure ?? damagedCheck.data?.detail ?? '',
+    ).slice(0, 140)}`,
   );
 
   const unconfirmed = await request('/backup/complete/restore', {
