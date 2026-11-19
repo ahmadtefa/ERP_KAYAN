@@ -343,6 +343,126 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     }
   }
 
+  /// The permissions this one person is explicitly refused.
+  ///
+  /// A deny is not the absence of a grant: it beats every role, which is the
+  /// only way to stop one clerk posting when the whole finance role may.
+  Future<void> _editDeniedPermissions(Json row) async {
+    final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final selected = _permissionCodes(row['deniedPermissions']);
+    if (selected == null) {
+      showAppError(context, const FormatException());
+      return;
+    }
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _PermissionsDialog(
+        title: '${arabic ? 'الصلاحيات المرفوضة' : 'Denied permissions'} — ${text(row, 'username')}',
+        selected: selected,
+        exitRelay: widget.exitRelay,
+        onSubmit: (chosen) async {
+          try {
+            await ref
+                .read(apiClientProvider)
+                .patch(
+                  '/admin/users/${row['id']}',
+                  body: {
+                    'deniedPermissions': chosen.toList(growable: false),
+                    'expectedDeniedPermissions': selected.toList(growable: false),
+                  },
+                );
+          } finally {
+            if (mounted) ref.invalidate(usersListProvider);
+          }
+        },
+      ),
+    );
+    if (saved == true && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
+  }
+
+  /// What the person can actually do today, after roles, grants and denies.
+  ///
+  /// Asked of the server rather than computed here: the screen must not be able
+  /// to disagree with the guard that will refuse the request.
+  Future<void> _showEffectivePermissions(Json row) async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    try {
+      final data = await ref
+          .read(apiClientProvider)
+          .get('/admin/users/${row['id']}/effective-permissions');
+      final permissions = (data['permissions'] as List?)?.cast<String>() ?? const <String>[];
+      final denied = (data['denied'] as List?)?.cast<String>() ?? const <String>[];
+      final roles = (data['roles'] as List?)?.cast<String>() ?? const <String>[];
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            '${arabic ? 'الصلاحيات الفعلية' : 'Effective permissions'} — ${text(row, 'username')}',
+          ),
+          content: SizedBox(
+            width: 480,
+            height: 420,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  arabic
+                      ? '${permissions.length} صلاحية من ${roles.length} دور.'
+                      : '${permissions.length} permission(s) from ${roles.length} role(s).',
+                ),
+                if (roles.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(roles.join(' · '), style: Theme.of(dialogContext).textTheme.bodySmall),
+                ],
+                if (denied.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    arabic ? 'مرفوضة: ${denied.length}' : 'Denied: ${denied.length}',
+                    style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const Divider(),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final code in permissions)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            denied.contains(code)
+                                ? Icons.block_outlined
+                                : Icons.check_circle_outline,
+                            size: 18,
+                          ),
+                          title: Text(code),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.close),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    }
+  }
+
   Future<void> _changePassword(Json row) async {
     final l10n = context.l10n;
     final values = await showFormSheet(
@@ -494,6 +614,16 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
               onPressed: _busy ? null : () => _edit(existing: row),
             ),
             IconButton(
+              tooltip: 'الصلاحيات المرفوضة / Denied permissions',
+              icon: const Icon(Icons.block_outlined, size: 20),
+              onPressed: _busy ? null : () => _editDeniedPermissions(row),
+            ),
+            IconButton(
+              tooltip: 'الصلاحيات الفعلية / Effective permissions',
+              icon: const Icon(Icons.visibility_outlined, size: 20),
+              onPressed: _busy ? null : () => _showEffectivePermissions(row),
+            ),
+            IconButton(
               tooltip: l10n.changePassword,
               icon: const Icon(Icons.key_outlined, size: 20),
               onPressed: _busy ? null : () => _changePassword(row),
@@ -555,6 +685,92 @@ class _RolesTab extends ConsumerStatefulWidget {
 class _RolesTabState extends ConsumerState<_RolesTab> {
   bool _busy = false;
 
+  static const _categories = <FieldOption>[
+    FieldOption('MANAGEMENT', 'الإدارة / Management'),
+    FieldOption('FINANCE', 'المالية / Finance'),
+    FieldOption('SALES', 'المبيعات / Sales'),
+    FieldOption('PURCHASING', 'المشتريات / Purchasing'),
+    FieldOption('INVENTORY', 'المخازن / Inventory'),
+    FieldOption('CASH', 'الخزينة والبنوك / Cash & banks'),
+    FieldOption('AUDIT', 'المراجعة والتقارير / Audit'),
+    FieldOption('CUSTOM', 'مخصص / Custom'),
+  ];
+
+  /// Creates a role from another role's permissions, without its users.
+  Future<void> _clone(Json source) async {
+    final l10n = context.l10n;
+    final values = await showFormSheet(
+      context,
+      exitRelay: widget.exitRelay,
+      title: '${l10n.newRole} — ${text(source, 'code')}',
+      fields: [
+        FieldSpec(
+          'code',
+          l10n.roleCode,
+          required: true,
+          helper: '${text(source, 'code')}_COPY',
+        ),
+        FieldSpec('nameEn', l10n.fullNameEn, required: true),
+        FieldSpec('nameAr', l10n.fullNameAr, required: true),
+      ],
+      initial: {
+        'code': '${text(source, 'code')}_COPY',
+        'nameEn': '${text(source, 'nameEn')} (copy)',
+        'nameAr': '${text(source, 'nameAr')} (نسخة)',
+      },
+      onSubmit: (draft) async {
+        try {
+          await ref.read(apiClientProvider).post(
+            '/admin/roles',
+            body: {...draft, 'copyFromRoleId': text(source, 'id')},
+          );
+        } catch (error) {
+          throw UncertainFormSubmission(error);
+        } finally {
+          if (mounted) ref.invalidate(rolesListProvider);
+        }
+      },
+    );
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+  }
+
+  /// Disables a role without removing it: its holders keep it, it grants
+  /// nothing, and switching it back on restores exactly what it was.
+  Future<void> _toggleActive(Json role) async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final active = flag(role, 'isActive');
+    final ok = await confirmAction(
+      context,
+      title: active
+          ? (arabic ? 'تعطيل الدور' : 'Disable role')
+          : (arabic ? 'تفعيل الدور' : 'Enable role'),
+      message: active
+          ? (arabic
+                ? 'سيبقى الدور مع مستخدميه، لكنه لن يمنح أي صلاحية حتى يعاد تفعيله.'
+                : 'The role keeps its users but grants nothing until it is enabled again.')
+          : (arabic
+                ? 'سيعود الدور لمنح صلاحياته كما كانت.'
+                : 'The role will grant its permissions again as before.'),
+      confirmLabel: active
+          ? (arabic ? 'تعطيل' : 'Disable')
+          : (arabic ? 'تفعيل' : 'Enable'),
+      destructive: active,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(apiClientProvider).patch(
+        '/admin/roles/${role['id']}',
+        body: {'isActive': !active},
+      );
+      if (mounted) ref.invalidate(rolesListProvider);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _edit({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
@@ -566,6 +782,22 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         if (!isEdit) FieldSpec('code', l10n.roleCode, required: true),
         FieldSpec('nameEn', l10n.fullNameEn, required: true),
         FieldSpec('nameAr', l10n.fullNameAr, required: true),
+        FieldSpec(
+          'descriptionEn',
+          'Description (English)',
+          kind: FieldKind.multiline,
+        ),
+        FieldSpec(
+          'descriptionAr',
+          'الوصف (بالعربية)',
+          kind: FieldKind.multiline,
+        ),
+        FieldSpec(
+          'category',
+          'المجموعة / Category',
+          kind: FieldKind.select,
+          options: _categories,
+        ),
       ],
       initial: existing,
       onSubmit: (draft) async {
@@ -661,6 +893,27 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     }
   }
 
+  static String _categoryLabel(String category) {
+    switch (category) {
+      case 'MANAGEMENT':
+        return 'الإدارة / Management';
+      case 'FINANCE':
+        return 'المالية / Finance';
+      case 'SALES':
+        return 'المبيعات / Sales';
+      case 'PURCHASING':
+        return 'المشتريات / Purchasing';
+      case 'INVENTORY':
+        return 'المخازن / Inventory';
+      case 'CASH':
+        return 'الخزينة / Cash';
+      case 'AUDIT':
+        return 'المراجعة / Audit';
+      default:
+        return 'مخصص / Custom';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -710,10 +963,31 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
               },
             ),
             ColumnSpec(
+              'المستخدمون / Users',
+              numeric: true,
+              value: (r) {
+                final count = r['userCount'];
+                return count is num ? '$count' : '—';
+              },
+            ),
+            ColumnSpec(
+              'المجموعة / Group',
+              value: (r) => _categoryLabel(text(r, 'category')),
+            ),
+            ColumnSpec(
               l10n.status,
-              value: (r) =>
-                  flag(r, 'isSystem') ? l10n.systemRole : l10n.customRole,
-              tone: (r) => flag(r, 'isSystem') ? AppTone.neutral : AppTone.info,
+              value: (r) => !flag(r, 'isActive')
+                  ? (Localizations.localeOf(context).languageCode == 'ar'
+                        ? 'معطّل'
+                        : 'Disabled')
+                  : flag(r, 'isSystem')
+                  ? l10n.systemRole
+                  : l10n.customRole,
+              tone: (r) => !flag(r, 'isActive')
+                  ? AppTone.warning
+                  : flag(r, 'isSystem')
+                  ? AppTone.neutral
+                  : AppTone.info,
             ),
           ],
           actions: (row) => [
@@ -730,6 +1004,25 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
               onPressed: _busy || flag(row, 'isSystem')
                   ? null
                   : () => _edit(existing: row),
+            ),
+            IconButton(
+              tooltip: 'نسخ الدور / Copy role',
+              icon: const Icon(Icons.copy_all_outlined, size: 20),
+              onPressed: _busy ? null : () => _clone(row),
+            ),
+            IconButton(
+              tooltip: flag(row, 'isActive')
+                  ? 'تعطيل / Disable'
+                  : 'تفعيل / Enable',
+              icon: Icon(
+                flag(row, 'isActive')
+                    ? Icons.pause_circle_outline
+                    : Icons.play_circle_outline,
+                size: 20,
+              ),
+              onPressed: _busy || text(row, 'code') == 'ADMIN'
+                  ? null
+                  : () => _toggleActive(row),
             ),
             IconButton(
               tooltip: l10n.deleteRole,
@@ -846,6 +1139,19 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     }
     setState(() => _saving = true);
     try {
+      // Before writing the set, ask the server what it means: the same union
+      // and the same warnings the save would produce. A refusal to preview is
+      // not a refusal to save - the server still checks everything on write -
+      // so a preview failure is reported as "no warnings to show" rather than
+      // blocking an administrator behind a read-only endpoint.
+      final warnings = await _previewWarnings();
+      if (warnings.isNotEmpty && mounted) {
+        final proceed = await _confirmWarnings(warnings);
+        if (!proceed) {
+          setState(() => _saving = false);
+          return;
+        }
+      }
       await widget.onSubmit(Set<String>.from(_selected));
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
@@ -856,6 +1162,75 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// The warnings the server publishes for this set, in the person's language.
+  Future<List<String>> _previewWarnings() async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    try {
+      final preview = await ref
+          .read(apiClientProvider)
+          .post(
+            '/admin/roles/permissions-preview',
+            body: {'permissions': _selected.toList(growable: false)},
+          );
+      return [
+        for (final warning in listOf(preview['warnings']))
+          arabic
+              ? text(warning, 'messageAr', fallback: text(warning, 'messageEn'))
+              : text(warning, 'messageEn', fallback: text(warning, 'messageAr')),
+      ].where((message) => message.isNotEmpty).toList(growable: false);
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
+  Future<bool> _confirmWarnings(List<String> warnings) async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(arabic ? 'راجع هذه الصلاحيات' : 'Review these permissions'),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                arabic
+                    ? 'هذه المجموعة تمنح ${_selected.length} صلاحية، ومنها ما يستحق مراجعة:'
+                    : 'This set grants ${_selected.length} permission(s), and some deserve a second look:',
+              ),
+              const SizedBox(height: 8),
+              for (final warning in warnings)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(warning)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(arabic ? 'متابعة الحفظ' : 'Save anyway'),
+          ),
+        ],
+      ),
+    );
+    return answer ?? false;
   }
 
   @override
@@ -932,6 +1307,14 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                         TextButton(
                           onPressed: () => setState(_selected.clear),
                           child: Text(l10n.clearAll),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                          child: Text(
+                            isArabic
+                                ? '${_selected.length} محددة'
+                                : '${_selected.length} selected',
+                          ),
                         ),
                       ],
                     ),
