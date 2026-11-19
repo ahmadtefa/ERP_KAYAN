@@ -10,7 +10,11 @@ import { Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { permissionWarnings, warningsForSet } from '../../common/rbac/permission-warnings';
+import {
+  PERMISSION_WARNING_RULES,
+  permissionWarnings,
+  warningsForSet,
+} from '../../common/rbac/permission-warnings';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 
 /// The groups the roles screen draws. Text rather than a database enum: an
@@ -86,6 +90,10 @@ export class RolesService {
       byModule.set(permission.module, bucket);
     }
     return {
+      // The rules that decide which grants deserve a second look, published
+      // with the catalogue so the screen can warn while somebody ticks instead
+      // of asking again on save. One list, read by the server and the screen.
+      warnings: PERMISSION_WARNING_RULES,
       items: permissions.map((p) => ({
         code: p.code,
         nameEn: p.nameEn,

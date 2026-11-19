@@ -127,9 +127,19 @@ Both lists save with an optimistic check (`expectedExtraPermissions`,
 `expectedDeniedPermissions`), so two administrators editing at once get a clear
 conflict instead of silently overwriting each other.
 
-**Preview before saving** — `POST admin/users/permissions-preview` answers "what
-will this person be able to do" for values that are not saved yet, with warnings
-in Arabic and English for sensitive grants (role management, backups, reset,
+**Preview before saving** — the permission picker costs no request. The rules
+that decide which grant deserves a second look are published *with* the
+catalogue (`GET admin/roles/permissions` → `warnings: [{match, severity,
+messageEn, messageAr}]`, from `backend/src/common/rbac/permission-warnings.ts`),
+so the screen applies exactly the server's list while the boxes are ticked: a
+one-line count above the list, and the full message before the write. There is
+one list, so the two can never drift.
+
+Servers and other clients can ask the same question directly:
+`POST admin/roles/permissions-preview {permissions}` and
+`POST admin/users/permissions-preview {roleIds, extraPermissions, deniedPermissions}`
+answer "what will this person be able to do" for values that are not saved yet,
+with the same warnings in Arabic and English (role management, backups, reset,
 cost, period close) and for a set that allows nothing at all.
 
 ## 5. The notification centre

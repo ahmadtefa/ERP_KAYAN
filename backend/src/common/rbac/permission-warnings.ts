@@ -15,7 +15,7 @@ export interface PermissionWarning {
   messageAr: string;
 }
 
-interface Rule {
+export interface PermissionWarningRule {
   /** An exact code or a prefix ending in `.`. */
   match: string;
   severity: 'INFO' | 'WARNING' | 'CRITICAL';
@@ -23,7 +23,7 @@ interface Rule {
   messageAr: string;
 }
 
-const RULES: readonly Rule[] = [
+export const PERMISSION_WARNING_RULES: readonly PermissionWarningRule[] = [
   {
     match: 'admin.users.manage',
     severity: 'WARNING',
@@ -98,7 +98,7 @@ const RULES: readonly Rule[] = [
   },
 ];
 
-function matches(rule: Rule, code: string): boolean {
+function matches(rule: PermissionWarningRule, code: string): boolean {
   if (rule.match.endsWith('.')) return code.startsWith(rule.match);
   return code === rule.match;
 }
@@ -107,7 +107,7 @@ function matches(rule: Rule, code: string): boolean {
 export function permissionWarnings(codes: readonly string[]): PermissionWarning[] {
   const set = new Set(codes);
   const severityRank = { CRITICAL: 3, WARNING: 2, INFO: 1 } as const;
-  return RULES.filter((rule) => [...set].some((code) => matches(rule, code)))
+  return PERMISSION_WARNING_RULES.filter((rule) => [...set].some((code) => matches(rule, code)))
     .map((rule) => ({
       code: [...set].filter((code) => matches(rule, code)).sort()[0],
       severity: rule.severity,

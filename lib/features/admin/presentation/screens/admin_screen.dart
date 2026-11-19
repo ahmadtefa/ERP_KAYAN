@@ -1139,12 +1139,10 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     }
     setState(() => _saving = true);
     try {
-      // Before writing the set, ask the server what it means: the same union
-      // and the same warnings the save would produce. A refusal to preview is
-      // not a refusal to save - the server still checks everything on write -
-      // so a preview failure is reported as "no warnings to show" rather than
-      // blocking an administrator behind a read-only endpoint.
-      final warnings = await _previewWarnings();
+      // The warnings come from the rules the server published with the
+      // catalogue, applied here as the boxes are ticked, so the preview costs
+      // no request and cannot disagree with the server: both read one list.
+      final warnings = _warningsFor(_selected);
       if (warnings.isNotEmpty && mounted) {
         final proceed = await _confirmWarnings(warnings);
         if (!proceed) {
@@ -1164,25 +1162,28 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
     }
   }
 
-  /// The warnings the server publishes for this set, in the person's language.
-  Future<List<String>> _previewWarnings() async {
+  /// The warnings the server's published rules give for this set, in the
+  /// person's language. A rule is an exact code or a prefix ending in a dot,
+  /// and the catalogue is the only place those rules are written down.
+  List<String> _warningsFor(Set<String> codes) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    try {
-      final preview = await ref
-          .read(apiClientProvider)
-          .post(
-            '/admin/roles/permissions-preview',
-            body: {'permissions': _selected.toList(growable: false)},
-          );
-      return [
-        for (final warning in listOf(preview['warnings']))
-          arabic
-              ? text(warning, 'messageAr', fallback: text(warning, 'messageEn'))
-              : text(warning, 'messageEn', fallback: text(warning, 'messageAr')),
-      ].where((message) => message.isNotEmpty).toList(growable: false);
-    } catch (_) {
-      return const <String>[];
+    final catalogue = ref.read(permissionsProvider).asData?.value;
+    final warnings = <String>[];
+    for (final rule in listOf(catalogue?['warnings'])) {
+      final match = text(rule, 'match');
+      if (match.isEmpty) continue;
+      final hit = match.endsWith('.')
+          ? codes.any((code) => code.startsWith(match))
+          : codes.contains(match);
+      if (!hit) continue;
+      final message = arabic
+          ? text(rule, 'messageAr', fallback: text(rule, 'messageEn'))
+          : text(rule, 'messageEn', fallback: text(rule, 'messageAr'));
+      if (message.isNotEmpty && !warnings.contains(message)) {
+        warnings.add(message);
+      }
     }
+    return warnings;
   }
 
   Future<bool> _confirmWarnings(List<String> warnings) async {
@@ -1318,6 +1319,24 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                         ),
                       ],
                     ),
+                    if (_warningsFor(_selected).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                isArabic
+                                    ? '${_warningsFor(_selected).length} من الصلاحيات المختارة تستحق مراجعة قبل الحفظ.'
+                                    : '${_warningsFor(_selected).length} of the selected permissions deserve a second look before saving.',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     Expanded(
                       child: ListView(
                         children: [
