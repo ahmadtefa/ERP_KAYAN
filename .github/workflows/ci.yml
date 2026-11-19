@@ -620,7 +620,13 @@ jobs:
       # These are screenshot generators: baselines are regenerated here, so
       # the normal test run below compares against this run's own render.
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        # Through ci-diagnose so a failure's own message reaches the run's
+        # annotations: the log host is not always reachable from a repair
+        # session, and "2 tests passed, 1 failed" names no test.
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
+      - name: Diagnose the design screenshots
+        if: failure()
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Upload design screenshots
         uses: actions/upload-artifact@v4
         with:
@@ -684,7 +690,7 @@ jobs:
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
