@@ -103,7 +103,7 @@ async function main() {
     created.status === 201
       ? `${created.data?.file?.name ?? ''} (${created.data?.file?.sizeBytes ?? 0} bytes)`
       // The server's own words, so a failure here is not a mystery.
-      : `${created.status}: ${created.text.slice(0, 400)}`,
+      : `${created.status}: ${created.text.replace(/\s+/g, ' ').slice(0, 700)}`,
   );
   const name = created.data?.file?.name;
   const manifest = created.data?.manifest;
@@ -242,7 +242,9 @@ async function main() {
     `${restored.status} ${
       restored.data?.restored
         ? `safety ${restored.data?.safetyBackup}`
-        : String(restored.data?.detail ?? JSON.stringify(restored.data ?? {})).slice(0, 700)
+        : String(restored.data?.detail ?? JSON.stringify(restored.data ?? {}))
+            .replace(/\s+/g, ' ')
+            .slice(0, 700)
     }`,
   );
   check(

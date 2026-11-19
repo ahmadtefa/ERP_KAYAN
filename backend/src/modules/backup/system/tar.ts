@@ -160,9 +160,28 @@ export class TarWriter {
     return new TarWriter(handle, path);
   }
 
+  /**
+   * Writes one chunk at the current position and waits until every byte of it
+   * is on disk. `FileHandle.write` may accept less than a whole chunk; treating
+   * that as success would leave a hole in the archive while its size still
+   * looked right — an archive that fails its own checksum, or worse, one that
+   * passes a size check and restores garbage.
+   */
   private async write(chunk: Buffer): Promise<void> {
-    await this.handle.write(chunk, 0, chunk.length, this.written);
-    this.written += chunk.length;
+    let offset = 0;
+    while (offset < chunk.length) {
+      const { bytesWritten } = await this.handle.write(
+        chunk,
+        offset,
+        chunk.length - offset,
+        this.written,
+      );
+      if (!bytesWritten || bytesWritten <= 0) {
+        throw new Error('the archive file accepted no bytes; the disk may be full');
+      }
+      offset += bytesWritten;
+      this.written += bytesWritten;
+    }
   }
 
   async add(entry: TarWriteEntry): Promise<void> {
@@ -195,17 +214,17 @@ export class TarWriter {
     await this.write(buildHeader(entry, size));
     const hash = createHash('sha256');
     let copied = 0;
-    await new Promise<void>((resolvePromise, reject) => {
-      const source = createReadStream(entry.path as string);
-      source.on('data', (chunk: Buffer) => {
-        hash.update(chunk);
-        copied += chunk.length;
-        source.pause();
-        this.write(chunk).then(() => source.resume(), reject);
-      });
-      source.on('error', reject);
-      source.on('end', () => resolvePromise());
-    });
+    // A `for await` loop, not a `data` listener: a listener can hear `end`
+    // while its last write is still in flight, and the padding for the entry
+    // would then be written over the entry's own last bytes — an archive
+    // whose size is right and whose content is quietly wrong. The loop does
+    // not move on until the chunk it handed over is on disk.
+    for await (const chunk of createReadStream(entry.path as string)) {
+      const data = chunk as Buffer;
+      hash.update(data);
+      copied += data.length;
+      await this.write(data);
+    }
     if (copied !== size) {
       throw new Error(
         `"${entry.path}" changed while it was being archived ` +

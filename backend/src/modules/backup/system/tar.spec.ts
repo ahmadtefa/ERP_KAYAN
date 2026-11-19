@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -136,5 +137,32 @@ describe('TAR archive', () => {
     expected.delete('settings/settings.json');
     expected.set('missing.json', { sha256: 'a'.repeat(64) });
     await expect(verifyTarArchive(path, expected)).rejects.toThrow(/does not contain/);
+  });
+  it('writes a large entry whole, without losing its last bytes to padding', async () => {
+    // A real database dump is hundreds of kilobytes, so it reaches the writer
+    // as many 64 KB chunks and ends on a length that needs padding. An earlier
+    // writer resolved on the stream's `end` event while the last chunk was
+    // still being written, and the padding then landed on top of that chunk:
+    // the archive had the right size and a wrong hash, and only a repeated
+    // run ever showed it. The loop below reproduces the shape that failed.
+    const size = 332_020;
+    const body = Buffer.alloc(size);
+    for (let index = 0; index < size; index += 1) body[index] = (index * 31 + 7) & 0xff;
+    const source = join(dir, 'dump.bin');
+    await writeFile(source, body);
+    const wanted = createHash('sha256').update(body).digest('hex');
+
+    for (let round = 0; round < 40; round += 1) {
+      const path = join(dir, `round-${round}.kayanbackup`);
+      const writer = await TarWriter.create(path);
+      await writer.add({ name: 'database/database.dump', path: source });
+      await writer.add({ name: 'manifest.json', data: Buffer.from('{}') });
+      await writer.close();
+
+      expect(writer.digests.get('database/database.dump')?.sha256).toBe(wanted);
+      const out = join(dir, `out-${round}`);
+      await extractTar(path, out, { only: (name) => name === 'database/database.dump' });
+      expect(createHash('sha256').update(await readFile(join(out, 'database/database.dump'))).digest('hex')).toBe(wanted);
+    }
   });
 });
