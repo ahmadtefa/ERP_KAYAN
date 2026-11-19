@@ -583,14 +583,6 @@ jobs:
           cache: true
       - name: Install Flutter dependencies
         run: flutter pub get
-      # Temporary: the analyzer's own output sits in a log host that is not
-      # always reachable from here, so its findings are lifted into annotations.
-      - name: List analyzer findings
-        if: always()
-        run: |
-          flutter analyze --no-pub > /tmp/analyze.txt 2>&1 || true
-          grep -E "(error|warning|info) • " /tmp/analyze.txt | head -40 | sed 's/^/::error title=analyzer::/' || true
-          tail -2 /tmp/analyze.txt | sed 's/^/::notice title=analyzer summary::/' || true
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
       # Renders real screens (shell + dashboard, customers, sales) to PNG so
@@ -656,14 +648,6 @@ jobs:
         run: flutter config --enable-linux-desktop
       - name: Install Flutter dependencies
         run: flutter pub get
-      # Temporary: the analyzer's own output sits in a log host that is not
-      # always reachable from here, so its findings are lifted into annotations.
-      - name: List analyzer findings
-        if: always()
-        run: |
-          flutter analyze --no-pub > /tmp/analyze.txt 2>&1 || true
-          grep -E "(error|warning|info) • " /tmp/analyze.txt | head -40 | sed 's/^/::error title=analyzer::/' || true
-          tail -2 /tmp/analyze.txt | sed 's/^/::notice title=analyzer summary::/' || true
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
       # Same screenshot generation as the web job: baselines are produced in
