@@ -127,8 +127,6 @@ class DashboardScreen extends ConsumerWidget {
             children: [
               CommandCenter(user: user, arabic: arabic, l10n: l10n),
               const SizedBox(height: AppSpacing.lg),
-              _NotificationsPanel(arabic: arabic),
-              const SizedBox(height: AppSpacing.lg),
               _CompanyContext(
                 company: company,
                 logoUrl: brandMark,
@@ -158,6 +156,11 @@ class DashboardScreen extends ConsumerWidget {
                   l10n: l10n,
                 ),
               ),
+              // Below the numbers, not above them: an owner who opens the
+              // dashboard to see today's sales should not have to scroll past
+              // a list to find them, and the alerts are one line each anyway.
+              const SizedBox(height: AppSpacing.lg),
+              _NotificationsPanel(arabic: arabic),
             ],
           ),
         ),
