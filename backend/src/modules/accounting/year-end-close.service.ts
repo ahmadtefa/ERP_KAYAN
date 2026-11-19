@@ -70,175 +70,133 @@ export class YearEndCloseService {
    * never be corrected inside a locked year.
    */
   async close(companyId: string, userId: string, periodId: string, reason?: string) {
-    const period = await this.requirePeriod(companyId, periodId);
-
-    const blockers = await this.blockers(companyId, period);
-    if (blockers.length > 0) {
-      throw new BadRequestException({
-        message: 'The year cannot be closed yet',
-        errors: { blockers },
+    return this.prisma.$transaction(async (tx) => {
+      // The journal/stock period triggers take this same row lock before
+      // allowing a posting. Acquire it BEFORE reading balances/blockers:
+      // whichever transaction wins is reflected in the close or refused.
+      // This does not by itself serialize creation of every kind of draft.
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM fiscal_periods
+         WHERE id = ${periodId}::uuid AND "companyId" = ${companyId}::uuid
+         FOR UPDATE
+      `);
+      const period = await this.requirePeriod(companyId, periodId, tx);
+      if (period.status === PeriodStatus.CLOSED) {
+        throw new BadRequestException('This period is already closed');
+      }
+      // Legacy data can contain overlapping periods from earlier releases.
+      // The DB posting trigger locks only one matching row, so an ambiguous
+      // range is not safe to close until the overlaps are corrected.
+      const overlap = await tx.fiscalPeriod.findFirst({
+        where: { companyId, id: { not: period.id },
+          startDate: { lte: period.endDate }, endDate: { gte: period.startDate } },
+        select: { id: true },
       });
-    }
-
-    if (period.status === PeriodStatus.CLOSED) {
-      throw new BadRequestException('This period is already closed');
-    }
-
-    const balances = await this.accountBalances(companyId, period.startDate, period.endDate);
-    const revenue = balances.filter((row) => row.type === AccountType.REVENUE);
-    const expenses = balances.filter((row) => row.type === AccountType.EXPENSE);
-
-    const totalRevenue = revenue.reduce((sum, row) => sum.plus(row.balance), new Prisma.Decimal(0));
-    const totalExpenses = expenses.reduce((sum, row) => sum.plus(row.balance), new Prisma.Decimal(0));
-    const result = totalRevenue.minus(totalExpenses);
-
-    if (revenue.length === 0 && expenses.length === 0) {
-      // Nothing to close. Locking the year is still meaningful, so it is done,
-      // but no empty entry is written: a ledger should not gain a document
-      // that says nothing.
-      const closed = await this.lock(companyId, userId, period.id);
-      await this.audit.record({
-        companyId,
-        userId,
-        action: 'fiscal_year.close_empty',
-        entity: 'fiscal_periods',
-        entityId: period.id,
-        after: { code: period.code, reason: reason ?? null },
-      });
-      return {
-        period: this.periodResponse(closed),
-        closingEntry: null,
-        totals: { revenue: '0.0000', expenses: '0.0000', result: '0.0000' },
-        note: 'There was no revenue or expense in this period, so no closing entry was needed.',
-      };
-    }
-
-    // The branch the closing entry belongs to: the one that holds the
-    // company's accounting. Manual entries need a branch, and the closing
-    // entry is a manual entry in every respect except who wrote it.
-    const branch = await this.prisma.branch.findFirst({
-      where: { companyId, deletedAt: null, isActive: true },
-      orderBy: [{ kind: 'asc' }, { code: 'asc' }],
-      select: { id: true },
-    });
-    if (!branch) {
-      throw new BadRequestException('This company has no active branch to post the closing entry to');
-    }
-
-    const lines: Array<{
-      accountId: string;
-      debit?: Prisma.Decimal;
-      credit?: Prisma.Decimal;
-      description: string;
-    }> = [];
-
-    // Revenue accounts carry credit balances: they are debited to zero them.
-    for (const row of revenue) {
-      if (row.balance.isZero()) continue;
-      lines.push(
-        row.balance.greaterThan(0)
-          ? { accountId: row.accountId, debit: row.balance, description: 'Closing revenue' }
-          : { accountId: row.accountId, credit: row.balance.negated(), description: 'Closing revenue' },
-      );
-    }
-    // Expenses carry debit balances: they are credited to zero them.
-    for (const row of expenses) {
-      if (row.balance.isZero()) continue;
-      lines.push(
-        row.balance.greaterThan(0)
-          ? { accountId: row.accountId, credit: row.balance, description: 'Closing expense' }
-          : { accountId: row.accountId, debit: row.balance.negated(), description: 'Closing expense' },
-      );
-    }
-
-    const result2 = await this.prisma.$transaction(async (tx) => {
-      const accounts = await this.accounts.resolve(tx, companyId, ['retainedEarnings']);
-      // The other side: profit is a credit to retained earnings, a loss a debit.
-      if (!result.isZero()) {
-        lines.push(
-          result.greaterThan(0)
-            ? {
-                accountId: accounts.retainedEarnings,
-                credit: result,
-                description: 'Result of the year transferred to retained earnings',
-              }
-            : {
-                accountId: accounts.retainedEarnings,
-                debit: result.negated(),
-                description: 'Loss of the year transferred to retained earnings',
-              },
-        );
+      if (overlap) {
+        throw new BadRequestException('This fiscal period overlaps another period; correct the ranges before closing.');
+      }
+      const blockers = await this.blockers(companyId, period, tx);
+      if (blockers.length > 0) {
+        throw new BadRequestException({
+          message: 'The year cannot be closed yet',
+          errors: { blockers },
+        });
       }
 
+      const balances = await this.accountBalances(companyId, period.startDate, period.endDate, tx);
+      const revenue = balances.filter((row) => row.type === AccountType.REVENUE);
+      const expenses = balances.filter((row) => row.type === AccountType.EXPENSE);
+      const totalRevenue = revenue.reduce((sum, row) => sum.plus(row.balance), new Prisma.Decimal(0));
+      const totalExpenses = expenses.reduce((sum, row) => sum.plus(row.balance), new Prisma.Decimal(0));
+      const result = totalRevenue.minus(totalExpenses);
+
+      // A group can have rows but a zero net balance. Never post empty lines.
+      const hasBalances = [...revenue, ...expenses].some((row) => !row.balance.isZero());
+      if (!hasBalances) {
+        const closed = await tx.fiscalPeriod.update({
+          where: { id: period.id },
+          data: { status: PeriodStatus.CLOSED, closedAt: new Date(), closedBy: userId },
+        });
+        await this.audit.recordRequired({
+          companyId, userId, action: 'fiscal_year.close_empty',
+          entity: 'fiscal_periods', entityId: period.id,
+          after: { code: period.code, reason: reason ?? null },
+        }, tx);
+        return {
+          period: this.periodResponse(closed),
+          closingEntry: null,
+          totals: { revenue: '0.0000', expenses: '0.0000', result: '0.0000' },
+          note: 'There was no revenue or expense in this period, so no closing entry was needed.',
+        };
+      }
+
+      const branch = await tx.branch.findFirst({
+        where: { companyId, deletedAt: null, isActive: true },
+        orderBy: [{ kind: 'asc' }, { code: 'asc' }],
+        select: { id: true },
+      });
+      if (!branch) {
+        throw new BadRequestException('This company has no active branch to post the closing entry to');
+      }
+      const lines: Array<{
+        accountId: string;
+        debit?: Prisma.Decimal;
+        credit?: Prisma.Decimal;
+        description: string;
+      }> = [];
+      for (const row of revenue) {
+        if (row.balance.isZero()) continue;
+        lines.push(row.balance.greaterThan(0)
+          ? { accountId: row.accountId, debit: row.balance, description: 'Closing revenue' }
+          : { accountId: row.accountId, credit: row.balance.negated(), description: 'Closing revenue' });
+      }
+      for (const row of expenses) {
+        if (row.balance.isZero()) continue;
+        lines.push(row.balance.greaterThan(0)
+          ? { accountId: row.accountId, credit: row.balance, description: 'Closing expense' }
+          : { accountId: row.accountId, debit: row.balance.negated(), description: 'Closing expense' });
+      }
+      // No retained-earnings lookup is needed when the result is exactly zero.
+      if (!result.isZero()) {
+        const accounts = await this.accounts.resolve(tx, companyId, ['retainedEarnings']);
+        lines.push(result.greaterThan(0)
+          ? { accountId: accounts.retainedEarnings, credit: result, description: 'Result of the year transferred to retained earnings' }
+          : { accountId: accounts.retainedEarnings, debit: result.negated(), description: 'Loss of the year transferred to retained earnings' });
+      }
       const journal = await this.posting.post(tx, {
-        companyId,
-        branchId: branch.id,
-        userId,
+        companyId, branchId: branch.id, userId,
         entryDate: period.endDate,
         description: `Closing entry for ${period.code}`,
-        sourceType: 'YEAR_END_CLOSE',
-        sourceId: period.id,
-        sourceNumber: period.code,
+        sourceType: 'YEAR_END_CLOSE', sourceId: period.id, sourceNumber: period.code,
         entryDescription: reason
           ? `Closing entry for ${period.code} — ${reason}`
           : `Closing entry for ${period.code}`,
         lines,
       });
-
       const closed = await tx.fiscalPeriod.update({
         where: { id: period.id },
-        data: {
-          status: PeriodStatus.CLOSED,
-          closedAt: new Date(),
-          closedBy: userId,
-        },
+        data: { status: PeriodStatus.CLOSED, closedAt: new Date(), closedBy: userId },
       });
-
-      return { journal, closed };
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'fiscal_year.close',
-      entity: 'fiscal_periods',
-      entityId: period.id,
-      after: {
-        code: period.code,
-        closingEntry: result2.journal.entryNumber,
-        result: result.toFixed(MONEY_SCALE),
-        reason: reason ?? null,
-      },
-    });
-
-    return {
-      period: this.periodResponse(result2.closed),
-      closingEntry: result2.journal,
-      totals: {
-        revenue: totalRevenue.toFixed(MONEY_SCALE),
-        expenses: totalExpenses.toFixed(MONEY_SCALE),
-        result: result.toFixed(MONEY_SCALE),
-        resultLabel: result.isNegative() ? 'loss' : 'profit',
-      },
-    };
-  }
-
-  /** Locks a period without writing a closing entry. */
-  private async lock(companyId: string, userId: string, periodId: string) {
-    const period = await this.prisma.fiscalPeriod.findFirst({
-      where: { id: periodId, companyId },
-    });
-    if (!period) throw new NotFoundException('Fiscal period not found');
-    return this.prisma.fiscalPeriod.update({
-      where: { id: periodId },
-      data: { status: PeriodStatus.CLOSED, closedAt: new Date(), closedBy: userId },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'fiscal_year.close', entity: 'fiscal_periods',
+        entityId: period.id,
+        after: { code: period.code, closingEntry: journal.entryNumber,
+          result: result.toFixed(MONEY_SCALE), reason: reason ?? null },
+      }, tx);
+      return {
+        period: this.periodResponse(closed), closingEntry: journal,
+        totals: {
+          revenue: totalRevenue.toFixed(MONEY_SCALE),
+          expenses: totalExpenses.toFixed(MONEY_SCALE),
+          result: result.toFixed(MONEY_SCALE),
+          resultLabel: result.isNegative() ? 'loss' : 'profit',
+        },
+      };
     });
   }
 
-  private async requirePeriod(companyId: string, periodId: string) {
-    const period = await this.prisma.fiscalPeriod.findFirst({
-      where: { id: periodId, companyId },
-    });
+  private async requirePeriod(companyId: string, periodId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const period = await db.fiscalPeriod.findFirst({ where: { id: periodId, companyId } });
     if (!period) throw new NotFoundException('Fiscal period not found');
     return period;
   }
@@ -247,10 +205,11 @@ export class YearEndCloseService {
   private async blockers(
     companyId: string,
     period: { id: string; startDate: Date; endDate: Date },
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<string[]> {
     const blockers: string[] = [];
 
-    const notPosted = await this.prisma.journalEntry.groupBy({
+    const notPosted = await db.journalEntry.groupBy({
       by: ['status'],
       where: {
         companyId,
@@ -263,7 +222,7 @@ export class YearEndCloseService {
       blockers.push(`${row._count._all} journal entr(ies) with status ${row.status} fall inside this period`);
     }
 
-    const draftInvoices = await this.prisma.salesInvoice.count({
+    const draftInvoices = await db.salesInvoice.count({
       where: {
         companyId,
         deletedAt: null,
@@ -275,7 +234,7 @@ export class YearEndCloseService {
       blockers.push(`${draftInvoices} draft sales invoice(s) fall inside this period`);
     }
 
-    const draftPurchases = await this.prisma.purchaseInvoice.count({
+    const draftPurchases = await db.purchaseInvoice.count({
       where: {
         companyId,
         deletedAt: null,
@@ -287,7 +246,7 @@ export class YearEndCloseService {
       blockers.push(`${draftPurchases} draft purchase invoice(s) fall inside this period`);
     }
 
-    const draftVouchers = await this.prisma.cashVoucher.count({
+    const draftVouchers = await db.cashVoucher.count({
       where: {
         companyId,
         deletedAt: null,
@@ -299,7 +258,19 @@ export class YearEndCloseService {
       blockers.push(`${draftVouchers} draft cash voucher(s) fall inside this period`);
     }
 
-    const draftStock = await this.prisma.stockDocument.count({
+    const draftTransfers = await db.cashTransfer.count({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: 'DRAFT',
+        transferDate: { gte: period.startDate, lte: period.endDate },
+      },
+    });
+    if (draftTransfers > 0) {
+      blockers.push(`${draftTransfers} draft cash transfer(s) fall inside this period`);
+    }
+
+    const draftStock = await db.stockDocument.count({
       where: {
         companyId,
         deletedAt: null,
@@ -311,7 +282,7 @@ export class YearEndCloseService {
       blockers.push(`${draftStock} draft stock document(s) fall inside this period`);
     }
 
-    const draftOpening = await this.prisma.openingBalance.count({
+    const draftOpening = await db.openingBalance.count({
       where: {
         companyId,
         deletedAt: null,
@@ -428,8 +399,8 @@ export class YearEndCloseService {
   }
 
   /** Money in each revenue and expense account over the period, by account type. */
-  private async accountBalances(companyId: string, from: Date, to: Date) {
-    const rows = await this.prisma.$queryRaw<
+  private async accountBalances(companyId: string, from: Date, to: Date, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const rows = await db.$queryRaw<
       Array<{ accountId: string; code: string; nameEn: string; nameAr: string; type: AccountType; balance: Prisma.Decimal }>
     >(Prisma.sql`
       SELECT a.id                                  AS "accountId",
@@ -442,7 +413,7 @@ export class YearEndCloseService {
         JOIN journal_lines l ON l."accountId" = a.id
         JOIN journal_entries e ON e.id = l."journalEntryId"
        WHERE a."companyId" = ${companyId}::uuid
-         AND a."deletedAt" IS NULL
+         AND e."companyId" = ${companyId}::uuid
          AND a.type IN ('REVENUE', 'EXPENSE')
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" >= ${from}::date

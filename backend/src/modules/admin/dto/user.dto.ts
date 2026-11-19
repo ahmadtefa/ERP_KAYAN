@@ -9,6 +9,7 @@ import {
   IsUUID,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 /// REQUIRES BUSINESS DECISION: the password policy below is a placeholder
@@ -41,9 +42,15 @@ export class UpdateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  /// Optimistic checks for callers replacing role or direct-grant sets.
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
+  expectedRoleIds?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  expectedExtraPermissions?: string[];
   /// Replaces the user's extra permission grants. Omit to leave them alone;
   /// send [] to remove them all.
-  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
   @MaxLength(120, { each: true })
   extraPermissions?: string[];
 }

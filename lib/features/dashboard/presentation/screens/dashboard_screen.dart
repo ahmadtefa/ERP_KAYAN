@@ -18,6 +18,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_panels.dart';
+import '../widgets/command_center.dart';
 
 /// Executive dashboard, fed by the server-side figures: totals, cash, debts,
 /// who buys most, what sells most and what is waiting.
@@ -121,6 +122,8 @@ class DashboardScreen extends ConsumerWidget {
               AppSpacing.xxl,
             ),
             children: [
+              CommandCenter(user: user, arabic: arabic, l10n: l10n),
+              const SizedBox(height: AppSpacing.lg),
               _CompanyContext(
                 company: company,
                 logoUrl: brandMark,
@@ -652,7 +655,7 @@ class _ComparisonStrip extends StatelessWidget {
 }
 
 /// Module shortcuts plus the work waiting in drafts and overdue debts.
-class _QuickActions extends StatelessWidget {
+class _QuickActions extends ConsumerWidget {
   const _QuickActions({
     required this.quick,
     required this.arabic,
@@ -664,7 +667,8 @@ class _QuickActions extends StatelessWidget {
   final AppLocalizations l10n;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
     final drafts = asString(quick['draftDocuments']) ?? '0';
     final overdue = asString(quick['overdueInvoices']) ?? '0';
     final reorder = asString(quick['itemsToReorder']) ?? '0';
@@ -689,6 +693,7 @@ class _QuickActions extends StatelessWidget {
           mainAxisExtent: 100,
           children: [
             for (final module in _modules(l10n))
+              if (user != null && (module.permission.isEmpty || user.can(module.permission)))
               QuickActionTile(
                 icon: module.icon,
                 label: module.label,
@@ -922,17 +927,17 @@ class _ContextChip extends StatelessWidget {
   );
 }
 
-List<({IconData icon, String label, String path, SectionAccent accent})>
+List<({IconData icon, String label, String path, SectionAccent accent, String permission})>
 _modules(AppLocalizations l10n) => [
-  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting),
-  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties),
-  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties),
-  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory),
-  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory),
-  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales),
-  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases),
-  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting),
-  (icon: Icons.precision_manufacturing_outlined, label: l10n.fixedAssets, path: AppRoutes.fixedAssets, accent: SectionAccents.accounting),
-  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports, accent: SectionAccents.insights),
-  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings, accent: SectionAccents.administration),
+  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting, permission: 'accounting.journal.read'),
+  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties, permission: 'parties.customers.read'),
+  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties, permission: 'parties.suppliers.read'),
+  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory, permission: 'inventory.items.read'),
+  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory, permission: 'inventory.stock.read'),
+  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales, permission: 'sales.invoices.read'),
+  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases, permission: 'purchases.invoices.read'),
+  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting, permission: 'accounting.accounts.read'),
+  (icon: Icons.precision_manufacturing_outlined, label: l10n.fixedAssets, path: AppRoutes.fixedAssets, accent: SectionAccents.accounting, permission: 'accounting.fixedassets.read'),
+  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports, accent: SectionAccents.insights, permission: 'reports.read'),
+  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings, accent: SectionAccents.administration, permission: ''),
 ];

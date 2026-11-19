@@ -60,6 +60,12 @@ class ApiClient {
             if (renewed != null) {
               try {
                 options.headers['Authorization'] = 'Bearer $renewed';
+                // Dio finalizes multipart streams on the first attempt. A
+                // byte-backed file needs a fresh FormData instance for the
+                // authenticated retry; replaying the consumed object fails.
+                if (options.data is FormData) {
+                  options.data = (options.data as FormData).clone();
+                }
                 options.extra[_retriedKey] = true;
                 handler.resolve(await _dio.fetch<dynamic>(options));
                 return;
@@ -161,7 +167,7 @@ class ApiClient {
       _log.warning('Could not renew the access token: ${e.type}');
       return const _RefreshOutcome.unavailable();
     } catch (error) {
-      _log.warning('Could not renew the access token: $error');
+      _log.warning('Could not renew the access token (${error.runtimeType})');
       return const _RefreshOutcome.unavailable();
     }
   }
@@ -294,10 +300,55 @@ class ApiClient {
           }
           return SessionExpiredFailure(message);
         }
-        if (status == 403) {
+        final data = e.response?.data;
+        final rawCode = data is Map
+            ? (data['errorCode'] ?? data['code'])
+            : null;
+        final code =
+            rawCode is String && RegExp(r'^[A-Z0-9_]{3,64}$').hasMatch(rawCode)
+            ? rawCode
+            : null;
+        final rawFields = data is Map
+            ? (data['fieldErrors'] ?? data['errors'])
+            : null;
+        final fieldErrors = <String, String>{};
+        if (rawFields is Map) {
+          rawFields.forEach((key, value) {
+            if (key is String &&
+                key.length <= 100 &&
+                value is String &&
+                value.length <= 300) {
+              fieldErrors[key] = value;
+            }
+          });
+        } else if (rawFields is List) {
+          for (final item in rawFields) {
+            if (item is Map &&
+                item['field'] is String &&
+                item['message'] is String) {
+              final key = item['field'] as String;
+              final value = item['message'] as String;
+              if (key.length <= 100 && value.length <= 300) {
+                fieldErrors[key] = value;
+              }
+            }
+          }
+        }
+        if (status == 403 && code != 'LICENSE_STATE_ID_MISMATCH') {
           return PermissionFailure(message);
         }
-        return ApiFailure(message, statusCode: status);
+        return ApiFailure(
+          message,
+          statusCode: status,
+          code: code,
+          fieldErrors: fieldErrors,
+          userAction: data is Map && data['userAction'] is String
+              ? data['userAction'] as String
+              : null,
+          requestId: data is Map && data['requestId'] is String
+              ? data['requestId'] as String
+              : null,
+        );
       case DioExceptionType.unknown:
         return const NetworkFailure();
     }
@@ -314,7 +365,6 @@ class ApiClient {
   }
 }
 
-
 /// What one attempt to renew the access token produced.
 ///
 /// `invalid` is the only outcome that ends the session: the server rejected
@@ -323,12 +373,8 @@ class ApiClient {
 /// both wrong and infuriating.
 class _RefreshOutcome {
   const _RefreshOutcome.success(this.accessToken) : invalid = false;
-  const _RefreshOutcome.invalid()
-    : accessToken = null,
-      invalid = true;
-  const _RefreshOutcome.unavailable()
-    : accessToken = null,
-      invalid = false;
+  const _RefreshOutcome.invalid() : accessToken = null, invalid = true;
+  const _RefreshOutcome.unavailable() : accessToken = null, invalid = false;
 
   final String? accessToken;
   final bool invalid;

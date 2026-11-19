@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -15,42 +17,18 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../presentation/widgets/party_statement_dialog.dart';
+import '../providers/party_providers.dart';
 
 /// Which of the two party lists a screen is showing.
 enum PartyKind { customer, supplier }
 
-class CustomersController extends JsonListController {
-  @override
-  String get resourcePath => '/parties/customers';
-
-  @override
-  Map<String, dynamic> get resourceQuery => const {'includeInactive': 'true'};
-}
-
-class SuppliersController extends JsonListController {
-  @override
-  String get resourcePath => '/parties/suppliers';
-
-  @override
-  Map<String, dynamic> get resourceQuery => const {'includeInactive': 'true'};
-}
-
-final customersListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(
-      CustomersController.new,
-    );
-
-final suppliersListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(
-      SuppliersController.new,
-    );
-
 /// Customers and suppliers, which differ only in the label and in whether a
 /// credit limit applies.
 class PartiesScreen extends ConsumerStatefulWidget {
-  const PartiesScreen({super.key, required this.kind});
+  const PartiesScreen({super.key, required this.kind, this.navigationKey});
 
   final PartyKind kind;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<PartiesScreen> createState() => _PartiesScreenState();
@@ -59,6 +37,23 @@ class PartiesScreen extends ConsumerStatefulWidget {
 class _PartiesScreenState extends ConsumerState<PartiesScreen> {
   String _query = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   bool get _isCustomer => widget.kind == PartyKind.customer;
 
@@ -74,8 +69,8 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
     final fields = <FieldSpec>[
       if (!isEdit)
         FieldSpec('code', l10n.accountCode, required: true),
-      FieldSpec('nameEn', 'Name (English)', required: true),
-      FieldSpec('nameAr', 'الاسم (عربي)', required: true),
+      FieldSpec('nameEn', 'Name (English)'),
+      FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec('phone', l10n.phone),
       FieldSpec('email', l10n.email),
       FieldSpec('taxNumber', l10n.taxNumber),
@@ -92,22 +87,36 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit
           ? (_isCustomer ? l10n.editCustomer : l10n.editSupplier)
           : (_isCustomer ? l10n.newCustomer : l10n.newSupplier),
       fields: fields,
       initial: existing,
+      onSubmit: (draft) async {
+        final client = ref.read(apiClientProvider);
+        try {
+          if (isEdit) {
+            await client.patch('$_path/${existing['id']}', body: draft);
+          } else {
+            await client.post(_path, body: draft);
+          }
+        } catch (error) {
+          // The server may have committed before a transport failure. Re-read
+          // the lists, while keeping the draft open for the user to inspect.
+          if (mounted) {
+            ref.invalidate(_provider);
+            ref.invalidate(customersProvider);
+            ref.invalidate(suppliersProvider);
+          }
+          throw UncertainFormSubmission(error);
+        }
+      },
     );
     if (values == null || !mounted) return;
 
     setState(() => _busy = true);
-    final client = ref.read(apiClientProvider);
     try {
-      if (isEdit) {
-        await client.patch('$_path/${existing['id']}', body: values);
-      } else {
-        await client.post(_path, body: values);
-      }
       await ref.read(_provider.notifier).reload();
       // The invoice and voucher pickers read these cached lists. Without
       // this a customer created here is missing from the invoice form until
@@ -117,7 +126,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
       ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -152,8 +161,14 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
       ref.invalidate(customersProvider);
       ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        // A timeout or unexpected error may follow a committed status change.
+        ref.invalidate(_provider);
+        ref.invalidate(customersProvider);
+        ref.invalidate(suppliersProvider);
+        await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -199,7 +214,11 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
             ),
             ColumnSpec(l10n.nameEnglish, value: (r) => text(r, 'nameEn')),
             ColumnSpec(l10n.nameArabic, value: (r) => text(r, 'nameAr')),
-            ColumnSpec(l10n.phone, value: (r) => text(r, 'phone')),
+            ColumnSpec(
+              l10n.phone,
+              value: (r) => text(r, 'phone'),
+              textDirection: TextDirection.ltr,
+            ),
             if (_isCustomer)
               ColumnSpec(
                 l10n.creditLimit,

@@ -148,6 +148,20 @@ void main() {
     expect(find.textContaining('raw materials'), findsWidgets);
   });
 
+  testWidgets('an invoice detail retry reloads after a transient error', (tester) async {
+    _size(tester, 768);
+    final api = _RetryInvoiceApi();
+    await tester.pumpWidget(_app(const SizedBox(height: 760,
+      child: InvoiceDetailDialog(kind: InvoiceKind.purchase,
+        summary: {'id': 'inv-1', 'invoiceNumber': 'PI-1'})), api: api));
+    for (var i = 0; i < 6; i++) { await tester.pump(const Duration(milliseconds: 100)); }
+    await tester.tap(find.text('Retry'));
+    for (var i = 0; i < 6; i++) { await tester.pump(const Duration(milliseconds: 100)); }
+    expect(api.invoiceLoads, 2);
+    expect(find.text('1,234,567.89'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a purchase invoice document reads cleanly on a phone', (
     tester,
   ) async {
@@ -281,5 +295,14 @@ class _InvoiceApi extends ApiClient {
         },
       ],
     };
+  }
+}
+
+class _RetryInvoiceApi extends _InvoiceApi {
+  int invoiceLoads = 0;
+  @override
+  Future<Map<String, dynamic>> getObject(String path, {Map<String, dynamic>? query}) async {
+    if (!path.contains('capabilities') && ++invoiceLoads == 1) throw StateError('Synthetic temporary error');
+    return super.getObject(path, query: query);
   }
 }

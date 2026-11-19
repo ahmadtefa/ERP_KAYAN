@@ -1,0 +1,236 @@
+name: KAYAN automated acceptance evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'backend/**'
+      - 'scripts/kayan-acceptance-*.mjs'
+      - '.github/workflows/kayan-acceptance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: backend
+      - name: Resolve locked Flutter packages
+        run: flutter pub get --enforce-lockfile
+      - name: Run acceptance tests and capture real exit codes
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          set +e
+          npm --prefix backend test -- --runInBand src/common/filters/problem-details.filter.spec.ts > build/acceptance/backend.log 2>&1
+          backend_status=$?
+          flutter test test --reporter json > build/acceptance/flutter.jsonl 2> build/acceptance/flutter.stderr
+          flutter_status=$?
+          BACKEND_STATUS="$backend_status" FLUTTER_STATUS="$flutter_status" node scripts/kayan-acceptance-results.mjs build/acceptance/flutter.jsonl build/acceptance/results.json
+          node scripts/kayan-acceptance-scan.mjs build/acceptance/screen-audit.json
+          node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          if [ "$backend_status" -ne 0 ] || [ "$flutter_status" -ne 0 ]; then
+            echo 'Acceptance tests failed; evidence was retained in build/acceptance.' >&2
+            exit 1
+          fi
+          node scripts/kayan-acceptance-gate.mjs build/acceptance/report.json
+      - name: Preserve a report when setup or test execution fails early
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          if [ ! -s build/acceptance/report.json ]; then
+            node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          fi
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-acceptance-${{ github.sha }}
+          path: build/acceptance/
+          if-no-files-found: error
+
+  windows-evaluation:
+    name: Build licence-protected Setup on disposable Windows runner
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Install Inno Setup on disposable runner
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+      - name: Build licence-protected Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (@(git status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'Source checkout is not clean.' }
+          $operatorKey = @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem') |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $operatorKey) { throw 'The approved licence public key is missing.' }
+          & node .\scripts\license-build-policy.mjs --mode product --public-key $operatorKey
+          if ($LASTEXITCODE -ne 0) { throw 'Licence public key validation failed.' }
+          & .\distribution\windows\build-installer.ps1 -DisposableSource -Output 'build\windows-evaluation-setup'
+          if ($LASTEXITCODE -ne 0) { throw 'Setup build failed.' }
+          $setup = Get-Item -LiteralPath 'build\windows-evaluation-setup\KAYAN-ERP-Setup.exe'
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{ sourceCommit = (git rev-parse HEAD).Trim(); mode = 'product-build-unreleased'; name = $setup.Name; bytes = $setup.Length; sha256 = $hash; createdUtc = $setup.CreationTimeUtc.ToString('o') } |
+            ConvertTo-Json | Set-Content -LiteralPath 'build\windows-evaluation-setup\identity.json' -Encoding utf8
+      - name: Upload unreleased Setup and build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-unreleased-setup-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/windows-evaluation-setup/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload Setup identity separately
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-setup-identity-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/windows-evaluation-setup/identity.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  postgres-acceptance:
+    name: PostgreSQL stock reconciliation and embedded SQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_acceptance"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_acceptance?schema=public
+      NODE_OPTIONS: --experimental-vm-modules
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: '900'
+      JWT_REFRESH_TTL: '604800'
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: '3000'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install PostgreSQL 16 client for backup checks
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare Prisma adapter and client
+        run: |
+          node scripts/patch-adapter-pg-name-type.mjs
+          npx prisma generate
+          npx prisma validate
+      - name: Apply real migrations to isolated PostgreSQL
+        run: node scripts/apply-migrations.mjs
+      - name: Build API for real PostgreSQL service checks
+        run: npm run build
+      - name: Reconcile real PostgreSQL stock ledger and shelf balances
+        shell: bash
+        run: |
+          mkdir -p ../build/acceptance-postgres
+          set -o pipefail
+          node scripts/pg-ledger-shelf-agreement.mjs 2>&1 | tee ../build/acceptance-postgres/real-postgres-stock.log
+      - name: Run stock and sales posting integration tests
+        shell: bash
+        run: |
+          mkdir -p ../build/acceptance-postgres
+          set +e
+          npm test -- --runInBand src/modules/sales/sales-invoice-posting.integration.spec.ts src/modules/inventory/stock-documents.barcode-posting.spec.ts > ../build/acceptance-postgres/jest.log 2>&1
+          status=$?
+          cat ../build/acceptance-postgres/jest.log
+          exit "$status"
+      - name: Seed isolated database
+        run: npx ts-node prisma/seed.ts
+      - name: Run real API stock and accounting scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start:prod > ../build/acceptance-postgres/api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > ../build/acceptance-postgres/health.json 2>/dev/null &&
+               node -e 'const h=require("../build/acceptance-postgres/health.json");process.exit(h.status==="ok"&&h.database==="up"&&!h.needsSetup?0:1)'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then cat ../build/acceptance-postgres/api.log; exit 1; fi
+          export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
+          node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/warehouses-orders.log
+          ENABLE_DISPOSABLE_RESET=true node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting.log
+          node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting-reconciliation.log
+      - name: Upload PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-postgres-acceptance-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/acceptance-postgres/
+          if-no-files-found: warn

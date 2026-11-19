@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -15,6 +16,7 @@ class _ScriptedAdapter implements HttpClientAdapter {
 
   final List<String> paths = [];
   int protectedCalls = 0;
+  final List<List<int>> requestBodies = [];
 
   /// How many protected requests the scripted server answers 401 to. Two when
   /// the test wants two requests to notice the expiry at the same moment.
@@ -30,6 +32,9 @@ class _ScriptedAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     paths.add(options.path);
+    if (options.path != '/auth/refresh' && requestStream != null) {
+      requestBodies.add((await requestStream.toList()).expand((part) => part).toList());
+    }
     if (options.path == '/auth/refresh') {
       if (refuseRefresh) {
         return ResponseBody.fromString('{}', 401, headers: _json);
@@ -105,6 +110,23 @@ void main() {
     expect(await store.readAccessToken(), 'access-2');
     expect(await store.readRefreshToken(), 'refresh-2');
     expect(store.isSessionVolatile, isTrue);
+  });
+
+  test('a multipart upload can be replayed after token renewal', () async {
+    final adapter = _ScriptedAdapter();
+    final store = TokenStore(backend: _RefusingBackend());
+    await store.saveTokens(accessToken:'access-1',refreshToken:'refresh-1');
+    final client = _buildClient(adapter,store);
+    final form = FormData.fromMap({
+      'expectedUserId':'synthetic-user',
+      'file':MultipartFile.fromBytes(utf8.encode('synthetic-photo-bytes'),filename:'photo.png'),
+    });
+    final result = await client.post('/profile/photo',body:form);
+    expect(result['ok'],isTrue);
+    expect(adapter.paths,['/profile/photo','/auth/refresh','/profile/photo']);
+    expect(adapter.requestBodies.length,2);
+    expect(adapter.requestBodies[0],adapter.requestBodies[1]);
+    expect(utf8.decode(adapter.requestBodies[1]),contains('synthetic-photo-bytes'));
   });
 
   test('a refused refresh ends the session once, and only once', () async {

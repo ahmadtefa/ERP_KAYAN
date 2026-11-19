@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
+  ServiceUnavailableException,
   NotFoundException,
 } from '@nestjs/common';
-import { basename, join } from 'node:path';
-import { readFile, unlink } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
+import { lstat, readFile, unlink } from 'node:fs/promises';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
 
@@ -13,9 +15,11 @@ import {
   AuditPurgeService,
 } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
 import {
+  LEGACY_LOGO_MIME,
   LOGO_MAX_BYTES,
   logoDimensions,
   uploadsDir,
@@ -105,6 +109,11 @@ interface TableSpec {
   selfReferencing?: boolean;
   /// The scalar column that names the parent row in this same table.
   selfReferenceField?: string;
+  /// Columns that hold bytes. They are written to the file as base64 and read
+  /// back as Buffers — a JSON file cannot carry a Buffer, and one that tried
+  /// came back as `{type:"Buffer",data:[...]}`, which Prisma rejects with a
+  /// validation error in the middle of a restore.
+  binaryFields?: string[];
 }
 
 /// Backs everything up as one JSON file, and puts it back again.
@@ -120,7 +129,7 @@ interface TableSpec {
 /// The order of this list is the order rows are written: everything a row
 /// points at comes before it. Restoring in any other order breaks a foreign
 /// key, which is exactly what a half-restore looks like.
-const TABLES: TableSpec[] = [
+export const TABLES: TableSpec[] = [
   // Insert parents before dependants. Restore deletes this list in reverse,
   // so every foreign-key dependant is removed before its parent.
   {
@@ -135,6 +144,7 @@ const TABLES: TableSpec[] = [
   { model: 'userPermission', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'userRole', scope: 'company' },
   { model: 'userBranch', scope: 'child', parent: 'user', foreignKey: 'userId' },
+  { model: 'userProfilePhoto', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'fiscalPeriod', scope: 'company' },
   {
     model: 'account',
@@ -143,14 +153,43 @@ const TABLES: TableSpec[] = [
     selfReferenceField: 'parentId',
   },
   { model: 'costCenter', scope: 'company' },
+  { model: 'notificationSetting', scope: 'company' },
+  { model: 'budget', scope: 'company' },
   { model: 'companySetting', scope: 'company' },
+  { model: 'printPriceSetting', scope: 'company' },
+  { model: 'quotationTermTemplate', scope: 'company' },
+  { model: 'quotationColumnTemplate', scope: 'company' },
   { model: 'priceList', scope: 'company' },
   { model: 'itemCategory', scope: 'company' },
   { model: 'customer', scope: 'company' },
   { model: 'supplier', scope: 'company' },
   { model: 'item', scope: 'company' },
+  // Item pictures are company data, not installation state: they are what the
+  // catalogue looks like, and a restore without them loses every picture the
+  // shop took. They travel as base64 inside the JSON file like any other bytes.
+  { model: 'itemImage', scope: 'child', parent: 'item', foreignKey: 'itemId', binaryFields: ['data'] },
   { model: 'itemUnit', scope: 'child', parent: 'item', foreignKey: 'itemId' },
   { model: 'warehouse', scope: 'company' },
+  {
+    // A storage location can hang from another one (aisle > shelf > bin).
+    model: 'storageLocation',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'parentId',
+  },
+  { model: 'itemWarehouseSetting', scope: 'company' },
+  // Batches carry expiry dates and per-lot cost. Dropping them from a backup
+  // would lose the expiry dates a shop needs to sell stock safely, and would
+  // leave every restored movement pointing at a lot that no longer exists.
+  { model: 'itemBatch', scope: 'company' },
+  // The shelf book. `warehouses` cannot be cleared while these rows exist,
+  // which is how a backup made without this table failed to restore at all.
+  { model: 'warehouseStockBalance', scope: 'company' },
+  { model: 'itemCostHistory', scope: 'company' },
+  { model: 'userWarehouseAccess', scope: 'company' },
+  { model: 'stockTakeSession', scope: 'company' },
+  { model: 'stockTakeLine', scope: 'child', parent: 'stockTakeSession', foreignKey: 'sessionId' },
+  { model: 'notification', scope: 'company' },
   { model: 'priceListItem', scope: 'child', parent: 'priceList', foreignKey: 'priceListId' },
   { model: 'stockBalance', scope: 'company' },
   { model: 'stockMovement', scope: 'company' },
@@ -172,6 +211,7 @@ const TABLES: TableSpec[] = [
   },
   { model: 'salesOrder', scope: 'company' },
   { model: 'salesOrderLine', scope: 'child', parent: 'salesOrder', foreignKey: 'orderId' },
+  { model: 'orderCreationRequest', scope: 'company' },
   { model: 'purchaseOrder', scope: 'company' },
   { model: 'purchaseOrderLine', scope: 'child', parent: 'purchaseOrder', foreignKey: 'orderId' },
   {
@@ -204,6 +244,7 @@ const TABLES: TableSpec[] = [
   },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  { model: 'stockDocumentCreationRequest', scope: 'company' },
   // Quotations point at the invoice they became, so they follow sales
   // invoices. The content snapshot is a column on the quotation, so an issued
   // offer survives the round trip exactly as it was sent.
@@ -246,7 +287,7 @@ const TABLES: TableSpec[] = [
 
 /// Tables that are deliberately left out, and why. A backup file that silently
 /// omits something is worse than one that says what it omits.
-const OMITTED: Record<string, string> = {
+export const OMITTED: Record<string, string> = {
   permission: 'the list of permissions is part of the program, not of the data',
   refreshToken: 'sign-in sessions should not come back to life when a backup is restored',
   backupRun: 'backup history describes files on this installation, not portable company business data',
@@ -254,12 +295,17 @@ const OMITTED: Record<string, string> = {
 
 @Injectable()
 export class BackupService {
+  private readonly logger = new Logger('BackupService');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     /// The one place that is allowed to remove audit rows, and only inside the
     /// caller's transaction, with a reason, and never silently.
     private readonly purge: AuditPurgeService,
+    /// The licence is installation-level state that a company file cannot
+    /// carry; the restore asks it to re-assert its watermarks afterwards.
+    private readonly licensing: LicensingService,
   ) {}
 
   /// ───────────────────────────────────────────────────────── taking one
@@ -269,6 +315,10 @@ export class BackupService {
       where: { id: companyId },
     });
     if (!company) throw new BadRequestException('Company not found');
+
+    const logo = company.logoData?.length
+      ? { data: company.logoData, mime: company.logoMime ?? 'image/png' }
+      : await this.readLegacyLogo(company.logoPath);
 
     const tables: BackupFile['tables'] = {};
     const counts: Record<string, number> = {};
@@ -299,10 +349,8 @@ export class BackupService {
         address: company.address,
         currency: company.currency,
         timezone: company.timezone,
-        logoBase64: company.logoData
-          ? Buffer.from(company.logoData).toString('base64')
-          : null,
-        logoMime: company.logoData ? company.logoMime : null,
+        logoBase64: logo ? Buffer.from(logo.data).toString('base64') : null,
+        logoMime: logo?.mime ?? null,
       },
       counts,
       tables,
@@ -312,6 +360,28 @@ export class BackupService {
   /// The sample backup is shipped as a discoverable download, but never
   /// inferred from a caller-supplied path. The first location is the packaged
   /// Windows layout; the second is the repository layout used in development.
+  private async readLegacyLogo(logoPath: string | null) {
+    if (!logoPath) return null;
+    const name = basename(logoPath);
+    const mime = LEGACY_LOGO_MIME[extname(name).toLowerCase()];
+    try {
+      if (!mime) throw new Error('Unsupported logo type');
+      const path = join(uploadsDir(), name);
+      const stat = await lstat(path);
+      if (!stat.isFile() || stat.size > LOGO_MAX_BYTES) throw new Error('Invalid logo file');
+      const logo = validateLogo(await readFile(path), mime);
+      const { width, height } = logoDimensions(Buffer.from(logo.data), logo.mime) ?? {};
+      if (!width || !height || width < 32 || height < 32 || width > 2048 || height > 2048) {
+        throw new Error('Invalid logo dimensions');
+      }
+      return logo;
+    } catch {
+      throw new ServiceUnavailableException(
+        'تعذّر تضمين شعار الشركة القديم في النسخة. أعد رفع الشعار ثم أعد المحاولة. / Could not include the legacy company logo. Upload the logo again and retry.',
+      );
+    }
+  }
+
   async demoBackup(): Promise<Buffer> {
     const fileName = 'kayan-company-backup-demo.json';
     const paths = [
@@ -349,6 +419,55 @@ export class BackupService {
     return (client as unknown as Record<string, Record<string, any>>)[model];
   }
 
+  /// Bytes → base64 for the file. A backup that carried a Buffer raw came back
+  /// from JSON as `{type:"Buffer",data:[...]}`, and the restore then failed
+  /// with "Expected Bytes, provided Object" halfway through writing.
+  private encodeBinaryFields(
+    rows: Array<Record<string, unknown>>,
+    fields?: string[],
+  ): Array<Record<string, unknown>> {
+    if (!fields?.length) return rows;
+    return rows.map((row) => {
+      const copy = { ...row };
+      for (const field of fields) {
+        const value = copy[field];
+        if (value === null || value === undefined) continue;
+        copy[field] = Buffer.isBuffer(value)
+          ? value.toString('base64')
+          : value instanceof Uint8Array
+            ? Buffer.from(value).toString('base64')
+            : value;
+      }
+      return copy;
+    });
+  }
+
+  /// base64 → bytes on the way back in. A file written before this existed (or
+  /// by hand) may already hold a Buffer-shaped object; both are accepted.
+  private decodeBinaryFields(
+    rows: Array<Record<string, unknown>>,
+    fields?: string[],
+  ): Array<Record<string, unknown>> {
+    if (!fields?.length) return rows;
+    return rows.map((row) => {
+      const copy = { ...row };
+      for (const field of fields) {
+        const value = copy[field];
+        if (value === null || value === undefined) continue;
+        if (typeof value === 'string') {
+          copy[field] = Buffer.from(value, 'base64');
+        } else if (
+          typeof value === 'object' &&
+          (value as { type?: string }).type === 'Buffer' &&
+          Array.isArray((value as { data?: unknown }).data)
+        ) {
+          copy[field] = Buffer.from((value as { data: number[] }).data);
+        }
+      }
+      return copy;
+    });
+  }
+
   private async readTable(
     client: RestoreClient,
     spec: TableSpec,
@@ -357,18 +476,23 @@ export class BackupService {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.findMany) return [];
 
+    // Bytes cannot survive JSON as bytes. Encode them once, on the way out, so
+    // every return path below writes base64 into the file.
+    const encode = (rows: Array<Record<string, unknown>>) =>
+      this.encodeBinaryFields(rows, spec.binaryFields);
+
     if (spec.scope === 'company') {
-      return (await delegate.findMany({ where: { companyId } })) as Array<
+      return encode((await delegate.findMany({ where: { companyId } })) as Array<
         Record<string, unknown>
-      >;
+      >);
     }
 
     // A child that reaches the company through two relations is filtered
     // directly: its parent has no companyId to list.
     if (spec.companyWhere) {
-      return (await delegate.findMany({
+      return encode((await delegate.findMany({
         where: spec.companyWhere(companyId),
-      })) as Array<Record<string, unknown>>;
+      })) as Array<Record<string, unknown>>);
     }
 
     // A child table is reached through its parent's ids.
@@ -385,8 +509,8 @@ export class BackupService {
       where: { [spec.foreignKey as string]: { in: parents.map((row) => row.id) } },
       ...(includePermissionCode ? { include: { permission: { select: { code: true } } } } : {}),
     })) as Array<Record<string, unknown>>;
-    if (!includePermissionCode) return rows;
-    return rows.map((row) => {
+    if (!includePermissionCode) return encode(rows);
+    return encode(rows.map((row) => {
       const { permission, ...scalars } = row as Record<string, unknown> & {
         permission?: { code?: string } | null;
       };
@@ -394,7 +518,7 @@ export class BackupService {
         ...scalars,
         ...(permission?.code ? { permissionCode: permission.code } : {}),
       };
-    });
+    }));
   }
 
   /// ───────────────────────────────────────────────────────── putting one back
@@ -619,6 +743,16 @@ export class BackupService {
       await unlink(join(uploadsDir(), basename(previousLogoPath))).catch(() => {});
     }
 
+    // The company file never contains licence rows, and the seat ledger is
+    // outside it, so a restore cannot hand seats back. Reconcile anyway: it
+    // records the restore in the licence history and proves the counters did
+    // not move.
+    await this.licensing.reconcile().catch((error: Error) => {
+      this.logger.warn(
+        `The licence could not be reconciled after the restore: ${error.message}`,
+      );
+    });
+
     return {
       companyId: requesterCompanyId,
       companyName: file.companyProfile?.nameAr ?? file.companyName,
@@ -830,6 +964,8 @@ export class BackupService {
   ): Promise<void> {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.createMany) return;
+
+    rows = this.decodeBinaryFields(rows, spec.binaryFields);
 
     // Two fixes before writing. A company table gets its companyId back (the
     // file carries it, but this is what makes a restore into a repaired

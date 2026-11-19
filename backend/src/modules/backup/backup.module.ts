@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 
 import { AuditModule } from '../../common/audit/audit.module';
 import { BackupController } from './backup.controller';
@@ -16,7 +17,7 @@ import { FullBackupService } from './full-backup.service';
 @Module({
   imports: [AuditModule],
   controllers: [BackupController, FullBackupController, BackupScheduleController],
-  providers: [BackupService, FullBackupService, BackupScheduleService],
+  providers: [AuditedSuperAdminGuard, BackupService, FullBackupService, BackupScheduleService],
   exports: [BackupService, FullBackupService, BackupScheduleService],
 })
 export class BackupModule {}

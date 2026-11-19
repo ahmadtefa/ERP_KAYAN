@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -24,6 +25,17 @@ export interface OpeningBalanceLineInput {
   quantity?: string | number;
   unitCost?: string | number;
   description?: string;
+}
+
+interface OpeningBalanceDraftInput {
+  asOfDate: string;
+  branchId?: string;
+  description?: string;
+  lines: OpeningBalanceLineInput[];
+  autoBalanceToEquity?: boolean;
+  warehouseId?: string;
+  importFingerprint?: string;
+  currency?: string;
 }
 
 /**
@@ -51,19 +63,22 @@ export class OpeningBalancesService {
     private readonly warehouses: WarehouseService,
   ) {}
 
-  async findAll(companyId: string) {
+  async findAll(companyId: string, mayReadCost = true) {
     const items = await this.prisma.openingBalance.findMany({
       where: { companyId, deletedAt: null },
       orderBy: { asOfDate: 'desc' },
-      include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        _count: { select: { lines: { where: { itemId: { not: null } } } } },
+      },
     });
     return {
-      items: items.map((document) => this.toSummary(document)),
+      items: items.map((document) => this.toSummary(document, !mayReadCost && document._count.lines > 0)),
       total: items.length,
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -82,8 +97,11 @@ export class OpeningBalancesService {
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
 
+    const hasRestrictedCosts = !mayReadCost && document.lines.some(line => line.itemId !== null);
     return {
-      ...this.toSummary(document),
+      ...this.toSummary(document, hasRestrictedCosts),
+      hasRestrictedCosts,
+      branchId: document.branchId,
       warehouse: document.warehouse,
       lines: document.lines.map((line) => ({
         id: line.id,
@@ -98,10 +116,10 @@ export class OpeningBalancesService {
         supplier: line.supplier,
         itemId: line.itemId,
         item: line.item,
-        debit: line.debit.toFixed(MONEY_SCALE),
-        credit: line.credit.toFixed(MONEY_SCALE),
+        debit: hasRestrictedCosts ? null : line.debit.toFixed(MONEY_SCALE),
+        credit: hasRestrictedCosts ? null : line.credit.toFixed(MONEY_SCALE),
         quantity: line.quantity?.toFixed(MONEY_SCALE) ?? null,
-        unitCost: line.unitCost?.toFixed(MONEY_SCALE) ?? null,
+        unitCost: mayReadCost ? line.unitCost?.toFixed(MONEY_SCALE) ?? null : null,
         description: line.description,
       })),
     };
@@ -112,16 +130,9 @@ export class OpeningBalancesService {
     companyId: string,
     branchId: string | null,
     userId: string,
-    dto: {
-      asOfDate: string;
-      branchId?: string;
-      description?: string;
-      lines: OpeningBalanceLineInput[];
-      /** Put any difference on the opening-balance equity account instead of refusing. */
-      autoBalanceToEquity?: boolean;
-      warehouseId?: string;
-      importFingerprint?: string;
-    },
+    dto: OpeningBalanceDraftInput,
+    draftId?: string,
+    mayReadCost = true,
   ) {
     if (dto.importFingerprint !== undefined && !/^[0-9a-f]{64}$/.test(dto.importFingerprint)) {
       throw new BadRequestException('The import fingerprint must be a SHA-256 hex digest');
@@ -131,13 +142,14 @@ export class OpeningBalancesService {
       throw new BadRequestException('Select the branch these opening figures belong to');
     }
     const asOfDate = this.date(dto.asOfDate);
-    if (!Array.isArray(dto.lines) || dto.lines.length < 2) {
-      throw new BadRequestException('An opening balance needs at least two lines');
+    const minimum = dto.autoBalanceToEquity === true ? 1 : 2;
+    if (!Array.isArray(dto.lines) || dto.lines.length < minimum || dto.lines.length > 1000) {
+      throw new BadRequestException(`An opening balance needs between ${minimum} and 1,000 lines`);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
       const branch = await tx.branch.findFirst({
-        where: { id: targetBranch, companyId, deletedAt: null },
+        where: { id: targetBranch, companyId, deletedAt: null, isActive: true },
         select: { id: true },
       });
       if (!branch) {
@@ -148,7 +160,18 @@ export class OpeningBalancesService {
       // transaction that persists it. In particular, AccountMapService
       // requires a transaction client; using the root PrismaService here
       // would split a dry read from the write and bypass that contract.
-      const prepared = await this.prepareLines(tx, companyId, dto.lines);
+      let currency: string | undefined;
+      if (dto.currency !== undefined) {
+        const company = await tx.company.findUnique({
+          where: { id: companyId },
+          select: { currency: true },
+        });
+        if (!company || dto.currency !== company.currency) {
+          throw new BadRequestException('Opening balances must use the company currency');
+        }
+        currency = company.currency;
+      }
+      const prepared = await this.prepareLines(tx, companyId, dto.lines, currency);
       let totalDebit = prepared.reduce(
         (sum, line) => sum.plus(line.debit),
         new Prisma.Decimal(0),
@@ -159,7 +182,7 @@ export class OpeningBalancesService {
       );
       const lines = [...prepared];
 
-      if (dto.autoBalanceToEquity && !totalDebit.equals(totalCredit)) {
+      if (dto.autoBalanceToEquity === true && !totalDebit.equals(totalCredit)) {
         // Make the balancing figure visible on the designated equity account;
         // never force a one-sided balance into the ledger silently.
         const equity = await this.accounts.resolve(tx, companyId, [
@@ -191,6 +214,10 @@ export class OpeningBalancesService {
         );
       }
 
+      if (totalDebit.greaterThanOrEqualTo('1000000000000000') ||
+          totalCredit.greaterThanOrEqualTo('1000000000000000')) {
+        throw new BadRequestException('Opening balance totals are outside the supported range');
+      }
       if (!totalDebit.equals(totalCredit)) {
         throw new BadRequestException({
           message: 'The opening balance does not balance',
@@ -203,50 +230,71 @@ export class OpeningBalancesService {
         });
       }
 
-      const documentNumber = await this.numbers.next(
-        tx,
-        companyId,
-        'OPENING_BALANCE',
-        'OB',
-      );
       const warehouseId = await this.warehouses.resolve(
         tx,
         companyId,
         targetBranch,
         dto.warehouseId,
       );
+      const details = {
+        branchId: targetBranch,
+        warehouseId,
+        asOfDate,
+        description: dto.description ?? null,
+        totalDebit,
+        totalCredit,
+      };
+      const newLines = lines.map((line, index) => ({ ...line, lineNumber: index + 1 }));
+      if (draftId) {
+        const existing = await tx.openingBalance.findFirst({
+          where: { id: draftId, companyId, deletedAt: null },
+          select: { id: true, branchId: true, status: true, updatedAt: true },
+        });
+        if (!existing) throw new NotFoundException('Opening balance document not found');
+        if (!mayReadCost && await tx.openingBalanceLine.count({
+          where: { openingBalanceId: draftId, itemId: { not: null } },
+        })) {
+          throw new ForbiddenException('Stock opening balances require inventory cost permission');
+        }
+        if (existing.branchId !== targetBranch) {
+          throw new BadRequestException('A saved opening balance cannot change branches');
+        }
+        const updated = await tx.openingBalance.updateMany({
+          where: { id: draftId, companyId, status: InvoiceStatus.DRAFT, deletedAt: null, updatedAt: existing.updatedAt },
+          data: { ...details, importFingerprint: null },
+        });
+        if (updated.count !== 1) {
+          throw new BadRequestException('This opening balance changed or is no longer a draft');
+        }
+        await tx.openingBalanceLine.deleteMany({ where: { openingBalanceId: draftId } });
+        await tx.openingBalanceLine.createMany({
+          data: newLines.map((line) => ({ ...line, openingBalanceId: draftId })),
+        });
+        await this.audit.recordRequired({
+          companyId, userId, action: 'UPDATE', entity: 'opening_balances', entityId: draftId,
+          after: { totalDebit: totalDebit.toFixed(MONEY_SCALE), lines: newLines.length },
+        }, tx);
+        return null;
+      }
+
+      const documentNumber = await this.numbers.next(tx, companyId, 'OPENING_BALANCE', 'OB');
       const created = await tx.openingBalance.create({
         data: {
+          ...details,
           companyId,
-          branchId: targetBranch,
-          warehouseId,
           documentNumber,
           importFingerprint: dto.importFingerprint ?? null,
-          asOfDate,
-          description: dto.description ?? null,
           status: InvoiceStatus.DRAFT,
-          totalDebit,
-          totalCredit,
           createdBy: userId,
-          lines: {
-            create: lines.map((line, index) => ({
-              lineNumber: index + 1,
-              accountId: line.accountId,
-              customerId: line.customerId,
-              supplierId: line.supplierId,
-              itemId: line.itemId,
-              debit: line.debit,
-              credit: line.credit,
-              quantity: line.quantity,
-              unitCost: line.unitCost,
-              description: line.description,
-            })),
-          },
+          lines: { create: newLines },
         },
       });
 
       return { created, totalDebit, lineCount: lines.length };
     });
+
+    if (!result && draftId) return this.findOne(companyId, draftId);
+    if (!result) throw new Error('Opening balance creation did not return a document');
 
     await this.audit.record({
       companyId,
@@ -264,16 +312,40 @@ export class OpeningBalancesService {
     return this.findOne(companyId, result.created.id);
   }
 
+  async removeDraft(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
+    if (branchId === null) throw new BadRequestException('Select a branch before deleting a draft');
+    await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.openingBalance.updateMany({
+        where: {
+          id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null,
+          ...(mayReadCost ? {} : { lines: { none: { itemId: { not: null } } } }),
+        },
+        data: { deletedAt: new Date(), importFingerprint: null },
+      });
+      if (removed.count !== 1) {
+        throw new BadRequestException('Only an existing draft opening balance can be deleted');
+      }
+      await this.audit.recordRequired({
+        companyId, userId, action: 'DELETE', entity: 'opening_balances', entityId: id,
+      }, tx);
+    });
+    return { deleted: true };
+  }
+
   /**
    * Posts the document: one journal entry, plus a stock movement for every
    * stocked item line, all in the same transaction.
    */
-  async post(companyId: string, userId: string, id: string) {
+  async post(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
+    if (branchId === null) throw new BadRequestException('Select a branch first');
     const document = await this.prisma.openingBalance.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
+      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+    }
     if (document.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft opening balance can be posted (current status: ${document.status})`,
@@ -317,6 +389,7 @@ export class OpeningBalancesService {
         where: {
           id: document.id,
           companyId,
+          updatedAt: document.updatedAt,
           status: InvoiceStatus.DRAFT,
           deletedAt: null,
         },
@@ -328,7 +401,7 @@ export class OpeningBalancesService {
       });
       if (claimed.count !== 1) {
         throw new BadRequestException(
-          'This opening balance has just been posted by someone else.',
+          'This opening balance changed. Refresh the document before posting.',
         );
       }
 
@@ -451,6 +524,7 @@ export class OpeningBalancesService {
         userId,
         entryDate: document.asOfDate,
         description: document.description ?? 'Opening balances',
+        currency: (await tx.company.findUnique({ where: { id: companyId }, select: { currency: true } }))?.currency,
         sourceType: 'OPENING_BALANCE',
         sourceId: document.id,
         sourceNumber: document.documentNumber,
@@ -492,12 +566,16 @@ export class OpeningBalancesService {
   }
 
   /** Reverses a posted opening balance: a mirror entry, plus stock back out. */
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
+    if (branchId === null) throw new BadRequestException('Select a branch first');
     const document = await this.prisma.openingBalance.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
+      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+    }
     if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
       throw new BadRequestException('Only a posted opening balance can be reversed');
     }
@@ -599,6 +677,7 @@ export class OpeningBalancesService {
     tx: Prisma.TransactionClient,
     companyId: string,
     input: OpeningBalanceLineInput[],
+    currency?: string,
   ): Promise<
     Array<{
       accountId: string;
@@ -616,6 +695,12 @@ export class OpeningBalancesService {
     const seenStockItems = new Map<string, number>();
 
     for (const [index, raw] of input.entries()) {
+      if (!raw || typeof raw.accountId !== 'string') {
+        throw new BadRequestException(`Line ${index + 1}: choose a ledger account`);
+      }
+      if ([raw.customerId, raw.supplierId, raw.itemId].filter(Boolean).length > 1) {
+        throw new BadRequestException(`Line ${index + 1}: choose a single customer, supplier or stock item`);
+      }
       const debit = this.amount(raw.debit, `Line ${index + 1} debit`);
       const credit = this.amount(raw.credit, `Line ${index + 1} credit`);
       if (debit.isZero() && credit.isZero()) {
@@ -627,7 +712,7 @@ export class OpeningBalancesService {
 
       const account = await tx.account.findFirst({
         where: { id: raw.accountId, companyId, deletedAt: null },
-        select: { id: true, code: true, isPostable: true, isActive: true },
+        select: { id: true, code: true, isPostable: true, isActive: true, currency: true },
       });
       if (!account) throw new BadRequestException(`Line ${index + 1}: the account does not exist`);
       if (!account.isPostable) {
@@ -637,6 +722,17 @@ export class OpeningBalancesService {
       }
       if (!account.isActive) {
         throw new BadRequestException(`Line ${index + 1}: account ${account.code} is inactive`);
+      }
+
+      if (currency && account.currency && account.currency !== currency) {
+        throw new BadRequestException(`Line ${index + 1}: account ${account.code} uses ${account.currency}, expected ${currency}`);
+      }
+      if (currency && (raw.customerId || raw.supplierId)) {
+        const key = raw.customerId ? 'accountsReceivable' : 'accountsPayable';
+        const mapped = await this.accounts.resolve(tx, companyId, [key]);
+        if (account.id !== mapped[key]) {
+          throw new BadRequestException(`Line ${index + 1}: use the designated ${key} account`);
+        }
       }
 
       let quantity: Prisma.Decimal | null = null;
@@ -718,6 +814,9 @@ export class OpeningBalancesService {
     if (value === undefined || value === null || value === '') return new Prisma.Decimal(0);
     try {
       const decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
+      if (!decimal.isFinite() || decimal.greaterThanOrEqualTo('1000000000000000')) {
+        throw new BadRequestException(`${field} is outside the supported range`);
+      }
       if (decimal.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
       return decimal;
     } catch (error) {
@@ -727,8 +826,8 @@ export class OpeningBalancesService {
   }
 
   private date(value: string): Date {
-    const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
       throw new BadRequestException('asOfDate is not a valid date');
     }
     return parsed;
@@ -746,15 +845,15 @@ export class OpeningBalancesService {
     postedAt: Date | null;
     createdAt: Date;
     branch?: { code: string; nameEn: string; nameAr: string };
-  }) {
+  }, redactTotals = false) {
     return {
       id: document.id,
       documentNumber: document.documentNumber,
       asOfDate: document.asOfDate.toISOString().slice(0, 10),
       description: document.description,
       status: document.status.toLowerCase(),
-      totalDebit: document.totalDebit.toFixed(MONEY_SCALE),
-      totalCredit: document.totalCredit.toFixed(MONEY_SCALE),
+      totalDebit: redactTotals ? null : document.totalDebit.toFixed(MONEY_SCALE),
+      totalCredit: redactTotals ? null : document.totalCredit.toFixed(MONEY_SCALE),
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
       createdAt: document.createdAt.toISOString(),

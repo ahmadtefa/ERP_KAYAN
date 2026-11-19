@@ -81,7 +81,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
 
     const settings = await this.settings.get(first.id);
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED'] } },
+      where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true, status: true, fileName: true },
     });
@@ -144,12 +144,8 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       for (const company of companies) {
         try {
           await this.runForCompany(company);
-        } catch (error) {
-          this.logger.error(
-            `Scheduled backup for ${company.code} failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+        } catch {
+          this.logger.error('A scheduled backup failed.');
         }
       }
     } finally {
@@ -191,7 +187,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     if (intervalHours <= 0 && !force) return null;
 
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED'] } },
+      where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
     });
     const dueAt = lastRun
@@ -199,9 +195,14 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       : new Date(0);
     if (!force && dueAt > new Date()) return null;
 
-    const tools = await this.full.capabilities();
-    if (!tools.available) {
-      const message = `pg_dump/pg_restore not found: ${tools.reason ?? 'unknown reason'}`;
+    let toolsAvailable = false;
+    try {
+      toolsAvailable = (await this.full.capabilities()).available;
+    } catch {
+      // An inaccessible tool or directory must be recorded as a failure too.
+    }
+    if (!toolsAvailable) {
+      const message = 'فشل النسخ: أدوات قاعدة البيانات غير متاحة. لم تُحذف أي نسخة سابقة.';
       await this.record({
         kind: 'SCHEDULED',
         fileName: '-',
@@ -211,26 +212,23 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       return { fileName: '-', status: 'FAILED', message };
     }
 
-    const started = Date.now();
-    const result = await this.full.createFull(null);
-    const fileName = result.file.name;
-
-    // Verify before retention prunes anything: the new file has to be readable
-    // or it is not a backup.
-    let status = 'SUCCESS';
-    let message: string | null = `written in ${Math.round((Date.now() - started) / 1000)}s`;
+    let fileName = '-';
+    let message: string;
     try {
-      const verification = await this.full.verify(fileName);
-      status = 'VERIFIED';
-      message = `${message}; the dump was read back and holds ${verification.entries} objects`;
-    } catch (error) {
-      status = 'SUCCESS';
-      message = `${message}; verification could not run: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
+      const result = await this.full.createFull(null);
+      fileName = result.file.name;
+      await this.full.verify(fileName);
+      // A readable PostgreSQL dump is useful, but it does not include or
+      // verify the external files and device-bound licence. It must not be
+      // reported as a successful FULL backup or authorize retention.
+      message = 'فشل اكتمال النسخة: أُنشئ أرشيف قاعدة البيانات وقُرئ، لكن الملفات والترخيص والاستعادة الكاملة لم يتم التحقق منها. احتُفظ بالنسخ السابقة.';
+    } catch {
+      // Never disclose tool stderr, paths or database contents to clients.
+      message = 'فشل إنشاء أرشيف قاعدة البيانات أو التحقق منه. احتُفظ بالنسخ السابقة.';
     }
+    const status = 'FAILED';
 
-    const run = await this.record({
+    await this.record({
       kind: 'SCHEDULED',
       fileName,
       status,
@@ -238,14 +236,9 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       companyId: company.id,
     });
 
-    await this.pruneRetention(settings.backupRetentionCount, run.id).catch((error) => {
-      this.logger.warn(
-        `Retention could not prune old backups: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
-
+    // Both failures and incomplete archives remain visible and never trigger
+    // retention. The scheduler counts failed attempts when calculating the
+    // next due time to avoid creating a new incomplete dump every tick.
     return { fileName, status, message };
   }
 
@@ -259,6 +252,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
    */
   async pruneRetention(count: number, keepRunId?: string): Promise<string[]> {
     if (count <= 0) return [];
+    await this.full.assertDeletionSafe();
 
     const files = await this.full.list();
     const ordered = [...files].sort(

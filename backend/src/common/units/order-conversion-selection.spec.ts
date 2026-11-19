@@ -1,0 +1,72 @@
+import { Prisma } from '@prisma/client';
+import { selectedOrderLineQuantities } from './order-conversion-selection';
+import { orderConversionIdentity } from './order-conversion-identity';
+import { SalesOrdersService } from '../../modules/sales/sales-orders.service';
+import { PurchaseOrdersService } from '../../modules/purchases/purchase-orders.service';
+
+const D = (value: string | number) => new Prisma.Decimal(value);
+const choices = [{ id: 'one' }, { id: 'two' }];
+
+describe('explicit order conversion selection', () => {
+  it.each([undefined, null, [], {}, 'all', [null], [['one']]])(
+    'rejects missing or invalid selections %#', (lines) => {
+      expect(() => selectedOrderLineQuantities(lines, choices)).toThrow();
+    },
+  );
+  it.each([
+    [{ orderLineId: 'missing', quantity: '1' }],
+    [{ orderLineId: 'one', quantity: '0' }],
+    [{ orderLineId: 'one', quantity: '-1' }],
+    [{ orderLineId: 'one', quantity: 'NaN' }],
+    [{ orderLineId: 'one', quantity: '0.00001' }],
+    [{ orderLineId: 'one', quantity: '1' }, { orderLineId: 'one', quantity: '2' }],
+  ])('rejects invalid quantity, foreign or duplicated line %#', (lines) => {
+    expect(() => selectedOrderLineQuantities(lines, choices)).toThrow();
+  });
+
+  it.each([
+    ['sales', SalesOrdersService, 'salesOrder', 'salesOrderLine', 'salesInvoice', 'salesInvoiceLine'],
+    ['purchase', PurchaseOrdersService, 'purchaseOrder', 'purchaseOrderLine', 'purchaseInvoice', 'purchaseInvoiceLine'],
+  ] as const)('%s invoices only explicitly selected lines', async (_kind, Service, orderModel, lineModel, invoiceModel, invoiceLineModel) => {
+    const line = (id: string) => ({ id, lineNumber: id === 'one' ? 1 : 2,
+      itemId: `item-${id}`, description: id, quantity: D(10), invoicedQuantity: D(0),
+      unitPrice: D(3), taxRate: D(0), discountPercent: D(5), unitName: null, unitFactor: null });
+    const order = { id: 'order', orderNumber: 'O-1', status: 'APPROVED',
+      customerId: 'customer', supplierId: 'supplier', lines: [line('one'), line('two')] };
+    const update = jest.fn(async (args: unknown) => { void args; return {}; });
+    const findPrevious = jest.fn(async (): Promise<{ id: string; orderConversionHash: string; deletedAt: null; status: string } | null> => null);
+    const tx = { $queryRaw: jest.fn(async () => [{ id: 'order' }]),
+      [lineModel]: { update, findMany: jest.fn(async () => [
+      { quantity: D(10), invoicedQuantity: D(2) }, { quantity: D(10), invoicedQuantity: D(0) },
+    ]) }, [invoiceModel]: { update: jest.fn(async () => ({})), findFirst: findPrevious },
+    [invoiceLineModel]: { update: jest.fn(async () => ({})) },
+    [orderModel]: { findFirst: jest.fn(async () => order), update: jest.fn(async () => ({})) } };
+    const prisma = { [orderModel]: { findFirst: jest.fn(async () => order) },
+      $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)) };
+    const create = jest.fn(async (...args: [string, string, string, unknown]) => { void args; return { id: 'invoice', invoiceNumber: 'I-1', totalAmount: D(6), lines: [{ id: 'invoice-line' }] }; });
+    const service = new Service(prisma as never, {} as never, {} as never, {} as never,
+      { createInTransaction: create, findOne: jest.fn(async () => ({ id: 'invoice' })) } as never,
+      { recordRequired: jest.fn(async () => undefined) } as never);
+    jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'order' } as never);
+    await service.convertToInvoice('company', 'branch', 'user', 'order', {
+      idempotencyKey: 'conversion-key-00000001', invoiceDate: '2026-11-03', lines: [{ orderLineId: 'one', quantity: '2' }],
+    });
+    const dto = create.mock.calls[0][3] as { lines: Array<{ itemId: string; quantity: string }> };
+    expect(dto.lines).toEqual([expect.objectContaining({ itemId: 'item-one', quantity: '2.0000', discountPercent: '5.0000' })]);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][0]).toEqual(expect.objectContaining({ where: { id: 'one' } }));
+    await expect(service.convertToInvoice('company', 'branch', 'user', 'order', {})).rejects.toThrow(/Select/);
+    expect(create).toHaveBeenCalledTimes(1);
+
+    // An exact replay must resolve before testing membership against the
+    // current order, which can differ from its state at initial conversion.
+    const retry = { idempotencyKey: 'conversion-key-00000001', invoiceDate: '2026-11-03',
+      lines: [{ orderLineId: 'one', quantity: '2' }] };
+    const identity = orderConversionIdentity(retry, selectedOrderLineQuantities(retry.lines));
+    findPrevious.mockResolvedValueOnce({ id: 'invoice', orderConversionHash: identity.hash,
+      deletedAt: null, status: 'DRAFT' });
+    order.lines = [line('two')];
+    await service.convertToInvoice('company', 'branch', 'user', 'order', retry);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});

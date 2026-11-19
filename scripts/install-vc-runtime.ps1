@@ -28,19 +28,38 @@ if (Test-VcInstalled) {
     exit 0
 }
 
-Write-Host "[INFO] Downloading Visual C++ 2015-2022 Redistributable..." -ForegroundColor Cyan
+# The product ships this redistributable inside the Setup, and a machine with
+# KAYAN installed already has it. Downloading it is the last resort, not the
+# first step: a computer with no Internet must still be repairable, and a
+# support script that reaches the network by default turns an offline
+# installation into a failure that looks like a missing runtime.
+$dest = $null
+# Repository staging directory first (this script lives in scripts\), then the
+# installed copy, which is what a support call on a customer machine will have.
+$bundled = @(
+    (Join-Path $PSScriptRoot '..\build\windows-installer\KAYAN-ERP\prerequisites\vc_redist.x64.exe'),
+    (Join-Path $env:ProgramFiles 'KAYAN ERP\prerequisites\vc_redist.x64.exe')
+)
+foreach ($candidate in $bundled) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) { $dest = $candidate; break }
+}
 
-$url    = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
-$tmpDir = Join-Path $env:TEMP 'kayan_vcredist'
-New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
-$dest = Join-Path $tmpDir 'vc_redist.x64.exe'
+if ($dest) {
+    Write-Host "[INFO] Using the bundled Visual C++ Redistributable: $dest" -ForegroundColor Cyan
+} else {
+    Write-Host "[INFO] No bundled redistributable found; downloading it is the only option left." -ForegroundColor Yellow
+    $url    = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+    $tmpDir = Join-Path $env:TEMP 'kayan_vcredist'
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+    $dest = Join-Path $tmpDir 'vc_redist.x64.exe'
 
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-} catch {
-    Write-Error "Download failed: $_"
-    exit 1
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+    } catch {
+        Write-Error "Download failed: $_"
+        exit 1
+    }
 }
 
 if (-not (Test-Path $dest) -or (Get-Item $dest).Length -lt 1MB) {

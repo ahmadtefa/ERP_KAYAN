@@ -37,6 +37,7 @@ function makeService() {
     ],
     paidAmount: D(0),
     createdAt: new Date('2026-10-18T00:00:00.000Z'),
+    updatedAt: new Date('2026-10-27T00:00:00Z'),
     supplier: { id: SUPPLIER, code: 'SUP-1', nameEn: 'Supplier', nameAr: 'مورد' },
     branch: { code: 'HQ', nameEn: 'Head Office', nameAr: 'المركز الرئيسي' },
     notes: null,
@@ -58,6 +59,8 @@ function makeService() {
     };
   });
   const tx = {
+    supplier: { findFirst: supplierFind },
+    item: { findFirst: itemFind },
     purchaseInvoice: {
       create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
         detail.subTotal = data.subTotal;
@@ -103,6 +106,7 @@ function makeService() {
   const accounts = {};
   const settings = { get: jest.fn(async () => ({ maxDiscountPercent: '100.0000', taxRate: '14.0000' })) };
   const warehouses = {};
+  const ledger = { post: jest.fn(async () => undefined) };
   const prices = { resolvePrice: jest.fn() };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new PurchaseInvoicesService(
@@ -112,6 +116,7 @@ function makeService() {
     accounts as never,
     settings as never,
     warehouses as never,
+    ledger as never,
     prices as never,
     audit as never,
   );
@@ -157,6 +162,28 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
     ).toFixed(4)).toBe('100.0000');
     expect(invoice.landedCostCharges).toEqual(data.landedCostCharges);
     expect(detail.landedCostAmount.toFixed(4)).toBe('100.0000');
+  });
+
+  it('adds tax on taxable freight once and keeps recoverable tax out of stock cost', async () => {
+    const { service, tx } = makeService();
+    const invoice = await service.create(COMPANY, BRANCH, 'user-1', {
+      invoiceDate: '2026-10-18',
+      supplierId: SUPPLIER,
+      discountType: 'PERCENT',
+      discountPercent: '10',
+      landedCostCharges: [
+        { description: 'Freight', amount: '20', taxRate: '14' },
+        { description: 'Exempt charge', amount: '5', taxRate: '0' },
+      ],
+      lines: [{ itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '14' }],
+    });
+    const saved = tx.purchaseInvoice.create.mock.calls[0]![0].data;
+    expect(saved.subTotal.toFixed(4)).toBe('90.0000');
+    expect(saved.taxAmount.toFixed(4)).toBe('15.4000');
+    expect(saved.totalAmount.toFixed(4)).toBe('130.4000');
+    expect(saved.lines.create[0].inventoryCostTotal.toFixed(4)).toBe('115.0000');
+    expect(saved.lines.create[0].taxAmount.toFixed(4)).toBe('15.4000');
+    expect(invoice.landedCostCharges[0].taxRate).toBe('14.0000');
   });
 
   it('replaces a draft charge breakdown and recalculates every line allocation on edit', async () => {
@@ -217,7 +244,7 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
   });
 
   it('rejects an aggregate amount that disagrees with the named charges', async () => {
-    const { service, prisma } = makeService();
+    const { service, tx } = makeService();
 
     await expect(service.create(COMPANY, BRANCH, 'user-1', {
       invoiceDate: '2026-10-18',
@@ -227,6 +254,32 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
       lines: [{ itemId: ITEMS[0], quantity: '1.0000', unitPrice: '600.0000', taxRate: '0.0000' }],
     })).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
+  });
+});
+
+ 
+describe('PurchaseInvoicesService line tax defaults', () => {
+  it('treats omitted, null, blank and whitespace tax as zero without inheriting item or company tax', async () => {
+    const { service } = makeService();
+    const itemFind = jest.fn().mockResolvedValue({
+      code: 'TAX-1', nameEn: 'Tax test item', nameAr: 'صنف اختبار',
+      taxRate: D(14), isActive: true, purchasePrice: D(100), unit: 'piece', units: [],
+    });
+    (service as any).prisma.item.findFirst = itemFind;
+    const prepared = await (service as any).prepareLines(COMPANY, [
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: null },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '   ' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: 0 },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '7' },
+    ], SUPPLIER, D(0), {});
+    expect(prepared.lines.map((line: any) => line.taxRate.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+    expect(prepared.lines.map((line: any) => line.taxAmount.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
   });
 });

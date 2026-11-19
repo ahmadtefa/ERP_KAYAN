@@ -1,0 +1,14 @@
+{
+  "name": "kayan-key-generator-build",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Build-time only: bundles and packages the operator's key generator.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2",
+    "postject": "1.0.0-alpha.6"
+  }
+}

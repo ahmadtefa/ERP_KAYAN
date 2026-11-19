@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { Prisma } from '@prisma/client';
 import { CreateUserDto, ListUsersDto, UpdateUserDto } from './dto/user.dto';
 
@@ -20,6 +21,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly licensing: LicensingService,
   ) {}
 
   async list(companyId: string, query: ListUsersDto) {
@@ -72,6 +74,7 @@ export class UsersService {
     dto: CreateUserDto,
     actorPermissions: string[],
     isSuperAdmin: boolean,
+    idempotencyKey?: string,
   ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
@@ -109,6 +112,16 @@ export class UsersService {
           createdBy: actorId,
         },
       });
+      // The licence seat is reserved inside the same transaction as the
+      // account: a refusal rolls the account back, and a failure anywhere
+      // after this point gives the seat back with it. See LicensingService
+      // for the lock that makes simultaneous creations safe.
+      await this.licensing.reserveSeat(tx, {
+        userId: user.id,
+        username,
+        reason: 'USER_CREATE',
+        idempotencyKey: idempotencyKey ?? `user:${companyId}:${username}`,
+      });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
       await this.replaceExtraPermissions(tx, user.id, extraPermissions);
@@ -134,6 +147,13 @@ export class UsersService {
     actorPermissions: string[],
     isSuperAdmin: boolean,
   ) {
+    if (dto.extraPermissions !== undefined && !Array.isArray(dto.extraPermissions)) {
+      throw new BadRequestException('Extra permissions must be an array when supplied.');
+    }
+    if ((dto.expectedRoleIds !== undefined && !Array.isArray(dto.roleIds)) ||
+        (dto.expectedExtraPermissions !== undefined && !Array.isArray(dto.extraPermissions))) {
+      throw new BadRequestException('An expected permission set requires its corresponding replacement.');
+    }
     const before = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
@@ -162,6 +182,36 @@ export class UsersService {
           );
 
     await this.prisma.$transaction(async (tx) => {
+      // Serialize all application-mediated updates to this user before
+      // checking snapshots, and recheck the protected identity under lock.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
+      const lockedBefore = await tx.user.findFirst({where:{id,companyId,deletedAt:null}});
+      if (!lockedBefore) throw new NotFoundException('User not found');
+      if (lockedBefore.isSuperAdmin && !isSuperAdmin) {
+        throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+      }
+      if (lockedBefore.username === SYSTEM_USERNAME && dto.isActive === false) {
+        throw new BadRequestException('The system administrator cannot be deactivated');
+      }
+      // The sets are read after prior updates of this user commit. A conflict
+      // must abort the whole transaction, including identity field updates.
+      const matches = (actual: string[], expected: string[]) => {
+        const sortedActual = [...actual].sort(), sortedExpected = [...expected].sort();
+        return sortedActual.length === sortedExpected.length &&
+          sortedActual.every((value, index) => value === sortedExpected[index]);
+      };
+      if (dto.expectedRoleIds !== undefined) {
+        const current = await tx.userRole.findMany({where:{userId:id,companyId},select:{roleId:true}});
+        if (!matches(current.map((row) => row.roleId), dto.expectedRoleIds)) {
+          throw new ConflictException('User roles changed since they were loaded. Refresh and review them before saving.');
+        }
+      }
+      if (dto.expectedExtraPermissions !== undefined) {
+        const current = await tx.userPermission.findMany({where:{userId:id},include:{permission:true}});
+        if (!matches(current.map((row) => row.permission.code), dto.expectedExtraPermissions)) {
+          throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
+        }
+      }
       await tx.user.update({
         where: { id },
         data: {
@@ -181,20 +231,15 @@ export class UsersService {
           data: { revokedAt: new Date() },
         });
       }
-    });
-
-    await this.audit.record({
-      companyId,
-      userId: actorId,
-      action: 'user.update',
-      entity: 'users',
-      entityId: id,
-      before: { fullNameEn: before.fullNameEn, isActive: before.isActive },
-      after: {
-      fullNameEn: dto.fullNameEn,
-      isActive: dto.isActive,
-      extraPermissions,
-    },
+      await this.audit.recordRequired({
+        companyId,
+        userId: actorId,
+        action: 'user.update',
+        entity: 'users',
+        entityId: id,
+        before: { fullNameEn: lockedBefore.fullNameEn, isActive: lockedBefore.isActive },
+        after: { fullNameEn: dto.fullNameEn, isActive: dto.isActive, extraPermissions },
+      }, tx);
     });
     return this.findOne(companyId, id);
   }

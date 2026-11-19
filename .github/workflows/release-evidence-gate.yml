@@ -1,0 +1,31 @@
+name: Release evidence status (not release approval)
+
+# Ordinary code CI does not require access to an approved release VM. A
+# successful PR notice means only that the notice ran: it is NOT evidence or
+# approval. Main pushes remain blocked until independently authenticated
+# evidence exists; the publisher has separate checks for the exact artifact.
+# This workflow cannot publish or modify releases.
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  licence-evidence-required:
+    name: Release evidence status (not approval)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Report evidence blocked without failing ordinary PR checks
+        if: github.event_name == 'pull_request'
+        run: |
+          echo '::notice title=BLOCKED — APPROVED RELEASE ENVIRONMENT / EVIDENCE NOT AVAILABLE::Signed production-licence and installed-product evidence has not been established by this PR. Do not publish; this notice is not release approval.'
+      - name: Block main release pending independently verified evidence
+        if: github.event_name == 'push'
+        run: |
+          echo '::error title=Release approval blocked::Approved isolated Windows VM and signed production-licence evidence for the exact artifact are required. No release is approved.'
+          exit 1

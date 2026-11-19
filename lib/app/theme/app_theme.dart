@@ -15,6 +15,7 @@ import 'design_tokens.dart';
 /// without being touched, which is what keeps this change a presentation
 /// change rather than a rewrite.
 abstract final class AppTheme {
+  static const _fontFamily = 'IBMPlexSansArabic';
   /// [textScale] is the user's size from settings. It changes *geometry* only
   /// - control heights and table rows - so a larger text cannot be clipped by
   /// a box that was measured for the default size. The text itself is scaled
@@ -32,7 +33,9 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness, double textScale) {
     final isLight = brightness == Brightness.light;
     final scheme = isLight ? _lightScheme : _darkScheme;
-    final textTheme = _textTheme(scheme);
+    // Apply the bundled family to explicit styles as well as ThemeData's
+    // defaults, so Arabic and Latin stay readable offline across controls.
+    final textTheme = _textTheme(scheme).apply(fontFamily: _fontFamily);
     final border = isLight ? AppColors.border : AppColors.darkBorder;
     final surface = isLight ? AppColors.surface : AppColors.darkSurface;
     final surfaceAlt = isLight ? AppColors.surfaceMuted : AppColors.darkSurfaceAlt;
@@ -42,6 +45,7 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      fontFamily: _fontFamily,
       textTheme: textTheme,
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
@@ -80,11 +84,13 @@ abstract final class AppTheme {
         selectedIconTheme: IconThemeData(color: scheme.primary),
         unselectedIconTheme: IconThemeData(color: scheme.onSurfaceVariant),
         selectedLabelTextStyle: TextStyle(
+          fontFamily: _fontFamily,
           color: scheme.primary,
           fontWeight: FontWeight.w700,
           fontSize: 12,
         ),
         unselectedLabelTextStyle: TextStyle(
+          fontFamily: _fontFamily,
           color: scheme.onSurfaceVariant,
           fontWeight: FontWeight.w500,
           fontSize: 12,
@@ -126,8 +132,9 @@ abstract final class AppTheme {
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: border,
         indicatorColor: scheme.primary,
-        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        labelStyle: const TextStyle(fontFamily: _fontFamily, fontSize: 13, fontWeight: FontWeight.w700),
         unselectedLabelStyle: const TextStyle(
+          fontFamily: _fontFamily,
           fontSize: 13,
           fontWeight: FontWeight.w500,
         ),
@@ -141,11 +148,12 @@ abstract final class AppTheme {
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
         labelStyle: TextStyle(
+          fontFamily: _fontFamily,
           color: scheme.onSurface,
           fontWeight: FontWeight.w600,
           fontSize: 12,
         ),
-        secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
+        secondaryLabelStyle: TextStyle(fontFamily: _fontFamily, color: scheme.onPrimaryContainer),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       ),
 
@@ -267,7 +275,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            TextStyle(fontFamily: _fontFamily, fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           elevation: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.disabled)) return 0;
@@ -313,7 +321,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            TextStyle(fontFamily: _fontFamily, fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           elevation: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) return 0;
@@ -349,7 +357,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            TextStyle(fontFamily: _fontFamily, fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
         ),
@@ -413,6 +421,7 @@ abstract final class AppTheme {
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
         textStyle: const TextStyle(
+          fontFamily: _fontFamily,
           color: Colors.white,
           fontSize: 11.5,
           fontWeight: FontWeight.w500,
@@ -423,7 +432,7 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.navy,
-        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+        contentTextStyle: const TextStyle(fontFamily: _fontFamily, color: Colors.white, fontSize: 13),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
@@ -518,29 +527,29 @@ abstract final class AppTheme {
 
   static const _darkScheme = ColorScheme(
     brightness: Brightness.dark,
-    primary: Color(0xFF7FA9F5),
-    onPrimary: Color(0xFF081730),
-    primaryContainer: Color(0xFF16305C),
-    onPrimaryContainer: Color(0xFFDCE8F8),
-    secondary: Color(0xFF8FB6F7),
-    onSecondary: Color(0xFF081730),
-    secondaryContainer: Color(0xFF1B3252),
-    onSecondaryContainer: Color(0xFFDCE8F8),
-    tertiary: Color(0xFF6FC3A0),
-    onTertiary: Color(0xFF06231A),
-    error: Color(0xFFF08A8A),
+    primary: Color(0xFFF59E0B),
+    onPrimary: Color(0xFF1F1202),
+    primaryContainer: Color(0xFF3F2704),
+    onPrimaryContainer: Color(0xFFFEF3C7),
+    secondary: Color(0xFF38BDF8),
+    onSecondary: Color(0xFF032230),
+    secondaryContainer: Color(0xFF0C4A6E),
+    onSecondaryContainer: Color(0xFFBAE6FD),
+    tertiary: Color(0xFF10B981),
+    onTertiary: Color(0xFF022619),
+    error: Color(0xFFF87171),
     onError: Color(0xFF3B0A0A),
     errorContainer: Color(0xFF4A1D1D),
     onErrorContainer: Color(0xFFFFDADA),
     surface: AppColors.darkSurface,
     onSurface: AppColors.darkText,
     onSurfaceVariant: AppColors.darkTextMuted,
-    surfaceContainerLowest: Color(0xFF070F1E),
+    surfaceContainerLowest: Color(0xFF05080E),
     surfaceContainerLow: AppColors.darkSurfaceAlt,
     surfaceContainer: AppColors.darkSurface,
-    surfaceContainerHigh: Color(0xFF1D3050),
-    surfaceContainerHighest: Color(0xFF243A5E),
-    outline: Color(0xFF41587C),
+    surfaceContainerHigh: Color(0xFF162238),
+    surfaceContainerHighest: Color(0xFF1E2E4A),
+    outline: Color(0xFF2E3E58),
     outlineVariant: AppColors.darkBorder,
     shadow: Colors.black,
     scrim: Color(0xAA000000),

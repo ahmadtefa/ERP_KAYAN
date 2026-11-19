@@ -1,3 +1,7 @@
+; Legacy definition disabled: it does not enforce the licence build policy.
+; Editing source can bypass this guard; release must remain independently gated.
+#error "Legacy Windows installer is disabled. Production release is blocked."
+
 ; KAYAN ERP - the Windows installer definition.
 ;
 ; This file is data, not a program: the Inno Setup compiler (ISCC) reads it and

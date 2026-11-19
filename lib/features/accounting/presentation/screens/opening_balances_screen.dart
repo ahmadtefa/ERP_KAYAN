@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../cash/presentation/providers/cash_providers.dart';
+import 'opening_balance_draft_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../inventory/presentation/screens/stock_screen.dart';
@@ -14,9 +17,10 @@ import '../../../inventory/presentation/screens/stock_screen.dart';
 /// Lists imported opening-balance drafts and gives the accountant a review
 /// screen before posting them to the ledger and stock.
 class OpeningBalancesScreen extends ConsumerStatefulWidget {
-  const OpeningBalancesScreen({super.key, this.documentId});
+  const OpeningBalancesScreen({super.key, this.documentId, this.navigationKey});
 
   final String? documentId;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<OpeningBalancesScreen> createState() =>
@@ -26,11 +30,23 @@ class OpeningBalancesScreen extends ConsumerStatefulWidget {
 class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
   late Future<Map<String, dynamic>> _load;
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
 
   @override
   void initState() {
     super.initState();
     _load = _fetch();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
   }
 
   @override
@@ -43,11 +59,15 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final client = ref.read(apiClientProvider);
     final id = widget.documentId;
     if (id != null) return client.getObject('/accounting/opening-balances/$id');
-    return client.getObject('/accounting/opening-balances').then((value) => value);
+    return client
+        .getObject('/accounting/opening-balances')
+        .then((value) => value);
   }
 
   void _refresh() {
-    setState(() => _load = _fetch());
+    setState(() {
+      _load = _fetch();
+    });
   }
 
   Future<void> _post(String id) async {
@@ -65,20 +85,86 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
       await ref
           .read(apiClientProvider)
           .post('/accounting/opening-balances/$id/post');
-      // Posting writes stock balances as well as the ledger. The stock
-      // screen caches its rows, so it would otherwise keep showing the
-      // quantities from before the opening balance until a restart.
-      ref.invalidate(stockListProvider);
-      if (mounted) {
-        showMessage(context, l10n.entryPosted);
-        _refresh();
-      }
+      if (mounted) showMessage(context, l10n.entryPosted);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, describeError(context, error), error: true);
+      if (mounted) showMessage(context, error, error: true);
+    } finally {
+      if (mounted) {
+        // A failed response can arrive after the server committed the post.
+        // Reload the document and all dependent ledger/stock/dashboard views.
+        _refresh();
+        ref.invalidate(stockListProvider);
+        invalidateMoneyViews(ref);
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _manualEntry([Map<String, dynamic>? draft]) async {
+    if (_busy) return;
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+    setState(() => _busy = true);
+    try {
+      final saved = await showOpeningBalanceDraft(
+        context,
+        ref.read(apiClientProvider),
+        user,
+        draft: draft,
+        exitRelay: _exitRelay,
+      );
+      if (saved == true && mounted) _refresh();
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _changeDocument(String id, {required bool reverse}) async {
+    if (_busy) return;
+    final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final title = reverse
+        ? l10n.reverse
+        : (arabic ? 'حذف المسودة' : 'Delete draft');
+    final confirmed = await confirmAction(
+      context,
+      title: title,
+      message: reverse
+          ? (arabic
+                ? 'عكس القيد وحركات المخزون؟'
+                : 'Reverse the journal and stock movements?')
+          : (arabic
+                ? 'حذف مسودة الأرصدة الافتتاحية؟'
+                : 'Delete this opening balance draft?'),
+      confirmLabel: title,
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _busy = true);
+    final api = ref.read(apiClientProvider);
+    final path = '/accounting/opening-balances/$id';
+    try {
+      if (reverse) {
+        await api.post('$path/reverse');
+      } else {
+        await api.delete(path);
+        if (mounted) context.go('/accounting/opening-balances');
+      }
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+    } finally {
+      if (mounted) {
+        _refresh();
+        if (reverse) {
+          ref.invalidate(stockListProvider);
+          invalidateMoneyViews(ref);
+        }
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -87,6 +173,10 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final l10n = context.l10n;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
     final isDetail = widget.documentId != null;
+    final user = ref.watch(currentUserProvider);
+    final canCreate =
+        user?.can('accounting.openingbalances.manage') == true &&
+        user?.can('accounting.accounts.read') == true;
 
     return ModuleScaffold(
       title: l10n.openingBalancesTitle,
@@ -94,6 +184,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         spacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          if (!isDetail && canCreate)
+            FilledButton.icon(
+              onPressed: _busy ? null : _manualEntry,
+              icon: const Icon(Icons.add),
+              label: Text(isArabic ? 'إدخال يدوي' : 'Manual entry'),
+            ),
           // The blank workbook first: it is the file this screen's documents
           // come from, so it can be fetched from here without hunting for
           // the import screen and the right entry in its list.
@@ -101,7 +197,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
             OutlinedButton.icon(
               onPressed: () => runDownload(
                 context,
-                ref.read(reportLinkProvider).importTemplate(
+                ref
+                    .read(reportLinkProvider)
+                    .importTemplate(
                       kind: 'opening-balances',
                       language: Localizations.localeOf(context).languageCode,
                     ),
@@ -191,11 +289,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                       '${_localized(row['branch'], isArabic, 'nameEn', 'nameAr') ?? (row['branch'] is Map ? (row['branch'] as Map)['code'] : '')}',
                     ),
                     trailing: Chip(
-                      label: Text(_statusLabel(context, '${row['status'] ?? ''}')),
+                      label: Text(
+                        _statusLabel(context, '${row['status'] ?? ''}'),
+                      ),
                     ),
-                    onTap: () => context.go(
-                      '/accounting/opening-balances/${row['id']}',
-                    ),
+                    onTap: () =>
+                        context.go('/accounting/opening-balances/${row['id']}'),
                   ),
                 ),
             ],
@@ -209,6 +308,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final status = '${data['status'] ?? ''}'.toLowerCase();
+    final user = ref.watch(currentUserProvider);
+    final mayManage =
+        data['hasRestrictedCosts'] != true &&
+        user?.can('accounting.openingbalances.manage') == true &&
+        (user?.isSuperAdmin == true || user?.branchId == data['branchId']);
+    final id = '${data['id']}';
     final branch = data['branch'];
     final warehouse = data['warehouse'];
     final lines = (data['lines'] as List? ?? const [])
@@ -246,23 +351,55 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   Text(
                     '${l10n.warehouse}: ${_localized(warehouse, isArabic, 'nameEn', 'nameAr') ?? warehouse['code'] ?? ''}',
                   ),
-                if (data['description'] != null && '${data['description']}'.isNotEmpty)
+                if (data['description'] != null &&
+                    '${data['description']}'.isNotEmpty)
                   Text('${l10n.description}: ${data['description']}'),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
                   runSpacing: 8,
                   children: [
-                    _total(context, l10n.debit, '${data['totalDebit'] ?? '0'}'),
-                    _total(context, l10n.credit, '${data['totalCredit'] ?? '0'}'),
+                    _total(context, l10n.debit, '${data['totalDebit'] ?? '—'}'),
+                    _total(
+                      context,
+                      l10n.credit,
+                      '${data['totalCredit'] ?? '—'}',
+                    ),
                   ],
                 ),
-                if (status == 'draft') ...[
+                if (mayManage && (status == 'draft' || status == 'posted')) ...[
                   const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : () => _post('${data['id']}'),
-                    icon: const Icon(Icons.publish_outlined),
-                    label: Text(_busy ? l10n.posting : l10n.post),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (status == 'draft') ...[
+                        FilledButton.icon(
+                          onPressed: _busy ? null : () => _post(id),
+                          icon: const Icon(Icons.publish_outlined),
+                          label: Text(_busy ? l10n.posting : l10n.post),
+                        ),
+                        if (user?.can('accounting.accounts.read') == true)
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _manualEntry(data),
+                            child: Text(l10n.edit),
+                          ),
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _changeDocument(id, reverse: false),
+                          child: Text(
+                            isArabic ? 'حذف المسودة' : 'Delete draft',
+                          ),
+                        ),
+                      ] else
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _changeDocument(id, reverse: true),
+                          child: Text(l10n.reverse),
+                        ),
+                    ],
                   ),
                 ],
               ],
@@ -279,8 +416,8 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                 '${isArabic ? line['accountNameAr'] ?? line['accountNameEn'] ?? '' : line['accountNameEn'] ?? line['accountNameAr'] ?? ''}',
               ),
               subtitle: Text(
-                '${l10n.debit}: ${line['debit'] ?? '0'} · '
-                '${l10n.credit}: ${line['credit'] ?? '0'}'
+                '${l10n.debit}: ${line['debit'] ?? '—'} · '
+                '${l10n.credit}: ${line['credit'] ?? '—'}'
                 '${line['item'] is Map ? ' · ${(line['item'] as Map)['code'] ?? ''}' : ''}'
                 '${line['customer'] is Map ? ' · ${(line['customer'] as Map)['code'] ?? ''}' : ''}'
                 '${line['supplier'] is Map ? ' · ${(line['supplier'] as Map)['code'] ?? ''}' : ''}',

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/backend/company_setup_data.dart';
+import '../../../../core/backend/setup_state.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -44,6 +45,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// can sign in. The setup screen answers that before the sign-in form can
   /// do anything useful.
   bool? _setupNeeded;
+  bool _setupRecoveryRequired = false;
   bool _setupBusy = false;
   String? _setupError;
 
@@ -58,7 +60,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final status = await ref.read(apiClientProvider).get('/setup/status');
       if (!mounted) return;
-      setState(() => _setupNeeded = status['needsSetup'] == true);
+      setState(() {
+        _setupRecoveryRequired = setupRequiresRecovery(
+          healthValue: status['recoveryRequired'],
+        );
+        _setupNeeded = !_setupRecoveryRequired && status['needsSetup'] == true;
+      });
     } catch (_) {
       // The server being unreachable is the sign-in form's own error to
       // report; from here, just behave as though setup is not needed.
@@ -201,6 +208,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+
+    if (_setupRecoveryRequired) {
+      final message = Localizations.localeOf(context).languageCode == 'ar'
+          ? setupRecoveryMessageAr
+          : setupRecoveryMessageEn;
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xxl),
+              child: Text(message, textAlign: TextAlign.center),
+            ),
+          ),
+        ),
+      );
+    }
 
     if (_setupNeeded == true) {
       // First run on this installation: the company is set up here, before

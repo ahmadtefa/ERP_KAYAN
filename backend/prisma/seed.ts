@@ -302,6 +302,28 @@ async function main(): Promise<void> {
     },
   });
 
+  // An account created here is an account like any other: it consumes one
+  // seat. The packaged installer creates the first administrator through this
+  // program rather than through the setup endpoint, so without this a
+  // five-seat licence would allow six accounts on every fresh installation.
+  // The row is skipped when the account already has one - the licensing
+  // migration backfills accounts that existed before it, and setup.service
+  // reserves the same seat when it revives this account itself.
+  const existingSeat = await prisma.licenseSeatUsage.findFirst({
+    where: { userId: admin.id },
+    select: { id: true },
+  });
+  if (!existingSeat) {
+    await prisma.licenseSeatUsage.create({
+      data: {
+        userId: admin.id,
+        username: admin.username,
+        reason: 'SETUP_ADMIN',
+        idempotencyKey: `setup:${company.id}:${admin.username}`,
+      },
+    });
+  }
+
   await prisma.userRole.upsert({
     where: {
       userId_roleId_companyId: {
