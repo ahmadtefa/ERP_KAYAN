@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/widgets/user_photo.dart';
 import '../../features/licensing/presentation/widgets/licence_gate.dart';
+import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
@@ -1367,6 +1368,11 @@ class _TopBar extends ConsumerWidget {
             icon: const Icon(Icons.home_outlined, size: 20),
             onPressed: () => context.go(AppRoutes.dashboard),
           ),
+          // The badge that makes the centre reachable from anywhere: without
+          // it an alert only existed for somebody who went looking for one.
+          // Shown only to a person the server would let read it.
+          if (ref.watch(currentUserProvider)?.can('notifications.read') ?? false)
+            const NotificationBell(key: ValueKey('topbar-notification-bell')),
           if (!compact) _SearchTrigger(expanded: isExtended),
           if (!compact) const SizedBox(width: AppSpacing.xs),
           if (!compact) const _LanguageMenu(),

@@ -26,6 +26,51 @@ final notificationCountProvider = FutureProvider.autoDispose<int>((ref) async {
   return (data['unread'] as num?)?.toInt() ?? 0;
 });
 
+/// The first few open alerts, for the dashboard.
+///
+/// Five rows, not a hundred: the dashboard answers "is there anything I must
+/// deal with", and the centre is one click away for the rest. The same provider
+/// is invalidated by the badge refresh, so the two never disagree.
+final notificationFeedProvider = FutureProvider.autoDispose<List<Json>>((ref) async {
+  final user = ref.watch(currentUserProvider);
+  if (user == null || !user.can('notifications.read')) return const <Json>[];
+  final data = await ref.read(apiClientProvider).get(
+    '/notifications',
+    query: {'status': 'OPEN', 'pageSize': '5'},
+  );
+  return listOf(data['items']);
+});
+
+/// Opens the document an alert is about.
+///
+/// The server writes the path on the row, so a new kind of alert needs no new
+/// screen here. Paths this build knows are routed to the module that owns them;
+/// anything else opens the centre, which still shows the alert and its text
+/// rather than pretending a click did nothing.
+void openNotificationTarget(BuildContext context, Json row) {
+  final path = text(row, 'actionPath');
+  const routes = <String, String>{
+    '/inventory/batches': AppRoutes.batches,
+    '/inventory/stock': AppRoutes.stock,
+    '/inventory/documents': AppRoutes.stockDocuments,
+    '/sales/invoices': AppRoutes.salesInvoices,
+    '/sales/orders': AppRoutes.salesOrders,
+    '/purchases/invoices': AppRoutes.purchaseInvoices,
+    '/purchases/orders': AppRoutes.purchaseOrders,
+    '/accounting/journal-entries': AppRoutes.journalEntries,
+    '/administration': AppRoutes.administration,
+  };
+  for (final entry in routes.entries) {
+    if (path.startsWith(entry.key)) {
+      // Navigating to the location the person is already on is a no-op in
+      // go_router, so it needs no guard.
+      context.go(entry.value);
+      return;
+    }
+  }
+  context.go(AppRoutes.notifications);
+}
+
 /// The program's notification centre.
 ///
 /// Not an inventory screen with a stock icon: everything the program wants a
@@ -41,11 +86,30 @@ class NotificationCenterScreen extends ConsumerStatefulWidget {
       _NotificationCenterScreenState();
 }
 
+/// The kinds the filter offers, in the order a person thinks about them. The
+/// labels live here rather than on the server because the screen must say
+/// something useful even if a kind is added before the text is translated.
+const notificationTypeFilters = <({String type, String ar, String en})>[
+  (type: '', ar: 'كل الأنواع', en: 'All types'),
+  (type: 'STOCK_BELOW_MINIMUM', ar: 'أقل من الحد الأدنى', en: 'Below minimum'),
+  (type: 'STOCK_OUT_OF_STOCK', ar: 'نفد من المخزن', en: 'Out of stock'),
+  (type: 'STOCK_EXPIRY_SOON', ar: 'قريب الانتهاء', en: 'Expiring soon'),
+  (type: 'STOCK_EXPIRED', ar: 'منتهي الصلاحية', en: 'Expired'),
+  (type: 'STOCK_VOUCHER_PENDING_APPROVAL', ar: 'مستندات تنتظر الاعتماد', en: 'Awaiting approval'),
+  (type: 'JOURNAL_PENDING_APPROVAL', ar: 'قيود تنتظر الاعتماد', en: 'Journals to approve'),
+  (type: 'INVOICE_OVERDUE', ar: 'فواتير عملاء متأخرة', en: 'Overdue invoices'),
+  (type: 'PAYABLE_DUE', ar: 'مستحقات موردين قريبة', en: 'Supplier bills due'),
+  (type: 'PAYABLE_OVERDUE', ar: 'مستحقات موردين متأخرة', en: 'Supplier bills overdue'),
+  (type: 'STOCK_ABNORMAL', ar: 'أرصدة غير منطقية', en: 'Impossible balances'),
+  (type: 'ADMIN_ALERT', ar: 'تنبيهات إدارية', en: 'Administrative'),
+];
+
 class _NotificationCenterScreenState
     extends ConsumerState<NotificationCenterScreen> {
   Future<List<Json>>? _future;
   String _status = 'OPEN';
   String _severity = '';
+  String _type = '';
   bool _busy = false;
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
@@ -63,6 +127,7 @@ class _NotificationCenterScreenState
       query: {
         'status': _status,
         if (_severity.isNotEmpty) 'severity': _severity,
+        if (_type.isNotEmpty) 'type': _type,
         'pageSize': '100',
       },
     );
@@ -84,6 +149,20 @@ class _NotificationCenterScreenState
       // once and waits to be acknowledged. The sentence stays the one ApiClient
       // extracted from the response, because a refusal written for the operator
       // is more useful than a generic replacement.
+      if (mounted) {
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
+    }
+  }
+
+  Future<void> _markUnread(Json row) async {
+    try {
+      await ref.read(apiClientProvider).post('/notifications/${row['id']}/unread');
+      _refresh();
+    } catch (error) {
       if (mounted) {
         await showAppPlainError(
           context,
@@ -144,25 +223,8 @@ class _NotificationCenterScreenState
   /// what a lot or an invoice is. A path this build does not have is reported
   /// rather than guessed at.
   void _open(Json row) {
-    final path = text(row, 'actionPath');
-    if (path.isEmpty) return;
-    if (path.startsWith('/inventory/batches')) {
-      context.go(AppRoutes.batches);
-      return;
-    }
-    _say(
-      _t(
-        'هذا التنبيه يخص شاشة أخرى: $path',
-        'This alert belongs to another screen: $path',
-      ),
-    );
-  }
-
-  /// For the one message here that is a notice and not a failure: an alert
-  /// that belongs to another screen. Errors use [showAppError].
-  void _say(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    if (text(row, 'actionPath').isEmpty) return;
+    openNotificationTarget(context, row);
   }
 
   Color _tone(ThemeData theme, String severity) {
@@ -189,6 +251,20 @@ class _NotificationCenterScreenState
         return Icons.trending_up_rounded;
       case 'STOCK_EXPIRED_WRITE_OFF_PENDING':
         return Icons.delete_sweep_outlined;
+      case 'STOCK_VOUCHER_PENDING_APPROVAL':
+        return Icons.fact_check_outlined;
+      case 'JOURNAL_PENDING_APPROVAL':
+        return Icons.playlist_add_check_rounded;
+      case 'INVOICE_OVERDUE':
+        return Icons.request_quote_outlined;
+      case 'PAYABLE_DUE':
+        return Icons.event_available_outlined;
+      case 'PAYABLE_OVERDUE':
+        return Icons.money_off_csred_outlined;
+      case 'STOCK_ABNORMAL':
+        return Icons.warning_amber_rounded;
+      case 'ADMIN_ALERT':
+        return Icons.manage_accounts_outlined;
       default:
         return Icons.notifications_none_rounded;
     }
@@ -237,6 +313,20 @@ class _NotificationCenterScreenState
                   ],
                   onChanged: (value) => setState(() {
                     _status = value ?? 'OPEN';
+                    _future = _load();
+                  }),
+                ),
+                DropdownButton<String>(
+                  value: _type,
+                  items: [
+                    for (final filter in notificationTypeFilters)
+                      DropdownMenuItem(
+                        value: filter.type,
+                        child: Text(_arabic ? filter.ar : filter.en),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() {
+                    _type = value ?? '';
                     _future = _load();
                   }),
                 ),
@@ -364,6 +454,12 @@ class _NotificationCenterScreenState
                                   tooltip: _t('تم', 'Mark read'),
                                   onPressed: () => _markRead(row),
                                   icon: const Icon(Icons.check_rounded, size: 18),
+                                )
+                              else
+                                IconButton(
+                                  tooltip: _t('غير مقروء', 'Mark unread'),
+                                  onPressed: () => _markUnread(row),
+                                  icon: const Icon(Icons.mark_email_unread_outlined, size: 18),
                                 ),
                               IconButton(
                                 tooltip: _t('أرشفة', 'Archive'),

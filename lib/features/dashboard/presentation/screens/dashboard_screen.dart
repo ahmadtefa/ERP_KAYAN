@@ -15,6 +15,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../../shared/widgets/surface_card.dart';
 import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../notifications/presentation/screens/notification_center_screen.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_panels.dart';
@@ -104,6 +105,8 @@ class DashboardScreen extends ConsumerWidget {
                 ref.invalidate(companyProfileProvider);
                 ref.invalidate(branchesProvider);
                 ref.invalidate(chartOfAccountsProvider);
+                ref.invalidate(notificationFeedProvider);
+                ref.invalidate(notificationCountProvider);
               },
               icon: const Icon(Icons.refresh_rounded, size: 18),
             ),
@@ -123,6 +126,8 @@ class DashboardScreen extends ConsumerWidget {
             ),
             children: [
               CommandCenter(user: user, arabic: arabic, l10n: l10n),
+              const SizedBox(height: AppSpacing.lg),
+              _NotificationsPanel(arabic: arabic),
               const SizedBox(height: AppSpacing.lg),
               _CompanyContext(
                 company: company,
@@ -157,6 +162,131 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// What the program wants the owner to deal with, on the screen they open first.
+///
+/// Five rows at most, ordered by the server (loudest first, then newest). It is
+/// deliberately not a copy of the centre: it is the part of the centre that
+/// changes what somebody does this morning. A person without
+/// `notifications.read` sees nothing at all, because there is nothing they may
+/// read.
+class _NotificationsPanel extends ConsumerWidget {
+  const _NotificationsPanel({required this.arabic});
+
+  final bool arabic;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
+    if (user == null || !user.can('notifications.read')) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final feed = ref.watch(notificationFeedProvider);
+    final rows = feed.asData?.value ?? const <Json>[];
+
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.notifications_active_outlined, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                arabic ? 'التنبيهات' : 'Notifications',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              if (rows.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${rows.length}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onErrorContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => context.go(AppRoutes.notifications),
+                child: Text(arabic ? 'عرض الكل' : 'View all'),
+              ),
+            ],
+          ),
+          if (feed.isLoading && rows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Text(
+                arabic ? 'لا توجد تنبيهات تحتاج انتباهك الآن' : 'Nothing needs your attention right now',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            )
+          else
+            for (final row in rows)
+              _NotificationLine(row: row, arabic: arabic),
+        ],
+      ),
+    );
+  }
+}
+
+class _NotificationLine extends StatelessWidget {
+  const _NotificationLine({required this.row, required this.arabic});
+
+  final Json row;
+  final bool arabic;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final severity = text(row, 'severity');
+    final tone = severity == 'CRITICAL'
+        ? theme.colorScheme.error
+        : severity == 'WARNING'
+            ? const Color(0xFFE8710A)
+            : theme.colorScheme.primary;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      onTap: () => openNotificationTarget(context, row),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Row(
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                arabic ? text(row, 'titleAr') : text(row, 'titleEn'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Icon(Icons.chevron_left_rounded, size: 16, color: theme.colorScheme.outline),
+          ],
+        ),
+      ),
     );
   }
 }
