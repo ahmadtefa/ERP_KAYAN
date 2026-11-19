@@ -268,6 +268,18 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          # The complete backup runs before the long accounting scenarios: it
+          # replaces the whole database with a copy taken moments earlier, so
+          # it must not disturb a scenario that is halfway through building a
+          # year of figures -- and it must not be skipped because one of those
+          # scenarios failed later on.
+          echo "Running the complete system backup and restore scenario: gate, archive, verification, damaged file, restore, status, re-login..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-system-backup.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after the system backup scenario failure"
+            tail -c 8000 /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
           if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after accounting scenario failure"
@@ -330,16 +342,6 @@ jobs:
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after statement scenario failure"
             cat /tmp/kayan-api.log
-            echo "::endgroup::"
-            exit 1
-          fi
-          # Last of the destructive checks: a complete system backup is taken,
-          # read back, damaged on purpose, refused, then restored for real --
-          # database, files and licence state -- on the same server.
-          echo "Running the complete system backup and restore scenario: gate, archive, verification, damaged file, restore, status, re-login..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-system-backup.mjs http://127.0.0.1:3000/api/v1; then
-            echo "::group::API logs after the system backup scenario failure"
-            tail -c 8000 /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
