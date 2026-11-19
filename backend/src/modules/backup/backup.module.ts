@@ -8,16 +8,51 @@ import { BackupScheduleService } from './backup-schedule.service';
 import { BackupService } from './backup.service';
 import { FullBackupController } from './full-backup.controller';
 import { FullBackupService } from './full-backup.service';
+import { CompleteBackupController } from './system/complete-backup.controller';
+import { CompleteBackupService } from './system/complete-backup.service';
+import { RestoreGateService } from './system/restore-gate.service';
+import { RestoreJournalStore } from './system/restore-journal';
+import { SystemRestoreService } from './system/system-restore.service';
+import { backupDirectory } from './system/pg-support';
 
 /// Copying the books out, and putting a copy back.
 ///
-/// Two kinds of backup live here: the company-level JSON file (one company's
-/// books, portable between installations) and the full PostgreSQL archive
-/// (everything on this installation, for disaster recovery).
+/// Three kinds of backup live here, and the screens keep them apart:
+///
+///  * the company-level JSON file — one company's books, portable between
+///    installations, and the only one that never touches another company;
+///  * the database archive (`.dump`) — the whole PostgreSQL database;
+///  * the complete system backup (`.kayanbackup`) — database, uploaded files,
+///    settings, licence state and a manifest with a SHA-256 of everything,
+///    with the safe restore that puts it back.
 @Module({
   imports: [AuditModule],
-  controllers: [BackupController, FullBackupController, BackupScheduleController],
-  providers: [AuditedSuperAdminGuard, BackupService, FullBackupService, BackupScheduleService],
-  exports: [BackupService, FullBackupService, BackupScheduleService],
+  controllers: [
+    BackupController,
+    FullBackupController,
+    CompleteBackupController,
+    BackupScheduleController,
+  ],
+  providers: [
+    AuditedSuperAdminGuard,
+    BackupService,
+    FullBackupService,
+    BackupScheduleService,
+    CompleteBackupService,
+    SystemRestoreService,
+    RestoreGateService,
+    {
+      provide: RestoreJournalStore,
+      useFactory: () => new RestoreJournalStore(backupDirectory()),
+    },
+  ],
+  exports: [
+    BackupService,
+    FullBackupService,
+    BackupScheduleService,
+    CompleteBackupService,
+    SystemRestoreService,
+    RestoreGateService,
+  ],
 })
 export class BackupModule {}

@@ -331,6 +331,15 @@ class ReportLinkBuilder {
     );
   }
 
+  /// One complete system backup, sitting on the server.
+  Future<DownloadRequest> systemBackupDownload(String name) async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/backup/complete/${Uri.encodeComponent(name)}/download'
+          '?${_encode(query)}',
+    );
+  }
+
   /// One full-database backup file, sitting on the server.
   Future<DownloadRequest> fullBackupDownload(String name) async {
     final query = <String, String>{'ticket': await _downloadTicket()};
@@ -664,6 +673,15 @@ class FullBackupService {
   Future<void> delete(String name) =>
       _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
 
+  /// Reads a database archive back and reports what is inside it.
+  Future<Map<String, dynamic>> verify(String name) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/${Uri.encodeComponent(name)}/verify',
+      options: Options(receiveTimeout: const Duration(minutes: 10)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
   /// Restores the whole database from a file on the server or an upload.
   ///
   /// [confirm] must be true — the screen makes the person type the
@@ -694,6 +712,123 @@ class FullBackupService {
     return Map<String, dynamic>.from(response.data ?? const {});
   }
 }
+
+/// Complete system backups: one archive that holds the database, the uploaded
+/// files, the settings, the licence *state* and a manifest with the SHA-256 of
+/// every file — and the restore that puts it back.
+///
+/// This is a different system from the company JSON backup, and the screen
+/// keeps them apart: a company backup restores one company's books, a system
+/// backup restores the whole installation.
+class SystemBackupService {
+  SystemBackupService(this._dio);
+
+  final Dio _dio;
+
+  static const _path = '/backup/complete';
+
+  /// What this machine can do, whether it may restore at all, and why not.
+  Future<Map<String, dynamic>> capabilities() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$_path/capabilities',
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// The complete backups on the server.
+  Future<List<Map<String, dynamic>>> list() async {
+    final response = await _dio.get<List<dynamic>>(_path);
+    return (response.data ?? const [])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false);
+  }
+
+  /// Takes a complete system backup.
+  Future<Map<String, dynamic>> create() async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      // A dump plus reading every byte back to hash it takes longer than the
+      // ordinary client timeout; the request is not the place to give up.
+      options: Options(receiveTimeout: const Duration(minutes: 30)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Reads an archive back and reports what is inside it.
+  Future<Map<String, dynamic>> verify(String name) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/${Uri.encodeComponent(name)}/verify',
+      options: Options(receiveTimeout: const Duration(minutes: 10)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Checks a chosen file before anything is restored.
+  Future<Map<String, dynamic>> inspect(PickedFile file) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/inspect',
+      data: FormData.fromMap({
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      }),
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Restores a complete backup. [confirmPhrase] must be the word RESTORE:
+  /// the server refuses anything else, deliberately.
+  Future<Map<String, dynamic>> restore({
+    PickedFile? file,
+    String? fileName,
+    required bool confirm,
+    String confirmPhrase = 'RESTORE',
+  }) async {
+    final form = FormData.fromMap({
+      if (file != null)
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      'fileName': ?fileName,
+      'confirm': confirm,
+      'confirmPhrase': confirmPhrase,
+    });
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/restore',
+      data: form,
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 60),
+      ),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// How the restore is going, and whether one was interrupted.
+  Future<Map<String, dynamic>> status() async {
+    final response = await _dio.get<Map<String, dynamic>>('$_path/status');
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Puts the safety backup back after an interrupted restore.
+  Future<Map<String, dynamic>> resumeRecovery() async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/recovery/resume',
+      options: Options(receiveTimeout: const Duration(minutes: 60)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<void> delete(String name) =>
+      _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
+}
+
+final systemBackupServiceProvider = Provider<SystemBackupService>(
+  (ref) => SystemBackupService(ref.read(apiClientProvider).raw),
+);
 
 final fullBackupServiceProvider = Provider<FullBackupService>(
   (ref) => FullBackupService(ref.read(apiClientProvider).raw),

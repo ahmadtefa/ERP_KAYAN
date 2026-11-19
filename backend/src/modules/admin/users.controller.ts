@@ -21,6 +21,7 @@ import {
   ChangePasswordDto,
   CreateUserDto,
   ListUsersDto,
+  PreviewUserPermissionsDto,
   UpdateUserDto,
 } from './dto/user.dto';
 import { UsersService } from './users.service';
@@ -42,6 +43,19 @@ export class UsersController {
   @Get(':id')
   findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.users.findOne(user.companyId, id);
+  }
+
+  /// What this person can do today, after roles, grants and denies.
+  @Get(':id/effective-permissions')
+  effective(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.users.effectivePermissions(user.companyId, id);
+  }
+
+  /// The same arithmetic on unsaved values, so the form can show what the
+  /// person will be able to do before anybody presses save.
+  @Post('permissions-preview')
+  preview(@CurrentUser() user: AuthUser, @Body() dto: PreviewUserPermissionsDto) {
+    return this.users.previewPermissions(user.companyId, dto);
   }
 
   @Post()

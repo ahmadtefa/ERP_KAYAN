@@ -13,14 +13,19 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
   CreateRoleDto,
+  PreviewRolePermissionsDto,
   SetRolePermissionsDto,
   UpdateRoleDto,
 } from './dto/role.dto';
+import { RoleCatalogueBootstrap } from './role-catalogue.bootstrap';
 import { RolesService } from './roles.service';
 
 @Controller('admin')
 export class RolesController {
-  constructor(private readonly roles: RolesService) {}
+  constructor(
+    private readonly roles: RolesService,
+    private readonly catalogue: RoleCatalogueBootstrap,
+  ) {}
 
   @Get('permissions')
   @RequirePermissions('admin.roles.manage')
@@ -32,6 +37,23 @@ export class RolesController {
   @RequirePermissions('admin.roles.manage')
   list(@CurrentUser() user: AuthUser) {
     return this.roles.list(user.companyId);
+  }
+
+  /// What a permission set contains, grouped by module, and what deserves a
+  /// second look. Nothing is written: this is the preview before saving.
+  @Post('roles/permissions-preview')
+  @RequirePermissions('admin.roles.manage')
+  previewPermissions(@Body() dto: PreviewRolePermissionsDto) {
+    return this.roles.previewPermissions(dto.permissions);
+  }
+
+  /// Adds any role the catalogue ships with that this installation is missing.
+  /// Idempotent, and the same pass the program runs at start-up.
+  @Post('roles/sync-catalogue')
+  @RequirePermissions('admin.roles.manage')
+  async syncCatalogue(@CurrentUser() user: AuthUser) {
+    const result = await this.catalogue.ensureAllCompanies();
+    return { ...result, ...(await this.roles.list(user.companyId)) };
   }
 
   @Get('roles/:id')

@@ -40,6 +40,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -194,6 +199,22 @@ jobs:
           PGPASSWORD: ci
         run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
 
+      # Multi-role access control arrived as an additive migration and a
+      # start-up pass that adds the roles an older installation is missing.
+      # The check that matters is that nothing else moved: users keep their
+      # password hash, their photo, their branch and their assignments, a
+      # legacy grant stays a grant, and a role a company had already tuned is
+      # not rewritten. It builds a database at the schema before the migration,
+      # fills it with legacy rows, applies the migration and then runs the
+      # catalogue pass twice.
+      - name: Prove the multi-role upgrade on a pre-upgrade database
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: ci
+          PGPASSWORD: ci
+        run: python ../scripts/ci-diagnose.py node scripts/verify-rbac-upgrade.mjs
+
       # The release guard decides whether a Windows build may overwrite a
       # published download; a wrong answer there is not recoverable.
       - name: Prove the release guard refuses a published release
@@ -263,6 +284,18 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          # The complete backup runs before the long accounting scenarios: it
+          # replaces the whole database with a copy taken moments earlier, so
+          # it must not disturb a scenario that is halfway through building a
+          # year of figures -- and it must not be skipped because one of those
+          # scenarios failed later on.
+          echo "Running the complete system backup and restore scenario: gate, archive, verification, damaged file, restore, status, re-login..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-system-backup.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after the system backup scenario failure"
+            tail -c 8000 /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
           if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after accounting scenario failure"
@@ -292,14 +325,26 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-          echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
+          echo "Verifying a fresh complete backup restores into an ISOLATED database with identical data..."
+          # A complete backup, not the legacy dump-only endpoint: that one is
+          # closed on purpose, because a bare pg_dump cannot carry the uploaded
+          # files and a restore of it would leave them orphaned. The archive is
+          # taken by the program, downloaded whole, and its dump handed to
+          # pg_restore -- so this step proves the same bytes a customer would
+          # get back actually rebuild the database.
           export PGPASSWORD=ci
           LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
           TOKEN=$(node -e 'console.log(JSON.parse(process.argv[1]).accessToken)' "$LOGIN_JSON")
-          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/full -H "Authorization: Bearer $TOKEN" > /tmp/kayan-full.json
-          DUMP=$(ls -t backups/*.dump | head -n 1)
-          if [ -z "$DUMP" ] || [ ! -s "$DUMP" ]; then echo "No dump file was produced."; ls -la backups || true; exit 1; fi
-          echo "Restoring $DUMP into erp_kayan_restore_check..."
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/complete -H "Authorization: Bearer $TOKEN" > /tmp/kayan-complete.json
+          ARCHIVE=$(node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-complete.json","utf8")); process.stdout.write(r.file?.name ?? "")')
+          if [ -z "$ARCHIVE" ]; then echo "No complete archive was produced:"; head -c 2000 /tmp/kayan-complete.json; exit 1; fi
+          echo "Downloading $ARCHIVE"
+          curl -fsS "http://127.0.0.1:3000/api/v1/backup/complete/$ARCHIVE/download" -H "Authorization: Bearer $TOKEN" -o /tmp/kayan-complete.kayanbackup
+          rm -rf /tmp/kayan-archive && mkdir -p /tmp/kayan-archive
+          tar -xf /tmp/kayan-complete.kayanbackup -C /tmp/kayan-archive database/database.dump
+          DUMP=/tmp/kayan-archive/database/database.dump
+          if [ ! -s "$DUMP" ]; then echo "The archive carried no database dump."; tar -tvf /tmp/kayan-complete.kayanbackup; exit 1; fi
+          echo "Restoring the archive's dump ($(stat -c%s "$DUMP") bytes) into erp_kayan_restore_check..."
           psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_restore_check' -c 'CREATE DATABASE erp_kayan_restore_check'
           if ! pg_restore -h 127.0.0.1 -U ci -d erp_kayan_restore_check --no-owner "$DUMP" > /tmp/pg_restore.log 2>&1; then
             cat /tmp/pg_restore.log
@@ -387,6 +432,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -495,6 +545,49 @@ jobs:
           summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
+  backup-restore-17:
+    name: Complete backup and restore on PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # PostgreSQL 17, server and client of the same version: a dump carries
+      # its writer's version, and rehearsing a 17 dump with a 16 pg_restore
+      # would fail for a reason that has nothing to do with this program.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17
+          /usr/lib/postgresql/17/bin/postgres --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_restore --version
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      # The harness creates its own cluster, applies the real migrations, seeds
+      # a fixture and then exercises: complete backup, verification, tampered
+      # archive refused, restore, safety backup, automatic rollback of a
+      # restore that dies half way, journal-driven recovery after a simulated
+      # power cut, one-restore-at-a-time, uploaded files, and the licence file
+      # being left untouched.
+      - name: Prove the complete backup and restore on PostgreSQL 17
+        run: python ../scripts/ci-diagnose.py npx ts-node --transpile-only scripts/verify-system-backup.ts --pgbin /usr/lib/postgresql/17/bin
+
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest
@@ -512,6 +605,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Install Flutter dependencies
@@ -523,7 +620,13 @@ jobs:
       # These are screenshot generators: baselines are regenerated here, so
       # the normal test run below compares against this run's own render.
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        # Through ci-diagnose so a failure's own message reaches the run's
+        # annotations: the log host is not always reachable from a repair
+        # session, and "2 tests passed, 1 failed" names no test.
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
+      - name: Diagnose the design screenshots
+        if: failure()
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Upload design screenshots
         uses: actions/upload-artifact@v4
         with:
@@ -571,6 +674,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Enable Linux desktop
@@ -583,7 +690,7 @@ jobs:
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop

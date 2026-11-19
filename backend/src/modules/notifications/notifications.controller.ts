@@ -76,6 +76,14 @@ export class NotificationsController {
     return this.service.markRead(user, id);
   }
 
+  /// "I will deal with it later": the row goes back to unread without needing
+  /// a second alert to be raised.
+  @Post(':id/unread')
+  @RequirePermissions('notifications.read')
+  unreadOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.markUnread(user, id);
+  }
+
   @Post(':id/archive')
   @RequirePermissions('notifications.read')
   archive(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -92,7 +100,14 @@ export class NotificationsController {
   @Post('scan')
   @RequirePermissions('notifications.manage')
   async scan(@CurrentUser() user: AuthUser) {
-    const answer = await this.service.scanStock(user.companyId);
-    return { ...answer, scheduler: this.scheduler.status() };
+    const stock = await this.service.scanStock(user.companyId);
+    const business = await this.service.scanBusiness(user.companyId);
+    return {
+      raised: stock.raised + business.raised,
+      closed: stock.closed + business.closed,
+      stock,
+      business,
+      scheduler: this.scheduler.status(),
+    };
   }
 }

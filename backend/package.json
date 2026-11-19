@@ -21,7 +21,9 @@
     "seed:permissions": "ts-node prisma/seed-permissions.ts",
     "seed:demo": "ts-node prisma/seed-demo.ts",
     "build:demo": "node scripts/build-demo-backup.mjs",
-    "check:api": "node scripts/api-check.mjs"
+    "check:api": "node scripts/api-check.mjs",
+    "verify:system-backup": "ts-node --transpile-only scripts/verify-system-backup.ts",
+    "scenario:system-backup": "node scripts/scenario-system-backup.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

@@ -11,7 +11,14 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { LicensingService } from '../licensing/licensing.service';
 import { Prisma } from '@prisma/client';
-import { CreateUserDto, ListUsersDto, UpdateUserDto } from './dto/user.dto';
+import {
+  CreateUserDto,
+  ListUsersDto,
+  PreviewUserPermissionsDto,
+  UpdateUserDto,
+} from './dto/user.dto';
+import { resolveEffectivePermissions } from '../../common/rbac/effective-permissions';
+import { permissionWarnings, warningsForSet } from '../../common/rbac/permission-warnings';
 
 /// Who may be changed, and by whom.
 const SYSTEM_USERNAME = 'admin';
@@ -40,7 +47,18 @@ export class UsersService {
       orderBy: { username: 'asc' },
       include: {
         userRoles: {
-          include: { role: { select: { id: true, code: true, nameEn: true } } },
+          include: {
+            role: {
+              select: {
+                id: true,
+                code: true,
+                nameEn: true,
+                nameAr: true,
+                isActive: true,
+                category: true,
+              },
+            },
+          },
         },
         branches: { include: { branch: true } },
         userPermissions: {
@@ -56,7 +74,18 @@ export class UsersService {
       where: { id, companyId, deletedAt: null },
       include: {
         userRoles: {
-          include: { role: { select: { id: true, code: true, nameEn: true } } },
+          include: {
+            role: {
+              select: {
+                id: true,
+                code: true,
+                nameEn: true,
+                nameAr: true,
+                isActive: true,
+                category: true,
+              },
+            },
+          },
         },
         branches: { include: { branch: true } },
         userPermissions: {
@@ -95,6 +124,9 @@ export class UsersService {
       actorPermissions,
       isSuperAdmin,
     );
+    // A deny hands nothing out, so it needs no "do you hold it" check - only
+    // that the code exists.
+    const deniedPermissions = await this.normalizeDeniedPermissions(dto.deniedPermissions);
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
 
@@ -124,7 +156,10 @@ export class UsersService {
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
-      await this.replaceExtraPermissions(tx, user.id, extraPermissions);
+      await this.replaceOverrides(tx, user.id, {
+        grants: extraPermissions,
+        denies: deniedPermissions,
+      });
       return user;
     });
 
@@ -150,8 +185,12 @@ export class UsersService {
     if (dto.extraPermissions !== undefined && !Array.isArray(dto.extraPermissions)) {
       throw new BadRequestException('Extra permissions must be an array when supplied.');
     }
+    if (dto.deniedPermissions !== undefined && !Array.isArray(dto.deniedPermissions)) {
+      throw new BadRequestException('Denied permissions must be an array when supplied.');
+    }
     if ((dto.expectedRoleIds !== undefined && !Array.isArray(dto.roleIds)) ||
-        (dto.expectedExtraPermissions !== undefined && !Array.isArray(dto.extraPermissions))) {
+        (dto.expectedExtraPermissions !== undefined && !Array.isArray(dto.extraPermissions)) ||
+        (dto.expectedDeniedPermissions !== undefined && !Array.isArray(dto.deniedPermissions))) {
       throw new BadRequestException('An expected permission set requires its corresponding replacement.');
     }
     const before = await this.prisma.user.findFirst({
@@ -180,6 +219,10 @@ export class UsersService {
             actorPermissions,
             isSuperAdmin,
           );
+    const deniedPermissions =
+      dto.deniedPermissions === undefined
+        ? undefined
+        : await this.normalizeDeniedPermissions(dto.deniedPermissions);
 
     await this.prisma.$transaction(async (tx) => {
       // Serialize all application-mediated updates to this user before
@@ -208,7 +251,15 @@ export class UsersService {
       }
       if (dto.expectedExtraPermissions !== undefined) {
         const current = await tx.userPermission.findMany({where:{userId:id},include:{permission:true}});
-        if (!matches(current.map((row) => row.permission.code), dto.expectedExtraPermissions)) {
+        const grants = current.filter((row) => !row.isDenied).map((row) => row.permission.code);
+        if (!matches(grants, dto.expectedExtraPermissions)) {
+          throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
+        }
+      }
+      if (dto.expectedDeniedPermissions !== undefined) {
+        const current = await tx.userPermission.findMany({where:{userId:id},include:{permission:true}});
+        const denies = current.filter((row) => row.isDenied).map((row) => row.permission.code);
+        if (!matches(denies, dto.expectedDeniedPermissions)) {
           throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
         }
       }
@@ -224,7 +275,12 @@ export class UsersService {
       });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);
-      if (extraPermissions) await this.replaceExtraPermissions(tx, id, extraPermissions);
+      if (extraPermissions !== undefined || deniedPermissions !== undefined) {
+        await this.replaceOverrides(tx, id, {
+          grants: extraPermissions,
+          denies: deniedPermissions,
+        });
+      }
       if (dto.isActive === false) {
         await tx.refreshToken.updateMany({
           where: { userId: id, revokedAt: null },
@@ -238,7 +294,12 @@ export class UsersService {
         entity: 'users',
         entityId: id,
         before: { fullNameEn: lockedBefore.fullNameEn, isActive: lockedBefore.isActive },
-        after: { fullNameEn: dto.fullNameEn, isActive: dto.isActive, extraPermissions },
+        after: {
+          fullNameEn: dto.fullNameEn,
+          isActive: dto.isActive,
+          extraPermissions,
+          deniedPermissions,
+        },
       }, tx);
     });
     return this.findOne(companyId, id);
@@ -436,16 +497,51 @@ export class UsersService {
     return unique.sort();
   }
 
-  private async replaceExtraPermissions(
+  /// Checks that every denied code exists. Denying a permission nobody holds
+  /// is harmless and allowed: it is a standing instruction for the future.
+  private async normalizeDeniedPermissions(codes: string[] | undefined): Promise<string[]> {
+    if (!codes?.length) return [];
+    const unique = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+    if (!unique.length) return [];
+    const found = await this.prisma.permission.findMany({
+      where: { code: { in: unique } },
+      select: { code: true },
+    });
+    const known = new Set(found.map((permission) => permission.code));
+    const unknown = unique.filter((code) => !known.has(code));
+    if (unknown.length) {
+      throw new BadRequestException(`Unknown permission code(s): ${unknown.join(', ')}`);
+    }
+    return unique.sort();
+  }
+
+  /// Writes the per-user exceptions: grants and denies, in one table.
+  ///
+  /// Either half may be omitted, and the omitted half is kept as it is — the
+  /// form sends both, a small client that only knows about grants does not
+  /// wipe a deny by accident. A code cannot be both: it is written once, and
+  /// deny wins.
+  private async replaceOverrides(
     tx: Prisma.TransactionClient,
     userId: string,
-    codes: string[],
+    next: { grants?: string[]; denies?: string[] },
   ) {
+    const current = await tx.userPermission.findMany({
+      where: { userId },
+      include: { permission: { select: { code: true } } },
+    });
+    const grants =
+      next.grants ?? current.filter((row) => !row.isDenied).map((row) => row.permission.code);
+    const denies =
+      next.denies ?? current.filter((row) => row.isDenied).map((row) => row.permission.code);
+    const denySet = new Set(denies);
+    const codes = [...new Set([...grants.filter((code) => !denySet.has(code)), ...denies])];
+
     await tx.userPermission.deleteMany({ where: { userId } });
     if (!codes.length) return;
     const permissions = await tx.permission.findMany({
       where: { code: { in: codes } },
-      select: { id: true },
+      select: { id: true, code: true },
     });
     if (permissions.length !== codes.length) {
       throw new BadRequestException('One of the permissions no longer exists');
@@ -454,8 +550,116 @@ export class UsersService {
       data: permissions.map((permission) => ({
         userId,
         permissionId: permission.id,
+        isDenied: denySet.has(permission.code),
       })),
     });
+  }
+
+  /// What this user can actually do today, after roles, grants and denies.
+  async effectivePermissions(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId, deletedAt: null },
+      include: {
+        userRoles: {
+          include: {
+            role: {
+              include: { rolePermissions: { include: { permission: { select: { code: true } } } } },
+            },
+          },
+        },
+        userPermissions: { include: { permission: { select: { code: true } } } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    const effective = resolveEffectivePermissions(
+      user.userRoles,
+      user.userPermissions,
+      companyId,
+    );
+    return { userId, ...effective, warnings: permissionWarnings(effective.permissions) };
+  }
+
+  /// The preview the user form asks for before anyone is saved: same arithmetic
+  /// as a real sign-in, done on the values currently on the screen.
+  ///
+  /// It reads the roles from the database (never trusts the client for what a
+  /// role contains) and computes the union, the grants and the denies exactly
+  /// as `auth.service` would after saving.
+  async previewPermissions(companyId: string, dto: PreviewUserPermissionsDto) {
+    let roleIds = dto.roleIds;
+    let grants = dto.extraPermissions;
+    let denies = dto.deniedPermissions;
+
+    // Editing an existing user: the form may send only what the person
+    // changed, so the untouched half comes from the stored row.
+    if ((roleIds === undefined || grants === undefined || denies === undefined) && dto.userId) {
+      const stored = await this.prisma.user.findFirst({
+        where: { id: dto.userId, companyId, deletedAt: null },
+        include: {
+          userRoles: { select: { roleId: true } },
+          userPermissions: { include: { permission: { select: { code: true } } } },
+        },
+      });
+      if (!stored) throw new NotFoundException('User not found');
+      roleIds ??= stored.userRoles.map((row) => row.roleId);
+      grants ??= stored.userPermissions
+        .filter((row) => !row.isDenied)
+        .map((row) => row.permission.code);
+      denies ??= stored.userPermissions
+        .filter((row) => row.isDenied)
+        .map((row) => row.permission.code);
+    }
+
+    const roles = roleIds?.length
+      ? await this.prisma.role.findMany({
+          where: {
+            id: { in: roleIds },
+            deletedAt: null,
+            OR: [{ companyId }, { companyId: null }],
+          },
+          include: {
+            rolePermissions: { include: { permission: { select: { code: true } } } },
+          },
+          orderBy: { code: 'asc' },
+        })
+      : [];
+
+    const overrides: Array<{ isDenied: boolean; permission: { code: string } }> = [
+      ...(grants ?? []).map((code) => ({ isDenied: false, permission: { code } })),
+      ...(denies ?? []).map((code) => ({ isDenied: true, permission: { code } })),
+    ];
+
+    const effective = resolveEffectivePermissions(
+      roles.map((role) => ({ companyId, deletedAt: null, isActive: role.isActive, role })),
+      overrides,
+      companyId,
+    );
+    const warnings = permissionWarnings(effective.permissions);
+    const disabledRoles = roles.filter((role) => role.isActive === false).map((role) => role.code);
+    if (disabledRoles.length) {
+      warnings.unshift({
+        code: 'role.disabled',
+        severity: 'WARNING',
+        messageEn: `Disabled role(s) grant nothing: ${disabledRoles.join(', ')}.`,
+        messageAr: `أدوار معطّلة لا تمنح شيئًا: ${disabledRoles.join('، ')}.`,
+      });
+    }
+    if (effective.deniedFromRoles.length) {
+      warnings.push({
+        code: 'deny.overrides',
+        severity: 'INFO',
+        messageEn: `Denied permissions remove ${effective.deniedFromRoles.length} allowance(s) the roles would have given.`,
+        messageAr: `الصلاحيات المرفوضة تلغي ${effective.deniedFromRoles.length} صلاحية كانت الأدوار ستمنحها.`,
+      });
+    }
+    if (effective.permissions.length === 0) {
+      warnings.push(...warningsForSet([]));
+    }
+    return {
+      ...effective,
+      permissionsCount: effective.permissions.length,
+      warnings,
+    };
   }
 
   private async assertBranchesBelongToCompany(companyId: string, branchIds?: string[]) {
@@ -485,9 +689,18 @@ export class UsersService {
         id: ur.role.id,
         code: ur.role.code,
         nameEn: ur.role.nameEn,
+        nameAr: ur.role.nameAr ?? null,
+        isActive: ur.role.isActive !== false,
       })),
-      // Grants made to this one person on top of their roles.
+      // Grants made to this one person on top of their roles, and the codes
+      // withheld from them on purpose. Kept apart: they are different
+      // decisions and the form shows them in different lists.
       extraPermissions: (user.userPermissions ?? [])
+        .filter((grant: any) => !grant.isDenied)
+        .map((grant: any) => grant.permission.code)
+        .sort(),
+      deniedPermissions: (user.userPermissions ?? [])
+        .filter((grant: any) => grant.isDenied)
         .map((grant: any) => grant.permission.code)
         .sort(),
       branches: (user.branches ?? []).map((ub: any) => ({

@@ -32,9 +32,12 @@ describe('the expiry alert scheduler', () => {
       call += 1;
       return handler(companyId, today);
     });
+    // The second pass (documents and money) finds nothing in these tests: the
+    // scheduler's job is to run both and to survive either failing.
+    const scanBusiness = jest.fn(async () => ({ raised: 0, closed: 0, types: 0 }));
     const scheduler = new ExpiryAlertScheduler(
       prisma as never,
-      { scanStock } as never,
+      { scanStock, scanBusiness } as never,
     );
     return { scheduler, prisma, scanStock, order };
   }

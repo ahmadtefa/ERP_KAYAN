@@ -87,6 +87,15 @@ describe('notifications', () => {
       thresholds: [] as Row[],
       onHand: [] as Array<{ warehouseId: string; itemId: string; quantity: string }>,
       audits: [] as Row[],
+      // The business scanners read these; empty means "nothing to say", which
+      // is also what a fresh company looks like.
+      salesOrders: [] as Row[],
+      purchaseOrders: [] as Row[],
+      journalEntries: [] as Row[],
+      salesInvoices: [] as Row[],
+      purchaseInvoices: [] as Row[],
+      balances: [] as Row[],
+      auditLogs: [] as Row[],
     };
     let nextId = 1;
 
@@ -196,6 +205,41 @@ describe('notifications', () => {
       itemBatch: {
         findMany: jest.fn(async (args: Row = {}) =>
           state.lots.filter((row) => matches(row, args.where)),
+        ),
+      },
+      salesOrder: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.salesOrders.filter((row) => matches(row, args.where)),
+        ),
+      },
+      purchaseOrder: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.purchaseOrders.filter((row) => matches(row, args.where)),
+        ),
+      },
+      journalEntry: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.journalEntries.filter((row) => matches(row, args.where)),
+        ),
+      },
+      salesInvoice: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.salesInvoices.filter((row) => matches(row, args.where)),
+        ),
+      },
+      purchaseInvoice: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.purchaseInvoices.filter((row) => matches(row, args.where)),
+        ),
+      },
+      warehouseStockBalance: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.balances.filter((row) => matches(row, args.where)),
+        ),
+      },
+      auditLog: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.auditLogs.filter((row) => matches(row, args.where)),
         ),
       },
       itemWarehouseSetting: {
@@ -449,7 +493,7 @@ describe('notifications', () => {
 
     const answer = await service.settings(COMPANY);
 
-    expect(answer.items).toHaveLength(6);
+    expect(answer.items).toHaveLength(13);
     const expired = answer.items.find((row) => row.type === STOCK_EXPIRED);
     expect(expired).toMatchObject({
       module: 'inventory',
@@ -941,6 +985,243 @@ describe('notifications', () => {
 
     const answer = await service.scanStock(COMPANY, TODAY);
 
-    expect(answer).toEqual({ raised: 0, closed: 0, types: 6 });
+    // Every kind the program knows, stock and business alike.
+    expect(answer).toEqual({ raised: 0, closed: 0, types: 13 });
+  });
+
+  // ───────────────────────────────────────── the rest of the business
+
+  it('tells a collection clerk about an invoice that is past its date, once per age band', async () => {
+    const { service, state } = makeHarness();
+    state.salesInvoices = [
+      {
+        id: 'inv-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        invoiceNumber: 'SI-1',
+        status: 'POSTED',
+        documentType: 'INVOICE',
+        dueDate: days(-3),
+        totalAmount: D(1000),
+        paidAmount: D(400),
+        customer: { nameEn: 'Nile Retail', nameAr: 'نايل' },
+      },
+      // Fully paid: keeping an old due date is not a reason to chase anybody.
+      {
+        id: 'inv-2',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        invoiceNumber: 'SI-2',
+        status: 'POSTED',
+        documentType: 'INVOICE',
+        dueDate: days(-9),
+        totalAmount: D(500),
+        paidAmount: D(500),
+        customer: { nameEn: 'Delta', nameAr: 'دلتا' },
+      },
+    ];
+
+    const answer = await service.scanBusiness(COMPANY, TODAY);
+
+    expect(answer.raised).toBe(1);
+    const row = state.notifications.find((one) => one.type === 'INVOICE_OVERDUE');
+    expect(row?.permission).toBe('sales.invoices.read');
+    expect(row?.dedupeKey).toBe('INVOICE_OVERDUE:inv-1:1w');
+    expect(row?.bodyEn).toContain('600');
+    expect(row?.actionPath).toBe('/sales/invoices?invoice=inv-1');
+
+    // The same fact on the next day is the same row, not a second one.
+    state.salesInvoices[0].dueDate = days(-4);
+    await service.scanBusiness(COMPANY, TODAY);
+    expect(state.notifications.filter((one) => one.type === 'INVOICE_OVERDUE')).toHaveLength(1);
+  });
+
+  it('raises the orders and journal entries that are waiting for a person', async () => {
+    const { service, state } = makeHarness();
+    state.salesOrders = [
+      {
+        id: 'so-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        orderNumber: 'SO-1',
+        status: 'DRAFT',
+        approvedAt: null,
+        deletedAt: null,
+        orderDate: days(-2),
+        totalAmount: D(750),
+        customer: { nameEn: 'Nile Retail', nameAr: 'نايل' },
+      },
+    ];
+    state.purchaseOrders = [
+      {
+        id: 'po-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        orderNumber: 'PO-1',
+        status: 'DRAFT',
+        approvedAt: null,
+        deletedAt: null,
+        orderDate: days(-1),
+        totalAmount: D(900),
+        supplier: { nameEn: 'Cairo Supply', nameAr: 'القاهرة' },
+      },
+    ];
+    state.journalEntries = [
+      {
+        id: 'je-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        entryNumber: 'JE-1',
+        status: 'PENDING_APPROVAL',
+        entryDate: days(-1),
+        description: 'Accrual',
+        totalDebit: D(300),
+      },
+    ];
+
+    const answer = await service.scanBusiness(COMPANY, TODAY);
+
+    expect(answer.raised).toBe(3);
+    expect(
+      state.notifications.filter((one) => one.type === 'STOCK_VOUCHER_PENDING_APPROVAL'),
+    ).toHaveLength(2);
+    const journal = state.notifications.find((one) => one.type === 'JOURNAL_PENDING_APPROVAL');
+    expect(journal?.permission).toBe('accounting.journal.approve');
+    expect(journal?.severity).toBe('WARNING');
+  });
+
+  it('separates a bill falling due from a bill that is overdue', async () => {
+    const { service, state } = makeHarness();
+    state.purchaseInvoices = [
+      {
+        id: 'b-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        invoiceNumber: 'PI-1',
+        status: 'POSTED',
+        documentType: 'INVOICE',
+        dueDate: days(3),
+        totalAmount: D(200),
+        paidAmount: D(0),
+        supplier: { nameEn: 'Cairo Supply', nameAr: 'القاهرة' },
+      },
+      {
+        id: 'b-2',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        invoiceNumber: 'PI-2',
+        status: 'POSTED',
+        documentType: 'INVOICE',
+        dueDate: days(-2),
+        totalAmount: D(500),
+        paidAmount: D(100),
+        supplier: { nameEn: 'Alex Trade', nameAr: 'الإسكندرية' },
+      },
+    ];
+
+    await service.scanBusiness(COMPANY, TODAY);
+
+    const types = state.notifications.map((row) => row.type).sort();
+    expect(types).toEqual(['PAYABLE_DUE', 'PAYABLE_OVERDUE']);
+    expect(state.notifications.every((row) => row.permission === 'purchases.invoices.read')).toBe(true);
+  });
+
+  it('shouts about a shelf with an impossible balance and closes the alarm when it is fixed', async () => {
+    const { service, state } = makeHarness();
+    state.balances = [
+      {
+        companyId: COMPANY,
+        branchId: BRANCH,
+        warehouseId: WAREHOUSE,
+        itemId: ITEM,
+        quantity: D(-4),
+        value: D(-120),
+        item: { code: 'IT-1', nameEn: 'Carton', nameAr: 'كرتونة' },
+        warehouse: { code: 'WH-1', nameEn: 'Main store', nameAr: 'المخزن الرئيسي' },
+      },
+    ];
+
+    const first = await service.scanBusiness(COMPANY, TODAY);
+    expect(first.raised).toBe(1);
+    const row = state.notifications.find((one) => one.type === 'STOCK_ABNORMAL');
+    expect(row?.severity).toBe('CRITICAL');
+    expect(row?.status).toBe('OPEN');
+
+    // The balance is corrected: the next pass closes the alarm instead of
+    // letting it stand in the centre next to news that contradicts it.
+    state.balances = [];
+    const second = await service.scanBusiness(COMPANY, TODAY);
+    expect(second.closed).toBe(1);
+    expect(state.notifications.find((one) => one.type === 'STOCK_ABNORMAL')?.status).toBe('CLOSED');
+  });
+
+  it('tells an auditor when access was changed, with the audit row as the key', async () => {
+    const { service, state } = makeHarness();
+    state.auditLogs = [
+      {
+        id: 'audit-1',
+        companyId: COMPANY,
+        action: 'role.permissions_set',
+        entity: 'roles',
+        entityId: 'role-1',
+        createdAt: days(0),
+        user: { username: 'admin', fullNameEn: 'System Administrator', fullNameAr: 'مدير النظام' },
+      },
+    ];
+
+    await service.scanBusiness(COMPANY, TODAY);
+
+    const row = state.notifications.find((one) => one.type === 'ADMIN_ALERT');
+    expect(row?.permission).toBe('admin.audit.read');
+    expect(row?.dedupeKey).toBe('ADMIN_ALERT:audit-1');
+    expect(row?.bodyAr).toContain('مدير النظام');
+  });
+
+  it('says nothing when a business kind is switched off, and still closes nothing it did not evaluate', async () => {
+    const { service, state } = makeHarness({
+      settings: [{ companyId: COMPANY, type: 'INVOICE_OVERDUE', isEnabled: false }],
+    });
+    state.salesInvoices = [
+      {
+        id: 'inv-1',
+        companyId: COMPANY,
+        branchId: BRANCH,
+        invoiceNumber: 'SI-1',
+        status: 'POSTED',
+        documentType: 'INVOICE',
+        dueDate: days(-3),
+        totalAmount: D(100),
+        paidAmount: D(0),
+        customer: { nameEn: 'Nile Retail', nameAr: 'نايل' },
+      },
+    ];
+
+    const answer = await service.scanBusiness(COMPANY, TODAY);
+
+    expect(answer.raised).toBe(0);
+    expect(state.notifications.filter((one) => one.type === 'INVOICE_OVERDUE')).toHaveLength(0);
+  });
+
+  it('puts an alert back to unread without inventing a second one', async () => {
+    const { service, state } = makeHarness({
+      notifications: [notification({ status: 'READ', readAt: days(-1) })],
+    });
+
+    const answer = await service.markUnread(user() as never, 'notification-1');
+
+    expect(answer.status).toBe('OPEN');
+    expect(answer.readAt).toBeNull();
+    expect(state.notifications).toHaveLength(1);
+  });
+
+  it('refuses to resurrect a closed alert by marking it unread', async () => {
+    const { service, state } = makeHarness({
+      notifications: [notification({ status: 'CLOSED', readAt: days(-2) })],
+    });
+
+    const answer = await service.markUnread(user() as never, 'notification-1');
+
+    expect(answer.status).toBe('CLOSED');
+    expect(state.notifications[0].readAt).toEqual(days(-2));
   });
 });

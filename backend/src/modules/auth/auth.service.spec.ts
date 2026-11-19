@@ -247,10 +247,12 @@ describe('refresh session security', () => {
       const result = await service.login('employee', 'correct-password');
 
       expect(result.user.roles).toEqual(['ACCOUNTANT', 'SYSTEM_VIEWER']);
+      // Sorted: the effective set is computed once, deterministically, and
+      // the order no longer depends on which role the query returned first.
       expect(result.user.permissions).toEqual([
-        'reports.read',
-        'inventory.items.read',
         'cash.vouchers.create',
+        'inventory.items.read',
+        'reports.read',
       ]);
       expect(result.user.branchId).toBe('branch-1');
       expect(userBranchFindMany).toHaveBeenCalledWith({

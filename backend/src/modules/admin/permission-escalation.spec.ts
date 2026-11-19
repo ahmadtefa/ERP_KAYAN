@@ -220,6 +220,7 @@ describe('direct permission grants', () => {
         findMany: jest.fn().mockResolvedValue(permissionRows),
       },
       userPermission: {
+        findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: permissionRows.length }),
       },
@@ -262,7 +263,7 @@ describe('direct permission grants', () => {
     );
 
     expect(tx.userPermission.createMany).toHaveBeenCalledWith({
-      data: [{ userId: 'target-user', permissionId: 'perm-post' }],
+      data: [{ userId: 'target-user', permissionId: 'perm-post', isDenied: false }],
     });
   });
 

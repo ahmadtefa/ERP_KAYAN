@@ -32,10 +32,19 @@ interface UploadedDump {
   buffer: Buffer;
 }
 
-/** Block destructive HTTP restore before the multipart interceptor can read a
- * large upload. No environment switch can enable an unproven restore. */
+/** Block the legacy database-only restore before the multipart interceptor can
+ * read a large upload.
+ *
+ * This is not the guard for the complete restore. That one lives in
+ * `system/complete-restore-unavailable.guard.ts` and asks the machine whether
+ * every safeguard is in place: a complete backup carries the database, the
+ * files and the manifest, so it can be put back safely on a machine that
+ * passes. A bare `pg_dump` file carries the database alone — restoring it
+ * would leave the uploaded files describing rows that no longer exist, and no
+ * environment switch is allowed to make that possible. The two guards answer
+ * differently on purpose, so they must not share a name. */
 @Injectable()
-export class CompleteRestoreUnavailableGuard implements CanActivate {
+export class DatabaseOnlyRestoreDisabledGuard implements CanActivate {
   canActivate(): boolean {
     throw new ServiceUnavailableException({
       code: 'FULL_RESTORE_UNAVAILABLE',
@@ -137,7 +146,7 @@ export class FullBackupController {
    * the user type the confirmation before it sends it.
    */
   @Post('restore')
-  @UseGuards(CompleteRestoreUnavailableGuard)
+  @UseGuards(DatabaseOnlyRestoreDisabledGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 * 1024 } }),
   )

@@ -11,6 +11,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
+import 'package:erp_kayan/features/notifications/presentation/screens/notification_center_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_list_screen.dart';
 import 'package:erp_kayan/features/parties/presentation/screens/parties_screen.dart';
 import 'package:erp_kayan/features/settings/presentation/providers/company_providers.dart';
@@ -269,6 +270,13 @@ Future<void> _pumpShot(
         branchesProvider.overrideWith(FakeBranchesController.new),
         dashboardSummaryProvider.overrideWith((ref) async => _summary),
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
+        // The bell and the dashboard panel are part of the picture, but this
+        // fixture must not reach the network to draw it: two fixed alerts, so
+        // the screenshot shows the badge and the panel without a live server.
+        notificationCountProvider.overrideWith((ref) async => 2),
+        notificationFeedProvider.overrideWith(
+          (ref) async => <Json>[_screenshotAlert1, _screenshotAlert2],
+        ),
       ],
       child: MaterialApp.router(
         debugShowCheckedModeBanner: false,
@@ -293,6 +301,26 @@ Future<void> _pumpShot(
   expect(find.byWidgetPredicate((widget) => widget is ListTile && widget.selected), findsNothing);
 
 }
+
+const Json _screenshotAlert1 = <String, dynamic>{
+  'id': 'n1',
+  'type': 'INVOICE_OVERDUE',
+  'severity': 'CRITICAL',
+  'titleEn': 'Invoice SI-1042 is 12 day(s) overdue',
+  'titleAr': 'الفاتورة SI-1042 متأخرة 12 يوم',
+  'actionPath': '/sales/invoices?invoice=si-1042',
+  'isRead': false,
+};
+
+const Json _screenshotAlert2 = <String, dynamic>{
+  'id': 'n2',
+  'type': 'STOCK_EXPIRY_SOON',
+  'severity': 'WARNING',
+  'titleEn': 'Carton 12 is expiring in 9 days',
+  'titleAr': 'كرتونة 12 تنتهي خلال 9 أيام',
+  'actionPath': '/inventory/batches?batch=b-12',
+  'isRead': false,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
