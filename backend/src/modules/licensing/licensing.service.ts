@@ -36,6 +36,7 @@ import {
   LicenseStateError,
   LicenseStore,
 } from './license-store';
+import { PublicLicenseKeyring } from './license-keyring';
 
 /**
  * The offline licence, as the program enforces it.
@@ -169,6 +170,8 @@ export class LicensingService implements OnModuleInit {
   private store!: LicenseStore;
   private installedStateError: 'LICENSE_STATE_DAMAGED' | null = null;
   private publicKeyPem: string | null = null;
+  private publicKeyring: PublicLicenseKeyring | null = null;
+  private nextPublicKeyPem: string | null = null;
   private publicKeyPrint: string | null = null;
   // Last completed check, for non-blocking health diagnostics only. A guard
   // decision always uses its own fresh check, never this shared observation.
@@ -301,6 +304,8 @@ export class LicensingService implements OnModuleInit {
     // Bootstrap can retry after an earlier partial failure. Never carry a key
     // from that failed attempt into a later attempt with a missing/bad file.
     this.publicKeyPem = null;
+    this.publicKeyring = null;
+    this.nextPublicKeyPem = null;
     this.publicKeyPrint = null;
     this.installedKeyAvailable = false;
     const candidates: string[] = [];
@@ -322,6 +327,19 @@ export class LicensingService implements OnModuleInit {
         );
       }
       this.adoptPublicKey(candidates);
+      if (this.publicKeyPem && existsSync(join(this.installedDirectory, 'keyring.required'))) {
+        const next = readTextIfPresent(join(this.installedDirectory, 'public-key-next.pem'));
+        try {
+          if (!next) throw new Error('missing transition key');
+          this.publicKeyring = PublicLicenseKeyring.fromPinnedPem(this.publicKeyPem, next);
+          this.nextPublicKeyPem = next;
+        } catch {
+          this.publicKeyPem = null;
+          this.publicKeyPrint = null;
+          this.installedKeyAvailable = false;
+          this.logger.error('The installed licence keyring is incomplete or invalid. Business operations are blocked.');
+        }
+      }
       return;
     }
 
@@ -381,15 +399,22 @@ export class LicensingService implements OnModuleInit {
    */
   private async verificationKeyAvailable(): Promise<boolean> {
     if (!this.installedDirectory) return Boolean(this.publicKeyPrint);
+    if (this.publicKeyring && !existsSync(join(this.installedDirectory, 'keyring.required'))) {
+      this.installedKeyAvailable = false;
+      return false;
+    }
     if (!this.publicKeyPem || !this.publicKeyPrint || !this.store.current.publicKeyFingerprint) {
       this.installedKeyAvailable = false;
       return false;
     }
-    const path = join(this.installedDirectory, 'public-key.pem');
+    const paths = [join(this.installedDirectory, 'public-key.pem')];
+    if (this.publicKeyring) paths.push(join(this.installedDirectory, 'public-key-next.pem'));
     const maxBytes = 16 * 1024;
-    let file: Awaited<ReturnType<typeof fs.open>> | undefined;
-    let valid = false;
+    let valid = true;
     try {
+      for (const path of paths) {
+      let file: Awaited<ReturnType<typeof fs.open>> | undefined;
+      try {
       const before = await fs.lstat(path);
       if (!before.isFile() || before.size <= 0 || before.size > maxBytes) throw new Error('invalid public key file');
       const flags = platform() === 'win32'
@@ -407,13 +432,15 @@ export class LicensingService implements OnModuleInit {
         throw new Error('public key file changed during verification');
       }
       const fingerprint = publicKeyFingerprint(loadPublicKey(buffer.subarray(0, bytesRead).toString('utf8')));
-      valid = fingerprint === this.publicKeyPrint && fingerprint === this.store.current.publicKeyFingerprint;
+      const expected = path === paths[0] ? this.publicKeyPrint : publicKeyFingerprint(loadPublicKey(this.nextPublicKeyPem!));
+      valid = valid && fingerprint === expected;
+      } finally { if (file) await file.close().catch(() => undefined); }
+      }
+      valid = valid && this.publicKeyPrint === this.store.current.publicKeyFingerprint;
     } catch {
       // Missing, unreadable, malformed or different key: fail closed without
       // logging file contents or changing any protected state.
       valid = false;
-    } finally {
-      if (file) await file.close().catch(() => undefined);
     }
     this.installedKeyAvailable = valid;
     return valid;
@@ -898,7 +925,9 @@ export class LicensingService implements OnModuleInit {
       });
     }
     try {
-      return verifyKey(rawKey, loadPublicKey(this.publicKeyPem));
+      return this.publicKeyring
+        ? this.publicKeyring.verify(rawKey).parsed
+        : verifyKey(rawKey, loadPublicKey(this.publicKeyPem));
     } catch (error) {
       if (error instanceof LicenseKeyError) {
         throw new ForbiddenException({

@@ -344,7 +344,7 @@ class _FormSheetState extends State<_FormSheet> {
               .firstOrNull;
           if (first != null) {
             final fieldContext = _fieldKeys[first.key]?.currentContext;
-            if (fieldContext != null && fieldContext.mounted) {
+            if (fieldContext != null) {
               Scrollable.ensureVisible(fieldContext);
               _focusNodes[first.key]?.requestFocus();
             }

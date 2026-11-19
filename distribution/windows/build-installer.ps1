@@ -14,6 +14,7 @@ param(
   # An explicitly labelled diagnostic installer using a throwaway public key.
   # It must never be published or given to a customer as a product installer.
   [switch]$TestSignedBuild,
+  [string]$IsccPath = '',
   # Where the licence public key is when it is not beside this script. A
   # release passes the operator's key (or drops it beside this script); the CI
   # job passes a throwaway key it generated for that run, so the Setup it
@@ -239,7 +240,10 @@ foreach ($icon in @('windows\runner\resources\app_icon.ico', 'web\favicon.png', 
 }
 $flutter = Get-Command flutter
 if ($flutter.Source -notmatch '\.bat$|\.cmd$') { $flutterCommand = 'flutter' } else { $flutterCommand = $flutter.Source }
-$iscc = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
+$iscc = if ($IsccPath) {
+  if (-not (Test-Path -LiteralPath $IsccPath -PathType Leaf)) { throw 'The explicitly requested Inno compiler is missing.' }
+  @{ Source = [IO.Path]::GetFullPath($IsccPath) }
+} else { Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue }
 if (-not $SkipInstaller -and -not $iscc) {
   foreach ($candidate in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
     if (Test-Path $candidate) { $iscc = @{ Source = $candidate }; break }
@@ -419,6 +423,14 @@ if ($licencePublicKey) {
   # Canonical destination even when the supplied file has a different name.
   $stagedPublicKey = Join-Path $app 'public-key.pem'
   Copy-Item -LiteralPath $licencePublicKey -Destination $stagedPublicKey -Force
+  $nextPublicKey = Join-Path $PSScriptRoot 'public-key-next.pem'
+  if ($buildKind -eq 'product') {
+    if (-not (Test-Path -LiteralPath $nextPublicKey -PathType Leaf)) { throw 'The approved transition public key is missing.' }
+    & node --test (Join-Path $root 'scripts\license-public-key-transition.test.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Approved public-key fingerprints did not validate.' }
+    Copy-Item -LiteralPath $nextPublicKey -Destination (Join-Path $app 'public-key-next.pem')
+    Set-Content -LiteralPath (Join-Path $app 'keyring.required') -Value 'Both pinned Ed25519 public keys are required.' -Encoding ASCII
+  }
   # Validate the actual staged bytes too, not only the source selected earlier.
   & node $policy --mode $buildKind --public-key $stagedPublicKey
   if ($LASTEXITCODE -ne 0) { throw 'Staged licence public key failed policy validation.' }

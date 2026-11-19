@@ -67,13 +67,13 @@ abstract final class AppColors {
   static const chartPurchases = Color(0xFF8A6A2F);
   static const chartPurchasesDark = Color(0xFFD8B678);
 
-  // Dark theme counterparts — the same navy deepened, never neutral grey.
-  static const darkBackground = Color(0xFF0A1322);
-  static const darkSurface = Color(0xFF111E33);
-  static const darkSurfaceAlt = Color(0xFF182841);
-  static const darkBorder = Color(0xFF2A3F61);
-  static const darkText = Color(0xFFEAF1FC);
-  static const darkTextMuted = Color(0xFF9DB2D0);
+  // Dark theme counterparts — Luxury Obsidian & Slate with Amber/Gold accents.
+  static const darkBackground = Color(0xFF080C14);
+  static const darkSurface = Color(0xFF0F1624);
+  static const darkSurfaceAlt = Color(0xFF162033);
+  static const darkBorder = Color(0xFF1E2B42);
+  static const darkText = Color(0xFFF8FAFC);
+  static const darkTextMuted = Color(0xFF94A3B8);
 }
 
 /// The one gradient in the product: the navy frame (sidebar, drawer and

@@ -97,7 +97,15 @@ class _CollapsedNav extends Notifier<_NavOpenSection> {
   void close() => state = const _NavOpenSection(null);
 
 }
+class _SidebarCollapseNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void toggle() => state = !state;
+}
+
 final _collapsedNavProvider = NotifierProvider<_CollapsedNav, _NavOpenSection>(_CollapsedNav.new);
+final _sidebarManuallyCollapsedProvider = NotifierProvider<_SidebarCollapseNotifier, bool>(_SidebarCollapseNotifier.new);
 
 /// Each section owns one colour (see [SectionAccents]): the selected entry
 /// is recognisable by its text, icon tile, background and edge indicator
@@ -254,7 +262,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final isWide = width >= ErpShell._wideBreakpoint;
-    final isExtended = width >= ErpShell._extendedBreakpoint;
+    final isExtendedByWidth = width >= ErpShell._extendedBreakpoint;
+    final isManuallyCollapsed = ref.watch(_sidebarManuallyCollapsedProvider);
+    final isExtended = isExtendedByWidth && !isManuallyCollapsed;
     final items = _navigationItems(context);
     final collapsed = ref.watch(_collapsedNavProvider);
     void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
@@ -287,8 +297,11 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                 selectedPath: items[selectedIndex].path,
                 extended: isExtended,
                 scrollController: _navScrollController,
-                collapsed:collapsed,
-                onToggle:toggleGroup,
+                collapsed: collapsed,
+                onToggle: toggleGroup,
+                onToggleCollapse: isExtendedByWidth
+                    ? ref.read(_sidebarManuallyCollapsedProvider.notifier).toggle
+                    : null,
               ),
             Expanded(
               child: Column(
@@ -690,6 +703,7 @@ class _Sidebar extends StatelessWidget {
     required this.scrollController,
     required this.collapsed,
     required this.onToggle,
+    this.onToggleCollapse,
   });
 
   final _NavOpenSection collapsed;
@@ -698,6 +712,7 @@ class _Sidebar extends StatelessWidget {
   final String selectedPath;
   final bool extended;
   final ScrollController scrollController;
+  final VoidCallback? onToggleCollapse;
 
   @override
   Widget build(BuildContext context) {
@@ -725,7 +740,7 @@ class _Sidebar extends StatelessWidget {
       decoration: const BoxDecoration(gradient: AppGradients.sidebar),
       child: Column(
         children: [
-          _SidebarBrand(extended: extended),
+          _SidebarBrand(extended: extended, onToggleCollapse: onToggleCollapse),
           Container(height: 1, color: AppColors.sidebarHairline),
           Expanded(
             child: Scrollbar(
@@ -770,7 +785,7 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          const _SidebarFooter(),
+          _SidebarFooter(extended: extended),
         ],
       ),
     );
@@ -791,9 +806,10 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _SidebarBrand extends StatelessWidget {
-  const _SidebarBrand({required this.extended});
+  const _SidebarBrand({required this.extended, this.onToggleCollapse});
 
   final bool extended;
+  final VoidCallback? onToggleCollapse;
 
   @override
   Widget build(BuildContext context) {
@@ -814,12 +830,16 @@ class _SidebarBrand extends StatelessWidget {
     );
     if (!extended) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Tooltip(message: 'KAYAN ERP', child: logo),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          onTap: onToggleCollapse,
+          child: Tooltip(message: onToggleCollapse != null ? 'توسيع القائمة الجانبية' : 'KAYAN ERP', child: logo),
+        ),
       );
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
       child: Row(
         children: [
           logo,
@@ -850,6 +870,12 @@ class _SidebarBrand extends StatelessWidget {
               ],
             ),
           ),
+          if (onToggleCollapse != null)
+            IconButton(
+              icon: const Icon(Icons.menu_open_rounded, size: 19, color: AppColors.onSidebarMuted),
+              tooltip: 'تصغير القائمة الجانبية',
+              onPressed: onToggleCollapse,
+            ),
         ],
       ),
     );
@@ -1088,7 +1114,9 @@ class _NavEntry extends StatelessWidget {
 }
 
 class _SidebarFooter extends ConsumerWidget {
-  const _SidebarFooter();
+  const _SidebarFooter({this.extended = true});
+
+  final bool extended;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1098,6 +1126,68 @@ class _SidebarFooter extends ConsumerWidget {
     final initials = _initials(user.fullName, user.username);
     final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
+
+    final avatar = Container(
+      width: 44,
+      height: 44,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: const Color(0xFFF59E0B).withValues(alpha: 0.7),
+          width: 2.0,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: photo == null
+          ? Text(
+              initials,
+              style: const TextStyle(
+                color: AppColors.onSidebar,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
+            )
+          : ClipOval(
+              child: Image.memory(
+                photo,
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Text(
+                  initials,
+                  style: const TextStyle(
+                    color: AppColors.onSidebar,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+    );
+
+    if (!extended) {
+      return Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.sidebarHairline)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        alignment: Alignment.center,
+        child: Tooltip(
+          message: '${user.fullName}\n${role.toLowerCase()}',
+          child: avatar,
+        ),
+      );
+    }
+
     return Container(
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: AppColors.sidebarHairline)),
@@ -1105,25 +1195,8 @@ class _SidebarFooter extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-            ),
-            child: photo == null ? Text(
-              initials,
-              style: const TextStyle(
-                color: AppColors.onSidebar,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ) : ClipOval(child:Image.memory(photo,width:30,height:30,fit:BoxFit.cover,
-              errorBuilder:(_, _, _) => Text(initials))),
-          ),
-          const SizedBox(width: 10),
+          avatar,
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1133,10 +1206,10 @@ class _SidebarFooter extends ConsumerWidget {
                   user.fullName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     color: AppColors.onSidebar,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
                   ),
                 ),
                 Text(
@@ -1145,7 +1218,7 @@ class _SidebarFooter extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.onSidebarMuted,
-                    fontSize: 10,
+                    fontSize: 10.5,
                   ),
                 ),
               ],
@@ -1302,18 +1375,33 @@ class _TopBar extends ConsumerWidget {
             final user = ref.watch(currentUserProvider);
             if (user == null) return const SizedBox.shrink();
             final bytes = ref.watch(userPhotoProvider((companyId: user.companyId, userId: user.id))).asData?.value;
+            final avatarRadius = compact ? 15.0 : 18.5;
             return Row(key: const ValueKey('topbar-current-user'), mainAxisSize: MainAxisSize.min, children: [
-              CircleAvatar(
-                key: ValueKey('topbar-photo-${user.id}'),
-                radius: 15,
-                foregroundImage: bytes == null ? null : MemoryImage(bytes),
-                onForegroundImageError: bytes == null ? null : (_, _) {},
-                child: const Icon(Icons.person_outline, size: 17),
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.6),
+                    width: 1.5,
+                  ),
+                ),
+                child: CircleAvatar(
+                  key: ValueKey('topbar-photo-${user.id}'),
+                  radius: avatarRadius,
+                  foregroundImage: bytes == null ? null : MemoryImage(bytes),
+                  onForegroundImageError: bytes == null ? null : (_, _) {},
+                  child: Icon(Icons.person_outline, size: compact ? 17 : 20),
+                ),
               ),
               const SizedBox(width: AppSpacing.xs),
               ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: isExtended ? 130 : 72),
-                child: Text(user.fullName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                constraints: BoxConstraints(maxWidth: isExtended ? 130 : (compact ? 58 : 72)),
+                child: Text(
+                  user.fullName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
               ),
             ]);
           }),

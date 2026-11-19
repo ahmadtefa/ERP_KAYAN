@@ -795,6 +795,21 @@ function Add-LicenceSettings([hashtable]$Values) {
       Copy-Item -LiteralPath $source -Destination $target
     }
     Set-PrivateAcl $target @('BUILTIN\Administrators', $serviceAccount)
+    $nextSource = Join-Path $PSScriptRoot 'public-key-next.pem'
+    $nextTarget = Join-Path $licenceDirectory 'public-key-next.pem'
+    $ringMarkerSource = Join-Path $PSScriptRoot 'keyring.required'
+    $ringMarkerTarget = Join-Path $licenceDirectory 'keyring.required'
+    if (Test-Path -LiteralPath $ringMarkerSource -PathType Leaf) {
+      if (-not (Test-Path -LiteralPath $nextSource -PathType Leaf)) { throw 'The transition verification key is missing from Setup.' }
+      if (Test-Path -LiteralPath $nextTarget -PathType Leaf) {
+        if ((Get-KayanFileSha256 $nextSource) -ne (Get-KayanFileSha256 $nextTarget)) { throw 'The installed transition key differs from Setup.' }
+      } else {
+        Copy-Item -LiteralPath $nextSource -Destination $nextTarget
+      }
+      Set-PrivateAcl $nextTarget @('BUILTIN\Administrators', $serviceAccount)
+      if (-not (Test-Path -LiteralPath $ringMarkerTarget -PathType Leaf)) { Copy-Item -LiteralPath $ringMarkerSource -Destination $ringMarkerTarget }
+      Set-PrivateAcl $ringMarkerTarget @('BUILTIN\Administrators', $serviceAccount)
+    }
     if (-not (Test-Path -LiteralPath $enforcementMarker)) {
       Set-Content -LiteralPath $enforcementMarker -Value ('KAYAN ERP enforces offline licences on this installation since ' + (Get-Date).ToString('u')) -Encoding ASCII
     }

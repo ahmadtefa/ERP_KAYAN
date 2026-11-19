@@ -226,6 +226,7 @@ export function harness(
   let now = new Date(options.clockIso ?? '2026-05-01T09:00:00.000Z');
   const db = new FakeDb(() => now);
   const service = new LicensingService(db as any, {} as any, {
+    installedDirectory: null,
     directory: dir,
     publicKeyText: options.publicKeyText ?? PUBLIC_PEM,
     enforcement: options.enforcement ?? 'enforce',

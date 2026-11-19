@@ -223,15 +223,6 @@ class AppErrorMessageResolver {
     final stripped = _stripLinePrefix(text);
     final body = stripped.body;
 
-    // The same reviewed business patterns used for Arabic translations also
-    // identify safe English API reasons. Keep those reasons visible even when
-    // they came from an untrusted HTTP response; technical signatures still
-    // take priority over every pattern.
-    if (!isArabic && !_looksTechnical(body) && _looksLikeSentence(body) &&
-        _patterns.any((rule) => rule.pattern.hasMatch(body))) {
-      return _business(body, statusCode: statusCode, preferred: preferred);
-    }
-
     // In the Arabic interface a known English rule is reworded; in the
     // English one the sentence the server wrote is already the right
     // language, and a translation would only get in the way.

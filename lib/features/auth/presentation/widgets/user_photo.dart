@@ -88,8 +88,29 @@ class _UserPhotoCardState extends ConsumerState<UserPhotoCard> {
     final bytes = photo.asData?.value;
     return Card(child: Padding(padding:const EdgeInsets.all(16),child:Wrap(spacing:16,runSpacing:8,
       crossAxisAlignment:WrapCrossAlignment.center,children:[
-        CircleAvatar(radius:28,child:bytes == null ? const Icon(Icons.person_outline) : ClipOval(
-          child:Image.memory(bytes,width:56,height:56,fit:BoxFit.cover,errorBuilder:(_, _, _) => const Icon(Icons.person_outline)))),
+        Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.6),
+              width: 2.5,
+            ),
+          ),
+          child: CircleAvatar(
+            radius: 38,
+            child: bytes == null
+                ? const Icon(Icons.person_outline, size: 38)
+                : ClipOval(
+                    child: Image.memory(
+                      bytes,
+                      width: 76,
+                      height: 76,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(Icons.person_outline, size: 38),
+                    ),
+                  ),
+          ),
+        ),
         Text(_label('صورة المستخدم','User photo')),
         OutlinedButton.icon(key:const Key('user-photo-upload'),onPressed:_busy ? null : () => _upload(scope),
           icon:const Icon(Icons.photo_camera_outlined),label:Text(_label('اختيار صورة','Choose photo'))),
