@@ -309,14 +309,26 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-          echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
+          echo "Verifying a fresh complete backup restores into an ISOLATED database with identical data..."
+          # A complete backup, not the legacy dump-only endpoint: that one is
+          # closed on purpose, because a bare pg_dump cannot carry the uploaded
+          # files and a restore of it would leave them orphaned. The archive is
+          # taken by the program, downloaded whole, and its dump handed to
+          # pg_restore -- so this step proves the same bytes a customer would
+          # get back actually rebuild the database.
           export PGPASSWORD=ci
           LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
           TOKEN=$(node -e 'console.log(JSON.parse(process.argv[1]).accessToken)' "$LOGIN_JSON")
-          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/full -H "Authorization: Bearer $TOKEN" > /tmp/kayan-full.json
-          DUMP=$(ls -t backups/*.dump | head -n 1)
-          if [ -z "$DUMP" ] || [ ! -s "$DUMP" ]; then echo "No dump file was produced."; ls -la backups || true; exit 1; fi
-          echo "Restoring $DUMP into erp_kayan_restore_check..."
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/complete -H "Authorization: Bearer $TOKEN" > /tmp/kayan-complete.json
+          ARCHIVE=$(node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-complete.json","utf8")); process.stdout.write(r.file?.name ?? "")')
+          if [ -z "$ARCHIVE" ]; then echo "No complete archive was produced:"; head -c 2000 /tmp/kayan-complete.json; exit 1; fi
+          echo "Downloading $ARCHIVE"
+          curl -fsS "http://127.0.0.1:3000/api/v1/backup/complete/$ARCHIVE/download" -H "Authorization: Bearer $TOKEN" -o /tmp/kayan-complete.kayanbackup
+          rm -rf /tmp/kayan-archive && mkdir -p /tmp/kayan-archive
+          tar -xf /tmp/kayan-complete.kayanbackup -C /tmp/kayan-archive database/database.dump
+          DUMP=/tmp/kayan-archive/database/database.dump
+          if [ ! -s "$DUMP" ]; then echo "The archive carried no database dump."; tar -tvf /tmp/kayan-complete.kayanbackup; exit 1; fi
+          echo "Restoring the archive's dump ($(stat -c%s "$DUMP") bytes) into erp_kayan_restore_check..."
           psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_restore_check' -c 'CREATE DATABASE erp_kayan_restore_check'
           if ! pg_restore -h 127.0.0.1 -U ci -d erp_kayan_restore_check --no-owner "$DUMP" > /tmp/pg_restore.log 2>&1; then
             cat /tmp/pg_restore.log
