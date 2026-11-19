@@ -31,6 +31,12 @@ export class CreateUserDto {
   @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
   @MaxLength(120, { each: true })
   extraPermissions?: string[];
+  /// Permissions explicitly withheld from this one person. A deny beats every
+  /// role, so this is the only way to stop a finance role posting for one
+  /// clerk without forking the role.
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  deniedPermissions?: string[];
 }
 
 export class UpdateUserDto {
@@ -53,6 +59,28 @@ export class UpdateUserDto {
   @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
   @MaxLength(120, { each: true })
   extraPermissions?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  expectedDeniedPermissions?: string[];
+  /// Replaces the denied set. Omit to leave it alone; send [] to clear it.
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  deniedPermissions?: string[];
+}
+
+/// What the user form asks before saving: "if I tick these, what will the
+/// person actually be able to do?". Nothing is written.
+export class PreviewUserPermissionsDto {
+  @IsOptional() @IsUUID('4')
+  userId?: string;
+  @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
+  roleIds?: string[];
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  extraPermissions?: string[];
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  deniedPermissions?: string[];
 }
 
 export class ChangePasswordDto {

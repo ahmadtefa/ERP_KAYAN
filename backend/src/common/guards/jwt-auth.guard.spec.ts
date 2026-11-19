@@ -119,6 +119,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
                 // The code as well as the permissions: the notification centre
                 // addresses an alert to a role, not to a permission.
                 code: true,
+                isActive: true,
                 rolePermissions: {
                   select: { permission: { select: { code: true } } },
                 },
@@ -153,7 +154,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
           },
         },
         userPermissions: {
-          select: { permission: { select: { code: true } } },
+          select: { isDenied: true, permission: { select: { code: true } } },
         },
       },
     });
@@ -204,9 +205,9 @@ describe('JwtAuthGuard account status and live authorization', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.user).toMatchObject({
       permissions: [
+        'cash.vouchers.create',
         'inventory.items.read',
         'reports.read',
-        'cash.vouchers.create',
       ],
     });
   });

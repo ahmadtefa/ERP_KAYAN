@@ -7,6 +7,7 @@ import { AuditLogsController } from './audit-logs.controller';
 import { AuditLogsService } from './audit-logs.service';
 import { ResetController } from './reset.controller';
 import { ResetService } from './reset.service';
+import { RoleCatalogueBootstrap } from './role-catalogue.bootstrap';
 import { RolesController } from './roles.controller';
 import { RolesService } from './roles.service';
 import { UsersController } from './users.controller';
@@ -28,7 +29,8 @@ import { UsersService } from './users.service';
     RolesService,
     AuditLogsService,
     ResetService,
+    RoleCatalogueBootstrap,
   ],
-  exports: [UsersService, RolesService, ResetService],
+  exports: [UsersService, RolesService, ResetService, RoleCatalogueBootstrap],
 })
 export class AdminModule {}

@@ -55,7 +55,7 @@ describe('role permission replacement safety', () => {
   });
   it('controller forwards the expected set without weakening the permission gate', async () => {
     const service={setPermissions:jest.fn().mockResolvedValue({})};
-    const controller=new RolesController(service as any);
+    const controller=new RolesController(service as any,{ensureAllCompanies:jest.fn()} as any);
     const actor={companyId:'company-id',userId:'actor',permissions:['admin.roles.manage'],isSuperAdmin:false};
     await controller.setPermissions(actor as any,'role-id',{permissions:['sales.read'],expectedPermissions:['sales.write']});
     expect(service.setPermissions).toHaveBeenCalledWith('company-id','actor','role-id',['sales.read'],['admin.roles.manage'],false,['sales.write']);

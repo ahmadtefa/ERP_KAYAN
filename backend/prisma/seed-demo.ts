@@ -39,6 +39,9 @@ import {
 import * as argon2 from 'argon2';
 import { deflateSync } from 'node:zlib';
 
+import { PERMISSIONS } from './permissions';
+import { seededRoles } from './role-catalogue';
+
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
@@ -389,62 +392,38 @@ async function main(): Promise<void> {
 
   // ── who works here ────────────────────────────────────────────────────
   const permissions = await prisma.permission.findMany();
-  const adminRole = await prisma.role.create({
-    data: {
-      companyId: company.id,
-      code: 'ADMIN',
-      nameEn: 'Administrator',
-      nameAr: 'مدير النظام',
-      isSystem: true,
-    },
-  });
-  const accountantRole = await prisma.role.create({
-    data: {
-      companyId: company.id,
-      code: 'ACCOUNTANT',
-      nameEn: 'Accountant',
-      nameAr: 'محاسب',
-      isSystem: true,
-    },
-  });
-  const salesRole = await prisma.role.create({
-    data: {
-      companyId: company.id,
-      code: 'SALES',
-      nameEn: 'Sales clerk',
-      nameAr: 'مندوب مبيعات',
-      isSystem: false,
-    },
-  });
-
-  for (const permission of permissions) {
-    await prisma.rolePermission.create({
-      data: { roleId: adminRole.id, permissionId: permission.id },
+  const permissionIdByCode = new Map(permissions.map((row) => [row.code, row.id]));
+  // The demo company gets the same roles a real company gets, from the one
+  // catalogue, so a demo never shows a permission set the product cannot have.
+  const catalogueRoleIds = new Map<string, string>();
+  for (const definition of seededRoles(PERMISSIONS.map(([code]) => code))) {
+    const role = await prisma.role.create({
+      data: {
+        companyId: company.id,
+        code: definition.code,
+        nameEn: definition.nameEn,
+        nameAr: definition.nameAr,
+        descriptionEn: definition.descriptionEn,
+        descriptionAr: definition.descriptionAr,
+        category: definition.category,
+        isSystem: true,
+      },
     });
+    catalogueRoleIds.set(definition.code, role.id);
+    const ids = definition.permissions
+      .map((code) => permissionIdByCode.get(code))
+      .filter((id): id is string => Boolean(id));
+    if (ids.length) {
+      await prisma.rolePermission.createMany({
+        data: ids.map((permissionId) => ({ roleId: role.id, permissionId })),
+      });
+    }
   }
-  const bookkeeping = ['accounting', 'parties', 'inventory', 'reports'];
-  for (const permission of permissions.filter(
-    (p) =>
-      bookkeeping.includes(p.module) ||
-      p.code === 'sales.invoices.read' ||
-      p.code === 'purchases.invoices.read',
-  )) {
-    await prisma.rolePermission.create({
-      data: { roleId: accountantRole.id, permissionId: permission.id },
-    });
-  }
-  for (const permission of permissions.filter(
-    (p) =>
-      p.code === 'sales.invoices.read' ||
-      p.code === 'sales.invoices.create' ||
-      p.code === 'parties.customers.read' ||
-      p.code === 'inventory.items.read' ||
-      p.code === 'inventory.stock.read',
-  )) {
-    await prisma.rolePermission.create({
-      data: { roleId: salesRole.id, permissionId: permission.id },
-    });
-  }
+  const roleIdOf = (code: string): string => {
+    const id = catalogueRoleIds.get(code);
+    if (!id) throw new Error(`The ${code} role was not seeded`);
+    return id;
+  };
 
   // The demo password is published with the file on purpose: it is a demo,
   // the data is invented, and the first thing to do with a real
@@ -480,9 +459,9 @@ async function main(): Promise<void> {
   });
   await prisma.userRole.createMany({
     data: [
-      { companyId: company.id, userId: admin.id, roleId: adminRole.id },
-      { companyId: company.id, userId: accountant.id, roleId: accountantRole.id },
-      { companyId: company.id, userId: sales.id, roleId: salesRole.id },
+      { companyId: company.id, userId: admin.id, roleId: roleIdOf('ADMIN') },
+      { companyId: company.id, userId: accountant.id, roleId: roleIdOf('ACCOUNTANT') },
+      { companyId: company.id, userId: sales.id, roleId: roleIdOf('SALES_CLERK') },
     ],
   });
   await prisma.userBranch.createMany({

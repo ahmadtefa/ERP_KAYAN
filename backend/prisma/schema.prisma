@@ -226,6 +226,14 @@ model Role {
   nameEn    String
   nameAr    String
   isSystem  Boolean @default(false)
+  /// What the role is for, in the language the administrator reads.
+  descriptionEn String?
+  descriptionAr String?
+  /// MANAGEMENT | FINANCE | SALES | PURCHASING | INVENTORY | CASH | AUDIT | CUSTOM.
+  /// Kept as text so an existing database upgrades without an enum migration.
+  category      String  @default("CUSTOM")
+  /// A disabled role grants nothing while keeping its holders and its history.
+  isActive      Boolean @default(true)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -255,6 +263,11 @@ model Permission {
 model UserPermission {
   userId       String @db.Uuid
   permissionId String @db.Uuid
+  /// An explicit deny that beats every role: deny wins over allow.
+  isDenied     Boolean  @default(false)
+  /// Why this person was given or refused this permission.
+  reason       String?
+  updatedAt    DateTime @default(now()) @updatedAt
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)

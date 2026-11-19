@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
+import { resolveEffectivePermissions } from '../../common/rbac/effective-permissions';
 import { AuditService } from '../../common/audit/audit.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -121,23 +122,15 @@ export class AuthService {
     }
 
     // A user may only receive grants assigned in their own company. Shared
-    // system roles are allowed, but deleted or cross-company roles are ignored.
-    const currentUserRoles = user.userRoles.filter(
-      (ur) =>
-        ur.companyId === user.companyId &&
-        ur.role.deletedAt === null &&
-        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    // system roles are allowed, but deleted, disabled and cross-company roles
+    // are ignored, and a per-user deny removes what a role would have given.
+    const effective = resolveEffectivePermissions(
+      user.userRoles,
+      user.userPermissions,
+      user.companyId,
     );
-    const permissions = [
-      ...new Set([
-        ...currentUserRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-        // Grants made to this one person on top of their roles.
-        ...user.userPermissions.map((grant) => grant.permission.code),
-      ]),
-    ];
-    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
+    const permissions = effective.permissions;
+    const roles = effective.roles;
 
     const branches = await this.prisma.userBranch.findMany({
       where: {
@@ -250,21 +243,13 @@ export class AuthService {
     if (rotation.count !== 1) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
-    const currentUserRoles = user.userRoles.filter(
-      (ur) =>
-        ur.companyId === user.companyId &&
-        ur.role.deletedAt === null &&
-        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    const effective = resolveEffectivePermissions(
+      user.userRoles,
+      user.userPermissions,
+      user.companyId,
     );
-    const permissions = [
-      ...new Set([
-        ...currentUserRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-        ...user.userPermissions.map((grant) => grant.permission.code),
-      ]),
-    ];
-    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
+    const permissions = effective.permissions;
+    const roles = effective.roles;
     const branchId =
       user.branches
         .filter(

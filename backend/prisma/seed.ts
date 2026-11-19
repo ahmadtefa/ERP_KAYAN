@@ -17,6 +17,7 @@ import { AccountType, PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { PERMISSIONS } from './permissions';
+import { seededRoles } from './role-catalogue';
 
 // The client runs on the plain `pg` driver (engine-less Prisma runtime), so
 // the seed opens its connection the same way the server does.
@@ -210,72 +211,46 @@ async function main(): Promise<void> {
     });
   }
 
-  const adminRole = await prisma.role.upsert({
-    where: { companyId_code: { companyId: company.id, code: 'ADMIN' } },
-    update: {},
-    create: {
-      companyId: company.id,
-      code: 'ADMIN',
-      nameEn: 'Administrator',
-      nameAr: 'مدير النظام',
-      isSystem: true,
-    },
-  });
-
-  const accountantRole = await prisma.role.upsert({
-    where: { companyId_code: { companyId: company.id, code: 'ACCOUNTANT' } },
-    update: {},
-    create: {
-      companyId: company.id,
-      code: 'ACCOUNTANT',
-      nameEn: 'Accountant',
-      nameAr: 'محاسب',
-      isSystem: true,
-    },
-  });
-
-  const all = await prisma.permission.findMany();
-  for (const p of all) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: { roleId: adminRole.id, permissionId: p.id },
+  // Every role the program ships with, from the one list the roles screen and
+  // the start-up bootstrap also read. ADMIN and ACCOUNTANT keep their codes so
+  // that an upgrade never rewrites an assignment or a session.
+  const permissionRows = await prisma.permission.findMany();
+  const permissionIdByCode = new Map(permissionRows.map((row) => [row.code, row.id]));
+  let adminRoleId: string | null = null;
+  for (const definition of seededRoles(PERMISSIONS.map(([code]) => code))) {
+    const role = await prisma.role.upsert({
+      where: { companyId_code: { companyId: company.id, code: definition.code } },
+      update: {
+        nameEn: definition.nameEn,
+        nameAr: definition.nameAr,
+        descriptionEn: definition.descriptionEn,
+        descriptionAr: definition.descriptionAr,
+        category: definition.category,
       },
-      update: {},
-      create: { roleId: adminRole.id, permissionId: p.id },
-    });
-  }
-  // REQUIRES BUSINESS DECISION: the matrix below is a starting point, not a
-  // company rule. It is editable at any time from the roles screen, where the
-  // owner decides who may do what.
-  //
-  // The accountant keeps the books: the ledger, the parties, the stock, the
-  // cash and bank accounts, and the reports. Sales and purchase invoices are
-  // added read-only, because reconciling receivables and payables needs to see
-  // them — raising and posting invoices belongs to whoever runs sales and
-  // purchasing.
-  //
-  // Cash belongs here because a receipt or a payment is a bookkeeping entry:
-  // without it an accountant signed in with the seeded role cannot open the
-  // cash screen at all, which is what made those screens look broken.
-  const accountantModules = [
-    'accounting',
-    'parties',
-    'inventory',
-    'cash',
-    'reports',
-  ];
-  const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
-  for (const p of all.filter(
-    (p) => accountantModules.includes(p.module) || accountantReadOnly.includes(p.code),
-  )) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: { roleId: accountantRole.id, permissionId: p.id },
+      create: {
+        companyId: company.id,
+        code: definition.code,
+        nameEn: definition.nameEn,
+        nameAr: definition.nameAr,
+        descriptionEn: definition.descriptionEn,
+        descriptionAr: definition.descriptionAr,
+        category: definition.category,
+        isSystem: true,
       },
-      update: {},
-      create: { roleId: accountantRole.id, permissionId: p.id },
     });
+    if (definition.code === 'ADMIN') adminRoleId = role.id;
+    for (const code of definition.permissions) {
+      const permissionId = permissionIdByCode.get(code);
+      if (!permissionId) continue;
+      await prisma.rolePermission.upsert({
+        where: { roleId_permissionId: { roleId: role.id, permissionId } },
+        update: {},
+        create: { roleId: role.id, permissionId },
+      });
+    }
   }
+  if (!adminRoleId) throw new Error('The ADMIN role was not seeded');
+  const adminRole = { id: adminRoleId };
 
   // Who the administrator is, and with what password.
   //
