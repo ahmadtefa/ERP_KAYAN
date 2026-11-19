@@ -240,7 +240,9 @@ async function main() {
     'the restore finishes',
     restored.status === 201 && restored.data?.restored === true,
     `${restored.status} ${
-      restored.data?.restored ? `safety ${restored.data?.safetyBackup}` : String(restored.data?.detail ?? '').slice(0, 160)
+      restored.data?.restored
+        ? `safety ${restored.data?.safetyBackup}`
+        : String(restored.data?.detail ?? JSON.stringify(restored.data ?? {})).slice(0, 700)
     }`,
   );
   check(
