@@ -199,6 +199,22 @@ jobs:
           PGPASSWORD: ci
         run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
 
+      # Multi-role access control arrived as an additive migration and a
+      # start-up pass that adds the roles an older installation is missing.
+      # The check that matters is that nothing else moved: users keep their
+      # password hash, their photo, their branch and their assignments, a
+      # legacy grant stays a grant, and a role a company had already tuned is
+      # not rewritten. It builds a database at the schema before the migration,
+      # fills it with legacy rows, applies the migration and then runs the
+      # catalogue pass twice.
+      - name: Prove the multi-role upgrade on a pre-upgrade database
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: ci
+          PGPASSWORD: ci
+        run: python ../scripts/ci-diagnose.py node scripts/verify-rbac-upgrade.mjs
+
       # The release guard decides whether a Windows build may overwrite a
       # published download; a wrong answer there is not recoverable.
       - name: Prove the release guard refuses a published release
