@@ -18,6 +18,51 @@ import '../widgets/full_backup_section.dart';
 /// goes through a preview of exactly what is in the file and what would be
 /// replaced, and the button that does it stays disabled until that preview has
 /// been seen.
+/// A numbered heading that makes the two halves of this screen impossible to
+/// confuse: the company JSON backup, and the system backup/restore.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.number,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String number;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 14,
+          backgroundColor: theme.colorScheme.primaryContainer,
+          child: Text(
+            number,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 2),
+              Text(subtitle, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class BackupScreen extends ConsumerStatefulWidget {
   const BackupScreen({super.key});
 
@@ -60,9 +105,17 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // The disaster-recovery half: the whole PostgreSQL database.
-          const FullBackupSection(),
-          const SizedBox(height: 16),
+          // Section one: one company's books, as a JSON file. This is the
+          // backup an accountant takes, and the only one that cannot touch
+          // another company.
+          _SectionHeader(
+            number: '1',
+            title: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'القسم الأول: نسخ واستعادة بيانات الشركة (JSON)'
+                : 'Section one: back up and restore company data (JSON)',
+            subtitle: l10n.takeBackupHint,
+          ),
+          const SizedBox(height: 8),
           _TakingCopy(summary: summary, onDownload: _download),
           const SizedBox(height: 16),
           if (showDemo) ...[
@@ -79,6 +132,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
             onInspect: _inspect,
             onRestore: _restore,
           ),
+          const SizedBox(height: 24),
+          // Section two: the whole installation. It carries its own heading
+          // and warning, because it is the one operation that can replace
+          // every company at once.
+          const FullBackupSection(),
         ],
       ),
     );
@@ -97,7 +155,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Future<void> _choose() async {
     PickedFile? picked;
     try {
-      picked = await pickFile(extensions: ['.json', '.dump']);
+      picked = await pickFile(extensions: ['.json']);
     } catch (error) {
       if (!mounted) return;
       setState(() => _failure = describeApiError(error));
@@ -116,7 +174,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         _restored = null;
         _failure =
             'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف JSON خاص بالشركة.\n'
-            'لاستعادة ملفات .dump بالكامل، يرجى استخدام قسم "النسخ الاحتياطي الكامل لقاعدة البيانات" أعلاه.';
+            'لاستعادة ملفات .dump بالكامل، يرجى استخدام القسم الثاني "النسخ الاحتياطي الكامل للنظام" أدناه.';
       });
       return;
     }

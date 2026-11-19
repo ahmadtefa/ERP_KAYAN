@@ -328,6 +328,16 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          # Last of the destructive checks: a complete system backup is taken,
+          # read back, damaged on purpose, refused, then restored for real --
+          # database, files and licence state -- on the same server.
+          echo "Running the complete system backup and restore scenario: gate, archive, verification, damaged file, restore, status, re-login..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-system-backup.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after the system backup scenario failure"
+            tail -c 8000 /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
@@ -494,6 +504,49 @@ jobs:
           # and "passed"), so both shapes are looked for.
           summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
+
+  backup-restore-17:
+    name: Complete backup and restore on PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # PostgreSQL 17, server and client of the same version: a dump carries
+      # its writer's version, and rehearsing a 17 dump with a 16 pg_restore
+      # would fail for a reason that has nothing to do with this program.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17
+          /usr/lib/postgresql/17/bin/postgres --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_restore --version
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      # The harness creates its own cluster, applies the real migrations, seeds
+      # a fixture and then exercises: complete backup, verification, tampered
+      # archive refused, restore, safety backup, automatic rollback of a
+      # restore that dies half way, journal-driven recovery after a simulated
+      # power cut, one-restore-at-a-time, uploaded files, and the licence file
+      # being left untouched.
+      - name: Prove the complete backup and restore on PostgreSQL 17
+        run: python ../scripts/ci-diagnose.py npx ts-node --transpile-only scripts/verify-system-backup.ts --pgbin /usr/lib/postgresql/17/bin
 
   flutter:
     name: Flutter Web (analyze, test, build)
