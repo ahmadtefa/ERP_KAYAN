@@ -11,13 +11,20 @@ import {
   normalizeExpiryDays,
 } from '../../common/warehouse/batch-policy';
 import {
+  ADMIN_ALERT,
+  INVOICE_OVERDUE,
+  JOURNAL_PENDING_APPROVAL,
   NOTIFICATION_KINDS,
+  PAYABLE_DUE,
+  PAYABLE_OVERDUE,
+  STOCK_ABNORMAL,
   STOCK_ABOVE_MAXIMUM,
   STOCK_BELOW_MINIMUM,
   STOCK_EXPIRED,
   STOCK_EXPIRED_WRITE_OFF_PENDING,
   STOCK_EXPIRY_SOON,
   STOCK_OUT_OF_STOCK,
+  STOCK_VOUCHER_PENDING_APPROVAL,
   assertKnownKind,
   dedupeKey,
   notificationKind,
@@ -150,6 +157,24 @@ export class NotificationsService {
     const updated = await this.prisma.notification.update({
       where: { id: row.id },
       data: { status: 'READ', readAt: row.readAt ?? new Date() },
+    });
+    return this.toResponse(updated);
+  }
+
+  /// Marks a row as unread again.
+  ///
+  /// "I read it, I will deal with it later" is the most common thing a person
+  /// wants from an alert list, and it must not require a second alert. Only a
+  /// closed row is left alone: resurrecting an alert whose fact has stopped
+  /// being true would be inventing news.
+  async markUnread(user: NotificationUser, id: string) {
+    const row = await this.require(user, id);
+    if (row.status === 'CLOSED' || row.status === 'ARCHIVED') {
+      return this.toResponse(row);
+    }
+    const updated = await this.prisma.notification.update({
+      where: { id: row.id },
+      data: { status: 'OPEN', readAt: null },
     });
     return this.toResponse(updated);
   }
@@ -786,6 +811,379 @@ export class NotificationsService {
     }
 
     return { raised, closed, types: NOTIFICATION_KINDS.length };
+  }
+
+  // ────────────────────────────────────── the rest of the business, scanned
+
+  /// Walks the documents and the money every company has, and raises what a
+  /// person needs to act on: orders waiting for approval, invoices overdue,
+  /// supplier bills falling due, a shelf gone negative, and a change to who may
+  /// do what.
+  ///
+  /// Read-only, exactly like `scanStock`: it writes nothing except the
+  /// notification rows themselves, and every row it writes is deduped by
+  /// `(companyId, dedupeKey)`. Running it twice in a minute is a second reading
+  /// of the same facts, not a second alarm.
+  async scanBusiness(companyId: string, today: Date = new Date()) {
+    const settingRows = await this.prisma.notificationSetting.findMany({ where: { companyId } });
+    const settings = new Map<string, SettingRow>(
+      settingRows.map((row) => [String(row.type), row as unknown as SettingRow]),
+    );
+    const enabled = (type: string) => settings.get(type)?.isEnabled !== false;
+    const startOfDay = dayOnly(today);
+
+    let raised = 0;
+    const keep = new Map<string, Set<string>>();
+    const stillTrue = (type: string, dedupe: string) => {
+      const set = keep.get(type) ?? new Set<string>();
+      set.add(dedupe);
+      keep.set(type, set);
+    };
+    const evaluated = (...types: string[]) => {
+      for (const type of types) if (!keep.has(type)) keep.set(type, new Set<string>());
+    };
+
+    // ── orders waiting for approval ──────────────────────────────────────
+    evaluated(
+      STOCK_VOUCHER_PENDING_APPROVAL,
+      JOURNAL_PENDING_APPROVAL,
+      INVOICE_OVERDUE,
+      PAYABLE_DUE,
+      PAYABLE_OVERDUE,
+      STOCK_ABNORMAL,
+      ADMIN_ALERT,
+    );
+
+    if (enabled(STOCK_VOUCHER_PENDING_APPROVAL)) {
+      const [salesOrders, purchaseOrders] = await Promise.all([
+        this.prisma.salesOrder.findMany({
+          where: { companyId, status: 'DRAFT', deletedAt: null, approvedAt: null },
+          select: {
+            id: true,
+            branchId: true,
+            orderNumber: true,
+            orderDate: true,
+            totalAmount: true,
+            customer: { select: { nameEn: true, nameAr: true } },
+          },
+          orderBy: { orderDate: 'asc' },
+          take: 200,
+        }),
+        this.prisma.purchaseOrder.findMany({
+          where: { companyId, status: 'DRAFT', deletedAt: null, approvedAt: null },
+          select: {
+            id: true,
+            branchId: true,
+            orderNumber: true,
+            orderDate: true,
+            totalAmount: true,
+            supplier: { select: { nameEn: true, nameAr: true } },
+          },
+          orderBy: { orderDate: 'asc' },
+          take: 200,
+        }),
+      ]);
+      for (const order of salesOrders) {
+        const dedupe = dedupeKey({ type: STOCK_VOUCHER_PENDING_APPROVAL, entityId: order.id });
+        stillTrue(STOCK_VOUCHER_PENDING_APPROVAL, dedupe);
+        const days = Math.max(0, Math.round((startOfDay.getTime() - dayOnly(order.orderDate).getTime()) / 86_400_000));
+        await this.raise({
+          companyId,
+          type: STOCK_VOUCHER_PENDING_APPROVAL,
+          branchId: order.branchId,
+          entityId: order.id,
+          entityRef: order.orderNumber,
+          actionPath: `/sales/orders?order=${order.id}`,
+          dueAt: order.orderDate,
+          titleEn: `Sales order ${order.orderNumber} is waiting for approval`,
+          titleAr: `أمر البيع ${order.orderNumber} في انتظار الاعتماد`,
+          bodyEn: `${order.customer?.nameEn ?? 'The customer'} — ${order.totalAmount} — waiting ${days} day(s).`,
+          bodyAr: `${order.customer?.nameAr ?? 'العميل'} — ${order.totalAmount} — منذ ${days} يوم.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+      for (const order of purchaseOrders) {
+        const dedupe = dedupeKey({ type: STOCK_VOUCHER_PENDING_APPROVAL, entityId: order.id });
+        stillTrue(STOCK_VOUCHER_PENDING_APPROVAL, dedupe);
+        await this.raise({
+          companyId,
+          type: STOCK_VOUCHER_PENDING_APPROVAL,
+          branchId: order.branchId,
+          entityId: order.id,
+          entityRef: order.orderNumber,
+          actionPath: `/purchases/orders?order=${order.id}`,
+          dueAt: order.orderDate,
+          titleEn: `Purchase order ${order.orderNumber} is waiting for approval`,
+          titleAr: `أمر الشراء ${order.orderNumber} في انتظار الاعتماد`,
+          bodyEn: `${order.supplier?.nameEn ?? 'The supplier'} — ${order.totalAmount}.`,
+          bodyAr: `${order.supplier?.nameAr ?? 'المورد'} — ${order.totalAmount}.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── journal entries waiting for approval ─────────────────────────────
+    if (enabled(JOURNAL_PENDING_APPROVAL)) {
+      const entries = await this.prisma.journalEntry.findMany({
+        where: { companyId, status: 'PENDING_APPROVAL' },
+        select: {
+          id: true,
+          branchId: true,
+          entryNumber: true,
+          entryDate: true,
+          description: true,
+          totalDebit: true,
+        },
+        orderBy: { entryDate: 'asc' },
+        take: 200,
+      });
+      for (const entry of entries) {
+        const dedupe = dedupeKey({ type: JOURNAL_PENDING_APPROVAL, entityId: entry.id });
+        stillTrue(JOURNAL_PENDING_APPROVAL, dedupe);
+        await this.raise({
+          companyId,
+          type: JOURNAL_PENDING_APPROVAL,
+          branchId: entry.branchId,
+          entityId: entry.id,
+          entityRef: entry.entryNumber,
+          actionPath: `/accounting/journal-entries?entry=${entry.id}`,
+          dueAt: entry.entryDate,
+          titleEn: `Journal entry ${entry.entryNumber} is waiting for approval`,
+          titleAr: `القيد ${entry.entryNumber} في انتظار الاعتماد`,
+          bodyEn: entry.description ?? `${entry.totalDebit} waiting to be approved.`,
+          bodyAr: entry.description ?? `${entry.totalDebit} في انتظار الاعتماد.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── money owed to us ─────────────────────────────────────────────────
+    if (enabled(INVOICE_OVERDUE)) {
+      const invoices = await this.prisma.salesInvoice.findMany({
+        where: {
+          companyId,
+          status: 'POSTED',
+          documentType: 'INVOICE',
+          dueDate: { lt: startOfDay },
+        },
+        select: {
+          id: true,
+          branchId: true,
+          invoiceNumber: true,
+          dueDate: true,
+          totalAmount: true,
+          paidAmount: true,
+          customer: { select: { nameEn: true, nameAr: true } },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 200,
+      });
+      for (const invoice of invoices) {
+        // A fully paid invoice that kept an old due date is not overdue, and
+        // telling a collection clerk it is would teach them to ignore the list.
+        const outstanding = Number(invoice.totalAmount) - Number(invoice.paidAmount);
+        if (outstanding <= 0) continue;
+        // The band, not the exact day, is in the key: an invoice that is three
+        // days late stays one row as it ages, and becomes a louder one when it
+        // crosses into another bucket instead of shouting daily.
+        const days = Math.max(0, Math.round((startOfDay.getTime() - dayOnly(invoice.dueDate!).getTime()) / 86_400_000));
+        const dedupe = dedupeKey({
+          type: INVOICE_OVERDUE,
+          entityId: invoice.id,
+          suffix: days > 30 ? '30+' : `${Math.ceil(days / 7)}w`,
+        });
+        stillTrue(INVOICE_OVERDUE, dedupe);
+        await this.raise({
+          companyId,
+          type: INVOICE_OVERDUE,
+          branchId: invoice.branchId,
+          entityId: invoice.id,
+          entityRef: invoice.invoiceNumber,
+          actionPath: `/sales/invoices?invoice=${invoice.id}`,
+          dueAt: invoice.dueDate,
+          titleEn: `Invoice ${invoice.invoiceNumber} is ${days} day(s) overdue`,
+          titleAr: `الفاتورة ${invoice.invoiceNumber} متأخرة ${days} يوم`,
+          bodyEn: `${invoice.customer?.nameEn ?? 'The customer'} still owes ${outstanding}.`,
+          bodyAr: `${invoice.customer?.nameAr ?? 'العميل'} مدين بمبلغ ${outstanding}.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── money we owe ─────────────────────────────────────────────────────
+    if (enabled(PAYABLE_DUE) || enabled(PAYABLE_OVERDUE)) {
+      const horizon = new Date(startOfDay.getTime() + 7 * 86_400_000);
+      const bills = await this.prisma.purchaseInvoice.findMany({
+        where: {
+          companyId,
+          status: 'POSTED',
+          documentType: 'INVOICE',
+          dueDate: { not: null, lte: horizon },
+        },
+        select: {
+          id: true,
+          branchId: true,
+          invoiceNumber: true,
+          dueDate: true,
+          totalAmount: true,
+          paidAmount: true,
+          supplier: { select: { nameEn: true, nameAr: true } },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 200,
+      });
+      for (const bill of bills) {
+        const outstanding = Number(bill.totalAmount) - Number(bill.paidAmount);
+        if (outstanding <= 0) continue;
+        const days = Math.round((dayOnly(bill.dueDate!).getTime() - startOfDay.getTime()) / 86_400_000);
+        const type = days < 0 ? PAYABLE_OVERDUE : PAYABLE_DUE;
+        if (!enabled(type)) continue;
+        const dedupe = dedupeKey({ type, entityId: bill.id });
+        stillTrue(type, dedupe);
+        await this.raise({
+          companyId,
+          type,
+          branchId: bill.branchId,
+          entityId: bill.id,
+          entityRef: bill.invoiceNumber,
+          actionPath: `/purchases/invoices?invoice=${bill.id}`,
+          dueAt: bill.dueDate,
+          titleEn:
+            days < 0
+              ? `Supplier bill ${bill.invoiceNumber} is ${Math.abs(days)} day(s) overdue`
+              : `Supplier bill ${bill.invoiceNumber} is due in ${days} day(s)`,
+          titleAr:
+            days < 0
+              ? `فاتورة المورد ${bill.invoiceNumber} متأخرة ${Math.abs(days)} يوم`
+              : `فاتورة المورد ${bill.invoiceNumber} تستحق خلال ${days} يوم`,
+          bodyEn: `${bill.supplier?.nameEn ?? 'The supplier'} — ${outstanding} outstanding.`,
+          bodyAr: `${bill.supplier?.nameAr ?? 'المورد'} — ${outstanding} مستحق.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── a shelf in a state nobody meant to create ────────────────────────
+    if (enabled(STOCK_ABNORMAL)) {
+      const balances = await this.prisma.warehouseStockBalance.findMany({
+        where: {
+          companyId,
+          OR: [{ quantity: { lt: 0 } }, { value: { lt: 0 } }],
+        },
+        select: {
+          branchId: true,
+          warehouseId: true,
+          itemId: true,
+          quantity: true,
+          value: true,
+          item: { select: { code: true, nameEn: true, nameAr: true } },
+          warehouse: { select: { code: true, nameEn: true, nameAr: true } },
+        },
+        take: 500,
+      });
+      for (const balance of balances) {
+        const entityId = `${balance.warehouseId}:${balance.itemId}`;
+        const dedupe = dedupeKey({ type: STOCK_ABNORMAL, entityId });
+        stillTrue(STOCK_ABNORMAL, dedupe);
+        await this.raise({
+          companyId,
+          type: STOCK_ABNORMAL,
+          branchId: balance.branchId,
+          warehouseId: balance.warehouseId,
+          entityId: balance.warehouseId,
+          entityRef: balance.item.code,
+          actionPath: `/inventory/stock?warehouse=${balance.warehouseId}&item=${balance.itemId}`,
+          titleEn: `${balance.item.nameEn} has an impossible balance`,
+          titleAr: `${balance.item.nameAr} له رصيد غير منطقي`,
+          bodyEn: `Warehouse ${balance.warehouse.code}: quantity ${balance.quantity}, value ${balance.value}.`,
+          bodyAr: `المخزن ${balance.warehouse.code}: الكمية ${balance.quantity} والقيمة ${balance.value}.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── who may do what, and what changed underneath ─────────────────────
+    if (enabled(ADMIN_ALERT)) {
+      const since = new Date(today.getTime() - 24 * 3_600_000);
+      const changes = await this.prisma.auditLog.findMany({
+        where: {
+          companyId,
+          createdAt: { gte: since },
+          action: {
+            in: [
+              'role.create',
+              'role.update',
+              'role.remove',
+              'role.permissions_set',
+              'user.create',
+              'user.update',
+              'user.password',
+              'admin.backup.restore',
+              'admin.reset',
+            ],
+          },
+        },
+        select: {
+          id: true,
+          action: true,
+          entity: true,
+          entityId: true,
+          createdAt: true,
+          user: { select: { username: true, fullNameEn: true, fullNameAr: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
+      for (const change of changes) {
+        const dedupe = dedupeKey({ type: ADMIN_ALERT, entityId: change.id });
+        stillTrue(ADMIN_ALERT, dedupe);
+        await this.raise({
+          companyId,
+          type: ADMIN_ALERT,
+          entityType: 'AuditLog',
+          entityId: change.id,
+          entityRef: change.action,
+          actionPath: '/administration',
+          dueAt: change.createdAt,
+          titleEn: `Access change: ${change.action}`,
+          titleAr: `تغيير في الصلاحيات: ${change.action}`,
+          bodyEn: `${change.user?.fullNameEn ?? change.user?.username ?? 'The system'} on ${change.entity}.`,
+          bodyAr: `${change.user?.fullNameAr ?? change.user?.username ?? 'النظام'} على ${change.entity}.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // The same closing rule as the stock pass: a kind this pass evaluated and
+    // did not find is a fact that has stopped being true.
+    let closed = 0;
+    for (const [type, keys] of keep) {
+      const stale = await this.prisma.notification.findMany({
+        where: {
+          companyId,
+          type,
+          status: { in: ['OPEN', 'READ'] },
+          dedupeKey: { notIn: [...keys] },
+        },
+        select: { id: true },
+        take: 2000,
+      });
+      if (stale.length === 0) continue;
+      const result = await this.prisma.notification.updateMany({
+        where: { id: { in: stale.map((row) => row.id) } },
+        data: { status: 'CLOSED', archivedAt: new Date() },
+      });
+      closed += result.count;
+    }
+
+    return { raised, closed, types: keep.size };
   }
 
   /// The policy a lot's item carries, for callers that show a shelf.

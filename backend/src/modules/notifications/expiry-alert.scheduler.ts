@@ -69,7 +69,7 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => void this.tick(), TICK_MINUTES * 60 * 1000);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     this.logger.log(
-      `Expiry alerts are scanned every ${TICK_MINUTES} minutes, and once shortly after start-up.`,
+      `Alerts are scanned every ${TICK_MINUTES} minutes, and once shortly after start-up.`,
     );
   }
 
@@ -150,9 +150,16 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
       companies = rows.length;
       for (const company of rows) {
         try {
+          // Two passes, one per question: "is anything on a shelf about to go
+          // bad" and "is there anything waiting for a person". Either may fail
+          // on its own - a company with no orders table content is not a reason
+          // to lose the expiry alerts - but a failure of either is counted.
           const answer = await this.notifications.scanStock(company.id, now);
           raised += answer.raised;
           closed += answer.closed;
+          const business = await this.notifications.scanBusiness(company.id, now);
+          raised += business.raised;
+          closed += business.closed;
         } catch {
           // Deliberately no error text: a Prisma failure can carry a
           // connection string or a row value, and neither belongs in a log.

@@ -25,6 +25,20 @@ export const STOCK_BELOW_MINIMUM = 'STOCK_BELOW_MINIMUM';
 export const STOCK_OUT_OF_STOCK = 'STOCK_OUT_OF_STOCK';
 export const STOCK_ABOVE_MAXIMUM = 'STOCK_ABOVE_MAXIMUM';
 export const STOCK_EXPIRED_WRITE_OFF_PENDING = 'STOCK_EXPIRED_WRITE_OFF_PENDING';
+/// A sales or purchase order that is waiting for somebody to approve it.
+export const STOCK_VOUCHER_PENDING_APPROVAL = 'STOCK_VOUCHER_PENDING_APPROVAL';
+/// A journal entry waiting for approval.
+export const JOURNAL_PENDING_APPROVAL = 'JOURNAL_PENDING_APPROVAL';
+/// A posted customer invoice whose due date has passed and is not fully paid.
+export const INVOICE_OVERDUE = 'INVOICE_OVERDUE';
+/// A supplier invoice falling due soon, and one that has fallen due.
+export const PAYABLE_DUE = 'PAYABLE_DUE';
+export const PAYABLE_OVERDUE = 'PAYABLE_OVERDUE';
+/// A shelf whose quantity or value has gone negative, or a movement the ledger
+/// cannot explain: the state a person should look at before it compounds.
+export const STOCK_ABNORMAL = 'STOCK_ABNORMAL';
+/// A change to who may do what, and operations that alter the company itself.
+export const ADMIN_ALERT = 'ADMIN_ALERT';
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   {
@@ -75,7 +89,78 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     entityType: 'ItemBatch',
     repeatAfterHours: 24,
   },
+  // ── documents waiting for a person, not a shelf ────────────────────────
+  {
+    type: STOCK_VOUCHER_PENDING_APPROVAL,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.stock.approve',
+    entityType: 'Order',
+    repeatAfterHours: 24,
+  },
+  {
+    type: JOURNAL_PENDING_APPROVAL,
+    module: 'accounting',
+    severity: 'WARNING',
+    permission: 'accounting.journal.approve',
+    entityType: 'JournalEntry',
+    repeatAfterHours: 24,
+  },
+  // ── money owed to us, and money we owe ─────────────────────────────────
+  {
+    type: INVOICE_OVERDUE,
+    module: 'sales',
+    severity: 'WARNING',
+    permission: 'sales.invoices.read',
+    entityType: 'SalesInvoice',
+    repeatAfterHours: 48,
+  },
+  {
+    type: PAYABLE_DUE,
+    module: 'purchases',
+    severity: 'INFO',
+    permission: 'purchases.invoices.read',
+    entityType: 'PurchaseInvoice',
+    repeatAfterHours: 72,
+  },
+  {
+    type: PAYABLE_OVERDUE,
+    module: 'purchases',
+    severity: 'WARNING',
+    permission: 'purchases.invoices.read',
+    entityType: 'PurchaseInvoice',
+    repeatAfterHours: 24,
+  },
+  // ── a state nobody meant to create ─────────────────────────────────────
+  {
+    type: STOCK_ABNORMAL,
+    module: 'inventory',
+    severity: 'CRITICAL',
+    permission: 'inventory.stock.read',
+    entityType: 'WarehouseStockBalance',
+    repeatAfterHours: 12,
+  },
+  // ── who may do what, and what changed underneath ───────────────────────
+  {
+    type: ADMIN_ALERT,
+    module: 'admin',
+    severity: 'WARNING',
+    permission: 'admin.audit.read',
+    entityType: 'AuditLog',
+    repeatAfterHours: 24,
+  },
 ];
+
+/// The kinds a company can switch off one by one on the settings screen.
+export const STOCK_KINDS = [
+  STOCK_EXPIRY_SOON,
+  STOCK_EXPIRED,
+  STOCK_BELOW_MINIMUM,
+  STOCK_OUT_OF_STOCK,
+  STOCK_ABOVE_MAXIMUM,
+  STOCK_EXPIRED_WRITE_OFF_PENDING,
+  STOCK_ABNORMAL,
+] as const;
 
 const BY_TYPE = new Map(NOTIFICATION_KINDS.map((kind) => [kind.type, kind]));
 
