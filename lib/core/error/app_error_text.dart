@@ -263,9 +263,16 @@ class AppErrorMessageResolver {
     //    written; in Arabic it is not, because an English sentence is no
     //    more readable than a generic Arabic one and it may still be a
     //    technical detail we did not recognise.
-    if (!isArabic &&
-        _looksLikeSentence(body) &&
-        (!untrusted || _exactArLower.containsKey(body.toLowerCase()))) {
+    //
+    //    A rule this file knows by name is not "unrecognised": the English
+    //    interface should read the server's own sentence, the same one an
+    //    Arabic reader sees reworded above. Matching only the exact-phrase
+    //    list left every parameterised rule ("Nothing to depreciate for
+    //    2024-01 — FA-M-1: already depreciated for 2024-01") falling through
+    //    to "The submitted data is not valid", which explains nothing.
+    final knownRule = _exactArLower.containsKey(body.toLowerCase()) ||
+        _patterns.any((rule) => rule.pattern.hasMatch(body));
+    if (!isArabic && _looksLikeSentence(body) && (knownRule || !untrusted)) {
       final reason = _reasonFor(statusCode, preferred);
       return AppErrorText(
         reason: reason,
