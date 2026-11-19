@@ -347,7 +347,9 @@ class _FormSheetState extends State<_FormSheet> {
               .firstOrNull;
           if (first != null) {
             final fieldContext = _fieldKeys[first.key]?.currentContext;
-            if (fieldContext != null) {
+            // The context belongs to a field that the await above may have
+            // taken off the screen; ask the context itself, not only the State.
+            if (fieldContext != null && fieldContext.mounted) {
               Scrollable.ensureVisible(fieldContext);
               _focusNodes[first.key]?.requestFocus();
             }
