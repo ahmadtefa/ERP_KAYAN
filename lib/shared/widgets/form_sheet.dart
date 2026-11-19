@@ -331,7 +331,10 @@ class _FormSheetState extends State<_FormSheet> {
       await widget.onSubmit!(result);
       if (mounted) Navigator.of(context).pop(result);
     } catch (error) {
-      if (mounted && error is! FormSubmissionCancelled) {
+      // The analyzer only accepts a plain mounted check before a State context
+      // is used across an await; a compound condition left this one flagged.
+      if (error is FormSubmissionCancelled) return;
+      if (mounted) {
         if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
           setState(() {
             _fieldErrors
