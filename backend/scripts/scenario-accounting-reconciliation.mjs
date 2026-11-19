@@ -1026,6 +1026,9 @@ async function main() {
   );
 
   // ── 12. a discounted sale in the new year (discount before tax) ────────
+  // The rate travels on the line, the way the invoice form sends it: a line
+  // that names no rate is treated as untaxed, so a caller that wants VAT must
+  // say so rather than inherit today's company setting.
   const sale2025 = await must('2025: sell 1 unit at 150 with a 10% document discount', '/sales/invoices', {
     method: 'POST',
     json: {
@@ -1034,7 +1037,7 @@ async function main() {
       customerId: customer.id,
       discountType: 'PERCENT',
       discountPercent: '10',
-      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150', taxRate: VAT }],
     },
   });
   if (sale2025) {
@@ -1212,7 +1215,7 @@ async function main() {
     json: {
       invoiceDate: '2025-02-01',
       customerId: customer.id,
-      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150', taxRate: VAT }],
     },
   });
   if (saleToReverse) {
@@ -1223,7 +1226,7 @@ async function main() {
     json: {
       invoiceDate: '2025-02-02',
       customerId: customer.id,
-      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150', taxRate: VAT }],
     },
   });
   if (raceSale) {
