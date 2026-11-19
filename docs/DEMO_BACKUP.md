@@ -1,12 +1,16 @@
 # The demo backup file
 
-> **Historical document — NOT current instructions (PR #70).** The full-dump
-> workflow/restore route described below is not available in the current
-> release candidate. Full Restore is blocked; a DB-only dump is not a complete
-> backup. Do not run the legacy builder or restore commands against a real
-> installation. The current repository also has a separate company JSON demo
-> download; JSON restore replaces company data and is not Full Restore. See
-> [current backup safety](BACKUP_RESTORE.md) and the dated release review.
+> **Rebuilt on the complete-backup format.** The dump-only workflow described
+> below no longer exists: a bare `pg_dump` file cannot carry the uploaded files,
+> so the endpoint that produced one is closed. `backend/scripts/build-demo-backup.mjs`
+> now builds a **complete archive** (`kayan-demo-backup-<date>.kayanbackup`) through
+> `POST /backup/complete`, has the program verify it, and puts the same bytes back
+> into a second disposable database through `POST /backup/complete/restore`.
+> That route restores only on a machine whose safety gate passes — see
+> [backup safety](BACKUP_RESTORE.md). The company JSON demo remains a separate,
+> narrower download. The sample contents further down are still an accurate
+> description of the invented company, and were checked again by the builder's
+> 23 checks (accounts, invoices, stock, balanced trial balance).
 
 
 The historical sample described below was an invented ERP KAYAN company.
@@ -16,10 +20,10 @@ screens, the lists, the reports and the exports have something real-looking to
 show, and so that a new installation can be tried without typing in a chart of
 accounts by hand.
 
-- **What it is:** one PostgreSQL Custom-format archive, `kayan-demo-backup-<date>.dump`
+- **What it is:** one complete archive, `kayan-demo-backup-<date>.kayanbackup` — a tar holding a PostgreSQL Custom-format dump, the uploaded files, a manifest and per-entry checksums
 - **Where it comes from:** the program's own *Take full backup* button — the
   same code path you use, not a copy of a folder and not a script
-- **How it goes in:** the program's own *Restore backup* screen
+- **How it goes in:** the program's own *Complete restore* screen (enabled when that machine's safeguards pass)
 - **Where to get it:** it is not in the repository. The **Demo backup file**
   workflow builds it on every push and attaches it to the run
 
