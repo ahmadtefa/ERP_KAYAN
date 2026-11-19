@@ -102,9 +102,18 @@ Finder _inMenu(String label) =>
 ///
 /// Text cannot be used to open a section: "المخزون" is both the inventory
 /// heading and the name of an item inside it, so a text finder matches two
-/// widgets and the tap is ambiguous. Scrolling first matters too - with a
-/// section open the list is taller than the window and the next heading may not
-/// have been built yet.
+/// widgets and the tap is ambiguous.
+///
+/// Scroll first, then *ensureVisible*. `scrollUntilVisible` stops as soon as
+/// its finder matches anything, and the menu is built with a 4000-pixel cache
+/// extent so that keyboard users can reach a module without dragging: every
+/// heading below the fold is already in the tree. The old helper therefore
+/// returned without dragging, `tap` aimed at a widget that was off screen, the
+/// hit test found nothing, and the section silently stayed closed — which is
+/// what made "opening a second section closes the first" fail while the first
+/// section was still open. `ensureVisible` scrolls the heading into the
+/// viewport, and the assertion below turns a miss into a named failure instead
+/// of a tap that does nothing.
 Future<void> _tapGroup(WidgetTester tester, String key) async {
   final heading = find.byKey(ValueKey(key));
   await tester.scrollUntilVisible(
@@ -114,6 +123,14 @@ Future<void> _tapGroup(WidgetTester tester, String key) async {
       of: _menu,
       matching: find.byType(Scrollable),
     ),
+  );
+  await tester.ensureVisible(heading);
+  await tester.pumpAndSettle();
+  expect(
+    heading.hitTestable(),
+    findsOneWidget,
+    reason: 'the "$key" heading must be on screen before it is tapped; a tap '
+        'on a widget outside the viewport does nothing and hides the bug',
   );
   await tester.tap(heading);
   await tester.pumpAndSettle();
