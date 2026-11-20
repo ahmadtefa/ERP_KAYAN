@@ -24,6 +24,7 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { FullBackupService } from './full-backup.service';
+import { RestoreGateService } from './system/restore-gate.service';
 
 interface UploadedDump {
   originalname: string;
@@ -32,26 +33,29 @@ interface UploadedDump {
   buffer: Buffer;
 }
 
-/** Block the legacy database-only restore before the multipart interceptor can
- * read a large upload.
+/**
+ * The gate in front of the database (DUMP) restore.
  *
  * This is not the guard for the complete restore. That one lives in
- * `system/complete-restore-unavailable.guard.ts` and asks the machine whether
- * every safeguard is in place: a complete backup carries the database, the
- * files and the manifest, so it can be put back safely on a machine that
- * passes. A bare `pg_dump` file carries the database alone — restoring it
- * would leave the uploaded files describing rows that no longer exist, and no
- * environment switch is allowed to make that possible. The two guards answer
- * differently on purpose, so they must not share a name. */
+ * `system/complete-restore-unavailable.guard.ts` and asks the same machine
+ * questions through the same RestoreGateService: the PostgreSQL tools, the
+ * writable backup folder, the isolated scratch database (via the runtime
+ * account or the limited-privilege restore-admin), and no interrupted
+ * restore waiting. A bare `pg_dump` file restores the database alone — the
+ * screen must warn before confirming that external files, images and the
+ * licence are not part of it and that a protective backup is taken first.
+ */
 @Injectable()
-export class DatabaseOnlyRestoreDisabledGuard implements CanActivate {
-  canActivate(): boolean {
-    throw new ServiceUnavailableException({
-      code: 'FULL_RESTORE_UNAVAILABLE',
-      detail: 'الاستعادة الكاملة متوقفة لحماية البيانات حتى يثبت ربط قاعدة البيانات والملفات والترخيص والتعافي من الانقطاع. / Full restore is unavailable until database, files and licence recovery and interruption safety are verified.',
-    });
+export class DatabaseRestoreGuard implements CanActivate {
+  constructor(private readonly gate: RestoreGateService) {}
+  async canActivate(): Promise<boolean> {
+    await this.gate.assertAllowed();
+    return true;
   }
 }
+
+/** Historical name kept so old imports keep working. */
+export { DatabaseRestoreGuard as DatabaseOnlyRestoreDisabledGuard };
 
 /**
  * Full-database backups: take one, list them, download one, put one back.
@@ -146,7 +150,7 @@ export class FullBackupController {
    * the user type the confirmation before it sends it.
    */
   @Post('restore')
-  @UseGuards(DatabaseOnlyRestoreDisabledGuard)
+  @UseGuards(DatabaseRestoreGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 * 1024 } }),
   )

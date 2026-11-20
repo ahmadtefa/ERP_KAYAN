@@ -526,19 +526,62 @@ describe('FullBackupService guards', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('refuses manual deletion without complete replacement restore evidence', async () => {
+    it('deletes an old backup but never the last copy on the server', async () => {
       const dir = temporaryDir('kayan-backups-');
       const service = serviceWithEnv(dir);
       const old = join(dir, 'old.dump');
       const newer = join(dir, 'new.dump');
       writeFileSync(old, 'synthetic old backup');
       writeFileSync(newer, 'synthetic new backup');
-      await expect(service.remove('old.dump', 'u1')).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'BACKUP_DELETE_PROTECTED' }),
+      // The world the rule sees is this pair of files, whatever else the
+      // machine holds in other folders.
+      const fs = await import('fs');
+      jest.spyOn(service, 'list').mockImplementation(async () =>
+        ([['old.dump', old], ['new.dump', newer]] as const)
+          .filter(([, path]) => fs.existsSync(path))
+          .map(([name]) => ({
+            name,
+            sizeBytes: 1,
+            createdAt: new Date().toISOString(),
+            kind: 'full' as const,
+          })),
+      );
+      // Old backups may go once another one exists — that is what retention
+      // and the delete tools are for. The last copy always stays.
+      await service.remove('old.dump', 'u1');
+      expect(fs.existsSync(old)).toBe(false);
+      expect(fs.readFileSync(newer, 'utf8')).toBe('synthetic new backup');
+      await expect(service.remove('new.dump', 'u1')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'BACKUP_DELETE_LAST' }),
+      });
+      expect(fs.readFileSync(newer, 'utf8')).toBe('synthetic new backup');
+    });
+
+    it('refuses to delete the protective copy an interrupted restore still needs', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithEnv(dir);
+      const keep = join(dir, 'keep-me.dump');
+      const spare = join(dir, 'spare.dump');
+      writeFileSync(keep, 'protective copy');
+      writeFileSync(spare, 'spare copy');
+      const { RestoreJournalStore } = await import('./system/restore-journal');
+      await new RestoreJournalStore(dir).write({
+        id: 'j1',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        phase: 'safety-taken',
+        source: 'fixture.dump',
+        sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
+        safetyBackup: 'keep-me.dump',
+      } as never);
+      await expect(service.remove('keep-me.dump', 'u1')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'BACKUP_DELETE_IN_USE' }),
       });
       const fs = await import('fs');
-      expect(fs.readFileSync(old, 'utf8')).toBe('synthetic old backup');
-      expect(fs.readFileSync(newer, 'utf8')).toBe('synthetic new backup');
+      expect(fs.readFileSync(keep, 'utf8')).toBe('protective copy');
+      // A file the journal does not need is still removable.
+      await service.remove('spare.dump', 'u1');
+      expect(fs.existsSync(spare)).toBe(false);
     });
 
     it('a full backup is reported only after the file exists and is a real archive', async () => {

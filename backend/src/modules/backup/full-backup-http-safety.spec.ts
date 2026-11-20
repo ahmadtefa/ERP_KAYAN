@@ -1,5 +1,7 @@
 import { INestApplication, Module } from '@nestjs/common';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
+import { RestoreGateService } from './system/restore-gate.service';
 
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ProblemDetailsFilter } from '../../common/filters/problem-details.filter';
@@ -18,9 +20,14 @@ describe('complete backup and restore HTTP safety', () => {
     file: {name: 'synthetic.dump', sizeBytes: 10, kind: 'full', createdAt: '2026-11-05T00:00:00Z'}, durationMs: 1,
   });
   const restore = jest.spyOn(service, 'restore');
+  const gate = {
+    probe: jest.fn(async () => ({fullRestoreSupported: true, state: 'ready', reasons: [], checks: [], checkedAt: '', backupDirectory: '/tmp', canRehearse: true})),
+    assertAllowed: jest.fn(async () => ({fullRestoreSupported: true, state: 'ready', reasons: [], checks: [], checkedAt: '', backupDirectory: '/tmp', canRehearse: true})),
+  };
   @Module({controllers: [FullBackupController], providers: [
     {provide: FullBackupService, useValue: service},
     {provide: MaintenanceService, useValue: maintenance},
+    {provide: RestoreGateService, useValue: gate},
   ]})
   class FixtureModule {}
   let app: INestApplication;
@@ -71,13 +78,32 @@ describe('complete backup and restore HTTP safety', () => {
     listing.mockRestore();
   });
 
-  it('rejects restore before parsing uploads and never invokes the legacy engine', async () => {
+  it('rejects restore before parsing uploads when the machine cannot restore', async () => {
+    gate.assertAllowed.mockRejectedValueOnce(new ServiceUnavailableException({
+      code: 'FULL_RESTORE_UNAVAILABLE',
+      detail: 'scratch database unavailable',
+    }));
     const result = await fetch(`${base}/restore`, {method:'POST', headers:{'x-fixture-super':'yes',
       'content-type':'multipart/form-data; boundary=invalid'}, body:'not a multipart body'});
     expect(result.status).toBe(503);
-    expect(await result.json()).toMatchObject({code:'FULL_RESTORE_UNAVAILABLE'});
     expect(restore).not.toHaveBeenCalled();
     expect(maintenance.isActive).toBe(false);
+    gate.assertAllowed.mockClear();
+  });
+
+  it('offers the database restore when the machine passes every check', async () => {
+    restore.mockResolvedValueOnce({ ok: true } as never);
+    const result = await fetch(`${base}/restore?confirm=true&fileName=named.dump`, {
+      method: 'POST',
+      headers: {'x-fixture-super': 'yes', 'content-type': 'application/x-www-form-urlencoded'},
+      body: '',
+    });
+    expect(result.status).toBeLessThan(300);
+    expect(gate.assertAllowed).toHaveBeenCalled();
+    expect(restore).toHaveBeenCalledWith(
+      expect.objectContaining({ confirm: true, fileName: 'named.dump' }),
+      'operator',
+    );
   });
 
   it('still denies a non-super administrator before any operation', async () => {

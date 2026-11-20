@@ -28,6 +28,15 @@ import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
 import { pgBackupConnectionEnv } from './pg-backup-connection';
+import {
+  backupDirectory,
+  createScratchDatabase,
+  dropDatabaseIfExists,
+  scratchToolEnv,
+  verifyRestoredShape,
+} from './system/pg-support';
+import { scratchDatabaseActor } from './system/restore-admin';
+import { RestoreJournalStore } from './system/restore-journal';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -93,6 +102,9 @@ export interface BackupVerification {
   /// How many objects `pg_restore --list` found inside the archive. Zero
   /// means the archive is empty, which is never a usable backup.
   entries: number;
+  /// The shape the archive promises, used as rehearsal evidence.
+  tables?: number;
+  constraints?: number;
   /// Reading archive content is not a restore rehearsal or a machine backup.
   archiveContentReadable: true;
   fullRestoreRehearsed: false;
@@ -569,13 +581,11 @@ export class FullBackupService {
 
     // One line per object in the archive, plus a handful of comment lines a
     // reader can skip. Comments are counted out so an empty archive cannot
-    // pass as a real one.
-    const entries = listing
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.startsWith(';')).length;
+    // pass as a real one. Tables and constraints are read too: they are the
+    // promise the restore rehearsal is checked against.
+    const toc = tocCounts(listing);
 
-    if (entries === 0) {
+    if (toc.entries === 0) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" holds no database objects. ` +
           'Nothing was changed.',
@@ -593,7 +603,9 @@ export class FullBackupService {
     return {
       name,
       sizeBytes: info.size,
-      entries,
+      entries: toc.entries,
+      tables: toc.tables,
+      constraints: toc.constraints,
       archiveContentReadable: true,
       fullRestoreRehearsed: false,
       includesExternalFiles: false,
@@ -609,7 +621,7 @@ export class FullBackupService {
     label: string,
     pgRestore: string,
     stagingPath: string,
-  ): Promise<number> {
+  ): Promise<{ entries: number; tables: number; constraints: number }> {
     let listing: string;
     try {
       listing = await runCapture(pgRestore, ['--list', stagingPath], 120_000);
@@ -620,11 +632,8 @@ export class FullBackupService {
           'different PostgreSQL version. The current data was not touched.',
       );
     }
-    const entries = listing
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.startsWith(';')).length;
-    if (entries === 0) {
+    const toc = tocCounts(listing);
+    if (toc.entries === 0) {
       throw new BadRequestException(
         `The file "${label}" holds no database objects, so it cannot be ` +
           'restored. The current data was not touched.',
@@ -637,7 +646,7 @@ export class FullBackupService {
         'The backup archive contains data that pg_restore could not read. The current database was not changed.',
       );
     }
-    return entries;
+    return toc;
   }
 
   /** Discard SQL at the OS null device: never persist or log customer rows. */
@@ -647,15 +656,49 @@ export class FullBackupService {
   }
 
   /**
-   * Reading a pg_dump is not evidence that database, files and licence can be
-   * restored together. Until such evidence exists, deletion is fail-closed.
-   * This protects the last viable copy in both manual and retention paths.
+   * Deletion is allowed only when it cannot destroy the last way back.
+   *
+   * The blanket "deletion is paused" refusal this replaced existed because no
+   * verified restore path existed yet. Restores are now rehearsed in an
+   * isolated database and recovered from a protective copy on failure, so the
+   * protection becomes the real rules instead of a wall:
+   *   1. never while a restore is running (the file may be in use);
+   *   2. never the safety copy an unresolved interrupted restore still needs;
+   *   3. never the very last backup on the server — there must always be a
+   *      way back. Deleting old backups while newer ones remain is the point
+   *      of the feature.
    */
-  async assertDeletionSafe(): Promise<void> {
-    throw new ConflictException({
-      code: 'BACKUP_DELETE_PROTECTED',
-      detail: 'Backup deletion is paused until a complete replacement restore can be verified.',
-    });
+  async assertDeletionSafe(name: string): Promise<void> {
+    await this.assertNoRestoreRunning(name);
+    const files = await this.list();
+    const remaining = files.filter((file) => file.name !== name);
+    if (remaining.length === 0) {
+      throw new ConflictException({
+        code: 'BACKUP_DELETE_LAST',
+        detail:
+          'This is the last backup on the server. Deleting it would leave no ' +
+          'way back, so it stays until another backup exists.',
+      });
+    }
+  }
+
+  /** The in-use half of the deletion rules, for retention that keeps copies. */
+  async assertNoRestoreRunning(name?: string): Promise<void> {
+    if (this.restoreInProgress || this.maintenance.isActive) {
+      throw new ConflictException({
+        code: 'BACKUP_DELETE_IN_USE',
+        detail: 'A restore is running, so no backup may be deleted right now.',
+      });
+    }
+    const journal = await new RestoreJournalStore(backupDirectory()).read();
+    if (name && journal?.safetyBackup && journal.safetyBackup === name) {
+      throw new ConflictException({
+        code: 'BACKUP_DELETE_IN_USE',
+        detail:
+          'This file is the protective copy an interrupted restore still ' +
+          'needs. Resolve the recovery first (see the recovery status).',
+      });
+    }
   }
 
   async remove(name: string, userId: string | null): Promise<void> {
@@ -663,7 +706,7 @@ export class FullBackupService {
     if (!existsSync(path)) {
       throw new NotFoundException(`No backup file named "${name}" on this server`);
     }
-    await this.assertDeletionSafe();
+    await this.assertDeletionSafe(name);
     try {
       await unlink(path);
     } catch (error) {
@@ -764,19 +807,19 @@ export class FullBackupService {
       // 1b. Read the archive's table of contents. This is what catches a
       //     truncated download or a file from a foreign database before any
       //     database is involved at all.
-      const entries = await this.verifyUploaded(
+      const toc = await this.verifyUploaded(
         label,
         tools.pgRestore as string,
         staging,
       );
-      this.logger.log(`Uploaded backup lists ${entries} objects`);
+      this.logger.log(`Uploaded backup lists ${toc.entries} objects`);
 
       // 2. Rehearse in a new database. If CREATE fails, never continue to the
       // primary: an archive listing alone cannot establish a usable restore.
       const scratchName = `kayan_restore_check_${randomUUID().replace(/-/g, '')}`;
       let rehearsed = false;
       try {
-        await this.execSql(`CREATE DATABASE "${scratchName}"`);
+        await this.scratchCreate(scratchName);
         this.canCreateDatabase = true;
       } catch (error) {
         this.canCreateDatabase = false;
@@ -792,21 +835,37 @@ export class FullBackupService {
         let rehearsalFailure: unknown;
         let rehearsalFailed = false;
         try {
-          await run(tools.pgRestore as string, [
-            '--exit-on-error',
-            '--no-owner',
-            '--no-privileges',
-            '--no-password',
-            `--dbname=${scratchName}`,
-            staging,
-          ]);
+          await run(
+            tools.pgRestore as string,
+            [
+              '--exit-on-error',
+              '--no-owner',
+              '--no-privileges',
+              '--no-password',
+              `--dbname=${scratchName}`,
+              staging,
+            ],
+            600_000,
+            await this.rehearsalEnv(),
+          );
+          // The rehearsal database must actually hold the shape the archive
+          // promised — the tables and the constraints. An archive that
+          // "restored" into an empty database is not a restore.
+          const shape = await this.rehearsalShape(scratchName, {
+            tables: toc.tables ?? 0,
+            constraints: toc.constraints ?? 0,
+          });
+          this.logger.log(`Rehearsal shape: ${shape.detail}`);
+          if (!shape.ok) {
+            throw new BackupToolFailure(shape.detail);
+          }
           rehearsed = true;
         } catch (error) {
           rehearsalFailed = true;
           rehearsalFailure = error;
         }
         try {
-          await this.execSql(`DROP DATABASE IF EXISTS "${scratchName}"`);
+          await this.scratchDrop(scratchName);
         } catch {
           // An unremoved rehearsal database means isolation and cleanup have
           // not been verified. Never proceed to the live database in that
@@ -1259,6 +1318,36 @@ export class FullBackupService {
     await this.prisma.$executeRawUnsafe(sql);
   }
 
+  /// Scratch-database work: the limited-privilege restore-admin account when
+  /// one is configured (see system/restore-admin.ts), otherwise the runtime
+  /// account on development machines. Split into spy-able steps on purpose.
+  private async scratchCreate(name: string): Promise<void> {
+    if (scratchDatabaseActor()) {
+      await createScratchDatabase(name);
+      return;
+    }
+    await this.execSql(`CREATE DATABASE "${name}"`);
+  }
+
+  private async scratchDrop(name: string): Promise<void> {
+    if (scratchDatabaseActor()) {
+      await dropDatabaseIfExists(name);
+      return;
+    }
+    await this.execSql(`DROP DATABASE IF EXISTS "${name}"`);
+  }
+
+  private async rehearsalEnv(): Promise<NodeJS.ProcessEnv> {
+    return scratchToolEnv();
+  }
+
+  private async rehearsalShape(
+    name: string,
+    expected: { tables: number; constraints: number },
+  ): Promise<{ tables: number; constraints: number; ok: boolean; detail: string }> {
+    return verifyRestoredShape(name, expected);
+  }
+
   private async cleanDatabaseSchema(): Promise<void> {
     try {
       await this.execSql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
@@ -1283,6 +1372,20 @@ class BackupToolFailure extends Error {
   }
 }
 
+/// What the archive promises: one entry per object, plus the tables and the
+/// constraints the restore rehearsal is checked against.
+function tocCounts(listing: string): { entries: number; tables: number; constraints: number } {
+  const lines = listing
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith(';'));
+  return {
+    entries: lines.length,
+    tables: lines.filter((line) => /\sTABLE\s/.test(line)).length,
+    constraints: lines.filter((line) => /\sCONSTRAINT\s/.test(line)).length,
+  };
+}
+
 /** Keep diagnostics useful without exposing paths, connection values or data. */
 function safeBackupFailure(error: unknown): string {
   if (error instanceof BackupToolFailure) return error.diagnostic;
@@ -1298,14 +1401,15 @@ function safeBackupFailure(error: unknown): string {
 }
 
 /// Runs a command without copying its stderr or arguments into exceptions.
-function run(command: string, args: string[], timeout = 600_000): Promise<string> {
-  return runCapture(command, args, timeout);
+function run(command: string, args: string[], timeout = 600_000, env?: NodeJS.ProcessEnv): Promise<string> {
+  return runCapture(command, args, timeout, env);
 }
 
 function runCapture(
   command: string,
   args: string[],
   timeout: number,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     execFile(
@@ -1314,7 +1418,7 @@ function runCapture(
       {
         timeout,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, ...connectionEnv() },
+        env: { ...process.env, ...connectionEnv(), ...(envOverride ?? {}) },
       },
       (error, stdout) => {
         if (error) {

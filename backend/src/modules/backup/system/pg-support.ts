@@ -18,6 +18,13 @@ import { sanitiseLicence, type SanitisedLicence } from './manifest';
  * from these functions.
  */
 
+import {
+  restoreAdminStatus,
+  scratchDatabaseActor,
+  selfCreatedScratchName,
+  type RestoreAdminPath,
+} from './restore-admin';
+
 export const CUSTOM_MAGIC = Buffer.from('PGDMP', 'latin1');
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 const TOOL_CACHE_TTL_MS = 60_000;
@@ -379,23 +386,43 @@ export async function serverVersion(): Promise<string | null> {
   }
 }
 
-/// Whether the database account may open a scratch database. A restore that
-/// cannot be rehearsed is not offered, because the rehearsal is the step that
-/// catches a damaged archive before production data is replaced.
-export async function mayCreateDatabase(): Promise<{ allowed: boolean; reason: string | null }> {
+/// Whether a scratch database may be opened. A restore that cannot be
+/// rehearsed is not offered, because the rehearsal is the step that catches a
+/// damaged archive before production data is replaced. Two paths are accepted:
+/// the runtime account may create databases on development machines, and on
+/// real installations a separate limited-privilege restore-admin account
+/// (see restore-admin.ts) provides the capability without widening the
+/// runtime account.
+export async function mayCreateDatabase(): Promise<{
+  allowed: boolean;
+  reason: string | null;
+  path: RestoreAdminPath | null;
+}> {
+  const runtimeReason =
+    'the database account is not allowed to create a database';
+  const adminHint =
+    'configure the restore-admin account (KAYAN_RESTORE_ADMIN_DATABASE_URL) ' +
+    'or grant the restore account CREATEDB';
   try {
-    return await withPgClient({}, async (client) => {
+    const runtimeMay = await withPgClient({}, async (client) => {
       const result = await client.query<{ allowed: boolean }>(
         'SELECT (rolsuper OR rolcreatedb) AS allowed FROM pg_roles WHERE rolname = current_user',
       );
-      const allowed = result.rows[0]?.allowed === true;
-      return {
-        allowed,
-        reason: allowed ? null : 'the database account is not allowed to create a database',
-      };
+      return result.rows[0]?.allowed === true;
     });
+    if (runtimeMay) return { allowed: true, reason: null, path: 'runtime' };
+    const admin = await restoreAdminStatus();
+    if (admin.usable) return { allowed: true, reason: null, path: 'restore-admin' };
+    return {
+      allowed: false,
+      path: null,
+      reason:
+        admin.configured && admin.reason
+          ? `${runtimeReason}; ${admin.reason}`
+          : `${runtimeReason} and no restore-admin is configured — ${adminHint}`,
+    };
   } catch (error) {
-    return { allowed: false, reason: (error as Error).message };
+    return { allowed: false, path: null, reason: (error as Error).message };
   }
 }
 
@@ -405,25 +432,105 @@ export async function executeSql(sql: string, database?: string): Promise<void> 
   });
 }
 
+/// The connection used for scratch-database work: the restore-admin account
+/// when one is configured, else the runtime account (development machines).
+/// A configured-but-broken restore administrator is never silently replaced
+/// by the runtime account — the operator is told to fix or remove it.
+async function scratchAdminConnectionString(): Promise<string> {
+  const actor = scratchDatabaseActor();
+  if (actor) return actor.connectionString;
+  const status = await restoreAdminStatus();
+  if (status.configured) {
+    throw new Error(
+      `the restore-admin account is configured but unusable (${status.reason ?? 'unknown problem'})`,
+    );
+  }
+  return adminDatabaseUrl();
+}
+
+async function scratchAdminEnv(): Promise<NodeJS.ProcessEnv> {
+  const actor = scratchDatabaseActor();
+  return actor ? actor.env : connectionEnv(adminDatabaseUrl());
+}
+
 export async function dropDatabaseIfExists(name: string): Promise<void> {
-  if (!/^[a-z0-9_]+$/.test(name)) throw new Error(`refusing to drop database "${name}"`);
+  if (!selfCreatedScratchName(name)) {
+    throw new Error(
+      `refusing to drop database "${name}": only the scratch databases this program creates may be removed`,
+    );
+  }
+  const connectionString = await scratchAdminConnectionString();
   try {
-    await withPgClient({ connectionString: adminDatabaseUrl() }, async (client) => {
+    await withPgClient({ connectionString }, async (client) => {
       await client.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
     });
   } catch {
     // An older PostgreSQL has no WITH (FORCE); try the plain form.
-    await withPgClient({ connectionString: adminDatabaseUrl() }, async (client) => {
+    await withPgClient({ connectionString }, async (client) => {
       await client.query(`DROP DATABASE IF EXISTS "${name}"`);
     });
   }
 }
 
 export async function createScratchDatabase(name: string): Promise<void> {
-  if (!/^[a-z0-9_]+$/.test(name)) throw new Error(`refusing to create database "${name}"`);
-  await withPgClient({ connectionString: adminDatabaseUrl() }, async (client) => {
+  if (!selfCreatedScratchName(name)) {
+    throw new Error(
+      `refusing to create database "${name}": scratch names must look like kayan_restore_check_…`,
+    );
+  }
+  const connectionString = await scratchAdminConnectionString();
+  await withPgClient({ connectionString }, async (client) => {
     await client.query(`CREATE DATABASE "${name}"`);
   });
+}
+
+/// The libpq environment for tools (pg_restore) that must reach a scratch
+/// database. Same account rules as the scratch lifecycle above.
+export async function scratchToolEnv(): Promise<NodeJS.ProcessEnv> {
+  return scratchAdminEnv();
+}
+
+/**
+ * Rehearsal evidence: the restored scratch database must actually hold the
+ * shape the archive promised — the tables and the constraints. An archive
+ * that "restored" into an empty database is not a restore.
+ */
+export async function verifyRestoredShape(
+  database: string,
+  expected: { tables: number; constraints: number },
+): Promise<{ tables: number; constraints: number; ok: boolean; detail: string }> {
+  const connectionString = await scratchConnectionStringFor(database);
+  return withPgClient({ connectionString }, async (client) => {
+    const tables = await client.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM pg_tables WHERE schemaname = 'public'",
+    );
+    const constraints = await client.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM pg_constraint WHERE connamespace = 'public'::regnamespace",
+    );
+    const actualTables = Number(tables.rows[0]?.n ?? 0);
+    const actualConstraints = Number(constraints.rows[0]?.n ?? 0);
+    // Fail closed: the archive promised a shape and the rehearsal must hold it.
+    const ok =
+      actualTables >= expected.tables &&
+      (expected.constraints === 0 || actualConstraints >= expected.constraints);
+    return {
+      tables: actualTables,
+      constraints: actualConstraints,
+      ok,
+      detail: ok
+        ? `the rehearsal database holds ${actualTables} tables and ${actualConstraints} constraints`
+        : `the rehearsal database holds ${actualTables} tables/${actualConstraints} constraints ` +
+          `but the archive promised ${expected.tables}/${expected.constraints}`,
+    };
+  });
+}
+
+async function scratchConnectionStringFor(database: string): Promise<string> {
+  if (!selfCreatedScratchName(database)) {
+    throw new Error('refusing to name a scratch database that');
+  }
+  const base = await scratchAdminConnectionString();
+  return databaseUrlFor(database, base);
 }
 
 /// ─────────────────────────────────────────────────────── dump and restore

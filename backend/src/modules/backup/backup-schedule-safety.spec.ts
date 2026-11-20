@@ -16,6 +16,7 @@ describe('scheduled backup safety', () => {
       list: jest.fn().mockResolvedValue([]),
       remove: jest.fn(),
       assertDeletionSafe: jest.fn().mockRejectedValue(new Error('retention paused')),
+      assertNoRestoreRunning: jest.fn().mockRejectedValue(new Error('retention paused')),
     };
     const settings = { get: jest.fn().mockResolvedValue({ backupIntervalHours: 1, backupRetentionCount: 1 }) };
     const service = new BackupScheduleService(prisma as any, full as any, settings as any);

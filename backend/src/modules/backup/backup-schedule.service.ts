@@ -252,7 +252,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
    */
   async pruneRetention(count: number, keepRunId?: string): Promise<string[]> {
     if (count <= 0) return [];
-    await this.full.assertDeletionSafe();
+    await this.full.assertNoRestoreRunning();
 
     const files = await this.full.list();
     const ordered = [...files].sort(

@@ -29,7 +29,8 @@ describe('full restore failure safety', () => {
     internals = service as unknown as { [key: string]: jest.Mock };
     jest.spyOn(internals, 'requireTools').mockReturnValue({ pgDump: 'fake-dump', pgRestore: 'fake-restore' });
     jest.spyOn(internals, 'ensureBackupDir').mockResolvedValue(dir);
-    jest.spyOn(internals, 'verifyUploaded').mockResolvedValue(1);
+    jest.spyOn(internals, 'verifyUploaded').mockResolvedValue({ entries: 1, tables: 1, constraints: 1 });
+    jest.spyOn(internals, 'rehearsalShape').mockResolvedValue({ tables: 1, constraints: 1, ok: true, detail: 'shape ok' });
     jest.spyOn(internals, 'execSql').mockResolvedValue(undefined);
     jest.spyOn(internals, 'cleanDatabaseSchema').mockResolvedValue(undefined);
     jest.spyOn(internals, 'createSafety').mockResolvedValue({ name: 'kayan-safety-test.dump' });
