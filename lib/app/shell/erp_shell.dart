@@ -270,6 +270,19 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final collapsed = ref.watch(_collapsedNavProvider);
     void toggleGroup(_NavGroup group) => ref.read(_collapsedNavProvider.notifier).toggle(group);
     final selectedIndex = _selectedIndex(items);
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final isInputs = widget.currentPath == AppRoutes.operationsInputs;
+    final isOutputs = widget.currentPath == AppRoutes.operationsOutputs;
+    // The centres are not sidebar entries. Do not mislabel them as Dashboard
+    // (the fallback when no sidebar item matches).
+    final topItem = isInputs || isOutputs
+        ? _NavItem(
+            widget.currentPath,
+            isInputs ? Icons.input_rounded : Icons.description_rounded,
+            isInputs ? (arabic ? 'المدخلات' : 'Inputs') : (arabic ? 'المخرجات' : 'Outputs'),
+            group: _NavGroup.overview,
+          )
+        : items[selectedIndex];
 
     // A draft screen that closes removes its guard, and the map keeps one
     // callback per key, so the floor does not come back on its own. Re-claim it
@@ -295,7 +308,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
             if (isWide)
               _Sidebar(
                 items: items,
-                selectedPath: items[selectedIndex].path,
+                selectedPath: isInputs || isOutputs ? widget.currentPath : items[selectedIndex].path,
                 extended: isExtended,
                 scrollController: _navScrollController,
                 collapsed: collapsed,
@@ -308,11 +321,10 @@ class _ErpShellState extends ConsumerState<ErpShell> {
               child: Column(
                 children: [
                   _TopBar(
-                    item: items[selectedIndex],
-                    sectionLabel: _Sidebar._groupLabel(
-                      items[selectedIndex].group,
-                      Localizations.localeOf(context).languageCode == 'ar',
-                    ),
+                    item: topItem,
+                    sectionLabel: isInputs || isOutputs
+                        ? (arabic ? 'العمليات' : 'Operations')
+                        : _Sidebar._groupLabel(topItem.group, arabic),
                     isWide: isWide,
                     isExtended: isExtended,
                     guardKey: widget.guardKey,

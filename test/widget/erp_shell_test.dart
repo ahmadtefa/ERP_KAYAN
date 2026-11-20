@@ -98,6 +98,22 @@ void main() {
     }
     }
   });
+  testWidgets('operations centre headers are not mislabelled as dashboard', (tester) async {
+    tester.view.physicalSize = const Size(1366, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final path in [AppRoutes.operationsInputs, AppRoutes.operationsOutputs]) {
+      await tester.pumpWidget(ProviderScope(child: wrapWithApp(
+        child: ErpShell(currentPath: path, child: const SizedBox.expand()),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text('Operations'), findsOneWidget);
+      expect(find.text('Dashboard'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 3));
+    }
+  });
   test('selected navigation glyphs meet contrast on every section accent', () {
     const accents = [SectionAccents.overview, SectionAccents.accounting,
       SectionAccents.cash, SectionAccents.parties, SectionAccents.inventory,
