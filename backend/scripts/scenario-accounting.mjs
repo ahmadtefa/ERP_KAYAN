@@ -692,10 +692,11 @@ async function main() {
   if (purchaseReturn) {
     await must('post the debit note', `/returns/purchases/${purchaseReturn.id}/post`, { method: 'POST' });
   }
+  const stockAfterReturns = await api(`/inventory/stock?itemId=${itemA.id}`);
   check(
     'one unit back in and two units out leaves 5',
-    near(quantityOf((await api(`/inventory/stock?itemId=${itemA.id}`)).data, itemA.id), 5),
-    `on hand ${quantityOf((await api(`/inventory/stock?itemId=${itemA.id}`)).data, itemA.id)}`,
+    near(quantityOf(stockAfterReturns.data, itemA.id), 5),
+    `on hand ${quantityOf(stockAfterReturns.data, itemA.id)}`,
   );
   check(
     'the credit note reversed 150 of revenue, 21 of VAT and put 100 of stock back',
@@ -706,10 +707,35 @@ async function main() {
     `sales returns ${await delta('4102')}, revenue ${await delta('4101')}, COGS ${await delta('5101')}, inventory ${await delta('1104')}`,
   );
   const purchaseAfterReturn = await api(`/purchases/invoices/${purchase.id}`);
+  const purchaseReturnDetail = purchaseReturn?.id
+    ? await api(`/returns/purchases/${purchaseReturn.id}`)
+    : { status: 0, data: null };
+  const purchaseReturnLine = purchaseReturnDetail.data?.lines?.[0];
   check(
-    'the supplier return is recorded against the purchase invoice',
-    Array.isArray(purchaseAfterReturn.data?.returns) ? purchaseAfterReturn.data.returns.length >= 1 : true,
-    `returns ${JSON.stringify(purchaseAfterReturn.data?.returns ?? []).slice(0, 120)}`,
+    'the posted supplier debit note is linked to its source purchase invoice',
+    purchaseReturnDetail.status === 200 &&
+      purchaseReturnDetail.data?.status === 'posted' &&
+      purchaseReturnDetail.data?.documentType === 'debit_note' &&
+      purchaseReturnDetail.data?.originalInvoiceNumber === purchaseAfterReturn.data?.invoiceNumber &&
+      near(purchaseReturnDetail.data?.subTotal, 200) &&
+      near(purchaseReturnDetail.data?.taxAmount, 28) &&
+      near(purchaseReturnDetail.data?.totalAmount, 228) &&
+      near(purchaseReturnLine?.quantity, 2) &&
+      near(purchaseReturnLine?.inventoryCostTotal, 200) &&
+      near(purchaseAfterReturn.data?.lines?.[0]?.returnedQuantity, 2),
+    `status ${purchaseReturnDetail.status}, source ${purchaseReturnDetail.data?.originalInvoiceNumber}, ` +
+      `sub-total/tax/total ${purchaseReturnDetail.data?.subTotal}/${purchaseReturnDetail.data?.taxAmount}/${purchaseReturnDetail.data?.totalAmount}, ` +
+      `quantity/cost ${purchaseReturnLine?.quantity}/${purchaseReturnLine?.inventoryCostTotal}, ` +
+      `source returned quantity ${purchaseAfterReturn.data?.lines?.[0]?.returnedQuantity}`,
+  );
+  check(
+    'the supplier return credits payables and reverses purchase VAT and inventory',
+    near(await delta('2101'), -412) &&
+      near(await delta('1105'), 112) &&
+      near(await delta('1104'), 500) &&
+      near(quantityOf(stockAfterReturns.data, itemA.id), 5),
+    `payables ${await delta('2101')}, input VAT ${await delta('1105')}, inventory ${await delta('1104')}, ` +
+      `on hand ${quantityOf(stockAfterReturns.data, itemA.id)}`,
   );
 
   // more than what was bought cannot be returned
@@ -1336,10 +1362,11 @@ async function main() {
     // report is the machine's own statement of that, and it is what the
     // settings screen shows the operator.
     check(
-      'the machine reports complete full backup and restore as unsupported',
+      'the machine distinguishes unsupported complete backup from gated database-archive restore',
       capabilities.data?.fullBackupSupported === false &&
-        capabilities.data?.fullRestoreSupported === false,
-      `backup=${capabilities.data?.fullBackupSupported}, restore=${capabilities.data?.fullRestoreSupported}`,
+        capabilities.data?.fullRestoreSupported === false &&
+        capabilities.data?.databaseRestoreSupported === true,
+      `complete backup=${capabilities.data?.fullBackupSupported}, complete restore=${capabilities.data?.fullRestoreSupported}, database restore=${capabilities.data?.databaseRestoreSupported}`,
     );
 
     // The scheduled path, run once on demand: this is the same code the timer
@@ -1409,12 +1436,22 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
-    // DatabaseRestoreGuard must honour the operator's refusal before the body
-    // is processed. scenario-system-backup tests the ready machine separately.
+    // This legacy route restores a PostgreSQL archive only. Its independent
+    // machine gate, scratch rehearsal, safety copy, and post-restore licence
+    // reconciliation are required; it must never claim to restore files or
+    // the machine-bound licence from the archive.
     check(
-      'full restore remains blocked until complete restore and licence recovery are proven',
-      restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
-      `status ${restored.status}, code ${restored.data?.code ?? '?'}: ${JSON.stringify(restored.data).slice(0, 200)}`,
+      'the database-only restore is rehearsed, safety-backed, and licence-reconciled without claiming a full restore',
+      restored.status === 201 &&
+        restored.data?.restored === true &&
+        restored.data?.checked === true &&
+        restored.data?.rehearsed === true &&
+        restored.data?.fullRestore === false &&
+        restored.data?.includesExternalFiles === false &&
+        restored.data?.includesLicence === false &&
+        restored.data?.licenceReconciled === true &&
+        Boolean(restored.data?.safetyBackup),
+      `status ${restored.status}, ${JSON.stringify(restored.data).slice(0, 240)}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(

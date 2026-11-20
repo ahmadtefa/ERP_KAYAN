@@ -84,7 +84,17 @@ export class FullBackupController {
     return {
       ...(await this.service.capabilities()),
       maintenance: this.maintenance.status,
-      fullRestoreSupported: gate.fullRestoreSupported,
+      // This legacy endpoint handles a database archive only. Keep the full
+      // machine-backup capability flags from FullBackupService truthful; the
+      // machine gate below describes only whether the database-only restore
+      // can be rehearsed and safely run on this installation.
+      fullBackupSupported: false,
+      fullRestoreSupported: false,
+      databaseRestoreSupported: gate.fullRestoreSupported,
+      databaseRestoreReasons: gate.reasons,
+      databaseRestoreChecks: gate.checks,
+      // Retain the legacy detail names for clients that used them to explain
+      // why the database-archive operation is currently gated.
       restoreReasons: gate.reasons,
       restoreChecks: gate.checks,
     };

@@ -56,6 +56,25 @@ describe('complete backup and restore HTTP safety', () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
+  it('keeps machine-backup support separate from database-archive restore readiness', async () => {
+    const capabilities = jest.spyOn(service, 'capabilities').mockResolvedValue({
+      available: true,
+      fullBackupSupported: false,
+      fullRestoreSupported: false,
+    } as never);
+    const result = await fetch(`${base}/capabilities`, {
+      headers: {'x-fixture-super': 'yes'},
+    });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({
+      fullBackupSupported: false,
+      fullRestoreSupported: false,
+      databaseRestoreSupported: true,
+      databaseRestoreReasons: [],
+    });
+    capabilities.mockRestore();
+  });
+
   it('offers the database archive only through the explicitly partial operation', async () => {
     const result = await fetch(`${base}/database-archive`, {method:'POST', headers:{'x-fixture-super':'yes'}});
     expect(result.status).toBe(201);
