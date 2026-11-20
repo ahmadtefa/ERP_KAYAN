@@ -34,10 +34,7 @@ const reviewed = [
   // and four `flutter test` files on a hosted runner. Flutter is pinned to
   // 3.47.6, the version every other workflow here uses.
   'barcode-quantity-focused.yml',
-  // Acceptance evidence and a licence-protected Setup on an ephemeral runner:
-  // read-only checkout, no private key or publication; build is independent
-  // of tests, and neither result is reported as an installation pass.
-  'kayan-acceptance.yml',
+  'kayan-acceptance.yml', 'windows-evaluation-setup.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
@@ -46,6 +43,18 @@ for (const name of reviewed) {
     assert.equal(Object.hasOwn(triggers, event), false, `${name}: unreviewed ${event} trigger`);
   }
 }
+// Application acceptance can run independently of every Windows/issuer job.
+const application = read('kayan-acceptance.yml');
+assert.ok(Object.hasOwn(application.on, 'workflow_dispatch'));
+assert.deepEqual(application.permissions, { contents: 'read' });
+for (const job of Object.values(application.jobs)) {
+  assert.equal(job['runs-on'], 'ubuntu-24.04');
+  assert.equal(job['continue-on-error'], undefined);
+}
+const setup = read('windows-evaluation-setup.yml');
+assert.deepEqual(Object.keys(setup.on), ['workflow_dispatch']);
+assert.deepEqual(setup.permissions, { contents: 'read' });
+assert.deepEqual(Object.keys(setup.jobs), ['windows-evaluation']);
 const installer = read('windows-installer.yml');
 assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
 assert.deepEqual(installer.permissions, { contents: 'read', deployments: 'read' }, 'Installer may read deployment review state but must not publish');
