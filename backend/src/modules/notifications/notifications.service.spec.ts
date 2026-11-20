@@ -79,10 +79,11 @@ describe('notifications', () => {
     });
   }
 
-  function makeHarness(seed: { notifications?: Row[]; settings?: Row[] } = {}) {
+  function makeHarness(seed: { notifications?: Row[]; settings?: Row[]; userStates?: Row[] } = {}) {
     const state = {
       notifications: (seed.notifications ?? []) as Row[],
       settings: (seed.settings ?? []) as Row[],
+      userStates: (seed.userStates ?? []) as Row[],
       lots: [] as Row[],
       thresholds: [] as Row[],
       onHand: [] as Array<{ warehouseId: string; itemId: string; quantity: string }>,
@@ -202,6 +203,48 @@ describe('notifications', () => {
           return { ...created };
         }),
       },
+      notificationUserState: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.userStates
+            .filter((row) => matches(row, args.where))
+            .map((row) => ({ ...row })),
+        ),
+        upsert: jest.fn(async (args: Row) => {
+          const key = args.where.notificationId_userId;
+          const found = state.userStates.find(
+            (row) =>
+              row.notificationId === key.notificationId && row.userId === key.userId,
+          );
+          if (found) {
+            Object.assign(found, args.update);
+            return { ...found };
+          }
+          const created = {
+            id: `user-state-${nextId++}`,
+            createdAt: new Date(),
+            dismissedAt: null,
+            ...args.create,
+          };
+          state.userStates.push(created);
+          return { ...created };
+        }),
+        updateMany: jest.fn(async (args: Row) => {
+          const rows = state.userStates.filter((row) => matches(row, args.where));
+          for (const row of rows) Object.assign(row, args.data);
+          return { count: rows.length };
+        }),
+        createMany: jest.fn(async (args: Row) => {
+          for (const data of args.data as Row[]) {
+            state.userStates.push({
+              id: `user-state-${nextId++}`,
+              createdAt: new Date(),
+              dismissedAt: null,
+              ...data,
+            });
+          }
+          return { count: args.data.length };
+        }),
+      },
       itemBatch: {
         findMany: jest.fn(async (args: Row = {}) =>
           state.lots.filter((row) => matches(row, args.where)),
@@ -318,16 +361,17 @@ describe('notifications', () => {
   });
 
   it('keeps the page size sane whatever the caller asks for', async () => {
-    const { service, prisma } = makeHarness({ notifications: [notification()] });
+    const { service } = makeHarness({ notifications: [notification()] });
 
     const first = await service.list(user() as never, { page: 0, pageSize: 5000 });
     expect(first.page).toBe(1);
     expect(first.pageSize).toBe(200);
-    expect(prisma.notification.findMany.mock.calls[0][0].skip).toBe(0);
 
     const second = await service.list(user() as never, { page: 3, pageSize: 0 });
     expect(second.pageSize).toBe(1);
-    expect(prisma.notification.findMany.mock.calls[1][0].skip).toBe(2);
+    expect(second.page).toBe(3);
+    expect(second.total).toBe(1);
+    expect(second.items).toHaveLength(0);
   });
 
   it('filters by type and severity when the screen asks', async () => {
@@ -708,6 +752,20 @@ describe('notifications', () => {
           raisedCount: 2,
         }),
       ],
+      userStates: [
+        {
+          notificationId: 'notification-1',
+          userId: 'user-1',
+          readAt: new Date(Date.now() - 30 * 3_600_000),
+          dismissedAt: null,
+        },
+        {
+          notificationId: 'notification-1',
+          userId: 'dismissed-it',
+          readAt: days(-3),
+          dismissedAt: days(-3),
+        },
+      ],
     });
 
     await service.raise({
@@ -719,8 +777,16 @@ describe('notifications', () => {
     });
 
     expect(state.notifications[0].status).toBe('OPEN');
-    expect(state.notifications[0].readAt).toBeNull();
     expect(state.notifications[0].raisedCount).toBe(3);
+    // The repeat is a fresh prompt, so it clears read state — but only for
+    // people who did not delete the alert. A deleted alert stays deleted.
+    const mine = state.userStates.find((row) => row.userId === 'user-1');
+    expect(mine?.readAt).toBeNull();
+    const theirs = state.userStates.find((row) => row.userId === 'dismissed-it');
+    expect(theirs?.readAt).toEqual(days(-3));
+    expect(theirs?.dismissedAt).toEqual(days(-3));
+    expect((await service.unreadCount(user() as never)).unread).toBe(1);
+    expect((await service.unreadCount(user({ userId: 'dismissed-it' }) as never)).unread).toBe(0);
   });
 
   it('does not re-open an archived alert', async () => {
@@ -1209,7 +1275,7 @@ describe('notifications', () => {
 
     const answer = await service.markUnread(user() as never, 'notification-1');
 
-    expect(answer.status).toBe('OPEN');
+    expect(answer.isRead).toBe(false);
     expect(answer.readAt).toBeNull();
     expect(state.notifications).toHaveLength(1);
   });
@@ -1223,5 +1289,153 @@ describe('notifications', () => {
 
     expect(answer.status).toBe('CLOSED');
     expect(state.notifications[0].readAt).toEqual(days(-2));
+  });
+
+  // ─────────────────────────── the Windows bug report, as a scenario ──────
+
+  it('drops the badge one at a time as the person reads, and the list alone reads nothing', async () => {
+    const alerts = Array.from({ length: 10 }, (_unused: unknown, index: number) =>
+      notification({ id: `alert-${index}`, dedupeKey: `dedupe-${index}` }),
+    );
+    const { service } = makeHarness({ notifications: alerts });
+
+    expect((await service.unreadCount(user() as never)).unread).toBe(10);
+
+    // Opening the centre is not reading.
+    await service.list(user() as never);
+    expect((await service.unreadCount(user() as never)).unread).toBe(10);
+
+    await service.markRead(user() as never, 'alert-0');
+    expect((await service.unreadCount(user() as never)).unread).toBe(9);
+    await service.markRead(user() as never, 'alert-1');
+    expect((await service.unreadCount(user() as never)).unread).toBe(8);
+
+    // Reading is personal: a colleague's badge is not moved by mine.
+    const colleague = user({ userId: 'user-2' });
+    expect((await service.unreadCount(colleague as never)).unread).toBe(10);
+
+    await service.markAllRead(user() as never);
+    expect((await service.unreadCount(user() as never)).unread).toBe(0);
+    expect((await service.unreadCount(colleague as never)).unread).toBe(10);
+
+    // And a new alert arrives on top of the zero.
+    await service.raise({
+      companyId: COMPANY,
+      type: STOCK_EXPIRED,
+      titleEn: 'A new fact',
+      titleAr: 'واقعة جديدة',
+      dedupe: 'STOCK_EXPIRED:lot-new',
+    });
+    expect((await service.unreadCount(user() as never)).unread).toBe(1);
+    expect((await service.unreadCount(colleague as never)).unread).toBe(11);
+  });
+
+  it('deletes for one person only and never destroys the alert or its documents', async () => {
+    const { service, state } = makeHarness({
+      notifications: [notification({ id: 'alert-0', dedupeKey: 'dedupe-0' })],
+    });
+
+    await service.dismiss(user() as never, 'alert-0');
+
+    expect((await service.unreadCount(user() as never)).unread).toBe(0);
+    const mine = await service.list(user() as never, { status: 'ALL' });
+    expect(mine.items).toHaveLength(0);
+    // A colleague still sees it...
+    expect((await service.unreadCount(user({ userId: 'user-2' }) as never)).unread).toBe(1);
+    // ...and the alert itself — its status, its dedupe key, its history — is
+    // untouched: nothing here may reach the invoice or the stock behind it.
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0].status).toBe('OPEN');
+    expect(state.notifications[0].dedupeKey).toBe('dedupe-0');
+  });
+
+  it('clears only what I have read when I delete the read ones', async () => {
+    const { service } = makeHarness({
+      notifications: [
+        notification({ id: 'read-1', dedupeKey: 'd1' }),
+        notification({ id: 'unread-1', dedupeKey: 'd2' }),
+      ],
+    });
+    await service.markRead(user() as never, 'read-1');
+
+    const result = await service.dismissRead(user() as never);
+
+    expect(result).toEqual({ deleted: 1 });
+    expect((await service.unreadCount(user() as never)).unread).toBe(1);
+  });
+
+  it('protects unread alerts in an old-age cleanup unless asked, and shows the count first', async () => {
+    const age = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000);
+    const { service } = makeHarness({
+      notifications: [
+        notification({ id: 'old-read', dedupeKey: 'd1', createdAt: age(40) }),
+        notification({ id: 'old-unread', dedupeKey: 'd2', createdAt: age(40) }),
+        notification({ id: 'new-read', dedupeKey: 'd3', createdAt: age(2) }),
+      ],
+    });
+    await service.markRead(user() as never, 'old-read');
+    await service.markRead(user() as never, 'new-read');
+
+    expect(await service.cleanupPreview(user() as never, 30, false)).toEqual({
+      count: 1,
+      days: 30,
+      includeUnread: false,
+    });
+    expect(await service.cleanupPreview(user() as never, 30, true)).toEqual({
+      count: 2,
+      days: 30,
+      includeUnread: true,
+    });
+
+    const result = await service.dismissOlderThan(user() as never, 30, false);
+    expect(result).toEqual({ deleted: 1, days: 30, includeUnread: false });
+    // The unread one survived; the one read two days ago was too young.
+    expect((await service.unreadCount(user() as never)).unread).toBe(1);
+    const all = await service.list(user() as never, { status: 'ALL' });
+    expect(all.items.map((row: Row) => row.id)).toEqual(['new-read', 'old-unread']);
+  });
+
+  it('deletes everything for this person when they confirm, and nothing for anyone else', async () => {
+    const { service, state } = makeHarness({
+      notifications: [
+        notification({ id: 'alert-0', dedupeKey: 'd0' }),
+        notification({ id: 'alert-1', dedupeKey: 'd1' }),
+      ],
+    });
+
+    const result = await service.dismissAll(user() as never);
+
+    expect(result).toEqual({ deleted: 2 });
+    expect((await service.unreadCount(user() as never)).unread).toBe(0);
+    expect((await service.unreadCount(user({ userId: 'user-2' }) as never)).unread).toBe(2);
+    expect(state.notifications).toHaveLength(2);
+  });
+
+  it('does not bring a dismissed alert back when the scanner repeats the fact', async () => {
+    const { service } = makeHarness({
+      notifications: [
+        notification({
+          id: 'alert-0',
+          dedupeKey: 'STOCK_EXPIRED:lot-1',
+          status: 'READ',
+          readAt: days(-2),
+          lastRaisedAt: new Date(Date.now() - 30 * 3_600_000),
+          raisedCount: 2,
+        }),
+      ],
+    });
+    await service.dismiss(user() as never, 'alert-0');
+
+    await service.raise({
+      companyId: COMPANY,
+      type: STOCK_EXPIRED,
+      titleEn: 'Expired lot again',
+      titleAr: 'دفعة منتهية',
+      dedupe: 'STOCK_EXPIRED:lot-1',
+    });
+
+    expect((await service.unreadCount(user() as never)).unread).toBe(0);
+    const all = await service.list(user() as never, { status: 'ALL' });
+    expect(all.items).toHaveLength(0);
   });
 });

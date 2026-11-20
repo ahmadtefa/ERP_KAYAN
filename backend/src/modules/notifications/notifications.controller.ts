@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -70,6 +80,56 @@ export class NotificationsController {
     return this.service.markAllRead(user);
   }
 
+  /// What "clear the old ones" would remove, before the person confirms.
+  @Get('cleanup-preview')
+  @RequirePermissions('notifications.read')
+  cleanupPreview(
+    @CurrentUser() user: AuthUser,
+    @Query('days') days: string,
+    @Query('includeUnread') includeUnread?: string,
+  ) {
+    return this.service.cleanupPreview(
+      user,
+      parseDays(days),
+      includeUnread === 'true' || includeUnread === '1',
+    );
+  }
+
+  /// Deleting is personal and non-destructive: the alert itself — and the
+  /// document, stock or invoice behind it — is never touched. These three
+  /// must be declared before `:id` or the literal paths would be swallowed.
+  @Delete('read')
+  @RequirePermissions('notifications.read')
+  dismissRead(@CurrentUser() user: AuthUser) {
+    return this.service.dismissRead(user);
+  }
+
+  @Delete('older')
+  @RequirePermissions('notifications.read')
+  dismissOlder(
+    @CurrentUser() user: AuthUser,
+    @Query('days') days: string,
+    @Query('includeUnread') includeUnread?: string,
+  ) {
+    return this.service.dismissOlderThan(
+      user,
+      parseDays(days),
+      includeUnread === 'true' || includeUnread === '1',
+    );
+  }
+
+  @Delete('all')
+  @RequirePermissions('notifications.read')
+  dismissAll(@CurrentUser() user: AuthUser) {
+    return this.service.dismissAll(user);
+  }
+
+  @Delete(':id')
+  @RequirePermissions('notifications.read')
+  dismiss(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.dismiss(user, id);
+  }
+
   @Post(':id/read')
   @RequirePermissions('notifications.read')
   read(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -110,4 +170,14 @@ export class NotificationsController {
       scheduler: this.scheduler.status(),
     };
   }
+}
+
+/// Cleanup windows are written by the screen; anything outside a sane range
+/// is refused here rather than silently clamped.
+function parseDays(value: string | undefined): number {
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    throw new BadRequestException('days must be an integer between 1 and 3650');
+  }
+  return days;
 }

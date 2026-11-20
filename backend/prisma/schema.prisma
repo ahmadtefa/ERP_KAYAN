@@ -2986,12 +2986,38 @@ model Notification {
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   branch    Branch?    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  userStates NotificationUserState[]
 
   @@unique([companyId, dedupeKey])
   @@index([companyId, status, createdAt])
   @@index([companyId, type, status])
   @@index([companyId, entityId])
   @@map("notifications")
+}
+
+/// One person's own state for one alert.
+///
+/// Reading and deleting are personal acts: one person reading an alert says
+/// nothing about what their colleague has read, and one person deleting it
+/// must not make it vanish for everybody. The alert itself (the fact, its
+/// audience, its audit trail) lives in `notifications` and is never destroyed
+/// from here — "delete" in the centre only writes `dismissedAt` on this row,
+/// so the source event keeps its dedupe key, its history and its place in the
+/// reports.
+model NotificationUserState {
+  id             String    @id @default(uuid()) @db.Uuid
+  notificationId String    @db.Uuid
+  userId         String    @db.Uuid
+  readAt         DateTime?
+  dismissedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId, readAt])
+  @@index([userId, dismissedAt])
+  @@map("notification_user_states")
 }
 
 /// How one company wants one kind of alert to behave.

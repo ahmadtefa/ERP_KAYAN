@@ -217,6 +217,190 @@ class _NotificationCenterScreenState
     }
   }
 
+  /// Every deletion here is personal and non-destructive: the alert row, the
+  /// document behind it and the audit trail are never touched. The confirm
+  /// dialog says so in the person's own language before anything happens.
+  Future<bool?> _confirm(String title, String message, {bool danger = false}) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(_t('إلغاء', 'Cancel')),
+          ),
+          FilledButton(
+            style: danger
+                ? FilledButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.error,
+                  )
+                : null,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(_t('تأكيد', 'Confirm')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Runs one deletion and reports the real outcome. A failed call shows the
+  /// server's own reason and leaves the list untouched — never a success that
+  /// did not happen.
+  Future<void> _runDelete(Future<Map<String, dynamic>> Function() op) async {
+    setState(() => _busy = true);
+    try {
+      final result = await op();
+      final count = (result['deleted'] as num?)?.toInt();
+      if (mounted) setState(() => _busy = false);
+      _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(count == null
+                ? _t('تم الحذف', 'Deleted')
+                : _t('تم الحذف ($count)', 'Deleted ($count)')),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _busy = false);
+        await showAppPlainError(
+          context,
+          error is Failure ? error.message : presentErrorText(context, error),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteOne(Json row) async {
+    final ok = await _confirm(
+      _t('حذف التنبيه؟', 'Delete this alert?'),
+      _t(
+        'سيختفي التنبيه من قائمتك أنت فقط. المستند أو الفاتورة المرتبطة به لن تتأثر، ويظل سجل التدقيق كما هو.',
+        'The alert disappears from your list only. The invoice or document behind it is untouched, and the audit trail stays.',
+      ),
+    );
+    if (ok != true) return;
+    await _runDelete(
+      () => ref.read(apiClientProvider).delete('/notifications/${row['id']}'),
+    );
+  }
+
+  Future<void> _confirmDeleteRead() async {
+    final ok = await _confirm(
+      _t('حذف التنبيهات المقروءة؟', 'Delete read alerts?'),
+      _t(
+        'تُحذف التنبيهات التي قرأتها من قائمتك أنت فقط. التنبيهات غير المقروءة تبقى كما هي.',
+        'The alerts you have read are removed from your list only. Unread alerts stay.',
+      ),
+    );
+    if (ok != true) return;
+    await _runDelete(() => ref.read(apiClientProvider).delete('/notifications/read'));
+  }
+
+  Future<void> _confirmDeleteAll() async {
+    final ok = await _confirm(
+      _t('حذف جميع التنبيهات؟', 'Delete all alerts?'),
+      _t(
+        'تُحذف جميع تنبيهاتك — بما فيها غير المقروءة — من قائمتك أنت فقط. لن تتأثر تنبيهات زملائك أو المستندات المرتبطة.',
+        'All of your alerts — unread included — are removed from your list only. Colleagues and the linked documents are unaffected.',
+      ),
+      danger: true,
+    );
+    if (ok != true) return;
+    await _runDelete(() => ref.read(apiClientProvider).delete('/notifications/all'));
+  }
+
+  Future<void> _confirmDeleteOld() async {
+    var days = 30;
+    var includeUnread = false;
+    int? preview;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          title: Text(_t('حذف التنبيهات القديمة', 'Delete old alerts')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_t('حذف التنبيهات الأقدم من:', 'Delete alerts older than:')),
+              const SizedBox(height: 8),
+              DropdownButton<int>(
+                value: days,
+                isExpanded: true,
+                items: [
+                  DropdownMenuItem(value: 7, child: Text(_t('7 أيام', '7 days'))),
+                  DropdownMenuItem(value: 30, child: Text(_t('30 يومًا', '30 days'))),
+                  DropdownMenuItem(value: 90, child: Text(_t('90 يومًا', '90 days'))),
+                ],
+                onChanged: (value) => setStateDialog(() {
+                  days = value ?? 30;
+                  preview = null;
+                }),
+              ),
+              CheckboxListTile(
+                value: includeUnread,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(_t('تضمين غير المقروءة', 'Include unread')),
+                subtitle: Text(
+                  _t(
+                    'افتراضيًا تبقى غير المقروءة محمية.',
+                    'Unread alerts are protected unless you ask for them.',
+                  ),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                onChanged: (value) => setStateDialog(() {
+                  includeUnread = value ?? false;
+                  preview = null;
+                }),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                icon: const Icon(Icons.calculate_outlined, size: 18),
+                label: Text(preview == null
+                    ? _t('عرض العدد', 'Show count')
+                    : _t('سيتم حذف: $preview', 'Will delete: $preview')),
+                onPressed: () async {
+                  final data = await ref.read(apiClientProvider).get(
+                        '/notifications/cleanup-preview',
+                        query: {
+                          'days': '$days',
+                          'includeUnread': '$includeUnread',
+                        },
+                      );
+                  setStateDialog(() {
+                    preview = (data['count'] as num?)?.toInt() ?? 0;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(_t('إلغاء', 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(_t('حذف', 'Delete')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    await _runDelete(
+      () => ref.read(apiClientProvider).delete(
+            '/notifications/older?days=$days&includeUnread=$includeUnread',
+          ),
+    );
+  }
+
   /// Opens the thing the alert is about.
   ///
   /// The server writes the path on the row, so the centre never has to know
@@ -285,6 +469,46 @@ class _NotificationCenterScreenState
           onPressed: _busy ? null : _markAllRead,
           icon: const Icon(Icons.done_all_rounded, size: 18),
           label: Text(_t('تحديد الكل كمقروء', 'Mark all read')),
+        ),
+        PopupMenuButton<String>(
+          tooltip: _t('إدارة التنبيهات', 'Manage alerts'),
+          enabled: !_busy,
+          onSelected: (value) {
+            switch (value) {
+              case 'delete-read':
+                _confirmDeleteRead();
+              case 'delete-old':
+                _confirmDeleteOld();
+              case 'delete-all':
+                _confirmDeleteAll();
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'delete-read',
+              child: Row(children: [
+                const Icon(Icons.mark_email_read_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text(_t('حذف المقروءة', 'Delete read')),
+              ]),
+            ),
+            PopupMenuItem(
+              value: 'delete-old',
+              child: Row(children: [
+                const Icon(Icons.event_busy_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text(_t('حذف التنبيهات القديمة', 'Delete old')),
+              ]),
+            ),
+            PopupMenuItem(
+              value: 'delete-all',
+              child: Row(children: [
+                Icon(Icons.delete_sweep_outlined, size: 18, color: theme.colorScheme.error),
+                const SizedBox(width: 8),
+                Text(_t('حذف جميع التنبيهات', 'Delete all')),
+              ]),
+            ),
+          ],
         ),
       ],
       body: Padding(
@@ -418,9 +642,13 @@ class _NotificationCenterScreenState
                           ),
                         ),
                         child: ListTile(
-                          onTap: () {
-                            _open(row);
-                            if (!isRead) _markRead(row);
+                          onTap: () async {
+                            // Read first, then open. Marking the row after
+                            // navigating raced the screen's disposal: the call
+                            // died silently and the badge kept its stale
+                            // number — the bug the bell was blamed for.
+                            if (!isRead) await _markRead(row);
+                            if (mounted) _open(row);
                           },
                           leading: CircleAvatar(
                             radius: 16,
@@ -465,6 +693,11 @@ class _NotificationCenterScreenState
                                 tooltip: _t('أرشفة', 'Archive'),
                                 onPressed: () => _archive(row),
                                 icon: const Icon(Icons.archive_outlined, size: 18),
+                              ),
+                              IconButton(
+                                tooltip: _t('حذف', 'Delete'),
+                                onPressed: () => _confirmDeleteOne(row),
+                                icon: const Icon(Icons.delete_outline, size: 18),
                               ),
                             ],
                           ),

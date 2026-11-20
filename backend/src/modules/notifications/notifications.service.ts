@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -115,38 +115,54 @@ export class NotificationsService {
     if (query.type) where.type = query.type.toUpperCase();
     if (query.severity) where.severity = query.severity.toUpperCase();
 
-    const [rows, total] = await Promise.all([
-      this.prisma.notification.findMany({
-        where: { ...where, ...this.visibleTo(user) },
-        // CRITICAL before WARNING before INFO, then the newest. The rank is a
-        // number because sorting the word alphabetically puts WARNING last.
-        orderBy: [{ severityRank: 'desc' }, { createdAt: 'desc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.notification.count({ where: { ...where, ...this.visibleTo(user) } }),
-    ]);
+    const rows = await this.prisma.notification.findMany({
+      where: { ...where, ...this.visibleTo(user) },
+      // CRITICAL before WARNING before INFO, then the newest. The rank is a
+      // number because sorting the word alphabetically puts WARNING last.
+      orderBy: [{ severityRank: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    // Reading and dismissal are personal, so the read filter and the page are
+    // cut from this person's own state — one colleague reading an alert never
+    // removes it from another's list.
+    const mine = await this.myStates(user.userId, rows.map((row) => row.id));
+    const filtered = rows.filter((row) => {
+      const state = mine.get(row.id);
+      if (state?.dismissedAt) return false;
+      if (status === 'OPEN') return !this.isRead(row, state);
+      if (status === 'READ') return this.isRead(row, state);
+      return true;
+    });
+    const start = (page - 1) * pageSize;
 
     return {
-      items: rows.map((row) => this.toResponse(row)),
-      total,
+      items: filtered
+        .slice(start, start + pageSize)
+        .map((row) => this.toResponse(row, mine.get(row.id))),
+      total: filtered.length,
       page,
       pageSize,
     };
   }
 
-  /// How many are waiting. This is the badge in the top bar, so it is one
-  /// query and it counts only what this person could open.
+  /// How many are waiting *for this person*. This is the badge in the top bar:
+  /// it counts only what they could open and have not read, and it never
+  /// counts what they deleted — reading one must take the badge from 10 to 9.
   async unreadCount(user: NotificationUser) {
-    const count = await this.prisma.notification.count({
+    const rows = await this.prisma.notification.findMany({
       where: {
         companyId: user.companyId,
-        status: 'OPEN',
+        status: { in: ['OPEN', 'READ'] },
         archivedAt: null,
         ...this.visibleTo(user),
       },
+      select: { id: true, status: true, readAt: true },
     });
-    return { unread: count };
+    const mine = await this.myStates(user.userId, rows.map((row) => row.id));
+    const unread = rows.filter(
+      (row) => !this.isRead(row, mine.get(row.id)) && !mine.get(row.id)?.dismissedAt,
+    ).length;
+    return { unread };
   }
 
   async markRead(user: NotificationUser, id: string) {
@@ -154,11 +170,10 @@ export class NotificationsService {
     if (row.status === 'ARCHIVED') {
       return this.toResponse(row);
     }
-    const updated = await this.prisma.notification.update({
-      where: { id: row.id },
-      data: { status: 'READ', readAt: row.readAt ?? new Date() },
+    const state = await this.upsertState(user.userId, row.id, {
+      readAt: new Date(),
     });
-    return this.toResponse(updated);
+    return this.toResponse(row, state);
   }
 
   /// Marks a row as unread again.
@@ -172,11 +187,8 @@ export class NotificationsService {
     if (row.status === 'CLOSED' || row.status === 'ARCHIVED') {
       return this.toResponse(row);
     }
-    const updated = await this.prisma.notification.update({
-      where: { id: row.id },
-      data: { status: 'OPEN', readAt: null },
-    });
-    return this.toResponse(updated);
+    const state = await this.upsertState(user.userId, row.id, { readAt: null });
+    return this.toResponse(row, state);
   }
 
   async archive(user: NotificationUser, id: string) {
@@ -188,17 +200,208 @@ export class NotificationsService {
     return this.toResponse(updated);
   }
 
+  /// Marks everything this person can see and has not read as read. Personal:
+  /// the colleague's badge is not touched.
   async markAllRead(user: NotificationUser) {
-    const result = await this.prisma.notification.updateMany({
+    const rows = await this.prisma.notification.findMany({
       where: {
         companyId: user.companyId,
-        status: 'OPEN',
+        status: { in: ['OPEN', 'READ'] },
         archivedAt: null,
         ...this.visibleTo(user),
       },
-      data: { status: 'READ', readAt: new Date() },
+      select: { id: true },
     });
-    return { updated: result.count };
+    const ids = rows.map((row) => row.id);
+    const mine = await this.myStates(user.userId, ids);
+    const now = new Date();
+    await this.prisma.notificationUserState.updateMany({
+      where: { userId: user.userId, notificationId: { in: ids }, readAt: null },
+      data: { readAt: now },
+    });
+    const missing = ids.filter((id) => !mine.has(id));
+    if (missing.length > 0) {
+      await this.prisma.notificationUserState.createMany({
+        data: missing.map((notificationId) => ({
+          notificationId,
+          userId: user.userId,
+          readAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    return { updated: ids.length };
+  }
+
+  // ────────────────────────────────────────────────────────────── dismissing
+
+  /// Deleting in the centre is personal and non-destructive: the row in
+  /// `notifications` — the fact, its audit trail, its dedupe key — is left
+  /// exactly where it was. Only this person stops seeing it.
+  async dismiss(user: NotificationUser, id: string) {
+    const row = await this.require(user, id);
+    await this.upsertState(user.userId, row.id, {
+      dismissedAt: new Date(),
+      readAt: new Date(),
+    });
+    return { deleted: 1 };
+  }
+
+  /// Clears what this person has read. Unread alerts are untouched: a blanket
+  /// "tidy up" must never swallow the warning nobody has seen yet.
+  async dismissRead(user: NotificationUser) {
+    const result = await this.prisma.notificationUserState.updateMany({
+      where: { userId: user.userId, readAt: { not: null }, dismissedAt: null },
+      data: { dismissedAt: new Date() },
+    });
+    return { deleted: result.count };
+  }
+
+  /// Clears everything this person can see. The caller is expected to have
+  /// asked for confirmation first — this deletes unread alerts too.
+  async dismissAll(user: NotificationUser) {
+    const rows = await this.prisma.notification.findMany({
+      where: { companyId: user.companyId, ...this.visibleTo(user) },
+      select: { id: true },
+    });
+    const ids = rows.map((row) => row.id);
+    const mine = await this.myStates(user.userId, ids);
+    const now = new Date();
+    await this.prisma.notificationUserState.updateMany({
+      where: { userId: user.userId, notificationId: { in: ids }, dismissedAt: null },
+      data: { dismissedAt: now, readAt: now },
+    });
+    const missing = ids.filter((id) => !mine.has(id));
+    if (missing.length > 0) {
+      await this.prisma.notificationUserState.createMany({
+        data: missing.map((notificationId) => ({
+          notificationId,
+          userId: user.userId,
+          readAt: now,
+          dismissedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    return { deleted: ids.length };
+  }
+
+  /// What a cleanup of alerts older than `days` would remove, without doing
+  /// it. The screen shows this number before the person confirms.
+  async cleanupPreview(
+    user: NotificationUser,
+    days: number,
+    includeUnread: boolean,
+  ) {
+    const targets = await this.olderThanTargets(user, days, includeUnread);
+    return { count: targets.length, days, includeUnread };
+  }
+
+  /// Clears this person's alerts older than `days`. Unread ones are protected
+  /// unless the person explicitly asked for them.
+  async dismissOlderThan(
+    user: NotificationUser,
+    days: number,
+    includeUnread: boolean,
+  ) {
+    const targets = await this.olderThanTargets(user, days, includeUnread);
+    if (targets.length > 0) {
+      const mine = await this.myStates(
+        user.userId,
+        targets.map((row) => row.id),
+      );
+      const now = new Date();
+      const ids = targets.map((row) => row.id);
+      await this.prisma.notificationUserState.updateMany({
+        where: { userId: user.userId, notificationId: { in: ids }, dismissedAt: null },
+        data: { dismissedAt: now, readAt: now },
+      });
+      const missing = ids.filter((id) => !mine.has(id));
+      if (missing.length > 0) {
+        await this.prisma.notificationUserState.createMany({
+          data: missing.map((notificationId) => ({
+            notificationId,
+            userId: user.userId,
+            readAt: now,
+            dismissedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+    return { deleted: targets.length, days, includeUnread };
+  }
+
+  private async olderThanTargets(
+    user: NotificationUser,
+    days: number,
+    includeUnread: boolean,
+  ) {
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      throw new BadRequestException('days must be an integer between 1 and 3650');
+    }
+    const cutoff = new Date(Date.now() - days * 86_400_000);
+    const rows = await this.prisma.notification.findMany({
+      where: {
+        companyId: user.companyId,
+        createdAt: { lt: cutoff },
+        ...this.visibleTo(user),
+      },
+      select: { id: true, status: true, readAt: true },
+    });
+    const mine = await this.myStates(user.userId, rows.map((row) => row.id));
+    return rows.filter((row) => {
+      const state = mine.get(row.id);
+      if (state?.dismissedAt) return false;
+      return includeUnread ? true : this.isRead(row, state);
+    });
+  }
+
+  /// This person's personal state for the given alerts.
+  private async myStates(userId: string, notificationIds: string[]) {
+    const map = new Map<
+      string,
+      { readAt: Date | null; dismissedAt: Date | null }
+    >();
+    if (notificationIds.length === 0) return map;
+    const rows: Array<{
+      notificationId: string;
+      readAt: Date | null;
+      dismissedAt: Date | null;
+    }> = await this.prisma.notificationUserState.findMany({
+      where: { userId, notificationId: { in: notificationIds } },
+    });
+    for (const row of rows) map.set(row.notificationId, row);
+    return map;
+  }
+
+  private async upsertState(
+    userId: string,
+    notificationId: string,
+    patch: { readAt?: Date | null; dismissedAt?: Date | null },
+  ) {
+    return this.prisma.notificationUserState.upsert({
+      where: { notificationId_userId: { notificationId, userId } },
+      create: {
+        notificationId,
+        userId,
+        readAt: patch.readAt ?? null,
+        dismissedAt: patch.dismissedAt ?? null,
+      },
+      update: patch,
+    }) as Promise<{ readAt: Date | null; dismissedAt: Date | null }>;
+  }
+
+  /// Read is personal; rows written before this table existed carry their
+  /// answer in the legacy shared columns, and the migration copied those into
+  /// every person's state — the fallback only matters for rows a state row
+  /// has never been written for.
+  private isRead(
+    row: { status: string; readAt: Date | null },
+    state?: { readAt: Date | null } | null,
+  ): boolean {
+    if (state) return state.readAt != null;
+    return row.status !== 'OPEN' || row.readAt != null;
   }
 
   /// Only rows this person could open, and only those whose permission they
@@ -259,7 +462,8 @@ export class NotificationsService {
     return row;
   }
 
-  private toResponse(row: {
+  private toResponse(
+    row: {
     id: string;
     type: string;
     severity: string;
@@ -279,7 +483,9 @@ export class NotificationsService {
     archivedAt: Date | null;
     branchId: string | null;
     warehouseId: string | null;
-  }) {
+    },
+    state?: { readAt: Date | null; dismissedAt: Date | null } | null,
+  ) {
     return {
       id: row.id,
       type: row.type,
@@ -295,11 +501,11 @@ export class NotificationsService {
       actionPath: row.actionPath,
       dueAt: row.dueAt,
       createdAt: row.createdAt,
-      readAt: row.readAt,
+      readAt: state ? state.readAt : row.readAt,
       archivedAt: row.archivedAt,
       branchId: row.branchId,
       warehouseId: row.warehouseId,
-      isRead: row.status !== 'OPEN' || row.readAt !== null,
+      isRead: this.isRead(row, state),
     };
   }
 
@@ -455,7 +661,9 @@ export class NotificationsService {
         // The fact is unchanged; its wording may not be. Re-opening a row a
         // person already read would be a lie about "new" - unless the setting
         // says this alert repeats, in which case it is a fresh prompt on
-        // purpose and the count says how many times it has been asked.
+        // purpose and the count says how many times it has been asked. The
+        // re-prompt is personal too: it clears read state but never brings a
+        // dismissed alert back to anybody.
         update: dueForRepeat
           ? {
               titleEn: input.titleEn,
@@ -467,7 +675,6 @@ export class NotificationsService {
               lastRaisedAt: new Date(),
               raisedCount: (existing?.raisedCount ?? 0) + 1,
               status: 'OPEN',
-              readAt: null,
             }
           : {
               titleEn: input.titleEn,
@@ -477,6 +684,12 @@ export class NotificationsService {
               lastRaisedAt: new Date(),
             },
       });
+      if (dueForRepeat) {
+        await this.prisma.notificationUserState.updateMany({
+          where: { notificationId: row.id, dismissedAt: null },
+          data: { readAt: null },
+        });
+      }
       return { id: row.id };
     } catch (error) {
       // A race between two scanners is the one case the upsert cannot settle
