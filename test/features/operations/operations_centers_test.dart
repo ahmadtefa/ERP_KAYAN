@@ -111,10 +111,14 @@ const _limitedUser = AppUser(
   return router;
 }
 
-Future<void> _scrollTo(WidgetTester tester, String label) async {
+Future<void> _scrollTo(
+  WidgetTester tester,
+  String label, {
+  double delta = 300,
+}) async {
   await tester.scrollUntilVisible(
     find.text(label),
-    300,
+    delta,
     scrollable: find.byType(Scrollable).first,
   );
   await tester.pumpAndSettle();
@@ -208,6 +212,7 @@ void main() {
         .descendant(of: card, matching: find.byIcon(Icons.push_pin_outlined))
         .first);
     await tester.pumpAndSettle();
+    await _scrollTo(tester, 'Favourites', delta: -300);
     expect(find.text('Favourites'), findsOneWidget);
 
     // A brand-new session (fresh widget tree) still shows the pin.
@@ -229,6 +234,7 @@ void main() {
     await tester.pumpAndSettle();
     router.pop();
     await tester.pumpAndSettle();
+    await _scrollTo(tester, 'Most used', delta: -300);
 
     expect(find.text('Most used'), findsOneWidget);
   });
