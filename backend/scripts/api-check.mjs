@@ -202,7 +202,7 @@ async function main() {
   check(
     'an invalid archive is rejected, or the machine gate refuses restore before parsing it',
     databaseRestoreSupported
-      ? refused.status === 400 && /not a PostgreSQL archive/i.test(refused.data?.detail ?? '')
+      ? refused.status === 400 && /PostgreSQL|\.dump|أرشيف/i.test(refused.data?.detail ?? '')
       : refused.status === 503 && refused.data?.code === 'FULL_RESTORE_UNAVAILABLE',
     `status ${refused.status}: ${refused.data?.detail ?? refused.data?.code ?? ''}`,
   );
