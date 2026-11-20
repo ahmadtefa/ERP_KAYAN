@@ -30,9 +30,9 @@
  *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
  *  16. prove that a PostgreSQL dump is never advertised as a complete
- *      installation backup: complete full backup and full restore stay
- *      fail-closed until external files and the device-bound licence are
- *      recoverable too, while the explicit database archive is still
+ *      installation backup: this scenario expects an operator-disabled restore
+ *      fixture (start the API with KAYAN_FULL_RESTORE_ENABLED=0), while the
+ *      explicit database archive is still
  *      reachable by hand and says what it leaves out
  *  17. verify the portable company JSON backup round-trips, and when explicitly
  *      enabled for an ephemeral database, verify the guarded reset, its
@@ -1409,12 +1409,8 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
-    // A destructive full restore is guarded shut on purpose: CompleteRestore
-    // UnavailableGuard refuses it before the multipart body is even read, and
-    // no environment switch can open it. Asserting that guard is the honest
-    // check - a scenario that demanded a 2xx here would be demanding the guard
-    // be removed. The response carries the machine-readable code, so assert
-    // the code rather than a generic HTTP title.
+    // DatabaseRestoreGuard must honour the operator's refusal before the body
+    // is processed. scenario-system-backup tests the ready machine separately.
     check(
       'full restore remains blocked until complete restore and licence recovery are proven',
       restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',

@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [backend, warehouses-orders, accounting, accounting-reconciliation]
+        suite: [backend, warehouses-orders, accounting, accounting-reconciliation, system-backup]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -179,6 +179,10 @@ jobs:
         if: matrix.suite != 'backend'
         env:
           SCENARIO: ${{ matrix.suite }}
+          # The accounting scenario asserts the operator-disabled API refuses
+          # restore. The system-backup scenario requires the same API to perform
+          # a real restore after ALL machine checks pass (no forced allow).
+          KAYAN_FULL_RESTORE_ENABLED: ${{ matrix.suite == 'accounting' && '0' || '' }}
           ENABLE_DISPOSABLE_RESET: ${{ matrix.suite == 'accounting' }}
         shell: bash
         run: |
@@ -201,7 +205,7 @@ jobs:
           log="../build/acceptance-postgres/$SCENARIO.log"
           if ! node "scripts/scenario-$SCENARIO.mjs" http://127.0.0.1:3000/api/v1 2>&1 | tee "$log"; then
             # Surface failed checks without dumping authentication responses.
-            awk '/^FAIL  / {split($0,a," — "); print "::error::" a[1]}' "$log"
+            awk '/^[[:space:]]*FAIL[[:space:]]/ {split($0,a," — "); print "::error::" a[1]}' "$log"
             exit 1
           fi
       - name: Upload PostgreSQL evidence
