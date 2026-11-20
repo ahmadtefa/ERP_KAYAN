@@ -111,6 +111,15 @@ const _limitedUser = AppUser(
   return router;
 }
 
+Future<void> _scrollTo(WidgetTester tester, String label) async {
+  await tester.scrollUntilVisible(
+    find.text(label),
+    300,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -156,14 +165,14 @@ void main() {
     // The registry is populated without entering a search term.
     expect(find.text('Income statement'), findsWidgets);
     expect(find.text('General ledger'), findsWidgets);
-    expect(find.text('Warehouse cost'), findsWidgets);
-
     await tester.tap(find.text('Income statement').first);
     await tester.pumpAndSettle();
     expect(find.text('report:profit-and-loss'), findsOneWidget);
 
     router.pop();
     await tester.pumpAndSettle();
+    await _scrollTo(tester, 'Warehouse cost');
+    expect(find.text('Warehouse cost'), findsWidgets);
     await tester.tap(find.text('Warehouse cost').first);
     await tester.pumpAndSettle();
     expect(find.text('inventory-report:cost-by-warehouse'), findsOneWidget);
@@ -189,6 +198,7 @@ void main() {
 
   testWidgets('favourites pin and survive a new session', (tester) async {
     await _pump(tester, user: _fullUser, kind: OpsKind.entry);
+    await _scrollTo(tester, 'New customer');
 
     final card = find.ancestor(
       of: find.text('New customer'),
@@ -209,10 +219,12 @@ void main() {
     final router = await _pump(tester, user: _fullUser, kind: OpsKind.entry);
 
     // Use one operation twice (push → back each time).
+    await _scrollTo(tester, 'New customer');
     await tester.tap(find.text('New customer').first);
     await tester.pumpAndSettle();
     router.pop();
     await tester.pumpAndSettle();
+    await _scrollTo(tester, 'New customer');
     await tester.tap(find.text('New customer').first);
     await tester.pumpAndSettle();
     router.pop();
@@ -232,6 +244,7 @@ void main() {
     );
 
     expect(find.text('فاتورة مبيعات جديدة'), findsWidgets);
+    await _scrollTo(tester, 'عميل جديد');
     expect(find.text('عميل جديد'), findsWidgets);
   });
 }
