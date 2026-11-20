@@ -1343,7 +1343,7 @@ class _TopBar extends ConsumerWidget {
                     ],
                   ),
                 ),
-                if (isExtended) ...[
+                if (isExtended && MediaQuery.sizeOf(context).width >= 1560) ...[
                   const SizedBox(width: AppSpacing.md),
                   Container(width: 1, height: 14, color: scheme.outlineVariant),
                   const SizedBox(width: AppSpacing.md),
@@ -1372,7 +1372,7 @@ class _TopBar extends ConsumerWidget {
                 : 'Inputs',
             color: const Color(0xFF218653),
             path: AppRoutes.operationsInputs,
-            showLabel: !compact,
+            showLabel: MediaQuery.sizeOf(context).width >= 1560,
           ),
           const SizedBox(width: AppSpacing.xs),
           _OpsCenterButton(
@@ -1383,7 +1383,7 @@ class _TopBar extends ConsumerWidget {
                 : 'Outputs',
             color: const Color(0xFF2259CF),
             path: AppRoutes.operationsOutputs,
-            showLabel: !compact,
+            showLabel: MediaQuery.sizeOf(context).width >= 1560,
           ),
           IconButton(
             key: const ValueKey('erp-home-shortcut'),
@@ -1422,9 +1422,12 @@ class _TopBar extends ConsumerWidget {
                   child: Icon(Icons.person_outline, size: compact ? 17 : 20),
                 ),
               ),
-              const SizedBox(width: AppSpacing.xs),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: isExtended ? 130 : (compact ? 58 : 72)),
+              // At compact widths the name would push the bar past the
+              // screen edge; the avatar alone identifies the account
+              // there (the full name stays in the drawer/profile).
+              if (!compact) const SizedBox(width: AppSpacing.xs),
+              if (!compact) ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: isExtended ? 130 : 72),
                 child: Text(
                   user.fullName,
                   maxLines: 1,
@@ -1463,7 +1466,12 @@ class _OpsCenterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final current = GoRouterState.of(context).uri.path == path;
+    bool current = false;
+    try {
+      current = GoRouterState.of(context).uri.path == path;
+    } catch (_) {
+      // Shell used outside a GoRoute match: no current-route highlight.
+    }
     final onColor =
         ThemeData.estimateBrightnessForColor(color) == Brightness.dark
             ? Colors.white
@@ -1491,7 +1499,7 @@ class _OpsCenterButton extends StatelessWidget {
             onTap: () => context.go(path),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: showLabel ? 10 : 8,
+                horizontal: showLabel ? 10 : 5,
                 vertical: 7,
               ),
               child: DefaultTextStyle(

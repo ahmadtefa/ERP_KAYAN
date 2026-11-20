@@ -300,7 +300,7 @@ void main() {
       ];
     await _pump(tester, service);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Deletion is paused'), findsOneWidget);
+    expect(find.textContaining('paused on this machine'), findsOneWidget);
     final deleteButton = find.ancestor(
       of: find.byIcon(Icons.delete_outline, skipOffstage: false),
       matching: find.byType(IconButton, skipOffstage: false),
