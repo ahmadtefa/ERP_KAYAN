@@ -51,6 +51,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
   Map<String, dynamic>? _systemCapabilities;
   List<Map<String, dynamic>> _systemFiles = const [];
   Map<String, dynamic>? _restoreStatus;
+  List<String> _technicalDetails = const [];
   bool _busy = false;
 
   /// True only while the first capabilities/list round-trip is in flight.
@@ -256,11 +257,40 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
         '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}$where\n$warning';
   }
 
-  /// The reason deletion is not offered, when the server protects its backups.
+  /// The reason a delete was refused, in the person's words, with the
+  /// server's own technical detail kept for the expandable panel.
+  String _deleteBlockedMessage(Object error) {
+    final data = error is DioException && error.response?.data is Map
+        ? error.response!.data as Map
+        : null;
+    final code = '${data?['code'] ?? ''}';
+    final detail = '${data?['detail'] ?? ''}';
+    if (detail.isNotEmpty) {
+      _technicalDetails = [..._technicalDetails, detail];
+    }
+    if (code == 'BACKUP_DELETE_LAST') {
+      return _t(
+        context,
+        'هذه آخر نسخة على الخادم. لا يمكن حذفها حتى توجد نسخة أخرى تضمن طريقاً للرجوع.',
+        'This is the last backup on the server. It cannot be deleted until another backup exists, so there is always a way back.',
+      );
+    }
+    if (code == 'BACKUP_DELETE_IN_USE') {
+      return _t(
+        context,
+        'هذه النسخة لا يمكن حذفها الآن: إما أن استعادة جارية، أو أنها النسخة الوقائية التي يحتاجها تعافٍ من استعادة سابقة. الحلّ أولاً من صفحة «حالة التعافي».',
+        'This backup cannot be deleted right now: either a restore is running, or this is the protective copy an earlier interrupted restore still needs. Resolve the recovery first.',
+      );
+    }
+    return describeApiError(error);
+  }
+
+  /// The reason deletion is not offered at all, when the server protects its
+  /// backups machine-wide.
   String _deleteProtectionMessage() => _t(
     context,
-    'حذف النسخ متوقف لحمايتها حتى يثبت استرجاع نسخة بديلة كاملة تشمل البيانات والملفات والترخيص.',
-    'Deletion is paused to protect backups until a complete replacement restore, including files and licence, is verified.',
+    'حذف النسخ متوقف على هذا الجهاز. السبب التقني مذكور في التفاصيل أدناه.',
+    'Backup deletion is paused on this machine. The technical reason is in the details below.',
   );
 
   Future<void> _verify(String name, {required bool complete}) async {
@@ -352,14 +382,10 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       await _load();
     } catch (error) {
       if (!mounted) return;
-      final protected =
-          error is DioException &&
-          error.response?.statusCode == 409 &&
-          error.response?.data is Map &&
-          (error.response!.data as Map)['code'] == 'BACKUP_DELETE_PROTECTED';
+      final blocked = error is DioException && error.response?.statusCode == 409;
       setState(
-        () => _failure = protected
-            ? _deleteProtectionMessage()
+        () => _failure = blocked
+            ? _deleteBlockedMessage(error)
             : describeApiError(error),
       );
     }
@@ -367,19 +393,31 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   /// The warning, then the typed word. Twice on purpose: the first dialog says
   /// what will happen, the second makes the person write it down.
-  Future<bool> _confirm() async {
+  Future<bool> _confirm({bool complete = true}) async {
     final l10n = context.l10n;
-    final warned = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l10n.confirmFullRestoreTitle),
-        content: Text(
-          '${l10n.restoreFullWarning}\n\n'
-          '${_t(
+    final scope = complete
+        ? _t(
             context,
             'هذه الاستعادة تمس جميع الشركات وليس شركة واحدة. تأكد أنك تريد استبدال كل البيانات الحالية.',
             'This restore replaces every company on the installation, not one company. Make sure you mean to replace all current data.',
-          )}',
+          )
+        : _t(
+            context,
+            'أنت على وشك استعادة أرشيف قاعدة بيانات (DUMP): يستبدل كل الشركات والمستخدمين على هذا الجهاز.\n'
+                'الملفات الخارجية (الصور والمرفقات) والإعدادات والترخيص ليست داخله — استخدم النسخة الكاملة للنظام لذلك.\n'
+                'قبل التنفيذ تؤخذ نسخة وقائية من قاعدة البيانات الحالية، وتُجرَّب الاستعادة أولاً على قاعدة منفصلة.',
+            'You are about to restore a database archive (DUMP): it replaces every company and user on this installation.\n'
+                'External files (images, attachments), settings and the licence are NOT inside it — use a complete system backup for those.\n'
+                'A protective copy of the current database is taken first, and the restore is rehearsed on a separate database before anything is replaced.',
+          );
+    final warned = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(complete
+            ? l10n.confirmFullRestoreTitle
+            : _t(context, 'استعادة قاعدة البيانات (DUMP)', 'Restore database (DUMP)')),
+        content: Text(
+          '${complete ? l10n.restoreFullWarning : ''}\n\n$scope',
         ),
         actions: [
           TextButton(
@@ -432,8 +470,8 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
   /// Restores from a complete archive (server file or upload) or a database
   /// archive. Progress is polled so the person sees which step is running
   /// instead of an unmoving bar.
-  Future<void> _restore({PickedFile? file, String? fileName}) async {
-    if (!await _confirm()) return;
+  Future<void> _restore({PickedFile? file, String? fileName, bool complete = true}) async {
+    if (!await _confirm(complete: complete)) return;
     if (!mounted) return;
 
     setState(() {
@@ -448,12 +486,18 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     _startStatusPolling();
 
     try {
-      final result = await ref.read(systemBackupServiceProvider).restore(
-        file: file,
-        fileName: fileName,
-        confirm: true,
-        confirmPhrase: 'RESTORE',
-      );
+      final result = complete
+          ? await ref.read(systemBackupServiceProvider).restore(
+              file: file,
+              fileName: fileName,
+              confirm: true,
+              confirmPhrase: 'RESTORE',
+            )
+          : await ref.read(fullBackupServiceProvider).restore(
+              file: file,
+              fileName: fileName,
+              confirm: true,
+            );
       if (!mounted) return;
       final safety = '${result['safetyBackup'] ?? ''}';
       final filesRestored = result['filesRestored'];
@@ -483,11 +527,48 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      setState(() {
+        _technicalDetails = const [];
+        _failure = _restoreFailure(error);
+      });
     } finally {
       _stopStatusPolling();
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// A restore refusal says what is missing and what to do — in Arabic —
+  /// with the machine's technical checks kept for the expandable panel.
+  String _restoreFailure(Object error) {
+    final data = error is DioException && error.response?.data is Map
+        ? error.response!.data as Map
+        : null;
+    final code = '${data?['code'] ?? ''}';
+    if (code == 'FULL_RESTORE_UNAVAILABLE') {
+      final reasons = (data?['reasons'] as List<dynamic>? ?? const [])
+          .map((entry) => '• $entry')
+          .join('\n');
+      final checks = (data?['checks'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((check) =>
+              '${check['ok'] == true ? '✓' : '✗'} ${check['name'] ?? ''}: ${check['detail'] ?? ''}')
+          .toList(growable: false);
+      final detail = '${data?['detail'] ?? ''}';
+      _technicalDetails = [
+        if (detail.isNotEmpty) detail,
+        ...checks,
+      ];
+      return _t(
+        context,
+        'الاستعادة غير متاحة على هذا الجهاز حتى تكتمل الشروط التالية:\n'
+            '$reasons\n'
+            'الإجراء المطلوب: نفّذ ما في الأسباب أعلاه (مثل تهيئة حساب مدير الاستعادة عبر KAYAN_RESTORE_ADMIN_DATABASE_URL أو منح صلاحية CREATEDB) ثم أعد المحاولة. التفاصيل التقنية في القائمة المنسدلة.',
+        'Restore is not available on this machine until these are fixed:\n'
+            '$reasons\n'
+            'Required action: address the reasons above (for example configure the restore-admin account via KAYAN_RESTORE_ADMIN_DATABASE_URL or grant CREATEDB), then try again. Technical details are in the expandable list.',
+      );
+    }
+    return describeApiError(error);
   }
 
   void _startStatusPolling() {
@@ -607,20 +688,10 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       return;
     }
     if (isDump) {
-      // A bare .dump is the database only: no uploaded files, no settings, no
-      // licence record. Restoring it as if it were the whole machine is the
-      // mistake this screen exists to prevent, and the database-only restore
-      // stays closed until its own safety test passes.
-      if (!mounted) return;
-      setState(() {
-        _failure = _t(
-          context,
-          'أرشيف قاعدة البيانات (.dump) يحمل قاعدة البيانات وحدها: لا ملفات ولا ترخيص.\n'
-              'استخدم نسخة كاملة للنظام (.kayanbackup) لاستعادة الجهاز.',
-          'A database archive (.dump) holds the database alone: no files and no licence. '
-              'Use a complete system backup (.kayanbackup) to restore the machine.',
-        );
-      });
+      // A bare .dump restores the database alone — offered on purpose, with
+      // its scope spelled out in the confirmation and a protective copy
+      // taken first. It is not the whole machine and never pretends to be.
+      await _restore(file: picked, complete: false);
       return;
     }
     if (!isComplete) {
@@ -834,6 +905,29 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                 text: _failure!,
               ),
             ],
+            if (_failure != null && _technicalDetails.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ExpansionTile(
+                dense: true,
+                tilePadding: EdgeInsets.zero,
+                title: Text(
+                  _t(context, 'التفاصيل التقنية', 'Technical details'),
+                  style: theme.textTheme.labelLarge,
+                ),
+                children: [
+                  for (final line in _technicalDetails)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        line,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
             if (_systemFiles.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
@@ -904,14 +998,18 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
             icon: const Icon(Icons.download_outlined, size: 20),
             onPressed: _busy ? null : () => _download(name, complete: complete),
           ),
-          // Restoring a bare .dump would put back the database without the
-          // files or the licence, so that control exists only for a complete
-          // archive — and only when this machine passed every check.
-          if (complete && restoreEnabled)
+          // A .dump restores the database alone (every company and user);
+          // its confirmation spells out that files and the licence are not
+          // included. A complete archive restores the whole machine. Both
+          // appear only when this machine passed every check.
+          if (restoreEnabled)
             IconButton(
-              tooltip: l10n.restoreFullDatabase,
+              tooltip: complete
+                  ? l10n.restoreFullDatabase
+                  : _t(context, 'استعادة قاعدة البيانات (DUMP)',
+                      'Restore database (DUMP)'),
               icon: const Icon(Icons.restore, size: 20),
-              onPressed: () => _restore(fileName: name),
+              onPressed: () => _restore(fileName: name, complete: complete),
             ),
           IconButton(
             tooltip: l10n.deleteBackup,

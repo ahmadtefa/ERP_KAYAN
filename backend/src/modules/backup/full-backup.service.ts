@@ -177,8 +177,10 @@ export class FullBackupService {
       serverVersion,
       warning,
       backupDirectory: this.backupDir(),
-      // No archive currently has proof of a complete machine restore.
-      deletionProtected: true,
+      // Deletion is available: the server enforces the real rules per file
+      // (never the last copy, never the protective copy an interrupted
+      // restore needs, never while a restore runs).
+      deletionProtected: false,
       // A PostgreSQL dump alone cannot restore the installation, attached
       // files, and device-bound licence as one verified recovery point.
       fullBackupSupported: false,

@@ -71,14 +71,22 @@ export class FullBackupController {
   constructor(
     private readonly service: FullBackupService,
     private readonly maintenance: MaintenanceService,
+    private readonly gate: RestoreGateService,
   ) {}
 
-  /// What this machine can do, and the state of the system right now.
+  /// What this machine can do, and the state of the system right now. The
+  /// restore gate's answer is included with its reasons and checks, so a
+  /// screen can say why a restore is unavailable and what to do about it —
+  /// never a bare "disabled".
   @Get('capabilities')
   async capabilities() {
+    const gate = await this.gate.probe();
     return {
       ...(await this.service.capabilities()),
       maintenance: this.maintenance.status,
+      fullRestoreSupported: gate.fullRestoreSupported,
+      restoreReasons: gate.reasons,
+      restoreChecks: gate.checks,
     };
   }
 
