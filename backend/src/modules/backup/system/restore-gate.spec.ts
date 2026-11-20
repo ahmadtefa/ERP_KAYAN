@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { MaintenanceService } from '../../../common/maintenance/maintenance';
 import { forgetPgTools } from './pg-support';
+import * as pgSupport from './pg-support';
 import { RestoreGateService } from './restore-gate.service';
 import { RestoreJournalStore } from './restore-journal';
 
@@ -58,6 +59,22 @@ describe('restore gate', () => {
     process.env = { ...originalEnv };
     forgetPgTools();
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports the actual scratch actor and the required action when blocked', async () => {
+    const probe = jest.spyOn(pgSupport, 'mayCreateDatabase');
+    try {
+      probe.mockResolvedValueOnce({ allowed: true, path: 'restore-admin', reason: null });
+      const gate = new RestoreGateService(maintenance, journal);
+      let check = (await gate.probe(true)).checks.find(c => c.name === 'scratch-database');
+      expect(check?.detail).toMatch(/path: restore-admin/);
+      probe.mockResolvedValueOnce({ allowed: false, path: null, reason: 'configure dedicated restore-admin with CREATEDB' });
+      check = (await gate.probe(true)).checks.find(c => c.name === 'scratch-database');
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toMatch(/configure dedicated restore-admin with CREATEDB/);
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it('refuses a tool set older than the server', async () => {

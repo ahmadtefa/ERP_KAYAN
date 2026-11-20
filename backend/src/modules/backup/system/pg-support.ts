@@ -398,11 +398,18 @@ export async function mayCreateDatabase(): Promise<{
   reason: string | null;
   path: RestoreAdminPath | null;
 }> {
-  const runtimeReason =
-    'the database account is not allowed to create a database';
-  const adminHint =
-    'configure the restore-admin account (KAYAN_RESTORE_ADMIN_DATABASE_URL) ' +
-    'or grant the restore account CREATEDB';
+  const admin = await restoreAdminStatus();
+  // The actual scratch lifecycle prefers an explicitly configured admin. The
+  // gate must check the same actor, even when runtime happens to have CREATEDB.
+  if (admin.configured) {
+    if (admin.usable) return { allowed: true, reason: null, path: 'restore-admin' };
+    return {
+      allowed: false,
+      path: null,
+      reason: `the configured restore-admin is unavailable: ${admin.reason ?? 'unknown problem'}; ` +
+        'fix KAYAN_RESTORE_ADMIN_DATABASE_URL or KAYAN_RESTORE_ADMIN_FILE and grant the dedicated restore-admin CREATEDB',
+    };
+  }
   try {
     const runtimeMay = await withPgClient({}, async (client) => {
       const result = await client.query<{ allowed: boolean }>(
@@ -411,18 +418,18 @@ export async function mayCreateDatabase(): Promise<{
       return result.rows[0]?.allowed === true;
     });
     if (runtimeMay) return { allowed: true, reason: null, path: 'runtime' };
-    const admin = await restoreAdminStatus();
-    if (admin.usable) return { allowed: true, reason: null, path: 'restore-admin' };
     return {
       allowed: false,
       path: null,
-      reason:
-        admin.configured && admin.reason
-          ? `${runtimeReason}; ${admin.reason}`
-          : `${runtimeReason} and no restore-admin is configured — ${adminHint}`,
+      reason: 'the runtime database account cannot create a scratch database; configure a dedicated restore-admin ' +
+        'using KAYAN_RESTORE_ADMIN_DATABASE_URL or KAYAN_RESTORE_ADMIN_FILE with CREATEDB on the same server',
     };
-  } catch (error) {
-    return { allowed: false, path: null, reason: (error as Error).message };
+  } catch {
+    return {
+      allowed: false,
+      path: null,
+      reason: 'the runtime database account could not be checked; check its database connection and configure a dedicated restore-admin with CREATEDB on the same server',
+    };
   }
 }
 
@@ -449,8 +456,8 @@ async function scratchAdminConnectionString(): Promise<string> {
 }
 
 async function scratchAdminEnv(): Promise<NodeJS.ProcessEnv> {
-  const actor = scratchDatabaseActor();
-  return actor ? actor.env : connectionEnv(adminDatabaseUrl());
+  const connectionString = await scratchAdminConnectionString();
+  return connectionEnv(connectionString);
 }
 
 export async function dropDatabaseIfExists(name: string): Promise<void> {

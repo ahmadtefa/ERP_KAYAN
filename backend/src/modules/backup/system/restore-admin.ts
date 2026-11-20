@@ -143,7 +143,8 @@ export async function restoreAdminStatus(
   const { url, problem } = readConfiguredUrl();
   if (!url) {
     return {
-      configured: false,
+      configured: Boolean((process.env.KAYAN_RESTORE_ADMIN_DATABASE_URL ?? '').trim() ||
+        (process.env.KAYAN_RESTORE_ADMIN_FILE ?? '').trim()),
       sameServer: false,
       mayCreate: false,
       usable: false,
@@ -163,10 +164,19 @@ export async function restoreAdminStatus(
       reason: 'the restore-admin credential is not a valid PostgreSQL URL',
     };
   }
+  if (!runtime) {
+    return {
+      configured: true,
+      sameServer: false,
+      mayCreate: false,
+      usable: false,
+      path: null,
+      reason: 'the runtime database URL is missing or invalid; configure DATABASE_URL to verify the PostgreSQL server',
+    };
+  }
   const sameServer =
-    runtime === null ||
-    (serverOf(admin).host === serverOf(runtime).host &&
-      serverOf(admin).port === serverOf(runtime).port);
+    serverOf(admin).host === serverOf(runtime).host &&
+    serverOf(admin).port === serverOf(runtime).port;
   if (!sameServer) {
     return {
       configured: true,

@@ -59,6 +59,15 @@ describe('restore-admin: the limited-privilege restore account', () => {
     expect(scratchDatabaseActor()).toBeNull();
   });
 
+  it('refuses an admin when the runtime server cannot be verified', async () => {
+    delete process.env.DATABASE_URL;
+    process.env.KAYAN_RESTORE_ADMIN_DATABASE_URL = 'postgresql://restore_admin:pw@localhost:5432/postgres';
+    const status = await restoreAdminStatus();
+    expect(status).toMatchObject({ configured: true, usable: false, sameServer: false });
+    expect(status.reason).toMatch(/DATABASE_URL/);
+    expect(scratchDatabaseActor()).toBeNull();
+  });
+
   it('refuses a credential file other users can read', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kayan-restore-admin-'));
     try {
@@ -67,6 +76,7 @@ describe('restore-admin: the limited-privilege restore account', () => {
       chmodSync(file, 0o644);
       process.env.KAYAN_RESTORE_ADMIN_FILE = file;
       const status = await restoreAdminStatus();
+      expect(status.configured).toBe(true);
       expect(status.usable).toBe(false);
       expect(status.reason).toMatch(/readable by other users/);
     } finally {

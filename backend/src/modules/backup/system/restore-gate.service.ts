@@ -175,7 +175,7 @@ export class RestoreGateService {
       name: 'scratch-database',
       ok: rehearsal.allowed,
       detail: rehearsal.allowed
-        ? 'a scratch database can be opened to rehearse a restore'
+        ? `a scratch database can be opened to rehearse a restore (path: ${rehearsal.path})`
         : `a restore cannot be rehearsed here: ${rehearsal.reason ?? 'the database refused'}`,
     });
 
