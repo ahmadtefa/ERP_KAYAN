@@ -89,7 +89,10 @@ final outstandingKindProvider = NotifierProvider<_FilterController, String>(
 
 /// Trial balance, profit and loss, party balances and the account ledger.
 class ReportsScreen extends ConsumerStatefulWidget {
-  const ReportsScreen({super.key});
+  const ReportsScreen({super.key, this.initialTab});
+
+  /// Report slug passed by the Outputs centre for a direct-open report.
+  final String? initialTab;
 
   @override
   ConsumerState<ReportsScreen> createState() => _ReportsScreenState();
@@ -97,8 +100,27 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 22, vsync: this)
-    ..addListener(() => setState(() {}));
+  late final TabController _tabs;
+
+  static const _tabSlugs = <String>[
+    'trial-balance', 'profit-and-loss', 'balance-sheet', 'cash-flow',
+    'equity-changes', 'customer-balances', 'supplier-balances',
+    'account-ledger', 'general-journal', 'sales', 'purchases', 'payments',
+    'cash', 'outstanding-invoices', 'expenses', 'income',
+    'receivables-reconciliation', 'payables-reconciliation', 'fixed-assets',
+    'cost-centers', 'budgets', 'reconciliation-center',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final index = _tabSlugs.indexOf(widget.initialTab ?? '');
+    _tabs = TabController(
+      length: _tabSlugs.length,
+      initialIndex: index < 0 ? 0 : index,
+      vsync: this,
+    )..addListener(() => setState(() {}));
+  }
 
   @override
   void dispose() {

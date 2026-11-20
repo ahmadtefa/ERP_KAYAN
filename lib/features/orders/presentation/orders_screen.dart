@@ -22,9 +22,15 @@ import 'order_edit_screen.dart';
 
 /// Sales and purchase order monitoring, conversion and linked draft actions.
 class OrdersScreen extends ConsumerStatefulWidget {
-  const OrdersScreen({super.key, required this.kind, this.navigationKey});
+  const OrdersScreen({
+    super.key,
+    required this.kind,
+    this.navigationKey,
+    this.initialOrderId,
+  });
   final InvoiceKind kind;
   final ValueKey<String>? navigationKey;
+  final String? initialOrderId;
   @override
   ConsumerState<OrdersScreen> createState() => _OrdersScreenState();
 }
@@ -41,6 +47,12 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   void initState() {
     super.initState();
     opsRunAutoCreate(this, _create);
+    final linkedOrderId = widget.initialOrderId;
+    if (linkedOrderId != null && linkedOrderId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _open({'id': linkedOrderId});
+      });
+    }
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

@@ -8,25 +8,25 @@ export class DashboardController {
   constructor(private readonly service: DashboardService) {}
 
   @Get('summary')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('dashboard.view')
   summary(
     @CurrentUser() user: AuthUser,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('branchId') branchId?: string,
   ) {
-    return this.service.summary(user.companyId, { from, to, branchId });
+    return this.service.summary(user, { from, to, branchId });
   }
 
   /// Month-by-month comparison behind the dashboard charts.
   @Get('monthly')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('dashboard.view')
   monthly(
     @CurrentUser() user: AuthUser,
     @Query('months') months?: string,
     @Query('branchId') branchId?: string,
   ) {
-    return this.service.monthly(user.companyId, {
+    return this.service.monthly(user, {
       months: months ? Number(months) : undefined,
       branchId,
     });

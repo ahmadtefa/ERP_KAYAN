@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -51,21 +50,31 @@ void openNotificationTarget(BuildContext context, Json row) {
   final path = text(row, 'actionPath');
   const routes = <String, String>{
     '/inventory/batches': AppRoutes.batches,
+    '/inventory/items': AppRoutes.items,
+    '/inventory/stock-takes': AppRoutes.stockTakes,
+    '/inventory/write-offs': AppRoutes.writeOffs,
     '/inventory/stock': AppRoutes.stock,
     '/inventory/documents': AppRoutes.stockDocuments,
+    '/sales/returns': AppRoutes.salesReturns,
     '/sales/invoices': AppRoutes.salesInvoices,
     '/sales/orders': AppRoutes.salesOrders,
+    '/purchases/returns': AppRoutes.purchaseReturns,
     '/purchases/invoices': AppRoutes.purchaseInvoices,
     '/purchases/orders': AppRoutes.purchaseOrders,
     '/accounting/journal-entries': AppRoutes.journalEntries,
+    '/cash': AppRoutes.cash,
     '/administration': AppRoutes.administration,
   };
-  for (final entry in routes.entries) {
-    if (path.startsWith(entry.key)) {
-      // Navigating to the location the person is already on is a no-op in
-      // go_router, so it needs no guard.
-      context.go(entry.value);
-      return;
+  final uri = Uri.tryParse(path);
+  if (uri != null) {
+    for (final entry in routes.entries) {
+      if (uri.path == entry.key || uri.path.startsWith('${entry.key}/')) {
+        // Keep a linked document identifier/filter when the owning screen
+        // supports one; never discard the action target's query parameters.
+        final query = uri.hasQuery ? '?${uri.query}' : '';
+        context.go('${entry.value}$query');
+        return;
+      }
     }
   }
   context.go(AppRoutes.notifications);
@@ -122,16 +131,45 @@ class _NotificationCenterScreenState
   }
 
   Future<List<Json>> _load() async {
-    final data = await ref.read(apiClientProvider).get(
-      '/notifications',
-      query: {
-        'status': _status,
-        if (_severity.isNotEmpty) 'severity': _severity,
-        if (_type.isNotEmpty) 'type': _type,
-        'pageSize': '100',
-      },
-    );
-    return listOf(data['items']);
+    final user = ref.read(currentUserProvider);
+    if (user == null || !user.can('notifications.read')) return const <Json>[];
+    const pageSize = 200;
+    final items = <Json>[];
+    var page = 1;
+    var total = 0;
+    try {
+      do {
+        // Dio serializes query values to strings exactly like the other
+        // Flutter requests; the Nest DTO transforms `page` and `pageSize`
+        // before validating them. Continue until every permitted row is read.
+        final data = await ref.read(apiClientProvider).get(
+          '/notifications',
+          query: {
+            'status': _status,
+            if (_severity.isNotEmpty) 'severity': _severity,
+            if (_type.isNotEmpty) 'type': _type,
+            'page': '$page',
+            'pageSize': '$pageSize',
+          },
+        );
+        final rows = listOf(data['items']);
+        items.addAll(rows);
+        total = (data['total'] as num?)?.toInt() ?? items.length;
+        if (rows.isEmpty) break;
+        page += 1;
+      } while (items.length < total);
+      return items;
+    } catch (error, stackTrace) {
+      // Keep API details in Flutter's diagnostic log, never in the visible
+      // screen. The user gets one stable Arabic-friendly retry message below.
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'notifications',
+        context: ErrorDescription('Loading notifications failed'),
+      ));
+      rethrow;
+    }
   }
 
   void _refresh() {
@@ -150,10 +188,7 @@ class _NotificationCenterScreenState
       // extracted from the response, because a refusal written for the operator
       // is more useful than a generic replacement.
       if (mounted) {
-        await showAppPlainError(
-          context,
-          error is Failure ? error.message : presentErrorText(context, error),
-        );
+        await showAppError(context, error);
       }
     }
   }
@@ -164,10 +199,7 @@ class _NotificationCenterScreenState
       _refresh();
     } catch (error) {
       if (mounted) {
-        await showAppPlainError(
-          context,
-          error is Failure ? error.message : presentErrorText(context, error),
-        );
+        await showAppError(context, error);
       }
     }
   }
@@ -183,10 +215,7 @@ class _NotificationCenterScreenState
       // extracted from the response, because a refusal written for the operator
       // is more useful than a generic replacement.
       if (mounted) {
-        await showAppPlainError(
-          context,
-          error is Failure ? error.message : presentErrorText(context, error),
-        );
+        await showAppError(context, error);
       }
     }
   }
@@ -207,10 +236,7 @@ class _NotificationCenterScreenState
       // still turning behind the modal barrier means the screen does not settle.
       if (mounted) {
         setState(() => _busy = false);
-        await showAppPlainError(
-          context,
-          error is Failure ? error.message : presentErrorText(context, error),
-        );
+        await showAppError(context, error);
       }
     } finally {
       if (mounted && _busy) setState(() => _busy = false);
@@ -267,10 +293,7 @@ class _NotificationCenterScreenState
     } catch (error) {
       if (mounted) {
         setState(() => _busy = false);
-        await showAppPlainError(
-          context,
-          error is Failure ? error.message : presentErrorText(context, error),
-        );
+        await showAppError(context, error);
       }
     }
   }
@@ -456,6 +479,18 @@ class _NotificationCenterScreenState
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider);
+    if (user == null || !user.can('notifications.read')) {
+      return ModuleScaffold(
+        title: _t('التنبيهات', 'Notifications'),
+        body: Center(
+          child: Text(
+            _t('ليس لديك صلاحية لعرض التنبيهات.', 'You do not have permission to view notifications.'),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     final theme = Theme.of(context);
     return ModuleScaffold(
       title: _t('التنبيهات', 'Notifications'),
@@ -590,11 +625,23 @@ class _NotificationCenterScreenState
                   }
                   if (snapshot.hasError) {
                     return Center(
-                      child: Text(
-                        _t(
-                          'تعذر تحميل التنبيهات: ${snapshot.error}',
-                          'Notifications could not be loaded: ${snapshot.error}',
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _t(
+                              'تعذر تحميل التنبيهات. تحقق من الاتصال ثم أعد المحاولة.',
+                              'Notifications could not be loaded. Check the connection and retry.',
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          OutlinedButton.icon(
+                            onPressed: _refresh,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: Text(_t('إعادة المحاولة', 'Retry')),
+                          ),
+                        ],
                       ),
                     );
                   }

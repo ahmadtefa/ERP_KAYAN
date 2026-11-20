@@ -4,21 +4,16 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../l10n/generated/app_localizations.dart';
-import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/kpi_card.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../../shared/widgets/surface_card.dart';
-import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
+import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../notifications/presentation/screens/notification_center_screen.dart';
-import '../../../settings/presentation/providers/company_providers.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_panels.dart';
-import '../widgets/command_center.dart';
 
 /// Executive dashboard, fed by the server-side figures: totals, cash, debts,
 /// who buys most, what sells most and what is waiting.
@@ -32,47 +27,11 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = context.l10n;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final user = ref.watch(currentUserProvider);
-    final companyAsync = ref.watch(companyProfileProvider);
-    final branchesAsync = ref.watch(branchesProvider);
+    final authorizedSections = _dashboardSectionsFor(user);
     final summaryAsync = ref.watch(dashboardSummaryProvider);
     final monthlyAsync = ref.watch(dashboardMonthlyProvider);
-    final company = companyAsync.asData?.value == null
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
-    // The profile reports a path, not an address; the running client is the
-    // only one that knows the host it talks to.
-    final brandMark = companyLogoUrl(
-      ref.watch(appConfigProvider).apiBaseUrl,
-      company,
-    );
-    final branches =
-        branchesAsync.asData?.value
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList() ??
-        <Map<String, dynamic>>[];
-    final companyName = _localName(company, arabic, 'nameAr', 'nameEn');
-    var branchName = '';
-    if (user?.branchId != null) {
-      for (final branch in branches) {
-        if (branch['id'] == user!.branchId) {
-          branchName = _localName(branch, arabic, 'nameAr', 'nameEn');
-          break;
-        }
-      }
-    }
-    if (branchName.isEmpty && branches.isNotEmpty) {
-      final headquarters = branches.where((b) => b['kind'] == 'HEADQUARTERS');
-      branchName = _localName(
-        headquarters.isNotEmpty ? headquarters.first : branches.first,
-        arabic,
-        'nameAr',
-        'nameEn',
-      );
-    }
-    if (branchName.isEmpty) branchName = user?.branchId ?? l10n.notAvailable;
 
     final width = MediaQuery.sizeOf(context).width;
     final medium = width >= 650;
@@ -90,14 +49,13 @@ class DashboardScreen extends ConsumerWidget {
               AppSpacing.xxl,
             ),
             children: [
-              // The duplicated page header that used to sit here is gone; the
-              // operations centre starts directly under the top bar, with a
-              // small real-refresh button beside its title.
+              // The existing dashboard begins immediately beneath the shell;
+              // its live figures are the first content on this home screen.
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      arabic ? 'مركز العمليات' : 'Operations centre',
+                      arabic ? 'لوحة المتابعة' : 'Business dashboard',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
@@ -108,13 +66,9 @@ class DashboardScreen extends ConsumerWidget {
                     visualDensity: VisualDensity.compact,
                     iconSize: 18,
                     onPressed: () {
-                      // Refresh every live source on this dashboard,
-                      // including the company identity and branch context.
+                      // Refresh every live dashboard and notification source.
                       ref.invalidate(dashboardSummaryProvider);
                       ref.invalidate(dashboardMonthlyProvider);
-                      ref.invalidate(companyProfileProvider);
-                      ref.invalidate(branchesProvider);
-                      ref.invalidate(chartOfAccountsProvider);
                       ref.invalidate(notificationFeedProvider);
                       ref.invalidate(notificationCountProvider);
                     },
@@ -123,19 +77,6 @@ class DashboardScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: AppSpacing.sm),
-              CommandCenter(user: user, arabic: arabic, l10n: l10n),
-              const SizedBox(height: AppSpacing.lg),
-              _CompanyContext(
-                company: company,
-                logoUrl: brandMark,
-                name: companyName.isEmpty
-                    ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
-                    : companyName,
-                branch: branchName,
-                arabic: arabic,
-                onEdit: () => context.go(AppRoutes.companySettings),
-              ),
-              const SizedBox(height: AppSpacing.lg),
               summaryAsync.when(
                 loading: () => const SizedBox(
                   height: 240,
@@ -151,7 +92,7 @@ class DashboardScreen extends ConsumerWidget {
                   monthlyLoading: monthlyAsync.isLoading,
                   arabic: arabic,
                   medium: medium,
-                  l10n: l10n,
+                  authorizedSections: authorizedSections,
                 ),
               ),
               // Below the numbers, not above them: an owner who opens the
@@ -300,7 +241,7 @@ class _SummarySections extends StatelessWidget {
     required this.monthlyLoading,
     required this.arabic,
     required this.medium,
-    required this.l10n,
+    required this.authorizedSections,
   });
 
   final Json summary;
@@ -308,11 +249,15 @@ class _SummarySections extends StatelessWidget {
   final bool monthlyLoading;
   final bool arabic;
   final bool medium;
-  final AppLocalizations l10n;
+  final Set<String> authorizedSections;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final serverSections = (summary['allowedSections'] as List? ?? const [])
+        .map((value) => value.toString())
+        .toSet();
+    final sections = serverSections.intersection(authorizedSections);
     final sales = Map<String, dynamic>.from(summary['sales'] as Map? ?? {});
     final purchases =
         Map<String, dynamic>.from(summary['purchases'] as Map? ?? {});
@@ -321,109 +266,113 @@ class _SummarySections extends StatelessWidget {
     final payments =
         Map<String, dynamic>.from(summary['payments'] as Map? ?? {});
     final overdue = Map<String, dynamic>.from(summary['overdue'] as Map? ?? {});
-    final parties = Map<String, dynamic>.from(summary['parties'] as Map? ?? {});
-    final customers =
-        Map<String, dynamic>.from(parties['customers'] as Map? ?? {});
-    final suppliers =
-        Map<String, dynamic>.from(parties['suppliers'] as Map? ?? {});
     final previous =
         Map<String, dynamic>.from(summary['previousPeriod'] as Map? ?? {});
-    final quick = Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
     final hasData = flag(summary, 'hasData', fallback: true);
     String money(Object? value) => formatAmount(asString(value), decimals: 0);
 
-    // The six figures that belong on a KPI card: money in, money out, the
-    // result, what is liquid, what is owed to us, what we owe.
+    // Existing KPI cards are reused; each enters the layout only when the
+    // server returned its authorized section. Wrap auto-flows the remaining
+    // cards to the available desktop/mobile width.
     final primary = <_PrimaryMetric>[
-      _PrimaryMetric(
-        arabic ? 'إجمالي المبيعات' : 'Total sales',
-        money(sales['total']),
-        arabic
-            ? '${sales['invoices'] ?? 0} فاتورة'
-            : '${sales['invoices'] ?? 0} invoices',
-        Icons.trending_up_rounded,
-        AppTone.success,
-        SectionAccents.sales,
-      ),
-      _PrimaryMetric(
-        arabic ? 'إجمالي المشتريات' : 'Total purchases',
-        money(purchases['total']),
-        arabic
-            ? '${purchases['invoices'] ?? 0} فاتورة'
-            : '${purchases['invoices'] ?? 0} invoices',
-        Icons.shopping_bag_outlined,
-        AppTone.info,
-        SectionAccents.purchases,
-      ),
-      _PrimaryMetric(
-        arabic ? 'صافي النتيجة' : 'Net result',
-        money(summary['grossResult']),
-        arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
-        Icons.insights_rounded,
-        AppTone.info,
-        SectionAccents.insights,
-      ),
-      _PrimaryMetric(
-        arabic ? 'النقدية' : 'Cash position',
-        money(summary['cashPosition']),
-        arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
-        Icons.account_balance_wallet_outlined,
-        AppTone.neutral,
-        SectionAccents.cash,
-      ),
-      _PrimaryMetric(
-        arabic ? 'الذمم المدينة' : 'Receivables',
-        money(summary['receivables']),
-        arabic ? 'مستحق من العملاء' : 'Owed by customers',
-        Icons.groups_2_outlined,
-        AppTone.warning,
-        SectionAccents.parties,
-      ),
-      _PrimaryMetric(
-        arabic ? 'الذمم الدائنة' : 'Payables',
-        money(summary['payables']),
-        arabic ? 'مستحق للموردين' : 'Owed to suppliers',
-        Icons.local_shipping_outlined,
-        AppTone.danger,
-        SectionAccents.parties,
-      ),
+      if (sections.contains('sales'))
+        _PrimaryMetric(
+          arabic ? 'إجمالي المبيعات' : 'Total sales',
+          money(sales['total']),
+          arabic
+              ? '${sales['invoices'] ?? 0} فاتورة'
+              : '${sales['invoices'] ?? 0} invoices',
+          Icons.trending_up_rounded,
+          AppTone.success,
+          SectionAccents.sales,
+        ),
+      if (sections.contains('purchases'))
+        _PrimaryMetric(
+          arabic ? 'إجمالي المشتريات' : 'Total purchases',
+          money(purchases['total']),
+          arabic
+              ? '${purchases['invoices'] ?? 0} فاتورة'
+              : '${purchases['invoices'] ?? 0} invoices',
+          Icons.shopping_bag_outlined,
+          AppTone.info,
+          SectionAccents.purchases,
+        ),
+      if (sections.contains('profit'))
+        _PrimaryMetric(
+          arabic ? 'صافي النتيجة' : 'Net result',
+          money(summary['grossResult']),
+          arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
+          Icons.insights_rounded,
+          AppTone.info,
+          SectionAccents.insights,
+        ),
+      if (sections.contains('cash'))
+        _PrimaryMetric(
+          arabic ? 'النقدية' : 'Cash position',
+          money(summary['cashPosition']),
+          arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
+          Icons.account_balance_wallet_outlined,
+          AppTone.neutral,
+          SectionAccents.cash,
+        ),
+      if (sections.contains('receivables'))
+        _PrimaryMetric(
+          arabic ? 'الذمم المدينة' : 'Receivables',
+          money(summary['receivables']),
+          arabic ? 'مستحق من العملاء' : 'Owed by customers',
+          Icons.groups_2_outlined,
+          AppTone.warning,
+          SectionAccents.parties,
+        ),
+      if (sections.contains('payables'))
+        _PrimaryMetric(
+          arabic ? 'الذمم الدائنة' : 'Payables',
+          money(summary['payables']),
+          arabic ? 'مستحق للموردين' : 'Owed to suppliers',
+          Icons.local_shipping_outlined,
+          AppTone.danger,
+          SectionAccents.parties,
+        ),
+      if (sections.contains('stock'))
+        _PrimaryMetric(
+          arabic ? 'قيمة المخزون' : 'Inventory value',
+          money((summary['stock'] as Map?)?['value']),
+          arabic ? 'قيمة الرصيد المتاح' : 'Current stock value',
+          Icons.inventory_2_outlined,
+          AppTone.success,
+          SectionAccents.inventory,
+        ),
     ];
 
     final secondary = <Widget>[
-      StatStripItem(
-        label: arabic ? 'المقبوضات' : 'Receipts',
-        value: money(receipts['total']),
-        icon: Icons.south_west_rounded,
-        tone: AppTone.success,
-      ),
-      StatStripItem(
-        label: arabic ? 'المدفوعات' : 'Payments',
-        value: money(payments['total']),
-        icon: Icons.north_east_rounded,
-        tone: AppTone.info,
-      ),
-      StatStripItem(
-        label: arabic ? 'المصروفات' : 'Expenses',
-        value: money(summary['expenses']),
-        icon: Icons.receipt_long_outlined,
-        tone: AppTone.warning,
-      ),
-      StatStripItem(
-        label: arabic ? 'فواتير متأخرة' : 'Overdue invoices',
-        value: money(overdue['total']),
-        icon: Icons.warning_amber_rounded,
-        tone: AppTone.danger,
-      ),
-      StatStripItem(
-        label: arabic ? 'العملاء' : 'Customers',
-        value: '${customers['count'] ?? 0}',
-        icon: Icons.people_outline,
-      ),
-      StatStripItem(
-        label: arabic ? 'الموردون' : 'Suppliers',
-        value: '${suppliers['count'] ?? 0}',
-        icon: Icons.local_shipping_outlined,
-      ),
+      if (sections.contains('movements')) ...[
+        StatStripItem(
+          label: arabic ? 'المقبوضات' : 'Receipts',
+          value: money(receipts['total']),
+          icon: Icons.south_west_rounded,
+          tone: AppTone.success,
+        ),
+        StatStripItem(
+          label: arabic ? 'المدفوعات' : 'Payments',
+          value: money(payments['total']),
+          icon: Icons.north_east_rounded,
+          tone: AppTone.info,
+        ),
+      ],
+      if (sections.contains('revenue'))
+        StatStripItem(
+          label: arabic ? 'المصروفات' : 'Expenses',
+          value: money(summary['expenses']),
+          icon: Icons.receipt_long_outlined,
+          tone: AppTone.warning,
+        ),
+      if (sections.contains('receivables'))
+        StatStripItem(
+          label: arabic ? 'فواتير متأخرة' : 'Overdue invoices',
+          value: money(overdue['total']),
+          icon: Icons.warning_amber_rounded,
+          tone: AppTone.danger,
+        ),
     ];
 
     final monthlyRows = listOf(monthly?['months']);
@@ -431,6 +380,23 @@ class _SummarySections extends StatelessWidget {
     final topItems = listOf(summary['topItems']);
     final recent = listOf(summary['recentDocuments']);
     final cashAccounts = listOf(summary['cashAccounts']);
+    final showChart = sections.contains('charts') &&
+        (sections.contains('sales') ||
+            sections.contains('purchases') ||
+            sections.contains('profit'));
+
+    if (sections.isEmpty) {
+      return SurfaceCard(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Text(
+          arabic
+              ? 'لا توجد مؤشرات متاحة لحسابك. تواصل مع مدير النظام لمنحك الصلاحيات المناسبة.'
+              : 'No dashboard indicators are available for your account. Ask your administrator to grant access.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,135 +434,160 @@ class _SummarySections extends StatelessWidget {
               ],
             ),
           ),
-        Row(
-          children: [
-            Text(
-              arabic ? 'مؤشرات الأعمال' : 'Business overview',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+        if (primary.isNotEmpty) ...[
+          Row(
+            children: [
+              Text(
+                arabic ? 'مؤشرات الأعمال' : 'Business overview',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Container(
-                height: 1,
-                color: theme.colorScheme.outlineVariant,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 1180
-                ? 4
-                : constraints.maxWidth >= 900
-                    ? 3
-                    : constraints.maxWidth >= 560
-                        ? 2
-                        : 1;
-            const gap = AppSpacing.md;
-            final cardWidth =
-                (constraints.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: [
-                for (final metric in primary)
-                  SizedBox(
-                    width: cardWidth,
-                    child: KpiCard(
-                      label: metric.label,
-                      value: metric.value,
-                      caption: metric.caption,
-                      icon: metric.icon,
-                      tone: metric.tone,
-                      accent: metric.accent,
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: Container(height: 1, color: theme.colorScheme.outlineVariant)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 1180
+                  ? 4
+                  : constraints.maxWidth >= 900
+                      ? 3
+                      : constraints.maxWidth >= 560
+                          ? 2
+                          : 1;
+              const gap = AppSpacing.md;
+              final cardWidth =
+                  (constraints.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (final metric in primary)
+                    SizedBox(
+                      width: cardWidth,
+                      child: KpiCard(
+                        label: metric.label,
+                        value: metric.value,
+                        caption: metric.caption,
+                        icon: metric.icon,
+                        tone: metric.tone,
+                        accent: metric.accent,
+                      ),
                     ),
+                ],
+              );
+            },
+          ),
+        ],
+        if (secondary.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          SurfaceCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            child: Wrap(
+              spacing: AppSpacing.xxl,
+              runSpacing: AppSpacing.md,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: secondary,
+            ),
+          ),
+        ],
+        if (sections.contains('revenue') &&
+            sections.contains('profit') &&
+            sections.contains('charts')) ...[
+          const SizedBox(height: AppSpacing.md),
+          _ComparisonStrip(summary: summary, previous: previous, arabic: arabic),
+        ],
+        if (showChart) ...[
+          const SizedBox(height: AppSpacing.md),
+          SurfaceCard(
+            title: arabic ? 'المؤشرات شهرياً' : 'Monthly performance',
+            subtitle: arabic
+                ? 'مقارنة المؤشرات المسموح بعرضها خلال الأشهر المعروضة'
+                : 'Comparison of the permitted indicators over the months shown',
+            icon: Icons.stacked_bar_chart_outlined,
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.md,
+            ),
+            child: monthlyLoading && monthlyRows.isEmpty
+                ? const SizedBox(height: 160, child: LoadingView())
+                : MonthlyBarsChart(
+                    months: monthlyRows,
+                    arabic: arabic,
+                    showSales: sections.contains('sales'),
+                    showPurchases: sections.contains('purchases'),
+                    showResult: sections.contains('profit'),
                   ),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: AppSpacing.md),
-        SurfaceCard(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.md,
           ),
-          child: Wrap(
-            spacing: AppSpacing.xxl,
-            runSpacing: AppSpacing.md,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: secondary,
+        ],
+        if (sections.contains('top')) ...[
+          const SizedBox(height: AppSpacing.md),
+          _SectionTitle(
+            title: arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        _ComparisonStrip(summary: summary, previous: previous, arabic: arabic),
-        const SizedBox(height: AppSpacing.md),
-        SurfaceCard(
-          title: arabic ? 'المبيعات والمشتريات شهرياً' : 'Monthly sales & purchases',
-          subtitle: arabic
-              ? 'مقارنة الإيرادات والمشتريات خلال الأشهر المعروضة'
-              : 'Revenue against purchases over the months shown',
-          icon: Icons.stacked_bar_chart_outlined,
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.md,
+          const SizedBox(height: AppSpacing.sm),
+          _ResponsivePair(
+            medium: medium,
+            gap: AppSpacing.md,
+            first: TopListPanel(
+              title: arabic ? 'أهم العملاء' : 'Top customers',
+              rows: topCustomers,
+              arabic: arabic,
+              emptyText: arabic
+                  ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
+                  : 'Names appear here once sales exist.',
+            ),
+            second: TopListPanel(
+              title: arabic ? 'أكثر المنتجات مبيعاً' : 'Best-selling products',
+              rows: topItems,
+              arabic: arabic,
+              quantitySuffix: arabic ? 'وحدة' : 'units',
+              emptyText: arabic
+                  ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
+                  : 'Items appear here once sales exist.',
+            ),
           ),
-          child: monthlyLoading && monthlyRows.isEmpty
-              ? const SizedBox(height: 160, child: LoadingView())
-              : MonthlyBarsChart(months: monthlyRows, arabic: arabic),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        _SectionTitle(
-          title: arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        _ResponsivePair(
-          medium: medium,
-          gap: AppSpacing.md,
-          first: TopListPanel(
-            title: arabic ? 'أهم العملاء' : 'Top customers',
-            rows: topCustomers,
-            arabic: arabic,
-            emptyText: arabic
-                ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
-                : 'Names appear here once sales exist.',
+        ],
+        if (sections.contains('cash') && sections.contains('recent')) ...[
+          const SizedBox(height: AppSpacing.md),
+          _ResponsivePair(
+            medium: medium,
+            gap: AppSpacing.md,
+            first: CashAccountsPanel(
+              rows: cashAccounts,
+              arabic: arabic,
+              emptyText: arabic
+                  ? 'لم تُسجَّل حسابات نقدية بعد.'
+                  : 'No cash accounts recorded yet.',
+            ),
+            second: RecentDocumentsPanel(
+              rows: recent,
+              arabic: arabic,
+              emptyText: arabic ? 'لا توجد عمليات بعد.' : 'No activity yet.',
+            ),
           ),
-          second: TopListPanel(
-            title: arabic ? 'أكثر المنتجات مبيعاً' : 'Best-selling products',
-            rows: topItems,
-            arabic: arabic,
-            quantitySuffix: arabic ? 'وحدة' : 'units',
-            emptyText: arabic
-                ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
-                : 'Items appear here once sales exist.',
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        _ResponsivePair(
-          medium: medium,
-          gap: AppSpacing.md,
-          first: CashAccountsPanel(
+        ] else if (sections.contains('cash')) ...[
+          const SizedBox(height: AppSpacing.md),
+          CashAccountsPanel(
             rows: cashAccounts,
             arabic: arabic,
             emptyText: arabic
                 ? 'لم تُسجَّل حسابات نقدية بعد.'
                 : 'No cash accounts recorded yet.',
           ),
-          second: RecentDocumentsPanel(
+        ] else if (sections.contains('recent')) ...[
+          const SizedBox(height: AppSpacing.md),
+          RecentDocumentsPanel(
             rows: recent,
             arabic: arabic,
             emptyText: arabic ? 'لا توجد عمليات بعد.' : 'No activity yet.',
           ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        _SectionTitle(title: arabic ? 'إجراءات سريعة' : 'Quick actions'),
-        const SizedBox(height: AppSpacing.sm),
-        _QuickActions(quick: quick, arabic: arabic, l10n: l10n),
+        ],
       ],
     );
   }
@@ -786,62 +777,37 @@ class _ComparisonStrip extends StatelessWidget {
 }
 
 /// Module shortcuts plus the work waiting in drafts and overdue debts.
-class _QuickActions extends ConsumerWidget {
-  const _QuickActions({
-    required this.quick,
-    required this.arabic,
-    required this.l10n,
-  });
-
-  final Json quick;
-  final bool arabic;
-  final AppLocalizations l10n;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(currentUserProvider);
-    final drafts = asString(quick['draftDocuments']) ?? '0';
-    final overdue = asString(quick['overdueInvoices']) ?? '0';
-    final reorder = asString(quick['itemsToReorder']) ?? '0';
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Column count follows the width the grid actually gets, not the
-        // window: the sidebar already took 250 px of it.
-        final available = constraints.maxWidth;
-        final columns = available >= 980
-            ? 5
-            : available >= 760
-            ? 4
-            : available >= 520
-            ? 3
-            : 2;
-        return GridView.count(
-          crossAxisCount: columns,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: AppSpacing.sm,
-          crossAxisSpacing: AppSpacing.sm,
-          mainAxisExtent: 100,
-          children: [
-            for (final module in _modules(l10n))
-              if (user != null && (module.permission.isEmpty || user.can(module.permission)))
-              QuickActionTile(
-                icon: module.icon,
-                label: module.label,
-                accent: module.accent,
-                onTap: () => context.go(module.path),
-                badge: switch (module.path) {
-                  AppRoutes.journalEntries => drafts,
-                  AppRoutes.salesInvoices => overdue,
-                  AppRoutes.stock => reorder,
-                  _ => null,
-                },
-              ),
-          ],
-        );
-      },
-    );
+/// Flutter applies the same section permissions as an additional fail-closed
+/// presentation check. Backend filtering remains the actual data boundary.
+Set<String> _dashboardSectionsFor(AppUser? user) {
+  if (user == null || (!user.isSuperAdmin && !user.can('dashboard.view'))) {
+    return <String>{};
   }
+  const permissions = <String, String>{
+    'sales': 'dashboard.sales',
+    'purchases': 'dashboard.purchases',
+    'revenue': 'dashboard.revenue',
+    'profit': 'dashboard.profit',
+    'cash': 'dashboard.cash',
+    'movements': 'dashboard.movements',
+    'receivables': 'dashboard.receivables',
+    'payables': 'dashboard.payables',
+    'stock': 'dashboard.stock',
+    'charts': 'dashboard.charts',
+    'top': 'dashboard.top',
+    'recent': 'dashboard.recent',
+  };
+  if (user.isSuperAdmin) return permissions.keys.toSet();
+  final allowed = <String>{
+    for (final entry in permissions.entries)
+      if (user.can(entry.value) &&
+          (entry.key != 'stock' || user.can('inventory.cost.read')))
+        entry.key,
+  };
+  if (user.can('dashboard.financial')) {
+    allowed.addAll(const ['revenue', 'profit', 'cash', 'movements']);
+  }
+  return allowed;
 }
 
 class _ErrorCard extends StatelessWidget {
@@ -891,184 +857,3 @@ class _ErrorCard extends StatelessWidget {
     );
   }
 }
-
-String _localName(
-  Map<String, dynamic> row,
-  bool arabic,
-  String arKey,
-  String enKey,
-) {
-  final ar = (row[arKey] as String?)?.trim() ?? '';
-  final en = (row[enKey] as String?)?.trim() ?? '';
-  return arabic ? (ar.isNotEmpty ? ar : en) : (en.isNotEmpty ? en : ar);
-}
-
-/// The company identity strip. It used to be a tall gradient hero; the same
-/// information now sits in one compact navy band so the numbers start higher.
-class _CompanyContext extends StatelessWidget {
-  const _CompanyContext({
-    required this.company,
-    required this.logoUrl,
-    required this.name,
-    required this.branch,
-    required this.arabic,
-    required this.onEdit,
-  });
-
-  final Map<String, dynamic> company;
-  final String? logoUrl;
-  final String name;
-  final String branch;
-  final bool arabic;
-  final VoidCallback onEdit;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final secondaryName = _localName(company, !arabic, 'nameAr', 'nameEn');
-    final taxId = (company['taxId'] as String?)?.trim() ?? '';
-    final code = (company['code'] as String?)?.trim() ?? '';
-    Widget logo = const Icon(
-      Icons.apartment_rounded,
-      size: 24,
-      color: Colors.white,
-    );
-    if (logoUrl != null && logoUrl!.isNotEmpty) {
-      logo = Image.network(
-        logoUrl!,
-        width: 46,
-        height: 46,
-        fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => const Icon(
-          Icons.apartment_rounded,
-          size: 24,
-          color: Colors.white,
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        gradient: AppGradients.brand,
-        borderRadius: AppRadii.card,
-        boxShadow: AppShadows.raised,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            clipBehavior: Clip.antiAlias,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-            ),
-            child: logo,
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  name,
-                  maxLines: 2,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (secondaryName.isNotEmpty && secondaryName != name)
-                  Text(
-                    secondaryName,
-                    maxLines: 2,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppColors.onNavyMuted,
-                    ),
-                  ),
-                const SizedBox(height: 5),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: 4,
-                  children: [
-                    _ContextChip(icon: Icons.location_on_outlined, label: branch),
-                    if (taxId.isNotEmpty)
-                      _ContextChip(
-                        icon: Icons.receipt_long_outlined,
-                        label: (arabic ? 'الرقم الضريبي: ' : 'Tax ID: ') + taxId,
-                      ),
-                    if (code.isNotEmpty)
-                      _ContextChip(
-                        icon: Icons.badge_outlined,
-                        label: (arabic ? 'كود الشركة: ' : 'Code: ') + code,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          IconButton(
-            tooltip: arabic ? 'إعدادات الشركة' : 'Company settings',
-            onPressed: onEdit,
-            style: IconButton.styleFrom(
-              foregroundColor: Colors.white,
-              backgroundColor: Colors.white.withValues(alpha: 0.12),
-            ),
-            icon: const Icon(Icons.edit_outlined, size: 17),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ContextChip extends StatelessWidget {
-  const _ContextChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, size: 12, color: AppColors.onNavyMuted),
-      const SizedBox(width: 3),
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 240),
-        child: Text(
-          label,
-          maxLines: 2,
-          style: const TextStyle(
-            color: AppColors.onNavyMuted,
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    ],
-  );
-}
-
-List<({IconData icon, String label, String path, SectionAccent accent, String permission})>
-_modules(AppLocalizations l10n) => [
-  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting, permission: 'accounting.journal.read'),
-  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties, permission: 'parties.customers.read'),
-  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties, permission: 'parties.suppliers.read'),
-  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory, permission: 'inventory.items.read'),
-  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory, permission: 'inventory.stock.read'),
-  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales, permission: 'sales.invoices.read'),
-  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases, permission: 'purchases.invoices.read'),
-  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting, permission: 'accounting.accounts.read'),
-  (icon: Icons.precision_manufacturing_outlined, label: l10n.fixedAssets, path: AppRoutes.fixedAssets, accent: SectionAccents.accounting, permission: 'accounting.fixedassets.read'),
-  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports, accent: SectionAccents.insights, permission: 'reports.read'),
-  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings, accent: SectionAccents.administration, permission: ''),
-];

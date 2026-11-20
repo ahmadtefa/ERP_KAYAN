@@ -9,19 +9,23 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ExpiryAlertScheduler } from './expiry-alert.scheduler';
 import { NotificationsService } from './notifications.service';
 
-class NotificationQueryDto {
+export class NotificationQueryDto {
   @IsOptional() @IsString() status?: string;
   @IsOptional() @IsString() type?: string;
   @IsOptional() @IsString() severity?: string;
-  @IsOptional() @IsNumber() @Min(1) page?: number;
-  @IsOptional() @IsNumber() @Min(1) @Max(200) pageSize?: number;
+  // Query parameters arrive as strings ("100"), so the transform must run
+  // before validation. Without @Type the string fails @IsNumber and the
+  // whole list request is refused with the pageSize errors the centre showed.
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) pageSize?: number;
 }
 
 class UpdateNotificationSettingDto {

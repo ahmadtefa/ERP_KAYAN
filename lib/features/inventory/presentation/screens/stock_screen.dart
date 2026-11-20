@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/stock_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../operations/ops_auto_create.dart';
 import 'stock_vouchers_screen.dart';
 
 export '../providers/stock_providers.dart'
@@ -27,8 +28,9 @@ export '../providers/stock_providers.dart'
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key, this.navigationKey});
+  const StockScreen({super.key, this.navigationKey, this.autoCreateVoucherKind});
   final ValueKey<String>? navigationKey;
+  final String? autoCreateVoucherKind;
 
   @override
   ConsumerState<StockScreen> createState() => _StockScreenState();
@@ -42,6 +44,11 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
+    if (widget.autoCreateVoucherKind != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openVouchers(initialKind: widget.autoCreateVoucherKind);
+      });
+    }
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }
@@ -53,10 +60,13 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     super.dispose();
   }
 
-  Future<void> _openVouchers() async {
+  Future<void> _openVouchers({String? initialKind}) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => StockVouchersScreen(exitRelay: _exitRelay),
+        builder: (_) => StockVouchersScreen(
+          exitRelay: _exitRelay,
+          initialKind: initialKind,
+        ),
       ),
     );
     if (mounted) ref.invalidate(stockListProvider);

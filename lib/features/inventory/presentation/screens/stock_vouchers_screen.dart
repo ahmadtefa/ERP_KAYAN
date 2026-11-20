@@ -69,8 +69,9 @@ class _VoucherLoadErrorState extends State<_VoucherLoadError> {
 /// The list is sourced from the server after every action, not an optimistic
 /// local status. Pagination prevents old vouchers from silently disappearing.
 class StockVouchersScreen extends ConsumerStatefulWidget {
-  const StockVouchersScreen({super.key, this.exitRelay});
+  const StockVouchersScreen({super.key, this.exitRelay, this.initialKind});
   final DraftExitRelay? exitRelay;
+  final String? initialKind;
   @override
   ConsumerState<StockVouchersScreen> createState() =>
       _StockVouchersScreenState();
@@ -85,6 +86,12 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   void initState() {
     super.initState();
     _future = _load();
+    final initialKind = widget.initialKind;
+    if (initialKind != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _create(initialKind);
+      });
+    }
   }
 
   Future<Json> _load() async {

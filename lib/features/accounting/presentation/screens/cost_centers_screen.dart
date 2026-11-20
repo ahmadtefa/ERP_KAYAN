@@ -13,6 +13,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/cost_center_providers.dart';
+import '../../../operations/ops_auto_create.dart';
 
 /// Cost centers: the answer to "whose cost is this?".
 ///
@@ -41,6 +42,7 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
+    opsRunAutoCreate(this, () => _save());
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }

@@ -30,10 +30,16 @@ import '../../../data/presentation/widgets/list_export_actions.dart';
 /// is therefore the moment the figures become real, and it is always behind a
 /// confirmation.
 class InvoiceListScreen extends ConsumerStatefulWidget {
-  const InvoiceListScreen({super.key, required this.kind, this.navigationKey});
+  const InvoiceListScreen({
+    super.key,
+    required this.kind,
+    this.navigationKey,
+    this.initialInvoiceId,
+  });
 
   final InvoiceKind kind;
   final ValueKey<String>? navigationKey;
+  final String? initialInvoiceId;
 
   @override
   ConsumerState<InvoiceListScreen> createState() => _InvoiceListScreenState();
@@ -49,6 +55,14 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   void initState() {
     super.initState();
     opsRunAutoCreate(this, _openEditor);
+    final linkedInvoiceId = widget.initialInvoiceId;
+    if (linkedInvoiceId != null && linkedInvoiceId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openDetail({'id': linkedInvoiceId, 'invoiceNumber': linkedInvoiceId});
+        }
+      });
+    }
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

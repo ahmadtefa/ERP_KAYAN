@@ -5,11 +5,15 @@ final _opsAutoCreateRan = Expando<bool>('opsAutoCreateRan');
 
 /// True when the screen was opened with `?new=1` from an operations centre,
 /// i.e. the caller asked for the blank new-record form, not the list.
-bool opsAutoCreateRequested(BuildContext context) {
+bool opsAutoCreateRequested(BuildContext context) =>
+    opsAutoCreateValue(context, 'new') == '1';
+
+/// Reads a centre-provided form selector without coupling a screen to a route.
+String? opsAutoCreateValue(BuildContext context, String key) {
   try {
-    return GoRouterState.of(context).uri.queryParameters['new'] == '1';
+    return GoRouterState.of(context).uri.queryParameters[key];
   } catch (_) {
-    return false;
+    return null;
   }
 }
 

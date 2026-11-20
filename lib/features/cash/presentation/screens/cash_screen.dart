@@ -51,7 +51,13 @@ class _CashScreenState extends ConsumerState<CashScreen>
   @override
   void initState() {
     super.initState();
-    opsRunAutoCreate(this, _newVoucher);
+    opsRunAutoCreate(this, () {
+      if (opsAutoCreateValue(context, 'action') == 'account') {
+        _newAccount();
+      } else {
+        _newVoucher();
+      }
+    });
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

@@ -11,6 +11,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../operations/ops_auto_create.dart';
 import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../domain/entities/account.dart';
 import '../../domain/entities/account_type.dart';
@@ -34,6 +35,7 @@ class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
+    opsRunAutoCreate(this, () => _editAccount(context, ref, null, _exitRelay));
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }

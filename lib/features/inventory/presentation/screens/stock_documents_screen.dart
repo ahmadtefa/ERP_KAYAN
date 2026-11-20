@@ -19,6 +19,7 @@ import '../providers/stock_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../operations/ops_auto_create.dart';
 
 /// One line being typed into a new stock document.
 ///
@@ -100,6 +101,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
+    opsRunAutoCreate(this, _createDocument);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }
