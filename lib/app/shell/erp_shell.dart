@@ -1503,7 +1503,9 @@ class _OpsCenterButton extends StatelessWidget {
                 vertical: 7,
               ),
               child: DefaultTextStyle(
-                style: TextStyle(
+                // Preserve the application's bundled Arabic/Latin family;
+                // a bare TextStyle loses it and can render Arabic as boxes.
+                style: Theme.of(context).textTheme.labelMedium!.copyWith(
                   color: foreground,
                   fontWeight: FontWeight.w700,
                   fontSize: 12.5,
