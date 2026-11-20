@@ -118,6 +118,20 @@ const _invoices = <Map<String, dynamic>>[
 
 
 final Json _summary = <String, dynamic>{
+  'allowedSections': <String>[
+    'sales',
+    'purchases',
+    'revenue',
+    'profit',
+    'cash',
+    'movements',
+    'receivables',
+    'payables',
+    'stock',
+    'charts',
+    'top',
+    'recent',
+  ],
   'from': '2026-01-01',
   'to': '2026-10-15',
   'hasData': true,

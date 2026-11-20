@@ -15,7 +15,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/stock_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
-import '../../../operations/ops_auto_create.dart';
 import 'stock_vouchers_screen.dart';
 
 export '../providers/stock_providers.dart'
