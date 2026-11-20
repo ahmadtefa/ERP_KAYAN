@@ -98,6 +98,7 @@ Future<void> _pump(
 }) async {
   await tester.pumpWidget(
     ProviderScope(
+      key: UniqueKey(),
       overrides: [
         currentUserProvider.overrideWithValue(_dashboardUser),
         dashboardSummaryProvider.overrideWith((ref) async => summary),
@@ -148,7 +149,7 @@ void main() {
 
   testWidgets('shows a simple localized home when no dashboard indicator is allowed', (tester) async {
     await _pump(tester, summary: <String, dynamic>{'allowedSections': <String>[]});
-    expect(find.textContaining('لا توجد مؤشرات متاحة'), findsOneWidget);
+    expect(find.textContaining('No dashboard indicators are available'), findsOneWidget);
     expect(find.text('Total sales'), findsNothing);
     expect(find.text('Total purchases'), findsNothing);
   });

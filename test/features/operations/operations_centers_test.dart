@@ -1,6 +1,5 @@
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
-import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/operations/operations_center_screen.dart';
 import 'package:erp_kayan/features/operations/operations_registry.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -59,14 +58,14 @@ const _limitedUser = AppUser(
     routes: [
       GoRoute(
         path: AppRoutes.operationsInputs,
-        builder: (context, _) => const Scaffold(
-          body: OperationsCenterScreen(kind: OpsKind.entry),
+        builder: (context, _) => Scaffold(
+          body: OperationsCenterScreen(kind: OpsKind.entry, user: user),
         ),
       ),
       GoRoute(
         path: AppRoutes.operationsOutputs,
-        builder: (context, _) => const Scaffold(
-          body: OperationsCenterScreen(kind: OpsKind.output),
+        builder: (context, _) => Scaffold(
+          body: OperationsCenterScreen(kind: OpsKind.output, user: user),
         ),
       ),
       GoRoute(
@@ -98,7 +97,6 @@ const _limitedUser = AppUser(
   addTearDown(router.dispose);
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [currentUserProvider.overrideWithValue(user)],
       child: MaterialApp.router(
         locale: locale,
         theme: theme,
