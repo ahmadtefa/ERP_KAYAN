@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+
+import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -56,6 +58,7 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   @override
   void initState() {
     super.initState();
+    opsRunAutoCreate(this, _openEditor);
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

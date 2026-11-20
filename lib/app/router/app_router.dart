@@ -39,6 +39,8 @@ import '../../features/parties/presentation/screens/parties_screen.dart';
 import '../../features/orders/presentation/orders_screen.dart';
 import '../../features/quotations/presentation/screens/quotation_editor_screen.dart';
 import '../../features/quotations/presentation/screens/quotation_list_screen.dart';
+import '../../features/operations/operations_center_screen.dart';
+import '../../features/operations/operations_registry.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
@@ -104,6 +106,8 @@ class AppRoutes {
   static const warehouseAccess = '/inventory/warehouse-access';
   static const inventoryReports = '/inventory/reports';
   static const stockDocuments = '/inventory/documents';
+  static const operationsInputs = '/operations/inputs';
+  static const operationsOutputs = '/operations/outputs';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -198,7 +202,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             : null,
           builder: (context, state) => ErpShell(currentPath: route.path,
             guardKey: _guardedShellPaths.contains(route.path) ? state.pageKey : null,
-            child:route.path == AppRoutes.administration
+            child:route.path == AppRoutes.operationsInputs
+              ? const OperationsCenterScreen(kind: OpsKind.entry)
+              : route.path == AppRoutes.operationsOutputs
+              ? const OperationsCenterScreen(kind: OpsKind.output)
+              : route.path == AppRoutes.administration
               ? AdminScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.chartOfAccounts
               ? ChartOfAccountsScreen(navigationKey:state.pageKey)
@@ -272,11 +280,21 @@ const _guardedShellPaths = <String>{
   AppRoutes.inventoryReports,
   AppRoutes.warehouseAccess,
   AppRoutes.notifications,
+  AppRoutes.operationsInputs,
+  AppRoutes.operationsOutputs,
 };
 
 /// Every authenticated screen, in the order the navigation shows them.
 const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.dashboard, child: DashboardScreen()),
+  (
+    path: AppRoutes.operationsInputs,
+    child: OperationsCenterScreen(kind: OpsKind.entry),
+  ),
+  (
+    path: AppRoutes.operationsOutputs,
+    child: OperationsCenterScreen(kind: OpsKind.output),
+  ),
   (path: AppRoutes.notifications, child: NotificationCenterScreen()),
   (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),

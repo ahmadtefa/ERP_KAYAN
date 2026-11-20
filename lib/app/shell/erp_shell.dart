@@ -1362,6 +1362,29 @@ class _TopBar extends ConsumerWidget {
               ],
             ),
           ),
+          // The two operations centres sit between the brand and Home: two
+          // clicks from anywhere to any real entry form or report.
+          _OpsCenterButton(
+            key: const ValueKey('topbar-operations-inputs'),
+            icon: Icons.input_rounded,
+            label: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'المدخلات'
+                : 'Inputs',
+            color: const Color(0xFF218653),
+            path: AppRoutes.operationsInputs,
+            showLabel: !compact,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          _OpsCenterButton(
+            key: const ValueKey('topbar-operations-outputs'),
+            icon: Icons.description_rounded,
+            label: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'المخرجات'
+                : 'Outputs',
+            color: const Color(0xFF2259CF),
+            path: AppRoutes.operationsOutputs,
+            showLabel: !compact,
+          ),
           IconButton(
             key: const ValueKey('erp-home-shortcut'),
             tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'الرئيسية' : 'Home',
@@ -1420,6 +1443,76 @@ class _TopBar extends ConsumerWidget {
 }
 
 /// Opens the one search box that reaches every module.
+/// A fixed top-bar button for one operations centre: filled when the centre
+/// is the current screen, tinted otherwise. Compact windows keep the icon.
+class _OpsCenterButton extends StatelessWidget {
+  const _OpsCenterButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.path,
+    required this.showLabel,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final String path;
+  final bool showLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = GoRouterState.of(context).uri.path == path;
+    final onColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+            ? Colors.white
+            : Colors.black87;
+    final foreground = current ? onColor : color;
+    final child = showLabel
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 6),
+              Text(label),
+            ],
+          )
+        : Icon(icon, size: 18);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: current ? color : color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => context.go(path),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: showLabel ? 10 : 8,
+                vertical: 7,
+              ),
+              child: DefaultTextStyle(
+                style: TextStyle(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+                child: IconTheme(
+                  data: IconThemeData(color: foreground),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SearchTrigger extends StatelessWidget {
   const _SearchTrigger({required this.expanded});
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -59,6 +61,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
   @override
   void initState() {
     super.initState();
+    opsRunAutoCreate(this, _save);
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

@@ -72,16 +72,23 @@ class CommandCenter extends StatelessWidget {
           (module: module, links: module.shortcuts.where(allowed).toList()),
     ];
     if (modules.isEmpty) return const SizedBox.shrink();
+    // The «مركز العمليات» title lives in the dashboard header, beside its
+    // refresh button; the cards start immediately underneath.
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text(arabic ? 'مركز العمليات' : 'Command center',
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-      const SizedBox(height: AppSpacing.md),
       LayoutBuilder(builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 930 ? 3 : constraints.maxWidth >= 590 ? 2 : 1;
-        final cardWidth = (constraints.maxWidth - (columns - 1) * AppSpacing.md) / columns;
-        return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: [
+        // Four compact cards per row on wide screens (the freed height shows
+        // more sections below), falling back to 3/2/1 as space shrinks.
+        final columns = constraints.maxWidth >= 1500
+            ? 4
+            : constraints.maxWidth >= 1100
+                ? 3
+                : constraints.maxWidth >= 700
+                    ? 2
+                    : 1;
+        final cardWidth = (constraints.maxWidth - (columns - 1) * AppSpacing.sm) / columns;
+        return Wrap(spacing: AppSpacing.sm, runSpacing: AppSpacing.sm, children: [
           for (final entry in modules)
-            SizedBox(width: cardWidth, height: 264,
+            SizedBox(width: cardWidth, height: 148,
               child: _ModuleTile(module: entry.module, links: entry.links)),
         ]);
       }),
@@ -100,39 +107,43 @@ class _ModuleTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias, child: InkWell(
         key: ValueKey('command-${module.key}'),
         onTap: () => context.go(links.first.path),
-        child: Padding(padding: const EdgeInsets.all(18), child: Column(
+        child: Padding(padding: const EdgeInsets.all(12), child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Container(width: 46, height: 46,
+              Container(width: 32, height: 32,
                 decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.17),
-                  borderRadius: BorderRadius.circular(13)),
-                child: Icon(module.icon, color: Colors.white, size: 25)),
-              const Spacer(),
-              const Icon(Icons.arrow_outward_rounded, color: Colors.white70, size: 20),
+                  borderRadius: BorderRadius.circular(9)),
+                child: Icon(module.icon, color: Colors.white, size: 18)),
+              const SizedBox(width: 10),
+              Expanded(child: Text(module.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Colors.white, fontWeight: FontWeight.w800))),
+              const Icon(Icons.arrow_outward_rounded, color: Colors.white70, size: 16),
             ]),
-            const SizedBox(height: 12),
-            Text(module.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white, fontWeight: FontWeight.w800)),
             const Spacer(),
-            Wrap(spacing: 6, runSpacing: 4, children: [
-              for (final link in links)
-                Material(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(9),
-                  child: InkWell(
-                    key: ValueKey('command-link-${link.path}'),
-                    borderRadius: BorderRadius.circular(9),
-                    onTap: () => context.go(link.path),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-                      child: Text(link.label, maxLines: 1,
-                        style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+            // Sub-buttons never clip: a narrow card scrolls them sideways.
+            SingleChildScrollView(scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final link in links)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Material(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        key: ValueKey('command-link-${link.path}'),
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => context.go(link.path),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          child: Text(link.label, maxLines: 1,
+                            style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-            ]),
+              ])),
           ],
         )),
       ));

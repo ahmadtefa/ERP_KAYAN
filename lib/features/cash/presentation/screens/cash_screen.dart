@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -49,6 +51,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
   @override
   void initState() {
     super.initState();
+    opsRunAutoCreate(this, _newVoucher);
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);

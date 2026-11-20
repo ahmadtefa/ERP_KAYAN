@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+
+import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -122,6 +124,12 @@ class _UsersTab extends ConsumerStatefulWidget {
 class _UsersTabState extends ConsumerState<_UsersTab> {
   String _query = '';
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    opsRunAutoCreate(this, _edit);
+  }
 
   /// The roles, as choices for the form. Read before the form opens so the
   /// dialog never appears empty.

@@ -10,7 +10,6 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/kpi_card.dart';
-import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../../shared/widgets/surface_card.dart';
 import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
@@ -82,49 +81,48 @@ class DashboardScreen extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PageHeader(
-          eyebrow: companyName.isEmpty
-              ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
-              : companyName,
-          title: arabic ? 'لوحة التحكم' : 'Executive dashboard',
-          subtitle: (arabic ? 'مرحباً، ' : 'Welcome back, ') +
-              (user?.fullName ?? ''),
-          actions: [
-            OutlinedButton.icon(
-              onPressed: () => context.go(AppRoutes.companySettings),
-              icon: const Icon(Icons.business_outlined, size: 17),
-              label: Text(l10n.companySettings),
-            ),
-            IconButton.filledTonal(
-              tooltip: arabic ? 'تحديث البيانات' : 'Refresh data',
-              onPressed: () {
-                // Refresh every live source on this dashboard, including the
-                // company identity and branch context in the header.
-                ref.invalidate(dashboardSummaryProvider);
-                ref.invalidate(dashboardMonthlyProvider);
-                ref.invalidate(companyProfileProvider);
-                ref.invalidate(branchesProvider);
-                ref.invalidate(chartOfAccountsProvider);
-                ref.invalidate(notificationFeedProvider);
-                ref.invalidate(notificationCountProvider);
-              },
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-            ),
-          ],
-        ),
-        Container(
-          height: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
         Expanded(
           child: ListView(
             padding: EdgeInsets.fromLTRB(
               pagePadding,
-              AppSpacing.lg,
+              AppSpacing.md,
               pagePadding,
               AppSpacing.xxl,
             ),
             children: [
+              // The duplicated page header that used to sit here is gone; the
+              // operations centre starts directly under the top bar, with a
+              // small real-refresh button beside its title.
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      arabic ? 'مركز العمليات' : 'Operations centre',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: arabic ? 'تحديث البيانات' : 'Refresh data',
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 18,
+                    onPressed: () {
+                      // Refresh every live source on this dashboard,
+                      // including the company identity and branch context.
+                      ref.invalidate(dashboardSummaryProvider);
+                      ref.invalidate(dashboardMonthlyProvider);
+                      ref.invalidate(companyProfileProvider);
+                      ref.invalidate(branchesProvider);
+                      ref.invalidate(chartOfAccountsProvider);
+                      ref.invalidate(notificationFeedProvider);
+                      ref.invalidate(notificationCountProvider);
+                    },
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
               CommandCenter(user: user, arabic: arabic, l10n: l10n),
               const SizedBox(height: AppSpacing.lg),
               _CompanyContext(
