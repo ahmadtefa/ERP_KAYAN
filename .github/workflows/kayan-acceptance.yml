@@ -74,7 +74,13 @@ jobs:
           if-no-files-found: error
 
   postgres-acceptance:
-    name: PostgreSQL stock reconciliation and embedded SQL integration
+    name: PostgreSQL 16 (${{ matrix.suite }})
+    # Each business scenario has its own migrated database, API and rate limiter;
+    # a reset or an opening balance in one scenario cannot influence another.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [backend, warehouses-orders, accounting, accounting-reconciliation]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -136,12 +142,14 @@ jobs:
       - name: Build API for real PostgreSQL service checks
         run: npm run build
       - name: Reconcile real PostgreSQL stock ledger and shelf balances
+        if: matrix.suite == 'backend'
         shell: bash
         run: |
           mkdir -p ../build/acceptance-postgres
           set -o pipefail
           node scripts/pg-ledger-shelf-agreement.mjs 2>&1 | tee ../build/acceptance-postgres/real-postgres-stock.log
       - name: Run stock and sales posting integration tests
+        if: matrix.suite == 'backend'
         shell: bash
         run: |
           mkdir -p ../build/acceptance-postgres
@@ -151,6 +159,7 @@ jobs:
           cat ../build/acceptance-postgres/jest.log
           exit "$status"
       - name: Run backend suite (except isolated licence signing and store tests)
+        if: matrix.suite == 'backend'
         shell: bash
         env:
           NODE_OPTIONS: --experimental-vm-modules --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
@@ -164,12 +173,18 @@ jobs:
           npm test -- --runInBand --testPathIgnorePatterns="/modules/licensing$isolated" --json --outputFile="$RUNNER_TEMP/jest.json"
           node -e 'const r=require(process.argv[1]); if(!r.numPassedTests || r.numPendingTests || r.numTodoTests) throw Error("Incomplete backend suite")' "$RUNNER_TEMP/jest.json"
       - name: Seed isolated database
+        if: matrix.suite != 'backend'
         run: npx ts-node prisma/seed.ts
-      - name: Run real API stock and accounting scenarios
+      - name: Run business scenario through the real API
+        if: matrix.suite != 'backend'
+        env:
+          SCENARIO: ${{ matrix.suite }}
+          ENABLE_DISPOSABLE_RESET: ${{ matrix.suite == 'accounting' }}
         shell: bash
         run: |
           set -euo pipefail
-          npm run start:prod > ../build/acceptance-postgres/api.log 2>&1 &
+          mkdir -p ../build/acceptance-postgres
+          node dist/src/main.js > ../build/acceptance-postgres/api.log 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" 2>/dev/null || true' EXIT
           ready=false
@@ -183,14 +198,17 @@ jobs:
           done
           if [ "$ready" != true ]; then cat ../build/acceptance-postgres/api.log; exit 1; fi
           export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
-          node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/warehouses-orders.log
-          ENABLE_DISPOSABLE_RESET=true node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting.log
-          node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1 2>&1 | tee ../build/acceptance-postgres/accounting-reconciliation.log
+          log="../build/acceptance-postgres/$SCENARIO.log"
+          if ! node "scripts/scenario-$SCENARIO.mjs" http://127.0.0.1:3000/api/v1 2>&1 | tee "$log"; then
+            # Surface failed checks without dumping authentication responses.
+            awk '/^FAIL  / {split($0,a," — "); print "::error::" a[1]}' "$log"
+            exit 1
+          fi
       - name: Upload PostgreSQL evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: kayan-postgres-acceptance-${{ github.event.pull_request.head.sha || github.sha }}
+          name: kayan-postgres-acceptance-${{ matrix.suite }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: build/acceptance-postgres/
           if-no-files-found: warn
 
