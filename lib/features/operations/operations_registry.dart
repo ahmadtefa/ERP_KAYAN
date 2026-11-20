@@ -323,15 +323,14 @@ class OpsPrefs {
   final String _userId;
   final String _companyId;
 
-  static final _store = SharedPreferencesAsync();
-
   String _favKey(OpsKind kind) =>
       'ops_favs_v1_${_companyId}_${_userId}_${kind.name}';
   String _useKey(OpsKind kind) =>
       'ops_usage_v1_${_companyId}_${_userId}_${kind.name}';
 
   Future<Set<String>> favorites(OpsKind kind) async {
-    final raw = await _store.getString(_favKey(kind));
+    final store = await SharedPreferences.getInstance();
+    final raw = store.getString(_favKey(kind));
     if (raw == null || raw.isEmpty) return const {};
     try {
       return (jsonDecode(raw) as List<dynamic>).cast<String>().toSet();
@@ -341,17 +340,19 @@ class OpsPrefs {
   }
 
   Future<void> setFavorite(OpsKind kind, String id, bool pinned) async {
-    final current = await favorites(kind);
+    final store = await SharedPreferences.getInstance();
+    final current = Set<String>.of(await favorites(kind));
     if (pinned) {
       current.add(id);
     } else {
       current.remove(id);
     }
-    await _store.setString(_favKey(kind), jsonEncode(current.toList()));
+    await store.setString(_favKey(kind), jsonEncode(current.toList()));
   }
 
   Future<Map<String, int>> usage(OpsKind kind) async {
-    final raw = await _store.getString(_useKey(kind));
+    final store = await SharedPreferences.getInstance();
+    final raw = store.getString(_useKey(kind));
     if (raw == null || raw.isEmpty) return const {};
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
@@ -362,8 +363,9 @@ class OpsPrefs {
   }
 
   Future<void> recordUse(OpsKind kind, String id) async {
-    final current = await usage(kind);
+    final store = await SharedPreferences.getInstance();
+    final current = Map<String, int>.of(await usage(kind));
     current[id] = (current[id] ?? 0) + 1;
-    await _store.setString(_useKey(kind), jsonEncode(current));
+    await store.setString(_useKey(kind), jsonEncode(current));
   }
 }
