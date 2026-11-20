@@ -14,6 +14,7 @@ const _fullUser = AppUser(
   username: 'boss',
   fullName: 'Boss',
   companyId: 'company-1',
+  isSuperAdmin: true,
   permissions: [
     'sales.invoices.read', 'sales.invoices.create',
     'sales.orders.read', 'sales.orders.create',
