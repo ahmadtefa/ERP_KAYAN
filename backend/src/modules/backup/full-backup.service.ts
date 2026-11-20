@@ -1381,7 +1381,9 @@ function tocCounts(listing: string): { entries: number; tables: number; constrai
     .filter((line) => line.length > 0 && !line.startsWith(';'));
   return {
     entries: lines.length,
-    tables: lines.filter((line) => /\sTABLE\s/.test(line)).length,
+    tables: lines.filter(
+      (line) => /\sTABLE\s/.test(line) && !/\sTABLE DATA\s/.test(line),
+    ).length,
     constraints: lines.filter((line) => /\sCONSTRAINT\s/.test(line)).length,
   };
 }
