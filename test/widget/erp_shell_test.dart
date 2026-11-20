@@ -6,6 +6,7 @@ import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/design_tokens.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/features/notifications/presentation/screens/notification_center_screen.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -75,6 +76,27 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 3));
+  });
+  testWidgets('top bar fits a narrow signed-in account with notifications', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const user = AppUser(id: 'one', username: 'one', fullName: 'Account one', companyId: 'company', permissions: ['notifications.read']);
+    for (final locale in [const Locale('en'), const Locale('ar')]) {
+    for (final width in [320.0, 375.0, 479.0, 480.0, 600.0, 799.0, 800.0, 900.0, 1024.0, 1366.0]) {
+      tester.view.physicalSize = Size(width, 700);
+      await tester.pumpWidget(ProviderScope(overrides: [
+        currentUserProvider.overrideWithValue(user),
+        apiClientProvider.overrideWithValue(_ShellPhotoClient({})),
+        notificationCountProvider.overrideWith((ref) async => 10),
+        notificationFeedProvider.overrideWith((ref) async => []),
+      ], child: wrapWithApp(locale: locale, child: const ErpShell(currentPath: AppRoutes.dashboard, child: SizedBox.expand()))));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'viewport width $width, locale $locale');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 3));
+    }
+    }
   });
   test('selected navigation glyphs meet contrast on every section accent', () {
     const accents = [SectionAccents.overview, SectionAccents.accounting,

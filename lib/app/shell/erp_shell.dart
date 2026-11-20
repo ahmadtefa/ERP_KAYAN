@@ -1265,7 +1265,7 @@ class _TopBar extends ConsumerWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final accentColor = item.accent.of(scheme.brightness);
-    final compact = MediaQuery.sizeOf(context).width < 480;
+    final compact = MediaQuery.sizeOf(context).width < 800;
     return Container(
       height: Theme.of(context).appBarTheme.toolbarHeight ??
           AppSizes.topBarHeight,
@@ -1280,7 +1280,7 @@ class _TopBar extends ConsumerWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      padding: EdgeInsets.symmetric(horizontal: compact ? AppSpacing.xs : AppSpacing.lg),
       child: Row(
         children: [
           if (!isWide) ...[
@@ -1294,7 +1294,7 @@ class _TopBar extends ConsumerWidget {
                 icon: const Icon(Icons.menu_rounded),
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            if (!compact) const SizedBox(width: AppSpacing.sm),
           ],
           // The current section, in its own colour: icon tile + section
           // name over the page title, so the bar answers «أين أنا؟»
@@ -1343,7 +1343,7 @@ class _TopBar extends ConsumerWidget {
                     ],
                   ),
                 ),
-                if (isExtended && MediaQuery.sizeOf(context).width >= 1560) ...[
+                if (isExtended) ...[
                   const SizedBox(width: AppSpacing.md),
                   Container(width: 1, height: 14, color: scheme.outlineVariant),
                   const SizedBox(width: AppSpacing.md),
@@ -1372,7 +1372,7 @@ class _TopBar extends ConsumerWidget {
                 : 'Inputs',
             color: const Color(0xFF218653),
             path: AppRoutes.operationsInputs,
-            showLabel: MediaQuery.sizeOf(context).width >= 1560,
+            showLabel: !compact,
           ),
           const SizedBox(width: AppSpacing.xs),
           _OpsCenterButton(
@@ -1383,7 +1383,7 @@ class _TopBar extends ConsumerWidget {
                 : 'Outputs',
             color: const Color(0xFF2259CF),
             path: AppRoutes.operationsOutputs,
-            showLabel: MediaQuery.sizeOf(context).width >= 1560,
+            showLabel: !compact,
           ),
           IconButton(
             key: const ValueKey('erp-home-shortcut'),
@@ -1499,7 +1499,7 @@ class _OpsCenterButton extends StatelessWidget {
             onTap: () => context.go(path),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: showLabel ? 10 : 5,
+                horizontal: showLabel ? 10 : 8,
                 vertical: 7,
               ),
               child: DefaultTextStyle(
