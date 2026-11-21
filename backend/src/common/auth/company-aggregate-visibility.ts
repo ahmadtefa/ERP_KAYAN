@@ -26,6 +26,8 @@ export function redactCompanyAggregates<T>(value: T): T {
     if (current === null || typeof current !== 'object' || current instanceof Date || Buffer.isBuffer(current)) {
       return current;
     }
+    const prototype = Object.getPrototypeOf(current);
+    if (prototype !== Object.prototype && prototype !== null) return current;
     const result: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(current)) {
       const normalized = key.toLowerCase();
