@@ -58,6 +58,7 @@ jobs:
         run: >-
           node --test
           backend/scripts/migrate-deploy.test.mjs
+          scripts/ci-diagnose.test.mjs
           scripts/windows-policy-non-signing.test.mjs
           scripts/windows-runtime-preflight.test.mjs
           scripts/windows-repair-semantics.test.mjs

@@ -20,7 +20,8 @@ lines = deque(maxlen=300)
 failures = deque(maxlen=120)
 context = 0
 FAILURE_MARKERS = re.compile(
-    r'\[E\]|EXCEPTION CAUGHT BY|^The following .* was thrown|'
+    r'\[E\]|EXCEPTION CAUGHT BY|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^Error:|'
+    r'^\s+at .+?:\d+:\d+(?:\)|$)|^The following .* was thrown|'
     r'Test failed\. See exception logs above|^\s*Expected:|^\s*Actual:|'
     r'Which: .*|^\s*test/.*\.dart:\d+:\d+|^════|'
     r'overflowed by|^The relevant error-causing widget was|^\s*Row|^\s*Column'
