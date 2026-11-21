@@ -46,6 +46,8 @@ describe('ResetService', () => {
     'cashAccount',
     'stockDocumentLine',
     'stockDocument',
+    'stockTransferAction',
+    'stockTransfer',
     'openingBalanceLine',
     'openingBalance',
     'salesInvoiceLine',
