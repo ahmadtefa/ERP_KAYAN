@@ -21,6 +21,7 @@ const _dashboardUser = AppUser(
     'dashboard.receivables', 'dashboard.payables', 'dashboard.stock',
     'dashboard.charts', 'dashboard.top', 'dashboard.recent',
     'inventory.cost.read',
+    'sales.price.read',
   ],
 );
 

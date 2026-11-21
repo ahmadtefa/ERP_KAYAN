@@ -91,7 +91,9 @@ void main() {
     expect(find.text('Current password'), findsOneWidget);
     expect(find.text('New password'), findsOneWidget);
     expect(find.text('Confirm new password'), findsOneWidget);
-    expect(find.byType(TextField), findsNWidgets(5));
+    // The login form stays mounted behind the dialog (two fields), while the
+    // change form asks for username, company, current, new and confirmation.
+    expect(find.byType(TextField), findsNWidgets(7));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
   });
 
