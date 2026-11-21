@@ -103,7 +103,7 @@ export class PurchaseInvoicesService {
     private readonly audit: AuditService,
   ) {}
 
-  async findAll(companyId: string, query: ListPurchaseInvoicesDto) {
+  async findAll(companyId: string, query: ListPurchaseInvoicesDto, mayReadCost = true) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
@@ -137,7 +137,7 @@ export class PurchaseInvoicesService {
       this.prisma.purchaseInvoice.count({ where }),
     ]);
 
-    return { items: items.map((i) => this.toSummary(i)), total, page, pageSize };
+    return { items: items.map((i) => this.toSummary(i, mayReadCost)), total, page, pageSize };
   }
 
   async findOne(companyId: string, id: string, mayReadCost = true) {
@@ -155,13 +155,13 @@ export class PurchaseInvoicesService {
     if (!invoice) throw new NotFoundException('Purchase invoice not found');
 
     return {
-      ...this.toSummary(invoice),
+      ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
       orderId: invoice.purchaseOrderId,
       updatedAt: invoice.updatedAt.toISOString(),
       notes: invoice.notes,
       supplierReference: invoice.supplierReference,
-      landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
+      landedCostAmount: mayReadCost ? invoice.landedCostAmount.toFixed(MONEY_SCALE) : null,
       journalEntryId: invoice.journalEntryId,
       postedAt: invoice.postedAt?.toISOString() ?? null,
       lines: invoice.lines.map((l) => ({
@@ -1320,7 +1320,7 @@ export class PurchaseInvoicesService {
     paidAmount: Prisma.Decimal;
     createdAt: Date;
     supplier?: { id?: string; code: string; nameEn: string; nameAr: string };
-  }) {
+  }, mayReadCost = true) {
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1338,8 +1338,8 @@ export class PurchaseInvoicesService {
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
-      landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
-      landedCostCharges: this.toLandedCostCharges(invoice.landedCostCharges),
+      landedCostAmount: mayReadCost ? invoice.landedCostAmount.toFixed(MONEY_SCALE) : null,
+      landedCostCharges: mayReadCost ? this.toLandedCostCharges(invoice.landedCostCharges) : null,
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
       balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
       createdAt: invoice.createdAt.toISOString(),

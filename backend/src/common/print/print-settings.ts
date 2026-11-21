@@ -1,4 +1,4 @@
-import { canReadCost, type CostVisibilityCaller } from '../auth/cost-visibility';
+import { canReadCost, canReadSalePrice, type CostVisibilityCaller } from '../auth/cost-visibility';
 
 /// What a printed copy is allowed to carry, per kind of print.
 ///
@@ -186,6 +186,7 @@ export interface ResolvedPrintVisibility {
   /// True when the caller may not read costs at all: the answer is forced,
   /// whatever the request or the settings say.
   costLocked: boolean;
+  salePriceLocked: boolean;
 }
 
 /// The requested choice as it arrives on a query string.
@@ -215,6 +216,7 @@ export function resolvePrintVisibility(
   typeKey?: string | null,
 ): ResolvedPrintVisibility {
   const mayReadCost = canReadCost(caller);
+  const mayReadSalePrice = canReadSalePrice(caller);
   const byType = new Map(saved.map((row) => [row.documentType, row]));
   const forType = typeKey ? byType.get(typeKey) : undefined;
   const forDefault = byType.get(DEFAULT_PRINT_TYPE);
@@ -245,11 +247,12 @@ export function resolvePrintVisibility(
   }
 
   return {
-    showSalePrice,
-    // The floor: a caller without `inventory.cost.read` never receives a cost,
-    // even when the saved setting says "show" and the request says "true".
+    // Both are permission floors: saved preferences and query flags cannot
+    // restore either price to a caller whose role lacks its matching grant.
+    showSalePrice: showSalePrice && mayReadSalePrice,
     showCost: showCost && mayReadCost,
     source,
     costLocked: !mayReadCost,
+    salePriceLocked: !mayReadSalePrice,
   };
 }

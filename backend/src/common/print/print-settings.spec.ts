@@ -10,7 +10,7 @@ import {
 const CLERK = { isSuperAdmin: false, permissions: ['reports.read'] };
 const COST_READER = {
   isSuperAdmin: false,
-  permissions: ['reports.read', 'inventory.cost.read'],
+  permissions: ['reports.read', 'inventory.cost.read', 'sales.price.read'],
 };
 const ADMIN = { isSuperAdmin: true, permissions: [] };
 
@@ -63,6 +63,7 @@ describe('print price settings', () => {
         showCost: true,
         source: 'builtin',
         costLocked: false,
+        salePriceLocked: false,
       });
     });
 
@@ -100,8 +101,17 @@ describe('print price settings', () => {
       expect(canReadCost(CLERK)).toBe(false);
       expect(asked.showCost).toBe(false);
       expect(asked.costLocked).toBe(true);
-      // The sale price is a different permission and stays as asked.
-      expect(asked.showSalePrice).toBe(true);
+      // This clerk has neither permission; the URL cannot restore the price.
+      expect(asked.showSalePrice).toBe(false);
+      expect(asked.salePriceLocked).toBe(true);
+    });
+
+    it('does not infer selling-price access from the legacy cost permission', () => {
+      const costOnly = { isSuperAdmin: false, permissions: ['inventory.cost.read'] };
+      const result = resolvePrintVisibility(costOnly, { showSalePrice: 'true' }, []);
+      expect(result.showCost).toBe(true);
+      expect(result.showSalePrice).toBe(false);
+      expect(result.salePriceLocked).toBe(true);
     });
 
     it('never restores a cost from a saved setting for such a caller', () => {

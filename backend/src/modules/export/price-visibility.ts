@@ -1,6 +1,7 @@
 import { ReportTable } from './report-table';
 import {
   canReadCost,
+  canReadSalePrice,
   COST_READ_PERMISSION,
   type CostVisibilityCaller,
 } from '../../common/auth/cost-visibility';
@@ -23,8 +24,9 @@ export function resolvePriceVisibility(
   requested: PriceVisibilityOptions,
 ): PriceVisibilityOptions {
   const mayReadCost = canReadCost(caller);
+  const mayReadSalePrice = canReadSalePrice(caller);
   return {
-    showSalePrice: requested.showSalePrice,
+    showSalePrice: mayReadSalePrice ? requested.showSalePrice : false,
     showCost: mayReadCost ? requested.showCost : false,
   };
 }

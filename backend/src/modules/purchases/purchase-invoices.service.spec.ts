@@ -183,7 +183,7 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
     expect(saved.totalAmount.toFixed(4)).toBe('130.4000');
     expect(saved.lines.create[0].inventoryCostTotal.toFixed(4)).toBe('115.0000');
     expect(saved.lines.create[0].taxAmount.toFixed(4)).toBe('15.4000');
-    expect(invoice.landedCostCharges[0].taxRate).toBe('14.0000');
+    expect(invoice.landedCostCharges![0].taxRate).toBe('14.0000');
   });
 
   it('replaces a draft charge breakdown and recalculates every line allocation on edit', async () => {

@@ -4,7 +4,8 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { redactPriceFields } from '../../common/auth/price-redaction';
 import { CreateItemDto, ListItemsDto, UpdateItemDto } from './dto/item.dto';
 import { ItemsService } from './items.service';
 
@@ -15,7 +16,7 @@ export class ItemsController {
   @Get()
   @RequirePermissions('inventory.items.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListItemsDto) {
-    return this.service.findAll(user.companyId, query, this.mayReadCost(user));
+    return this.service.findAll(user.companyId, query, this.mayReadCost(user)).then((result) => this.redactPrices(user, result));
   }
 
   /// Resolving a scanned code. Declared before `:id` so that the literal
@@ -23,13 +24,13 @@ export class ItemsController {
   @Get('by-barcode/:code')
   @RequirePermissions('inventory.items.read')
   findByBarcode(@CurrentUser() user: AuthUser, @Param('code') code: string) {
-    return this.service.findByBarcode(user.companyId, code, this.mayReadCost(user));
+    return this.service.findByBarcode(user.companyId, code, this.mayReadCost(user)).then((result) => this.redactPrices(user, result));
   }
 
   @Get(':id')
   @RequirePermissions('inventory.items.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, this.mayReadCost(user));
+    return this.service.findOne(user.companyId, id, this.mayReadCost(user)).then((result) => this.redactPrices(user, result));
   }
 
   @Post()
@@ -42,7 +43,7 @@ export class ItemsController {
       user.branchId,
       canReadCost(user),
       this.mayManageBarcodes(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   @Patch(':id')
@@ -68,7 +69,7 @@ export class ItemsController {
       dto,
       canReadCost(user),
       this.mayManageBarcodes(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   /// Generates an internal EAN-13 code, or assigns the one supplied.
@@ -85,7 +86,11 @@ export class ItemsController {
       id,
       body?.barcode,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
+  }
+
+  private redactPrices(user: AuthUser, response: unknown) {
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) });
   }
 
   /// Whether this caller may see what the goods cost the company.
@@ -105,7 +110,7 @@ export class ItemsController {
       user.userId,
       id,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   // Unit catalogue management (list/add/update/deactivate/reactivate, unit

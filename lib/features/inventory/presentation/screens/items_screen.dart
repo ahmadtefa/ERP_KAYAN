@@ -100,6 +100,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   Future<void> _save({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
+    final user = ref.read(currentUserProvider);
+    final canSeeSalePrice = user?.canReadSalePrice ?? false;
+    final canSeePurchasePrice = user?.canReadPurchasePrice ?? false;
     final values = await showFormSheet(
       context,
       exitRelay: _exitRelay,
@@ -110,7 +113,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec('nameAr', 'الاسم (عربي)'),
         FieldSpec('unit', l10n.unit),
         FieldSpec('barcode', 'Barcode'),
-        FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
+        if (canSeeSalePrice)
+          FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         FieldSpec(
           'taxRate',
           l10n.taxRate,
@@ -124,18 +128,19 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           kind: FieldKind.toggle,
           helper: l10n.stockTrackingDoesNotAddQuantity,
         ),
-        if (!isEdit) ...[
+        if (!isEdit && canSeePurchasePrice) ...[
           FieldSpec(
             'openingQuantity',
             l10n.openingQuantity,
             kind: FieldKind.decimal,
             helper: l10n.openingStockHint,
           ),
-          FieldSpec(
-            'openingUnitCost',
-            l10n.openingUnitCost,
-            kind: FieldKind.decimal,
-          ),
+          if (canSeePurchasePrice)
+            FieldSpec(
+              'openingUnitCost',
+              l10n.openingUnitCost,
+              kind: FieldKind.decimal,
+            ),
         ],
         FieldSpec(
           'notes',
@@ -237,8 +242,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final canManageBarcodes =
         ref.read(currentUserProvider)?.can('inventory.barcodes.manage') ??
         false;
-    final canSeeCost =
-        ref.read(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    final currentUser = ref.read(currentUserProvider);
+    final canSeeCost = currentUser?.canReadPurchasePrice ?? false;
+    final canSeeSalePrice = currentUser?.canReadSalePrice ?? false;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
 
     Future<List<Map<String, dynamic>>> loadUnits() async {
@@ -415,11 +421,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            FieldSpec(
-              'salePrice',
-              l10n.unitsBarcodesFieldSalePrice,
-              kind: FieldKind.decimal,
-            ),
+            if (canSeeSalePrice)
+              FieldSpec(
+                'salePrice',
+                l10n.unitsBarcodesFieldSalePrice,
+                kind: FieldKind.decimal,
+              ),
             if (canSeeCost)
               FieldSpec(
                 'purchasePrice',
@@ -549,7 +556,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             'unit': unit['unit'],
             'factor': unit['factor'],
             if (canManageBarcodes) 'barcode': unit['barcode'],
-            'salePrice': unit['salePrice'],
+            if (canSeeSalePrice) 'salePrice': unit['salePrice'],
             if (canSeeCost) 'purchasePrice': unit['purchasePrice'],
             'isDefaultSale': unit['isDefaultSale'] == true,
             'isDefaultPurchase': unit['isDefaultPurchase'] == true,
@@ -572,11 +579,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            FieldSpec(
-              'salePrice',
-              l10n.unitsBarcodesFieldSalePrice,
-              kind: FieldKind.decimal,
-            ),
+            if (canSeeSalePrice)
+              FieldSpec(
+                'salePrice',
+                l10n.unitsBarcodesFieldSalePrice,
+                kind: FieldKind.decimal,
+              ),
             if (canSeeCost)
               FieldSpec(
                 'purchasePrice',
@@ -657,6 +665,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final canSeeSalePrice = ref.watch(currentUserProvider)?.canReadSalePrice ?? false;
     final async = ref.watch(itemsListProvider);
 
     return ModuleScaffold(
@@ -724,11 +733,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
               ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
               ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
-              ColumnSpec(
-                l10n.salePrice,
-                numeric: true,
-                value: (r) => formatAmount(asString(r['salePrice'])),
-              ),
+              if (canSeeSalePrice)
+                ColumnSpec(
+                  l10n.salePrice,
+                  numeric: true,
+                  value: (r) => formatAmount(asString(r['salePrice'])),
+                ),
               ColumnSpec(
                 l10n.taxAmount,
                 numeric: true,

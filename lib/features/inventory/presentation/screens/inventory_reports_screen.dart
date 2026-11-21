@@ -73,7 +73,9 @@ final _selectedReportProvider =
     NotifierProvider<_SelectedReport, String?>(_SelectedReport.new);
 
 class InventoryReportsScreen extends ConsumerStatefulWidget {
-  const InventoryReportsScreen({super.key});
+  const InventoryReportsScreen({super.key, this.initialReportSlug});
+
+  final String? initialReportSlug;
 
   @override
   ConsumerState<InventoryReportsScreen> createState() =>
@@ -83,6 +85,15 @@ class InventoryReportsScreen extends ConsumerStatefulWidget {
 class _InventoryReportsScreenState
     extends ConsumerState<InventoryReportsScreen> {
   bool _exporting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialReportSlug;
+    if (initial != null && initial.isNotEmpty) {
+      ref.read(_selectedReportProvider.notifier).select(initial);
+    }
+  }
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 

@@ -187,7 +187,7 @@ describe('cost redaction - operations sales report', () => {
 describe('sales invoice write responses honour cost permission', () => {
   it('passes the current cost permission through every response-producing mutation', async () => {
     const { SalesInvoicesController } = await import('./sales-invoices.controller');
-    const service = {create:jest.fn(),updateDraft:jest.fn(),post:jest.fn(),reverse:jest.fn()};
+    const service = {create:jest.fn().mockResolvedValue({}),updateDraft:jest.fn().mockResolvedValue({}),post:jest.fn().mockResolvedValue({}),reverse:jest.fn().mockResolvedValue({})};
     const controller = new SalesInvoicesController(service as never);
     const principal = {userId:'u',companyId:'c',branchId:'b',username:'test',isSuperAdmin:false,permissions:[]};
     const dto = {lines:[]} as never;
@@ -223,8 +223,8 @@ describe('sales invoice write responses honour cost permission', () => {
 describe('return write responses honour cost permission on both sides', () => {
   it('passes current cost permission for creation, posting and reversal', async () => {
     const { ReturnsController } = await import('../returns/returns.controller');
-    const service = {createSalesReturn:jest.fn(),postSalesReturn:jest.fn(),createPurchaseReturn:jest.fn(),
-      postPurchaseReturn:jest.fn(),reverse:jest.fn()};
+    const service = {createSalesReturn:jest.fn().mockResolvedValue({}),postSalesReturn:jest.fn().mockResolvedValue({}),createPurchaseReturn:jest.fn().mockResolvedValue({}),
+      postPurchaseReturn:jest.fn().mockResolvedValue({}),reverse:jest.fn().mockResolvedValue({})};
     const controller = new ReturnsController(service as never);
     const principal = {userId:'u',companyId:'c',branchId:'b',username:'test',isSuperAdmin:false,permissions:[]};
     const body = {originalInvoiceId:'i'};

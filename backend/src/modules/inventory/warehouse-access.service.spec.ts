@@ -33,7 +33,10 @@ describe('warehouse access', () => {
             : { ...userRow, isSuperAdmin: false, ...options.user },
         ),
       },
-      userWarehouseAccess: { findMany: jest.fn(async () => [] as unknown[]) },
+      userWarehouseAccess: {
+        findMany: jest.fn(async () => [] as unknown[]),
+        count: jest.fn(async () => 0),
+      },
       warehouse: {
         findMany: jest.fn(async () => [
           { id: WH_A, code: 'WH-A', nameEn: 'Store A', nameAr: 'مخزن أ', branchId: 'branch-1' },
@@ -68,8 +71,21 @@ describe('warehouse access', () => {
     expect((prisma.warehouse.findMany.mock.calls[0] as any[])[0].where.branchId).toEqual({ in: ['branch-1'] });
   });
 
+  it('keeps the restricted flag when grants exist only outside the admin branch scope', async () => {
+    const { service, prisma } = makeService();
+    prisma.userWarehouseAccess.count.mockResolvedValueOnce(1);
+
+    const access = await service.forUser(COMPANY, USER, ['branch-1']);
+
+    expect(access.restricted).toBe(true);
+    expect(access.grants).toEqual([]);
+    expect((prisma.userWarehouseAccess.findMany.mock.calls[0] as any[])[0].where.warehouse.branchId)
+      .toEqual({ in: ['branch-1'] });
+  });
+
   it('reports every flag of a grant, not just the fact that one exists', async () => {
     const { service, prisma } = makeService();
+    prisma.userWarehouseAccess.count.mockResolvedValueOnce(1);
     prisma.userWarehouseAccess.findMany.mockResolvedValueOnce([
       {
         warehouseId: WH_A,
@@ -159,6 +175,16 @@ describe('warehouse access', () => {
       service.setForUser(COMPANY, ACTOR, USER, [{ warehouseId: WH_A }, { warehouseId: WH_B }]),
     ).rejects.toThrow(/not available to you/i);
     expect(tx.userWarehouseAccess.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces only the current branch slice and preserves other-branch grants', async () => {
+    const { service, tx } = makeService();
+
+    await service.setForUser(COMPANY, ACTOR, USER, [], ['branch-1']);
+
+    expect(tx.userWarehouseAccess.deleteMany).toHaveBeenCalledWith({
+      where: { companyId: COMPANY, userId: USER, warehouse: { branchId: { in: ['branch-1'] } } },
+    });
   });
 
   it('clears a person\u2019s restrictions when the admin saves an empty list', async () => {

@@ -15,7 +15,8 @@ import type { Response } from 'express';
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { redactPriceFields } from '../../common/auth/price-redaction';
 import { grantsOf } from '../../common/warehouse/warehouse-access';
 import { BarcodeLabelsService } from './barcode-labels.service';
 import { BarcodeLabelsQueryDto } from './dto/barcode-labels.dto';
@@ -46,7 +47,7 @@ export class InventoryReportsController {
   @Get('items/:itemId/units')
   @RequirePermissions('inventory.items.read')
   units(@CurrentUser() user: AuthUser, @Param('itemId') itemId: string) {
-    return this.service.listUnits(user.companyId, itemId, canReadCost(user));
+    return this.service.listUnits(user.companyId, itemId, canReadCost(user)).then((result) => this.redactPrices(user, result));
   }
 
   @Post('items/:itemId/units')
@@ -67,7 +68,7 @@ export class InventoryReportsController {
       itemId,
       body,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   @Patch('items/:itemId/units/:unitId')
@@ -90,7 +91,7 @@ export class InventoryReportsController {
       unitId,
       body,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   @Delete('items/:itemId/units/:unitId')
@@ -106,7 +107,7 @@ export class InventoryReportsController {
       itemId,
       unitId,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   /// Used units are deactivated, never hard-deleted, so old documents keep a
@@ -124,7 +125,7 @@ export class InventoryReportsController {
       itemId,
       unitId,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   @Post('items/:itemId/units/:unitId/reactivate')
@@ -140,7 +141,7 @@ export class InventoryReportsController {
       itemId,
       unitId,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
   }
 
   /// Gives a unit its own code, generated when none is supplied.
@@ -159,7 +160,11 @@ export class InventoryReportsController {
       unitId,
       body?.barcode,
       canReadCost(user),
-    );
+    ).then((result) => this.redactPrices(user, result));
+  }
+
+  private redactPrices(user: AuthUser, response: unknown) {
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) });
   }
 
   private assertUnrestrictedWarehouseReport(user: AuthUser): void {
@@ -243,7 +248,7 @@ export class InventoryReportsController {
     const specs = this.labels.parseSpecs(specsQuery);
     const html = await this.labels.buildHtml(user.companyId, itemId, specs, {
       paper: this.labels.parsePaper(query.paper),
-      showPrice: query.showPrice !== 'false',
+      showPrice: query.showPrice !== 'false' && canReadSalePrice(user),
       lang: query.lang === 'en' ? 'en' : 'ar',
       autoPrint: query.auto === '1' || query.auto === 'true',
     });
@@ -267,7 +272,7 @@ export class InventoryReportsController {
     const specs = this.labels.parseSpecs(specsQuery);
     const pdf = await this.labels.renderPdf(user.companyId, itemId, specs, {
       paper: this.labels.parsePaper(query.paper),
-      showPrice: query.showPrice !== 'false',
+      showPrice: query.showPrice !== 'false' && canReadSalePrice(user),
       lang: query.lang === 'en' ? 'en' : 'ar',
       autoPrint: false,
     });

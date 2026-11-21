@@ -131,9 +131,12 @@ class RecordsTable extends StatelessWidget {
     return Scrollbar(
       child: SingleChildScrollView(
         scrollDirection: Axis.vertical,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
+        child: Scrollbar(
+          thumbVisibility: true,
+          trackVisibility: true,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
             showCheckboxColumn: false,
             headingTextStyle: theme.textTheme.labelSmall?.copyWith(
               color: scheme.onSurfaceVariant,
@@ -189,6 +192,7 @@ class RecordsTable extends StatelessWidget {
                   ],
                 ),
             ],
+            ),
           ),
         ),
       ),

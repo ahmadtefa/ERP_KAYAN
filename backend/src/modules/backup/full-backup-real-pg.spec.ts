@@ -126,7 +126,15 @@ const SERVER_URL = process.env.DATABASE_URL_KAYAN_ROUNDTRIP ?? '';
 
     // 3. Put the backup back — from the list on the server.
     const result = await service.restore({ confirm: true, fileName: file.name }, 'round-trip-test');
-    expect(result).toBeDefined();
+    expect(result).toMatchObject({
+      restored: true,
+      checked: true,
+      rehearsed: true,
+      fullRestore: false,
+      includesExternalFiles: false,
+      includesLicence: false,
+      licenceReconciled: true,
+    });
 
     // 4. Compare: tables, rows, relations.
     const customers = await query('SELECT id, name FROM customers ORDER BY id');

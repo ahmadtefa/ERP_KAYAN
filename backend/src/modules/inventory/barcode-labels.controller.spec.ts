@@ -42,7 +42,11 @@ describe('barcode label routes', () => {
       }),
     };
     const controller = new InventoryReportsController({} as never, labels as never);
-    const user = { companyId: 'company-1' } as never;
+    const user = {
+      companyId: 'company-1',
+      isSuperAdmin: false,
+      permissions: ['sales.price.read'],
+    } as never;
     const response = { type: jest.fn(), setHeader: jest.fn(), send: jest.fn() } as any;
 
     await controller.barcodeLabelPrint(

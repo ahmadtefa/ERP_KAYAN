@@ -4,7 +4,8 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { redactPriceFields } from '../../common/auth/price-redaction';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -15,10 +16,14 @@ import { SalesInvoicesService } from './sales-invoices.service';
 export class SalesInvoicesController {
   constructor(private readonly service: SalesInvoicesService) {}
 
+  private redact(user: AuthUser, response: unknown) {
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) }, 'sale');
+  }
+
   @Get()
   @RequirePermissions('sales.invoices.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListInvoicesDto) {
-    return this.service.findAll(user.companyId, query, canReadCost(user));
+    return this.service.findAll(user.companyId, query, canReadCost(user)).then((result) => this.redact(user, result));
   }
 
   @Get('tax-pricing')
@@ -30,13 +35,13 @@ export class SalesInvoicesController {
   @Get(':id')
   @RequirePermissions('sales.invoices.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, canReadCost(user));
+    return this.service.findOne(user.companyId, id, canReadCost(user)).then((result) => this.redact(user, result));
   }
 
   @Post()
   @RequirePermissions('sales.invoices.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSalesInvoiceDto) {
-    return this.service.create(user.companyId, user.branchId, user.userId, dto, undefined, canReadCost(user));
+    return this.service.create(user.companyId, user.branchId, user.userId, dto, undefined, canReadCost(user)).then((result) => this.redact(user, result));
   }
 
   @Put(':id')
@@ -46,13 +51,13 @@ export class SalesInvoicesController {
     @Param('id') id: string,
     @Body() dto: CreateSalesInvoiceDto,
   ) {
-    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto, canReadCost(user));
+    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto, canReadCost(user)).then((result) => this.redact(user, result));
   }
 
   @Put(':id/order-allocation')
   @RequirePermissions('sales.orders.read', 'sales.invoices.create')
   updateOrderAllocation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
-    return this.service.updateOrderAllocation(user.companyId, user.branchId, user.userId, id, dto ?? {});
+    return this.service.updateOrderAllocation(user.companyId, user.branchId, user.userId, id, dto ?? {}).then((result) => this.redact(user, result));
   }
 
   @Delete(':id')
@@ -80,12 +85,12 @@ export class SalesInvoicesController {
     return this.service.post(user.companyId, user.userId, id, canReadCost(user), {
       mayIssueExpired,
       reason: body?.expiredIssueReason ?? null,
-    });
+    }).then((result) => this.redact(user, result));
   }
 
   @Post(':id/reverse')
   @RequirePermissions('sales.invoices.post')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user));
+    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user)).then((result) => this.redact(user, result));
   }
 }

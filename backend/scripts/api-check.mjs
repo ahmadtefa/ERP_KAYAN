@@ -5,8 +5,9 @@
  *
  * This is the check that says whether the program works - not whether it
  * compiles. It signs in, renews its session, confirms a complete backup is
- * refused, creates and downloads a database archive, confirms full restore is
- * unavailable, exports and prints a report, downloads an import template and
+ * refused, creates and downloads a database archive, checks its gated
+ * database-only restore and licence-reconciliation semantics, exports and
+ * prints a report, downloads an import template and
  * imports it, and then (only when told the database is disposable) resets the
  * company and sets it up again.
  *
@@ -89,9 +90,15 @@ async function main() {
   // ────────────────────────────────────── 2. what this machine can do
   const caps = await call('/backup/full/capabilities');
   check(
-    'the server reports the PostgreSQL tools it found',
-    caps.status === 200 && caps.data?.available === true,
-    caps.data?.version ?? caps.data?.reason ?? `status ${caps.status}`,
+    'the server reports the PostgreSQL tools it found and separates full-system restore from the gated database archive',
+    caps.status === 200 &&
+      caps.data?.available === true &&
+      caps.data?.fullBackupSupported === false &&
+      caps.data?.fullRestoreSupported === false &&
+      typeof caps.data?.databaseRestoreSupported === 'boolean',
+    `${caps.data?.version ?? caps.data?.reason ?? `status ${caps.status}`}; ` +
+      `full backup=${caps.data?.fullBackupSupported}, full restore=${caps.data?.fullRestoreSupported}, ` +
+      `database restore=${caps.data?.databaseRestoreSupported}`,
   );
   if (caps.data?.available !== true) return false;
 
@@ -183,15 +190,21 @@ async function main() {
     `status ${ticketAsBearer.status}`,
   );
 
-  // ────────────────────────────────────────────── 5. restore is unavailable
+  // ────────────────────────────────────── 5. guarded database-only restore
+  // Invalid uploads and missing confirmation are rejected whether the
+  // machine gate is open or closed. When the gate is open, this endpoint may
+  // restore only the PostgreSQL archive; the complete-system route is separate.
+  const databaseRestoreSupported = caps.data?.databaseRestoreSupported === true;
   const form = new FormData();
   form.append('confirm', 'true');
   form.append('file', new Blob(['this is not a dump at all']), 'bogus.dump');
   const refused = await call('/backup/full/restore', { method: 'POST', body: form });
   check(
-    'restore is blocked even for an invalid upload',
-    refused.status === 503 && refused.data?.code === 'FULL_RESTORE_UNAVAILABLE',
-    `status ${refused.status}`,
+    'an invalid archive is rejected, or the machine gate refuses restore before parsing it',
+    databaseRestoreSupported
+      ? refused.status === 400 && /PostgreSQL|\.dump|أرشيف/i.test(refused.data?.detail ?? '')
+      : refused.status === 503 && refused.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${refused.status}: ${refused.data?.detail ?? refused.data?.code ?? ''}`,
   );
 
   const noConfirm = new FormData();
@@ -201,27 +214,39 @@ async function main() {
     body: noConfirm,
   });
   check(
-    'restore without confirm=true is blocked',
-    unconfirmed.status === 503 && unconfirmed.data?.code === 'FULL_RESTORE_UNAVAILABLE',
-    `status ${unconfirmed.status}`,
+    'a valid archive cannot be restored without explicit confirmation',
+    databaseRestoreSupported
+      ? unconfirmed.status === 400 && /confirm=true/i.test(unconfirmed.data?.detail ?? '')
+      : unconfirmed.status === 503 && unconfirmed.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${unconfirmed.status}: ${unconfirmed.data?.detail ?? unconfirmed.data?.code ?? ''}`,
   );
 
   const upload = new FormData();
   upload.append('confirm', 'true');
   upload.append('file', new Blob([bytes]), 'restored.dump');
-  const restoreBlocked = await call('/backup/full/restore', {
+  const restored = await call('/backup/full/restore', {
     method: 'POST',
     body: upload,
   });
   check(
-    'a valid full restore is refused explicitly',
-    restoreBlocked.status === 503 && restoreBlocked.data?.code === 'FULL_RESTORE_UNAVAILABLE',
-    `status ${restoreBlocked.status}`,
+    'a permitted database-archive restore is rehearsed, safety-backed, and licence-reconciled without claiming a full restore',
+    databaseRestoreSupported
+      ? restored.status === 201 &&
+        restored.data?.restored === true &&
+        restored.data?.checked === true &&
+        restored.data?.rehearsed === true &&
+        restored.data?.fullRestore === false &&
+        restored.data?.includesExternalFiles === false &&
+        restored.data?.includesLicence === false &&
+        restored.data?.licenceReconciled === true &&
+        Boolean(restored.data?.safetyBackup)
+      : restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 240)}`,
   );
 
-  // The program still answers after the restore was refused.
+  // The program still answers after the attempted restore.
   const after = await call('/auth/me');
-  check('the program still answers after the blocked restore', after.status === 200, `status ${after.status}`);
+  check('the program still answers after the database restore attempt', after.status === 200, `status ${after.status}`);
 
   // ─────────────────────────────────────── 4c. renewing the session
   //

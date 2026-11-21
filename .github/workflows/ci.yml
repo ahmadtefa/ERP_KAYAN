@@ -99,20 +99,15 @@ jobs:
         run: |
           node -e "const j=require('./jest.config.cjs');if(!j||!j.rootDir)process.exit(1)"
           node -e "if(!(process.env.NODE_OPTIONS||'').includes('--experimental-vm-modules')){console.error('NODE_OPTIONS must carry --experimental-vm-modules or the PGlite suites cannot run');process.exit(1)}"
-      - name: Run unit tests
+      - name: Run all backend tests in bounded-memory batches
         env:
           NODE_OPTIONS: --experimental-vm-modules
-        # `| tee` reports tee's exit status, not the test run's, so without
-        # `-o pipefail` a failing suite would leave this step green and the
-        # whole job would pass. The log is kept because the summary step below
-        # reads it.
-        # This older CLI integration suite creates a private signing key on disk.
-        # It is retained in source but is not run under the no-private-key-on-disk
-        # constraint. The source-level in-memory generator check is a separate job;
-        # neither that check nor this partial suite proves the packaged generator.
+        # Each batch runs in its own Node process, preventing Jest's retained
+        # worker state from growing until the whole suite exhausts the heap.
+        # The runner discovers every *.spec.ts file and stops on the first
+        # failure; no suites are filtered or skipped by this step.
         run: |
-          echo '::warning title=Generator tests not run::The file-backed generator suite is excluded; the packaged Windows generator is not verified by this job.'
-          python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts 2>&1 | tee /tmp/kayan-jest.log'
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/run-tests-batched.mjs 12 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |

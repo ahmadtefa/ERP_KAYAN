@@ -231,15 +231,34 @@ final routerProvider = Provider<GoRouter>((ref) {
               : route.path == AppRoutes.companySettings
                 ? CompanySettingsScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.salesInvoices
-                ? InvoiceListScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey)
+                ? InvoiceListScreen(
+                    kind: InvoiceKind.sales,
+                    navigationKey: state.pageKey,
+                    initialInvoiceId: state.uri.queryParameters['invoice'],
+                  )
                 : route.path == AppRoutes.purchaseInvoices
-                  ? InvoiceListScreen(kind:InvoiceKind.purchase,navigationKey:state.pageKey)
+                  ? InvoiceListScreen(
+                      kind: InvoiceKind.purchase,
+                      navigationKey: state.pageKey,
+                      initialInvoiceId: state.uri.queryParameters['invoice'],
+                    )
                   : route.path == AppRoutes.salesOrders
-                    ? OrdersScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey)
+                    ? OrdersScreen(
+                        kind: InvoiceKind.sales,
+                        navigationKey: state.pageKey,
+                        initialOrderId: state.uri.queryParameters['order'],
+                      )
                     : route.path == AppRoutes.purchaseOrders
-                      ? OrdersScreen(kind:InvoiceKind.purchase,navigationKey:state.pageKey)
+                      ? OrdersScreen(
+                          kind: InvoiceKind.purchase,
+                          navigationKey: state.pageKey,
+                          initialOrderId: state.uri.queryParameters['order'],
+                        )
                       : route.path == AppRoutes.stock
-                        ? StockScreen(navigationKey:state.pageKey)
+                        ? StockScreen(
+                            navigationKey: state.pageKey,
+                            autoCreateVoucherKind: state.uri.queryParameters['voucher'],
+                          )
                         : route.path == AppRoutes.warehouses
                           ? WarehousesScreen(navigationKey: state.pageKey)
                           : route.path == AppRoutes.openingBalances
@@ -257,10 +276,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                                     : route.path == AppRoutes.stockDocuments
                                       ? StockDocumentsScreen(navigationKey: state.pageKey)
                                       : route.path == AppRoutes.inventoryReports
-                                        ? InventoryReportsScreen()
-                                        : route.path == AppRoutes.warehouseAccess
-                                          ? WarehouseAccessScreen()
-                                          : route.child),
+                                        ? InventoryReportsScreen(initialReportSlug: state.uri.queryParameters['report'])
+                                        : route.path == AppRoutes.reports
+                                          ? ReportsScreen(initialTab: state.uri.queryParameters['tab'])
+                                          : route.path == AppRoutes.warehouseAccess
+                                            ? WarehouseAccessScreen()
+                                            : route.child),
         ),
     ],
   );

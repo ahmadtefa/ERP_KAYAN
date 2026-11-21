@@ -144,7 +144,7 @@ it('removes profit, cost values outside the column list, and derived purchase to
 });
 
 describe('resolvePriceVisibility', () => {
-  const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read'] };
+  const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read', 'sales.price.read'] };
   const clerk = { isSuperAdmin: false, permissions: ['inventory.items.read'] };
 
   it('honours the request of a caller who may read costs', () => {
@@ -156,7 +156,7 @@ describe('resolvePriceVisibility', () => {
 
   it('forces costs off for a caller without the cost permission, whatever the link says', () => {
     expect(resolvePriceVisibility(clerk, { showSalePrice: 'true', showCost: 'true' })).toEqual({
-      showSalePrice: 'true',
+      showSalePrice: false,
       showCost: false,
     });
   });

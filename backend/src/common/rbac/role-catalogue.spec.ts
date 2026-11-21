@@ -71,6 +71,18 @@ describe('role catalogue', () => {
     expect(storekeeper?.permissions).toContain('inventory.stock.read');
   });
 
+  it('separates selling and purchase price access from inventory-only warehouse work', () => {
+    const storekeeper = SEEDED.find((role) => role.code === 'STOREKEEPER');
+    const salesClerk = SEEDED.find((role) => role.code === 'SALES_CLERK');
+    const purchaseClerk = SEEDED.find((role) => role.code === 'PURCHASING_CLERK');
+    expect(storekeeper?.permissions).not.toContain('sales.price.read');
+    expect(storekeeper?.permissions).not.toContain('purchases.price.read');
+    expect(salesClerk?.permissions).toContain('sales.price.read');
+    expect(salesClerk?.permissions).not.toContain('purchases.price.read');
+    expect(purchaseClerk?.permissions).toContain('purchases.price.read');
+    expect(purchaseClerk?.permissions).not.toContain('sales.price.read');
+  });
+
   it('lets a clerk prepare but not post, and a manager post', () => {
     const clerk = SEEDED.find((role) => role.code === 'SALES_CLERK');
     const manager = SEEDED.find((role) => role.code === 'SALES_MANAGER');

@@ -38,7 +38,12 @@ describe('installed licence HTTP guard', () => {
       { installedDirectory: dir, machineId: MACHINE, clock: now },
     );
     writeFileSync(pub, PUBLIC_PEM);
-    const calls = { read: jest.fn(() => []), write: jest.fn(() => ({ ok: true })), admin: jest.fn(() => []), adminWrite: jest.fn(() => ({ ok: true })) };
+    const calls = {
+      read: jest.fn(async () => []),
+      write: jest.fn(async () => ({ ok: true })),
+      admin: jest.fn(() => []),
+      adminWrite: jest.fn(() => ({ ok: true })),
+    };
     const healthDb = {
       $queryRaw: async (parts: TemplateStringsArray) => parts.join(' ').includes('current_database') ? [{ name: 'synthetic' }] : [{ value: 1 }],
       company: { count: async () => 1 },

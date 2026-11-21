@@ -1,6 +1,10 @@
 import {
   canReadCost,
   COST_READ_PERMISSION,
+  PURCHASE_PRICE_READ_PERMISSION,
+  SALES_PRICE_READ_PERMISSION,
+  canReadPurchasePrice,
+  canReadSalePrice,
   redactMoney,
 } from './cost-visibility';
 
@@ -13,6 +17,15 @@ describe('cost-visibility helper', () => {
     expect(
       canReadCost({ isSuperAdmin: false, permissions: [COST_READ_PERMISSION] }),
     ).toBe(true);
+  });
+
+  it('keeps purchase and selling-price visibility independent', () => {
+    const purchaseOnly = { isSuperAdmin: false, permissions: [PURCHASE_PRICE_READ_PERMISSION] };
+    const saleOnly = { isSuperAdmin: false, permissions: [SALES_PRICE_READ_PERMISSION] };
+    expect(canReadPurchasePrice(purchaseOnly)).toBe(true);
+    expect(canReadSalePrice(purchaseOnly)).toBe(false);
+    expect(canReadPurchasePrice(saleOnly)).toBe(false);
+    expect(canReadSalePrice(saleOnly)).toBe(true);
   });
 
   it('denies cost access to an ordinary role without the permission', () => {

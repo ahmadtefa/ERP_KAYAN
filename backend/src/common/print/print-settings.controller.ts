@@ -4,7 +4,7 @@ import { Type } from 'class-transformer';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { PrintSettingsService } from './print-settings.service';
 
 class PrintPriceSettingDto {
@@ -37,6 +37,7 @@ export class PrintSettingsController {
       /// Whether this caller may ever see a cost, so the screen disables the
       /// checkbox with a reason instead of saving a setting that is ignored.
       costLocked: !canReadCost(user),
+      salePriceLocked: !canReadSalePrice(user),
     };
   }
 
@@ -44,6 +45,10 @@ export class PrintSettingsController {
   @RequirePermissions('admin.company.manage')
   async save(@CurrentUser() user: AuthUser, @Body() dto: SavePrintSettingsDto) {
     const stored = await this.settings.save(user.companyId, user.userId, dto.settings);
-    return { ...stored, costLocked: !canReadCost(user) };
+    return {
+      ...stored,
+      costLocked: !canReadCost(user),
+      salePriceLocked: !canReadSalePrice(user),
+    };
   }
 }

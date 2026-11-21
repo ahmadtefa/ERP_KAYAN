@@ -26,13 +26,16 @@ class DocumentExportActions extends ConsumerWidget {
     final capabilities = ref.watch(exportCapabilitiesProvider);
     final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
     final ready = id.isNotEmpty;
-    final canSeeCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    final currentUser = ref.watch(currentUserProvider);
+    final canSeeCost = currentUser?.canReadPurchasePrice ?? false;
+    final canSeeSalePrice = currentUser?.canReadSalePrice ?? false;
 
     Future<void> printDocument() async {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
         canSeeCost: canSeeCost,
+        canSeeSalePrice: canSeeSalePrice,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(context, links.documentPrint(
@@ -49,6 +52,7 @@ class DocumentExportActions extends ConsumerWidget {
         context,
         arabic: language == 'ar',
         canSeeCost: canSeeCost,
+        canSeeSalePrice: canSeeSalePrice,
       );
       if (visibility == null || !context.mounted) return;
       await runDownload(context, links.documentPdf(

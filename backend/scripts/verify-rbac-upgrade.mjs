@@ -39,6 +39,9 @@ const URL = `postgresql://${credentials}${HOST}:${PORT}/${DB}`;
 const BACKEND = path.resolve(import.meta.dirname, '..');
 const MIGRATIONS = path.join(BACKEND, 'prisma', 'migrations');
 const TARGET = '20261119120000_roles_catalogue_and_deny';
+// Keep this regression focused on the RBAC upgrade: later notification and
+// dashboard migrations intentionally add data/grants of their own, and must
+// not be mistaken for the RBAC migration rewriting an existing role.
 
 /// Assigned in main(); the error path closes it so a failed check exits
 /// instead of hanging on an open socket.
@@ -198,8 +201,8 @@ async function main() {
   ).rows[0];
 
   // ── the migration ────────────────────────────────────────────────────────
-  const applied = await applyAll(client);
-  check('the migration applies to a populated database', applied === 1, `${applied} migration(s)`);
+  const applied = await applyAll(client, { stopBefore: '20261120090000_notification_user_state' });
+  check('the RBAC migration applies to a populated database', applied === 1, `${applied} migration(s)`);
 
   const roleRows = (
     await client.query('SELECT code, category, "isActive", "isSystem" FROM roles ORDER BY code')
@@ -337,8 +340,8 @@ async function main() {
   );
 
   // And the migration itself is idempotent.
-  const recheck = await applyAll(client);
-  check('re-running the migration applies nothing', recheck === 0);
+  const recheck = await applyAll(client, { stopBefore: '20261120090000_notification_user_state' });
+  check('re-running the RBAC migration applies nothing', recheck === 0);
 
   await client.end();
 

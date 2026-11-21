@@ -220,9 +220,12 @@ class _ResizableTableState extends State<ResizableTable> {
           ),
           child: ClipRRect(
             borderRadius: AppRadii.control,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
+            child: Scrollbar(
+              thumbVisibility: true,
+              trackVisibility: true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
                 width: math.max(totalWidth, 320.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -272,6 +275,7 @@ class _ResizableTableState extends State<ResizableTable> {
                 ),
               ),
             ),
+          ),
           ),
         ),
       ],

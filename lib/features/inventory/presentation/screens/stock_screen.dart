@@ -27,8 +27,9 @@ export '../providers/stock_providers.dart'
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key, this.navigationKey});
+  const StockScreen({super.key, this.navigationKey, this.autoCreateVoucherKind});
   final ValueKey<String>? navigationKey;
+  final String? autoCreateVoucherKind;
 
   @override
   ConsumerState<StockScreen> createState() => _StockScreenState();
@@ -42,6 +43,11 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
+    if (widget.autoCreateVoucherKind != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openVouchers(initialKind: widget.autoCreateVoucherKind);
+      });
+    }
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }
@@ -53,10 +59,13 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     super.dispose();
   }
 
-  Future<void> _openVouchers() async {
+  Future<void> _openVouchers({String? initialKind}) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => StockVouchersScreen(exitRelay: _exitRelay),
+        builder: (_) => StockVouchersScreen(
+          exitRelay: _exitRelay,
+          initialKind: initialKind,
+        ),
       ),
     );
     if (mounted) ref.invalidate(stockListProvider);
@@ -73,7 +82,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     final l10n = context.l10n;
     final async = ref.watch(stockListProvider);
     final canReadCost =
-        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
 
     return ModuleScaffold(
       title: l10n.stockBalances,
@@ -216,7 +225,7 @@ class _StockCostCenterReportScreenState
   Widget build(BuildContext context) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final canReadCost =
-        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -390,7 +399,7 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
     final canReadCost =
-        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 

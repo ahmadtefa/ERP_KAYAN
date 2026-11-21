@@ -34,6 +34,8 @@ describe('permission catalogue', () => {
     expect(codes.has('admin.reset')).toBe(true);
     // Reading opening balances is its own operation, separate from managing them.
     expect(codes.has('accounting.openingbalances.read')).toBe(true);
+    expect(codes.has('sales.price.read')).toBe(true);
+    expect(codes.has('purchases.price.read')).toBe(true);
   });
 
   it('publishes warning rules that point at permissions that exist', () => {

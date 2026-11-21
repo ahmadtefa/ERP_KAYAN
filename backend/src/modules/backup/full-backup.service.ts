@@ -1015,6 +1015,13 @@ export class FullBackupService {
         safetyBackup: safety.name,
         checked: true,
         rehearsed,
+        // This endpoint restores PostgreSQL only. External files are not
+        // included, and the machine-bound licence state is reconciled rather
+        // than restored from the archive.
+        fullRestore: false,
+        includesExternalFiles: false,
+        includesLicence: false,
+        licenceReconciled: true,
       };
     } finally {
       await unlink(staging).catch(() => {});

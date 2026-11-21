@@ -34,9 +34,19 @@ export class WarehouseAccessService {
     });
     if (!user) throw new NotFoundException('User not found');
 
-    const [grants, warehouses] = await Promise.all([
+    const grantScope = scope === null
+      ? { companyId, userId }
+      : { companyId, userId, warehouse: { branchId: { in: scope } } };
+    const [grants, warehouses, configuredGrantCount] = await Promise.all([
       this.prisma.userWarehouseAccess.findMany({
-        where: { companyId, userId },
+        where: {
+          ...grantScope,
+          warehouse: {
+            companyId,
+            deletedAt: null,
+            ...(scope !== null ? { branchId: { in: scope } } : {}),
+          },
+        },
         include: {
           warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         },
@@ -51,12 +61,16 @@ export class WarehouseAccessService {
         select: { id: true, code: true, nameEn: true, nameAr: true, branchId: true },
         orderBy: { code: 'asc' },
       }),
+      this.prisma.userWarehouseAccess.count({ where: { companyId, userId } }),
     ]);
 
     return {
       user,
       /// Empty means unrestricted: every warehouse of their branches.
-      restricted: grants.length > 0,
+      // A branch-scoped admin may be looking at an empty slice while the user
+      // is still restricted in another branch. That must not read as global
+      // unrestricted access or be cleared by saving the local slice.
+      restricted: configuredGrantCount > 0,
       grants: grants.map((row) => ({
         warehouseId: row.warehouseId,
         warehouseCode: row.warehouse.code,
@@ -117,7 +131,13 @@ export class WarehouseAccessService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.userWarehouseAccess.deleteMany({ where: { companyId, userId } });
+      await tx.userWarehouseAccess.deleteMany({
+        where: {
+          companyId,
+          userId,
+          ...(scope !== null ? { warehouse: { branchId: { in: scope } } } : {}),
+        },
+      });
       for (const grant of cleaned) {
         await tx.userWarehouseAccess.create({
           data: {

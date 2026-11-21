@@ -61,7 +61,8 @@ class ListExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+        canSeeCost: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
+        canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runDownload(
@@ -80,7 +81,8 @@ class ListExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+        canSeeCost: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
+        canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(

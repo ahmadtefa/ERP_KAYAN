@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../features/auth/domain/entities/app_user.dart';
+import '../../features/auth/presentation/providers/auth_providers.dart';
 import 'operations_registry.dart';
 
 /// The Inputs Centre (المدخلات) and the Outputs Centre (المخرجات): one card
@@ -30,8 +31,10 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
+  AppUser? get _user => widget.user ?? ref.read(currentUserProvider);
+
   OpsPrefs get _prefs {
-    final user = widget.user;
+    final user = _user;
     return OpsPrefs(user?.id ?? 'anon', user?.companyId ?? 'none');
   }
 
@@ -57,14 +60,8 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
     super.dispose();
   }
 
-  bool _allowed(OpsItem item) {
-    final user = widget.user;
-    if (user == null) return false;
-    return item.allowed(user.can);
-  }
-
-  List<OpsItem> get _visible =>
-      OperationsRegistry.forKind(widget.kind).where(_allowed).toList();
+  bool _allowed(OpsItem item, AppUser? user) =>
+      user != null && item.allowed(user.can);
 
   List<OpsItem> _matches(OpsItem item) {
     if (_query.isEmpty) return [item];
@@ -101,7 +98,10 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
 
   @override
   Widget build(BuildContext context) {
-    final items = _visible;
+    final user = widget.user ?? ref.watch(currentUserProvider);
+    final items = OperationsRegistry.forKind(widget.kind)
+        .where((item) => _allowed(item, user))
+        .toList();
     final arabic = _arabic;
     final favoriteItems = items
         .where((item) => _favorites.contains(item.id))
@@ -126,6 +126,29 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
               : (arabic ? 'ابحث في التقارير والمخرجات…' : 'Search reports and outputs…'),
           onChanged: (value) => setState(() => _query = value.trim()),
         ),
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
+            child: Center(
+              child: Text(
+                arabic
+                    ? 'لا توجد لديك صلاحية لعرض عمليات هذا القسم.'
+                    : 'You do not have permission to view operations in this section.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          )
+        else if (_query.isNotEmpty && grouped.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
+            child: Center(
+              child: Text(
+                arabic ? 'لا توجد نتائج مطابقة للبحث.' : 'No matching results.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
         if (favoriteItems.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           _StripHeader(

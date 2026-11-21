@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { redactPriceFields } from '../../common/auth/price-redaction';
 import { ReturnsService } from './returns.service';
 
 /// Sales returns (credit notes) and purchase returns (debit notes).
@@ -12,6 +13,10 @@ import { ReturnsService } from './returns.service';
 @Controller('returns')
 export class ReturnsController {
   constructor(private readonly service: ReturnsService) {}
+
+  private redact(user: AuthUser, response: unknown, side: 'sale' | 'purchase') {
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) }, side);
+  }
 
   @Get('sales')
   @RequirePermissions('sales.invoices.read')
@@ -26,31 +31,31 @@ export class ReturnsController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       canReadCost(user),
-    );
+    ).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Get('sales/:id')
   @RequirePermissions('sales.invoices.read')
   getSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, 'sales', id, canReadCost(user));
+    return this.service.findOne(user.companyId, 'sales', id, canReadCost(user)).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Post('sales')
   @RequirePermissions('sales.invoices.create')
   createSales(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.service.createSalesReturn(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
+    return this.service.createSalesReturn(user.companyId, user.branchId, user.userId, body as never, canReadCost(user)).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Post('sales/:id/post')
   @RequirePermissions('sales.invoices.post')
   postSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.postSalesReturn(user.companyId, user.userId, id, canReadCost(user));
+    return this.service.postSalesReturn(user.companyId, user.userId, id, canReadCost(user)).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Post('sales/:id/reverse')
   @RequirePermissions('sales.invoices.post')
   reverseSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, 'sales', id, canReadCost(user));
+    return this.service.reverse(user.companyId, user.userId, 'sales', id, canReadCost(user)).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Get('purchases')
@@ -66,13 +71,13 @@ export class ReturnsController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       canReadCost(user),
-    );
+    ).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Get('purchases/:id')
   @RequirePermissions('purchases.invoices.read')
   getPurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, 'purchases', id, canReadCost(user));
+    return this.service.findOne(user.companyId, 'purchases', id, canReadCost(user)).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Post('purchases')
@@ -84,18 +89,18 @@ export class ReturnsController {
       user.userId,
       body as never,
       canReadCost(user),
-    );
+    ).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Post('purchases/:id/post')
   @RequirePermissions('purchases.invoices.post')
   postPurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.postPurchaseReturn(user.companyId, user.userId, id, canReadCost(user));
+    return this.service.postPurchaseReturn(user.companyId, user.userId, id, canReadCost(user)).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Post('purchases/:id/reverse')
   @RequirePermissions('purchases.invoices.post')
   reversePurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, 'purchases', id, canReadCost(user));
+    return this.service.reverse(user.companyId, user.userId, 'purchases', id, canReadCost(user)).then((result) => this.redact(user, result, 'purchase'));
   }
 }

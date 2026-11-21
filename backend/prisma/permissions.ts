@@ -52,6 +52,24 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['reports.print', 'Print reports', 'طباعة التقارير', 'reports'],
   ['dashboard.view', 'View dashboard', 'عرض لوحة التحكم', 'dashboard'],
   ['dashboard.financial', 'View financial dashboard summaries', 'عرض ملخصات مالية في لوحة التحكم', 'dashboard'],
+  // One permission per dashboard section. The dashboard API returns only the
+  // sections the caller holds, so a clerk who may raise invoices does not
+  // learn the profit, and a treasurer does not learn the stock value, unless
+  // an administrator grants that section to their role. `dashboard.financial`
+  // remains as a broad grant for the financial sections (revenue, profit,
+  // cash, movements) for roles that already hold it.
+  ['dashboard.sales', 'View total sales on the dashboard', 'عرض إجمالي المبيعات في لوحة التحكم', 'dashboard'],
+  ['dashboard.purchases', 'View total purchases on the dashboard', 'عرض إجمالي المشتريات في لوحة التحكم', 'dashboard'],
+  ['dashboard.revenue', 'View revenue and expenses on the dashboard', 'عرض الإيرادات والمصروفات في لوحة التحكم', 'dashboard'],
+  ['dashboard.profit', 'View net result on the dashboard', 'عرض صافي النتيجة في لوحة التحكم', 'dashboard'],
+  ['dashboard.cash', 'View cash and bank balances on the dashboard', 'عرض أرصدة الخزائن والبنوك في لوحة التحكم', 'dashboard'],
+  ['dashboard.movements', 'View receipts and payments on the dashboard', 'عرض المقبوضات والمدفوعات في لوحة التحكم', 'dashboard'],
+  ['dashboard.receivables', 'View customer receivables on the dashboard', 'عرض أرصدة ومستحقات العملاء في لوحة التحكم', 'dashboard'],
+  ['dashboard.payables', 'View supplier payables on the dashboard', 'عرض أرصدة ومستحقات الموردين في لوحة التحكم', 'dashboard'],
+  ['dashboard.stock', 'View stock value on the dashboard', 'عرض قيمة المخزون في لوحة التحكم', 'dashboard'],
+  ['dashboard.charts', 'View dashboard charts and comparisons', 'عرض الرسوم البيانية والمقارنات في لوحة التحكم', 'dashboard'],
+  ['dashboard.top', 'View top customers and items on the dashboard', 'عرض أفضل العملاء والأصناف في لوحة التحكم', 'dashboard'],
+  ['dashboard.recent', 'View recent documents on the dashboard', 'عرض آخر العمليات في لوحة التحكم', 'dashboard'],
   ['sales.orders.read', 'View sales orders', 'عرض أوامر البيع', 'sales'],
   ['sales.orders.create', 'Create sales orders', 'إنشاء أوامر البيع', 'sales'],
   ['sales.orders.approve', 'Approve sales orders', 'اعتماد أوامر البيع', 'sales'],
@@ -113,7 +131,9 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   // Reading a cost is its own privilege: a warehouse clerk may price a sale
   // without ever seeing what the goods cost the company, and the print/PDF
   // options can only hide what the API is willing to send.
-  ['inventory.cost.read', 'View cost and purchase prices', 'عرض التكلفة وأسعار الشراء', 'inventory'],
+  ['inventory.cost.read', 'View legacy cost and purchase prices', 'عرض صلاحية التكلفة وأسعار الشراء القديمة', 'inventory'],
+  ['purchases.price.read', 'View purchase prices', 'عرض أسعار الشراء', 'purchases'],
+  ['sales.price.read', 'View selling prices', 'عرض أسعار البيع', 'sales'],
   // A barcode is an identifier, so changing one is guarded separately from
   // editing the item's descriptive fields. Generating a code is a write too.
   ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],

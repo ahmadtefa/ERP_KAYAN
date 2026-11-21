@@ -3,16 +3,16 @@ import 'package:flutter/material.dart';
 /// The same choice is used by list, report and saved-document PDF/print
 /// actions. This changes only the rendered copy, never the stored document.
 ///
-/// [canSeeCost] mirrors the `inventory.cost.read` permission. A person who may
-/// not read a cost is not offered it here either: the server would refuse to
-/// include it anyway, and showing a checkbox that quietly changes nothing is
-/// worse than saying why it is not there.
+/// The two switches mirror the independent API permissions. A caller may
+/// choose what to print only inside the figures their role may already read;
+/// the server enforces the same floor even if a caller edits the request.
 Future<Map<String, bool>?> choosePriceVisibility(
   BuildContext context, {
   required bool arabic,
   bool canSeeCost = true,
+  bool canSeeSalePrice = true,
 }) async {
-  var showSalePrice = true;
+  var showSalePrice = canSeeSalePrice;
   var showCost = canSeeCost;
 
   return showDialog<Map<String, bool>>(
@@ -27,7 +27,16 @@ Future<Map<String, bool>?> choosePriceVisibility(
               contentPadding: EdgeInsets.zero,
               value: showSalePrice,
               title: Text(arabic ? 'إظهار سعر البيع' : 'Show sale prices'),
-              onChanged: (value) => setDialogState(() => showSalePrice = value ?? false),
+              subtitle: canSeeSalePrice
+                  ? null
+                  : Text(
+                      arabic
+                          ? 'ليس لديك صلاحية عرض أسعار البيع.'
+                          : 'Your role may not view selling prices.',
+                    ),
+              onChanged: canSeeSalePrice
+                  ? (value) => setDialogState(() => showSalePrice = value ?? false)
+                  : null,
             ),
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
@@ -60,7 +69,7 @@ Future<Map<String, bool>?> choosePriceVisibility(
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop({
-              'showSalePrice': showSalePrice,
+              'showSalePrice': showSalePrice && canSeeSalePrice,
               'showCost': showCost && canSeeCost,
             }),
             child: Text(arabic ? 'متابعة' : 'Continue'),
