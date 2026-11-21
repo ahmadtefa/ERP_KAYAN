@@ -17,6 +17,7 @@ export interface DashboardUser {
   branchIds?: string[] | null;
   isSuperAdmin?: boolean;
   permissions?: string[] | null;
+  roles?: string[] | null;
 }
 
 /**

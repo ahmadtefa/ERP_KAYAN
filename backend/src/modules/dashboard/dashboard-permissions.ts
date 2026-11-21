@@ -56,6 +56,20 @@ const FINANCIAL_SECTIONS: ReadonlySet<DashboardSection> = new Set([
 export interface DashboardPrincipal {
   isSuperAdmin?: boolean;
   permissions?: string[] | null;
+  roles?: string[] | null;
+}
+
+/**
+ * Company-wide aggregates reveal business performance even when a caller has
+ * separate access to the underlying document screens. Keep them to the
+ * company and finance managers (plus the explicitly privileged super-admin).
+ * Role codes come from the signed-in principal, not caller-controlled query
+ * parameters or dashboard section grants.
+ */
+export function mayReadCompanyAggregates(user: DashboardPrincipal): boolean {
+  if (user.isSuperAdmin) return true;
+  const roles = new Set((user.roles ?? []).map((role) => role.trim().toUpperCase()));
+  return roles.has('ADMIN') || roles.has('GENERAL_MANAGER') || roles.has('FINANCE_MANAGER');
 }
 
 /** The sections this caller may see, as a set of section names. */
@@ -66,6 +80,12 @@ export function dashboardSectionsFor(
   const allowed = new Set<DashboardSection>();
   if (user.isSuperAdmin) {
     for (const section of DASHBOARD_SECTIONS) allowed.add(section);
+    return allowed;
+  }
+  if (!mayReadCompanyAggregates(user)) {
+    // The recent-document list is not an aggregate; its individual amounts
+    // are independently stripped below according to document permissions.
+    if (granted.has('dashboard.recent')) allowed.add('recent');
     return allowed;
   }
   const financial = granted.has('dashboard.financial');

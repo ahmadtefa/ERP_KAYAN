@@ -109,6 +109,7 @@ const path = require('node:path');
     assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows,before.rows);
     console.log('PASS: real database archive read remains FAILED as a full scheduled backup and preserves prior bytes; synthetic scheduler interface, no licence or full-restore proof.');
 
+    console.log('CHECKPOINT: archive deletion safety passed; checking truncated archive rejection.');
     // A readable TOC is insufficient: truncate the synthetic data section,
     // retain the original, and prove the real pg_restore can still list it.
     const corruptPath = path.join(dir, 'synthetic-corrupt.dump');
@@ -130,6 +131,7 @@ const path = require('node:path');
     assert.equal((await service.list()).some(file => file.name === spareName), false);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
 
+    console.log('CHECKPOINT: truncated archive rejection passed; checking HTTP restore and archive endpoints.');
     // Exercise the real controller and service over HTTP with real archive
     // tools and PostgreSQL. Identity is injected, not a JWT or licence test.
     class BackupHttpFixtureModule {}
@@ -192,6 +194,7 @@ const path = require('node:path');
       assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     } finally { await http.close(); }
 
+    console.log('CHECKPOINT: HTTP archive and restore endpoint checks passed; checking fsync failure safety.');
     // Real pg_dump/pg_restore with an injected fsync failure: do not publish
     // a new file or disturb the previous backup/primary when flushing fails.
     const flushFail = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
@@ -204,6 +207,7 @@ const path = require('node:path');
     assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     console.log('PASS: injected archive fsync failure prevents publication and preserves the prior archive and primary; no power-loss guarantee.');
 
+    console.log('CHECKPOINT: fsync failure safety passed; checking corrupt archive publication rejection.');
     // A tool may exit zero while leaving a data-corrupt archive; it must not
     // be published even if its TOC can be listed successfully.
     const corruptDumpTool = path.join(dir, 'corrupt-pg-dump');
@@ -239,6 +243,7 @@ const path = require('node:path');
       if (savedDump === undefined) delete process.env.KAYAN_PG_DUMP;
       else process.env.KAYAN_PG_DUMP = savedDump;
     }
+    console.log('CHECKPOINT: corrupt archive publication checks passed; checking scratch cleanup failure safety.');
     await client.query("UPDATE fixture_items SET value='changed-after-backup' WHERE id=1");
     const pendingRestore = service.restore({ confirm: true, fileName: backup.file.name }, 'fixture');
     await assert.rejects(service.createFull('fixture'), /restore is running/i);
@@ -403,4 +408,8 @@ const path = require('node:path');
     await admin.end();
     await fs.rm(dir, { recursive: true, force: true });
   }
-})().catch(e => { console.error(e.stack); process.exitCode = 1; });
+  })().catch(error => {
+    const detail = error instanceof Error ? error.stack : String(error);
+    console.error('RESTORE_REHEARSAL_FIXTURE_FAILURE:', detail);
+    process.exitCode = 1;
+  });

@@ -8,15 +8,29 @@ import {
 
 describe('dashboard section permissions', () => {
   it('grants just the independently-authorized sections and maps the legacy financial grant narrowly', () => {
-expect([...dashboardSectionsFor({ permissions: ['dashboard.sales'] })]).toEqual([]);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.sales', 'sales.price.read'] })]).toEqual(['sales']);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.purchases', 'purchases.price.read'] })]).toEqual(['purchases']);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial'] })].sort()).toEqual([
-      'cash', 'movements',
-    ]);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial', 'sales.price.read', 'purchases.price.read'] })].sort()).toEqual([
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.sales'] })]).toEqual([]);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.sales', 'sales.price.read'], roles: ['GENERAL_MANAGER'] })]).toEqual(['sales']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.purchases', 'purchases.price.read'], roles: ['FINANCE_MANAGER'] })]).toEqual(['purchases']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial'] })]).toEqual([]);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial'], roles: ['ACCOUNTANT'] })]).toEqual([]);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial', 'sales.price.read', 'purchases.price.read'], roles: ['FINANCE_MANAGER'] })].sort()).toEqual([
       'cash', 'movements', 'profit', 'revenue',
     ]);
+  });
+
+  it('keeps company aggregates to company and finance managers, while allowing permitted recent documents', () => {
+    expect([...dashboardSectionsFor({
+      roles: ['SALES_MANAGER'],
+      permissions: ['dashboard.sales', 'sales.price.read', 'dashboard.recent'],
+    })]).toEqual(['recent']);
+    expect([...dashboardSectionsFor({
+      roles: ['GENERAL_MANAGER'],
+      permissions: ['dashboard.sales', 'sales.price.read'],
+    })]).toEqual(['sales']);
+    expect([...dashboardSectionsFor({
+      roles: ['FINANCE_MANAGER'],
+      permissions: ['dashboard.financial', 'sales.price.read', 'purchases.price.read'],
+    })]).toEqual(expect.arrayContaining(['revenue', 'profit']));
   });
 
   it('allows a Super Admin every section, while retaining the supplied companyId for service queries', () => {
@@ -86,8 +100,8 @@ expect([...dashboardSectionsFor({ permissions: ['dashboard.sales'] })]).toEqual(
 
   it('requires the existing inventory cost permission before granting the stock-value KPI', () => {
     expect([...dashboardSectionsFor({ permissions: ['dashboard.stock'] })]).toEqual([]);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'inventory.cost.read'] })]).toEqual(['stock']);
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'purchases.price.read'] })]).toEqual(['stock']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'inventory.cost.read'], roles: ['FINANCE_MANAGER'] })]).toEqual(['stock']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'purchases.price.read'], roles: ['GENERAL_MANAGER'] })]).toEqual(['stock']);
   });
 
   it('strips monthly series and sales-derived counts independently', () => {
