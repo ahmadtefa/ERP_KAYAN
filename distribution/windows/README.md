@@ -47,6 +47,10 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### Restore rehearsal account
+
+Setup and Repair provision a separate `kayan_restore_admin` account for local Windows installations. It receives only PostgreSQL `CREATEDB` (not superuser, role-management, replication, or application-table privileges); the ordinary `erp_app` role is not widened. Its random credential is kept in `%ProgramData%\\KAYAN-ERP\\restore-admin.url`, ACL-restricted to SYSTEM, Administrators and the authorized desktop user, and the protected runtime settings contain only the path as `KAYAN_RESTORE_ADMIN_FILE`. Setup verifies that this account can authenticate and create rehearsal databases before reporting success. Upgrades reuse the protected credential and repair the role's limited attributes; they do not touch company data, external/cloud databases, or licensing data.
+
 ### The company page: a new company never reuses the old database
 
 Setup asks one question: a new company, or the one already on this computer.

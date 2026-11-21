@@ -56,6 +56,20 @@ test('local persistent caches are opt-in and every cached installer is verified 
     'the VC++ redistributable cache hit must pass Microsoft Authenticode verification');
 });
 
+test('Windows Setup provisions a private, least-privilege restore administrator on install and upgrade', async () => {
+  const install = await read('distribution/windows/install-runtime.ps1');
+  assert.match(install, /function Set-RestoreAdministrator\(/);
+  assert.match(install, /CREATE ROLE \$role WITH LOGIN PASSWORD '\$restorePassword' CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOINHERIT NOBYPASSRLS/);
+  assert.match(install, /ALTER ROLE \$role WITH LOGIN PASSWORD '\$restorePassword' CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOINHERIT NOBYPASSRLS/);
+  assert.match(install, /Set-PrivateAcl \$credentialFile \$principals/,
+    'the generated URL file must be ACL-restricted to system administrators and the authorized user');
+  assert.match(install, /\$Values\['KAYAN_RESTORE_ADMIN_FILE'\] = \$credentialFile/,
+    'the backend must receive the protected credential-file path through normal runtime settings');
+  assert.match(install, /Set-RestoreAdministrator -Values \$settings -PostgresPassword \$dbPassword/,
+    'both fresh installations and upgrades must pass through restore-admin provisioning');
+  assert.match(install, /\$ready -ne 'true'.*Setup will not claim restore rehearsal is ready/);
+});
+
 test('PostgreSQL extraction skips pgAdmin while retaining the verified runtime and notices', async () => {
   const build = await read('distribution/windows/build-installer.ps1');
 

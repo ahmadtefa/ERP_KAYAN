@@ -909,6 +909,62 @@ function Save-UserSettings([hashtable]$Values) {
   Set-PrivateAcl $machineConfig $authorizedPrincipals
 }
 
+function Set-RestoreAdministrator([hashtable]$Values, [string]$PostgresPassword) {
+  # The application role remains least-privilege. This separate account may
+  # create isolated rehearsal databases only; it is never made a superuser,
+  # database owner, or granted access to application tables.
+  $role = 'kayan_restore_admin'
+  $credentialFile = Join-Path $ProgramDataRoot 'restore-admin.url'
+  $restorePassword = $null
+  if (Test-Path -LiteralPath $credentialFile -PathType Leaf) {
+    $savedUrl = (Get-Content -LiteralPath $credentialFile -Raw -ErrorAction Stop).Trim()
+    if ($savedUrl -match '^postgresql://kayan_restore_admin:([a-f0-9]{64})@127\.0\.0\.1:5432/postgres$') {
+      $restorePassword = $matches[1]
+    }
+  }
+  if (-not $restorePassword) { $restorePassword = New-Secret }
+
+  $env:PGPASSWORD = $PostgresPassword
+  try {
+    $state = Get-DatabaseScalar 'postgres' 'postgres' ("SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$role') THEN 'missing' WHEN (SELECT rolsuper OR rolcreaterole OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname = '$role') THEN 'unsafe' WHEN EXISTS (SELECT 1 FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = '$role')) THEN 'member' ELSE 'safe' END")
+    if ($state -eq 'unsafe' -or $state -eq 'member') {
+      throw 'The existing restore-administrator role has privileges or memberships beyond KAYAN setup; it was left unchanged.'
+    }
+    $roleSql = if ($state -eq 'missing') {
+      "CREATE ROLE $role WITH LOGIN PASSWORD '$restorePassword' CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOINHERIT NOBYPASSRLS"
+    } else {
+      "ALTER ROLE $role WITH LOGIN PASSWORD '$restorePassword' CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOINHERIT NOBYPASSRLS"
+    }
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-p','5432','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') $roleSql
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  }
+
+  $url = "postgresql://$role`:$restorePassword@127.0.0.1:5432/postgres"
+  $temporary = "$credentialFile.$([guid]::NewGuid().ToString('N')).tmp"
+  try {
+    [IO.File]::WriteAllText($temporary, $url, [Text.Encoding]::ASCII)
+    $principals = (Get-AuthorizedSettingsPrincipals).Principals
+    Set-PrivateAcl $temporary $principals
+    Move-Item -LiteralPath $temporary -Destination $credentialFile -Force
+    Set-PrivateAcl $credentialFile $principals
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+  }
+
+  # Check the saved credential by authenticating as the restricted role and
+  # proving it has CREATEDB but not the powers of a PostgreSQL administrator.
+  $env:PGPASSWORD = $restorePassword
+  try {
+    $ready = Get-DatabaseScalar 'postgres' $role "SELECT (current_user = '$role' AND (SELECT rolcreatedb AND NOT rolsuper AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls FROM pg_roles WHERE rolname = current_user))::text"
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  }
+  if ($ready -ne 'true') { throw 'The dedicated restore-administrator could not be verified; Setup will not claim restore rehearsal is ready.' }
+
+  $Values['KAYAN_RESTORE_ADMIN_FILE'] = $credentialFile
+}
+
 $authInfo = Get-AuthorizedSettingsPrincipals
 $initialPrincipals = $authInfo.Principals
 if (Test-ExistingPath $bootstrapMarker) {
@@ -1203,6 +1259,8 @@ if (-not $clusterExists) {
   # The settings file is written back only after the database has been
   # identified and prepared, and the database itself is touched only after
   # that - with a verified backup first whenever it holds a company.
+  Set-Stage 'configuring the isolated restore-rehearsal account'
+  Set-RestoreAdministrator -Values $settings -PostgresPassword $dbPassword
   Add-LicenceSettings $settings
   Save-UserSettings $settings
   if ($preparedDatabase) {
