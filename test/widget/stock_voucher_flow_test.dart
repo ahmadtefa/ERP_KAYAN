@@ -165,7 +165,8 @@ class _VoucherApi extends ApiClient {
     Object? body,
     String? idempotencyKey,
   }) async {
-    if (path == '/inventory/stock-documents') {
+    if (path == '/inventory/stock-documents' ||
+        path == '/inventory/stock-documents/vouchers') {
       requests.add(Map<String, dynamic>.from(body! as Map));
       if (requests.length == 1) throw const NetworkFailure();
       return {'id': 'document'};
@@ -301,7 +302,7 @@ class _EditVoucherApi extends _VoucherApi {
 
   @override
   Future<Map<String, dynamic>> put(String path, {Object? body}) async {
-    expect(path, '/inventory/stock-documents/document/voucher-draft');
+    expect(path, '/inventory/stock-documents/vouchers/document/draft');
     edits.add(Map<String, dynamic>.from(body! as Map));
     if (!committed) {
       committed = true;
@@ -1026,7 +1027,7 @@ void main() {
     expect(api.listQueries.last, containsPair('page', 1));
   });
   testWidgets(
-    'limited role cannot see receipt costs review approval or export',
+    'limited role can prepare a receipt without seeing costs or approval controls',
     (tester) async {
       const limited = AppUser(
         id: 'limited',
@@ -1057,7 +1058,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('New receipt'), findsNothing);
+      // Receipt entry requires recording a unit cost, not reading saved costs.
+      // Keep the operator's workflow available while the API redacts valuations.
+      expect(find.text('New receipt'), findsOneWidget);
       expect(find.text('New issue'), findsNothing);
       expect(
         find.text('Cost-centre read permission is required to issue stock'),
