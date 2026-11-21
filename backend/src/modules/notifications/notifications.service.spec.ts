@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import {
+  NOTIFICATION_KINDS,
   STOCK_ABOVE_MAXIMUM,
   STOCK_BELOW_MINIMUM,
   STOCK_EXPIRED,
@@ -537,7 +538,7 @@ describe('notifications', () => {
 
     const answer = await service.settings(COMPANY);
 
-    expect(answer.items).toHaveLength(13);
+    expect(answer.items).toHaveLength(NOTIFICATION_KINDS.length);
     const expired = answer.items.find((row) => row.type === STOCK_EXPIRED);
     expect(expired).toMatchObject({
       module: 'inventory',
@@ -1052,7 +1053,7 @@ describe('notifications', () => {
     const answer = await service.scanStock(COMPANY, TODAY);
 
     // Every kind the program knows, stock and business alike.
-    expect(answer).toEqual({ raised: 0, closed: 0, types: 13 });
+    expect(answer).toEqual({ raised: 0, closed: 0, types: NOTIFICATION_KINDS.length });
   });
 
   // ───────────────────────────────────────── the rest of the business

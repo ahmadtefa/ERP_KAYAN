@@ -4,6 +4,16 @@ import { Prisma, StockDocumentKind } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StockDocumentsService } from './stock-documents.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  STOCK_TRANSFER_APPROVAL_REQUIRED,
+  STOCK_TRANSFER_CLOSE_REQUIRED,
+  STOCK_TRANSFER_DISPATCH_REQUIRED,
+  STOCK_TRANSFER_RECEIPT_REQUIRED,
+  STOCK_TRANSFER_REVIEW_REQUIRED,
+  STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED,
+  dedupeKey,
+} from '../notifications/notification-kinds';
 
 type LineInput = { itemId: string; quantity: string | number; unitId?: string; unitName?: string; batchId?: string; notes?: string };
 type StageLineInput = { lineId: string; quantity: string | number; notes?: string };
@@ -14,6 +24,7 @@ export class StockTransfersService {
     private readonly prisma: PrismaService,
     private readonly documents: StockDocumentsService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(companyId: string, query: { status?: string; q?: string; sourceWarehouseId?: string; destinationWarehouseId?: string } = {}) {
@@ -105,8 +116,10 @@ export class StockTransfersService {
       await tx.stockTransferAction.create({ data: { companyId, transferId: transfer.id, requestKey: `CREATE:${key}`, requestHash: hash, action: 'CREATE', resultVersion: 0 } });
       return transfer.id;
     }, { timeout: 30000 });
-    await this.audit.record({ companyId, userId, action: 'CREATE', entity: 'stock_transfers', entityId: result, after: { documentNumber: (await this.findOne(companyId, result)).documentNumber } });
-    return this.findOne(companyId, result);
+    const created = await this.findOne(companyId, result);
+    await this.audit.record({ companyId, userId, action: 'CREATE', entity: 'stock_transfers', entityId: result, after: { documentNumber: created.documentNumber } });
+    await this.notifyNextStages(created);
+    return created;
   }
 
   async review(companyId: string, userId: string, id: string, key: string) {
@@ -132,7 +145,10 @@ export class StockTransfersService {
     const actionHash = this.hash({ lines: lines ?? null });
     let action = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
     if (action && action.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different dispatch quantities');
-    if (action?.stockDocumentId) return transfer;
+    if (action?.stockDocumentId) {
+      await this.notifyNextStages(transfer);
+      return transfer;
+    }
     let effectiveKey = safeKey;
     let quantities = this.stageQuantities(transfer.lines, lines, 'dispatch');
     if (!action && transfer.status === 'DISPATCHING') {
@@ -197,7 +213,9 @@ export class StockTransfersService {
       await tx.stockTransferAction.update({ where: { id: currentAction.id }, data: { stockDocumentId: doc.id, resultVersion: current.version + 2 } });
     });
     await this.audit.record({ companyId, userId, action: 'DISPATCH', entity: 'stock_transfers', entityId: id, after: { stockDocumentId: doc.id } });
-    return this.findOne(companyId, id);
+    const dispatched = await this.findOne(companyId, id);
+    await this.notifyNextStages(dispatched);
+    return dispatched;
   }
 
   async receive(companyId: string, userId: string, id: string, key: string, lines: StageLineInput[]) {
@@ -207,7 +225,10 @@ export class StockTransfersService {
     const actionHash = this.hash({ lines });
     let action = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
     if (action && action.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different receipt quantities');
-    if (action?.stockDocumentId) return transfer;
+    if (action?.stockDocumentId) {
+      await this.notifyNextStages(transfer);
+      return transfer;
+    }
     let effectiveKey = safeKey;
     let quantities = this.stageQuantities(transfer.lines, lines, 'receive');
     if (!action && transfer.status === 'RECEIVING') {
@@ -254,7 +275,9 @@ export class StockTransfersService {
       await tx.stockTransferAction.update({ where: { id: currentAction.id }, data: { stockDocumentId: doc.id, resultVersion: current.version + 2 } });
     });
     await this.audit.record({ companyId, userId, action: 'RECEIVE', entity: 'stock_transfers', entityId: id, after: { stockDocumentId: doc.id } });
-    return this.findOne(companyId, id);
+    const received = await this.findOne(companyId, id);
+    await this.notifyNextStages(received);
+    return received;
   }
 
   async settle(companyId: string, userId: string, id: string, key: string, lines: Array<{ lineId: string; returnedQuantity?: string | number; shortage?: string | number; damage?: string | number; reason: string }>) {
@@ -268,7 +291,10 @@ export class StockTransfersService {
       if (prior) requestKey = prior.requestKey;
     }
     if (prior && prior.requestHash !== requestHash) throw new ConflictException('Idempotency key was reused with different settlement quantities');
-    if (prior && transfer.status !== 'SETTLING') return transfer;
+    if (prior && transfer.status !== 'SETTLING') {
+      await this.notifyNextStages(transfer);
+      return transfer;
+    }
     if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED', 'SETTLING'].includes(transfer.status)) throw new ConflictException('Receive dispatched goods before settling differences');
     const returns: Array<{ line: typeof transfer.lines[number]; quantity: Prisma.Decimal }> = [];
     const writeOffs: Array<{ line: typeof transfer.lines[number]; quantity: Prisma.Decimal; shortage: Prisma.Decimal; damage: Prisma.Decimal; reason: string }> = [];
@@ -337,7 +363,9 @@ export class StockTransfersService {
       await tx.stockTransferAction.update({ where: { id: previous.id }, data: { stockDocumentId: settlementDocumentId, resultVersion: currentTransfer.version + 1 } });
     });
     await this.audit.record({ companyId, userId, action: 'SETTLE', entity: 'stock_transfers', entityId: id, after: { settlementDocumentId, returns: returns.map(x=>[x.line.id,x.quantity.toString()]), writeOffs: writeOffs.map(x=>[x.line.id,x.quantity.toString()]) } });
-    return this.findOne(companyId, id);
+    const settled = await this.findOne(companyId, id);
+    await this.notifyNextStages(settled);
+    return settled;
   }
 
   async approveSettlement(companyId: string, userId: string, id: string) {
@@ -364,7 +392,9 @@ export class StockTransfersService {
       await tx.stockTransfer.update({ where: { id }, data: { status: unresolved ? 'PARTIALLY_RECEIVED' : 'SETTLED', settlementApprovedBy: userId, settlementApprovedAt: new Date(), version: { increment: 1 } } });
     });
     await this.audit.record({ companyId, userId, action: 'APPROVE_TRANSFER_SETTLEMENT', entity: 'stock_transfers', entityId: id, after: { stockDocumentId: transfer.settlementDocumentId } });
-    return this.findOne(companyId, id);
+    const approved = await this.findOne(companyId, id);
+    await this.notifyNextStages(approved);
+    return approved;
   }
 
   async close(companyId: string, userId: string, id: string, key: string) {
@@ -447,7 +477,83 @@ export class StockTransfersService {
       await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey, requestHash: hash, action: status, resultVersion: row.version + 1 } });
     });
     await this.audit.record({ companyId, userId, action: status, entity: 'stock_transfers', entityId: id });
-    return this.findOne(companyId, id);
+    const updated = await this.findOne(companyId, id);
+    await this.notifyNextStages(updated);
+    return updated;
+  }
+
+  private async notifyNextStages(transfer: Awaited<ReturnType<StockTransfersService['findOne']>>) {
+    const stages: string[] = [];
+    if (transfer.status === 'DRAFT') stages.push(STOCK_TRANSFER_REVIEW_REQUIRED);
+    if (transfer.status === 'REVIEWED') stages.push(STOCK_TRANSFER_APPROVAL_REQUIRED);
+    if (transfer.status === 'APPROVED') stages.push(STOCK_TRANSFER_DISPATCH_REQUIRED);
+    if (transfer.status === 'PARTIALLY_DISPATCHED') stages.push(STOCK_TRANSFER_DISPATCH_REQUIRED);
+    if (['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status)) {
+      stages.push(STOCK_TRANSFER_RECEIPT_REQUIRED);
+    }
+    if (transfer.status === 'SETTLEMENT_PENDING') stages.push(STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED);
+    if (['RECEIVED', 'SETTLED'].includes(transfer.status)) stages.push(STOCK_TRANSFER_CLOSE_REQUIRED);
+    for (const type of stages) await this.notifyStage(transfer, type);
+  }
+
+  private async notifyStage(
+    transfer: Awaited<ReturnType<StockTransfersService['findOne']>>,
+    type: string,
+  ) {
+    const destinationStage = type === STOCK_TRANSFER_RECEIPT_REQUIRED ||
+      type === STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED ||
+      type === STOCK_TRANSFER_CLOSE_REQUIRED;
+    const warehouse = destinationStage ? transfer.destinationWarehouse : transfer.sourceWarehouse;
+    const fromName = transfer.sourceWarehouse.nameAr || transfer.sourceWarehouse.nameEn;
+    const toName = transfer.destinationWarehouse.nameAr || transfer.destinationWarehouse.nameEn;
+    const documentNumber = transfer.documentNumber;
+    const date = transfer.transferDate.toISOString().slice(0, 10);
+    const labels: Record<string, { titleAr: string; titleEn: string; bodyAr: string; bodyEn: string }> = {
+      [STOCK_TRANSFER_REVIEW_REQUIRED]: {
+        titleAr: 'طلب تحويل بانتظار المراجعة', titleEn: 'Transfer awaiting review',
+        bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} بانتظار المراجعة.`,
+        bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, is awaiting review.`,
+      },
+      [STOCK_TRANSFER_APPROVAL_REQUIRED]: {
+        titleAr: 'تحويل بانتظار الاعتماد', titleEn: 'Transfer awaiting approval',
+        bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} بانتظار الاعتماد.`,
+        bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, is awaiting approval.`,
+      },
+      [STOCK_TRANSFER_DISPATCH_REQUIRED]: {
+        titleAr: 'تحويل معتمد بانتظار التسليم', titleEn: 'Approved transfer awaiting dispatch',
+        bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} بانتظار التسليم من المخزن المصدر.`,
+        bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, is awaiting dispatch from the source warehouse.`,
+      },
+      [STOCK_TRANSFER_RECEIPT_REQUIRED]: {
+        titleAr: 'بضاعة بالطريق بانتظار الاستلام', titleEn: 'Goods in transit awaiting receipt',
+        bodyAr: `تم تسليم التحويل ${documentNumber} من ${fromName} بتاريخ ${date} إلى البضاعة بالطريق. يُرجى استكمال الاستلام أو الإبلاغ عن الفروق في ${toName}.`,
+        bodyEn: `Transfer ${documentNumber} was dispatched from ${fromName} on ${date}. Complete receipt or report differences at ${toName}.`,
+      },
+      [STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED]: {
+        titleAr: 'فروق تحويل بانتظار الاعتماد', titleEn: 'Transfer differences awaiting approval',
+        bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} لديه فروق بانتظار اعتماد التسوية.`,
+        bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, has differences awaiting settlement approval.`,
+      },
+      [STOCK_TRANSFER_CLOSE_REQUIRED]: {
+        titleAr: 'تحويل مكتمل بانتظار الإغلاق', titleEn: 'Completed transfer awaiting closure',
+        bodyAr: `اكتمل استلام وتسوية التحويل ${documentNumber} بين ${fromName} و${toName} بتاريخ ${date}؛ يمكن إغلاقه.`,
+        bodyEn: `Transfer ${documentNumber} between ${fromName} and ${toName} was received and reconciled on ${date}; it can be closed.`,
+      },
+    };
+    const label = labels[type];
+    if (!label) return;
+    await this.notifications.raise({
+      companyId: transfer.companyId,
+      branchId: destinationStage ? transfer.destinationBranchId : transfer.sourceBranchId,
+      warehouseId: warehouse.id,
+      type,
+      ...label,
+      entityType: 'StockTransfer',
+      entityId: transfer.id,
+      entityRef: documentNumber,
+      actionPath: `/inventory/stock-transfers?transferId=${encodeURIComponent(transfer.id)}`,
+      dedupe: dedupeKey({ type, entityId: transfer.id, suffix: `v${transfer.version}` }),
+    });
   }
 
   private async transitWarehouse(companyId: string, branchId: string, userId: string) {

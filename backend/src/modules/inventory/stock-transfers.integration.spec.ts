@@ -44,16 +44,16 @@ async function database() {
 jest.setTimeout(120_000);
 const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.env.NODE_OPTIONS??'').includes('--experimental-vm-modules');
 (vmReady?describe:describe.skip)('staged stock transfer workflow on PostgreSQL-compatible schema',()=>{
-  let db:PGlite; let service:StockTransfersService; let posted:string[]; let docsState:Map<string,{status:string;approvedAt?:Date}>;
+  let db:PGlite; let service:StockTransfersService; let posted:string[]; let raised:Array<Record<string,unknown>>; let storedNotifications:Map<string,Record<string,unknown>>; let docsState:Map<string,{status:string;approvedAt?:Date}>;
   beforeEach(async()=>{
-    db=await database(); const prisma=pglitePrisma(db); posted=[]; docsState=new Map();
+    db=await database(); const prisma=pglitePrisma(db); posted=[]; raised=[]; storedNotifications=new Map(); docsState=new Map();
     const docs={
       create:jest.fn(async()=>{const id=randomUUID();docsState.set(id,{status:'DRAFT'});return {id,lines:[{itemId:ITEM,unitCost:'4.2500'}]};}),
       findOne:jest.fn(async (...args:string[])=>docsState.get(args[1])??{status:'DRAFT'}),
       approve:jest.fn(async (...args:string[])=>{const id=args[2];const d=docsState.get(id)!;d.approvedAt=new Date();return d;}),
       post:jest.fn(async (...args:string[])=>{const id=args[2];posted.push(id);docsState.get(id)!.status='POSTED';return {status:'POSTED'};}),
     };
-    service=new StockTransfersService(prisma as never,docs as never,{record:async()=>undefined} as never);
+    service=new StockTransfersService(prisma as never,docs as never,{record:async()=>undefined} as never,{raise:async(input:Record<string,unknown>)=>{raised.push(input);const dedupe=String(input.dedupe);storedNotifications.set(dedupe,input);return {id:`notification-${storedNotifications.size}`};}} as never);
   });
   afterEach(async()=>db.close());
 
@@ -78,6 +78,23 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     await service.close(COMPANY,USER_B,row.id,'close-001');
     expect((await service.findOne(COMPANY,row.id)).status).toBe('CLOSED');
     expect(posted).toHaveLength(3);
+    expect(raised.map(event=>event.type)).toEqual([
+      'STOCK_TRANSFER_REVIEW_REQUIRED',
+      'STOCK_TRANSFER_REVIEW_REQUIRED',
+      'STOCK_TRANSFER_APPROVAL_REQUIRED',
+      'STOCK_TRANSFER_DISPATCH_REQUIRED',
+      'STOCK_TRANSFER_RECEIPT_REQUIRED',
+      'STOCK_TRANSFER_RECEIPT_REQUIRED',
+      'STOCK_TRANSFER_CLOSE_REQUIRED',
+    ]);
+    expect(raised[0].dedupe).toBe(raised[1].dedupe);
+    const storedRows = [...storedNotifications.values()];
+    expect(storedRows).toHaveLength(6);
+    const receipt = storedRows.find(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')!;
+    expect(receipt.warehouseId).toBe(TO);
+    expect(receipt.branchId).toBe(BRANCH_B);
+    expect(receipt.actionPath).toBe(`/inventory/stock-transfers?transferId=${row.id}`);
+    expect(JSON.stringify(storedRows)).not.toMatch(/unitCost|purchasePrice|costOfGoods|inventoryCostTotal/);
   });
 
   it('requires a different approver to post a missing/damaged quantity write-off',async()=>{
@@ -87,10 +104,13 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     await service.receive(COMPANY,USER_B,row.id,'receive-writeoff',[{lineId:row.lines[0].id,quantity:'7'}]);
     const pending=await service.settle(COMPANY,USER_A,row.id,'settle-writeoff',[{lineId:row.lines[0].id,shortage:'2',damage:'1',reason:'Crushed during transit'}]);
     expect(pending.status).toBe('SETTLEMENT_PENDING');
+    expect(raised.at(-1)?.type).toBe('STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED');
+    expect(raised.at(-1)?.warehouseId).toBe(TO);
     await expect(service.approveSettlement(COMPANY,USER_A,row.id)).rejects.toThrow('cannot approve');
     const settled=await service.approveSettlement(COMPANY,USER_B,row.id);
     expect(settled.status).toBe('SETTLED');
     expect(settled.lines[0].writtenOffQuantity.toString()).toBe('3');
+    expect(raised.at(-1)?.type).toBe('STOCK_TRANSFER_CLOSE_REQUIRED');
   });
 
   it('freezes the entered unit conversion while storing base-unit stock quantity',async()=>{

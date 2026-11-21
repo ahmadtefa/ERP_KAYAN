@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -19,8 +21,29 @@ class StockTransfersScreen extends ConsumerStatefulWidget {
   @override ConsumerState<StockTransfersScreen> createState()=>_StockTransfersScreenState();
 }
 class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
-  bool _busy=false; String _query=''; bool get ar=>Localizations.localeOf(context).languageCode=='ar';
+  bool _busy=false; String _query=''; String? _lastNotificationTransfer; bool get ar=>Localizations.localeOf(context).languageCode=='ar';
   String t(String a,String e)=>ar?a:e;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final transferId = GoRouterState.of(context).uri.queryParameters['transferId'];
+    if (transferId == null || transferId.isEmpty) {
+      _lastNotificationTransfer = null;
+      return;
+    }
+    if (_lastNotificationTransfer == transferId) return;
+    _lastNotificationTransfer = transferId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_openNotificationTransfer(transferId));
+    });
+  }
+  Future<void> _openNotificationTransfer(String id) async {
+    await _details({'id': id});
+    if (!mounted) return;
+    if (GoRouterState.of(context).uri.queryParameters['transferId'] == id) {
+      context.go('/inventory/stock-transfers');
+    }
+  }
   @override Widget build(BuildContext context) {
     final rows=ref.watch(stockTransfersProvider); final user=ref.watch(currentUserProvider);
     return ModuleScaffold(title:t('التحويلات المخزنية','Stock transfers'),eyebrow:t('المخزون','Inventory'),trailing:Wrap(spacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[

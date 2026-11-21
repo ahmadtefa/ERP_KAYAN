@@ -55,6 +55,7 @@ void openNotificationTarget(BuildContext context, Json row) {
     '/inventory/write-offs': AppRoutes.writeOffs,
     '/inventory/stock': AppRoutes.stock,
     '/inventory/documents': AppRoutes.stockDocuments,
+    '/inventory/stock-transfers': AppRoutes.stockTransfers,
     '/sales/returns': AppRoutes.salesReturns,
     '/sales/invoices': AppRoutes.salesInvoices,
     '/sales/orders': AppRoutes.salesOrders,
@@ -105,6 +106,12 @@ const notificationTypeFilters = <({String type, String ar, String en})>[
   (type: 'STOCK_EXPIRY_SOON', ar: 'قريب الانتهاء', en: 'Expiring soon'),
   (type: 'STOCK_EXPIRED', ar: 'منتهي الصلاحية', en: 'Expired'),
   (type: 'STOCK_VOUCHER_PENDING_APPROVAL', ar: 'مستندات تنتظر الاعتماد', en: 'Awaiting approval'),
+  (type: 'STOCK_TRANSFER_REVIEW_REQUIRED', ar: 'تحويلات تنتظر المراجعة', en: 'Transfers awaiting review'),
+  (type: 'STOCK_TRANSFER_APPROVAL_REQUIRED', ar: 'تحويلات تنتظر الاعتماد', en: 'Transfers awaiting approval'),
+  (type: 'STOCK_TRANSFER_DISPATCH_REQUIRED', ar: 'تحويلات تنتظر التسليم', en: 'Transfers awaiting dispatch'),
+  (type: 'STOCK_TRANSFER_RECEIPT_REQUIRED', ar: 'بضاعة بالطريق تنتظر الاستلام', en: 'Goods awaiting receipt'),
+  (type: 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED', ar: 'فروق تنتظر الاعتماد', en: 'Differences awaiting approval'),
+  (type: 'STOCK_TRANSFER_CLOSE_REQUIRED', ar: 'تحويلات مكتملة تنتظر الإغلاق', en: 'Transfers awaiting closure'),
   (type: 'JOURNAL_PENDING_APPROVAL', ar: 'قيود تنتظر الاعتماد', en: 'Journals to approve'),
   (type: 'INVOICE_OVERDUE', ar: 'فواتير عملاء متأخرة', en: 'Overdue invoices'),
   (type: 'PAYABLE_DUE', ar: 'مستحقات موردين قريبة', en: 'Supplier bills due'),
@@ -460,6 +467,16 @@ class _NotificationCenterScreenState
         return Icons.delete_sweep_outlined;
       case 'STOCK_VOUCHER_PENDING_APPROVAL':
         return Icons.fact_check_outlined;
+      case 'STOCK_TRANSFER_REVIEW_REQUIRED':
+      case 'STOCK_TRANSFER_APPROVAL_REQUIRED':
+      case 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED':
+        return Icons.rule_folder_outlined;
+      case 'STOCK_TRANSFER_DISPATCH_REQUIRED':
+        return Icons.local_shipping_outlined;
+      case 'STOCK_TRANSFER_RECEIPT_REQUIRED':
+        return Icons.inventory_2_outlined;
+      case 'STOCK_TRANSFER_CLOSE_REQUIRED':
+        return Icons.task_alt_outlined;
       case 'JOURNAL_PENDING_APPROVAL':
         return Icons.playlist_add_check_rounded;
       case 'INVOICE_OVERDUE':

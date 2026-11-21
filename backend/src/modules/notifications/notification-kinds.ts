@@ -27,6 +27,12 @@ export const STOCK_ABOVE_MAXIMUM = 'STOCK_ABOVE_MAXIMUM';
 export const STOCK_EXPIRED_WRITE_OFF_PENDING = 'STOCK_EXPIRED_WRITE_OFF_PENDING';
 /// A sales or purchase order that is waiting for somebody to approve it.
 export const STOCK_VOUCHER_PENDING_APPROVAL = 'STOCK_VOUCHER_PENDING_APPROVAL';
+export const STOCK_TRANSFER_REVIEW_REQUIRED = 'STOCK_TRANSFER_REVIEW_REQUIRED';
+export const STOCK_TRANSFER_APPROVAL_REQUIRED = 'STOCK_TRANSFER_APPROVAL_REQUIRED';
+export const STOCK_TRANSFER_DISPATCH_REQUIRED = 'STOCK_TRANSFER_DISPATCH_REQUIRED';
+export const STOCK_TRANSFER_RECEIPT_REQUIRED = 'STOCK_TRANSFER_RECEIPT_REQUIRED';
+export const STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED = 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED';
+export const STOCK_TRANSFER_CLOSE_REQUIRED = 'STOCK_TRANSFER_CLOSE_REQUIRED';
 /// A journal entry waiting for approval.
 export const JOURNAL_PENDING_APPROVAL = 'JOURNAL_PENDING_APPROVAL';
 /// A posted customer invoice whose due date has passed and is not fully paid.
@@ -97,6 +103,48 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     permission: 'inventory.stock.approve',
     entityType: 'Order',
     repeatAfterHours: 24,
+  },
+  {
+    type: STOCK_TRANSFER_REVIEW_REQUIRED,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.transfer.review',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_APPROVAL_REQUIRED,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.transfer.approve',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_DISPATCH_REQUIRED,
+    module: 'inventory',
+    severity: 'INFO',
+    permission: 'inventory.transfer.dispatch',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_RECEIPT_REQUIRED,
+    module: 'inventory',
+    severity: 'CRITICAL',
+    permission: 'inventory.transfer.receive',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED,
+    module: 'inventory',
+    severity: 'CRITICAL',
+    permission: 'inventory.transfer.settle.approve',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_CLOSE_REQUIRED,
+    module: 'inventory',
+    severity: 'INFO',
+    permission: 'inventory.transfer.close',
+    entityType: 'StockTransfer',
   },
   {
     type: JOURNAL_PENDING_APPROVAL,
