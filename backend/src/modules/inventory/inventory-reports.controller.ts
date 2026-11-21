@@ -15,7 +15,7 @@ import type { Response } from 'express';
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { grantsOf } from '../../common/warehouse/warehouse-access';
 import { BarcodeLabelsService } from './barcode-labels.service';
@@ -47,7 +47,7 @@ export class InventoryReportsController {
   @Get('items/:itemId/units')
   @RequirePermissions('inventory.items.read')
   units(@CurrentUser() user: AuthUser, @Param('itemId') itemId: string) {
-    return this.service.listUnits(user.companyId, itemId, canReadCost(user)).then((result) => this.redactPrices(user, result));
+    return this.service.listUnits(user.companyId, itemId, canReadPurchasePrice(user)).then((result) => this.redactPrices(user, result));
   }
 
   @Post('items/:itemId/units')
@@ -57,6 +57,7 @@ export class InventoryReportsController {
     @Param('itemId') itemId: string,
     @Body() body: Record<string, unknown>,
   ) {
+    this.assertPriceWritePermissions(user, body);
     if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
       throw new ForbiddenException(
         'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
@@ -67,7 +68,7 @@ export class InventoryReportsController {
       user.userId,
       itemId,
       body,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
@@ -79,6 +80,7 @@ export class InventoryReportsController {
     @Param('unitId') unitId: string,
     @Body() body: Record<string, unknown>,
   ) {
+    this.assertPriceWritePermissions(user, body);
     if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
       throw new ForbiddenException(
         'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
@@ -90,7 +92,7 @@ export class InventoryReportsController {
       itemId,
       unitId,
       body,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
@@ -106,7 +108,7 @@ export class InventoryReportsController {
       user.userId,
       itemId,
       unitId,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
@@ -124,7 +126,7 @@ export class InventoryReportsController {
       user.userId,
       itemId,
       unitId,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
@@ -140,7 +142,7 @@ export class InventoryReportsController {
       user.userId,
       itemId,
       unitId,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
@@ -159,12 +161,27 @@ export class InventoryReportsController {
       itemId,
       unitId,
       body?.barcode,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
+  private assertPriceWritePermissions(user: AuthUser, body: Record<string, unknown>) {
+    if (body.salePrice !== undefined && !user.isSuperAdmin &&
+        !user.permissions.includes('inventory.items.saleprice.manage')) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية إدخال أو تعديل سعر البيع. / Missing permission: inventory.items.saleprice.manage',
+      );
+    }
+    if (body.purchasePrice !== undefined && !user.isSuperAdmin &&
+        !user.permissions.includes('inventory.items.purchaseprice.manage')) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية إدخال أو تعديل سعر الشراء. / Missing permission: inventory.items.purchaseprice.manage',
+      );
+    }
+  }
+
   private redactPrices(user: AuthUser, response: unknown) {
-    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) });
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) });
   }
 
   private assertUnrestrictedWarehouseReport(user: AuthUser): void {
@@ -230,7 +247,12 @@ export class InventoryReportsController {
   @RequirePermissions('inventory.stock.read')
   reorder(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
     this.assertUnrestrictedWarehouseReport(user);
-    return this.service.reorder(user.companyId, { branchId }, canReadCost(user));
+    return this.service.reorder(
+      user.companyId,
+      { branchId },
+      canReadCost(user),
+      canReadPurchasePrice(user),
+    );
   }
 
   /// Printable barcode label sheet (HTML) for the item's own units. Reading

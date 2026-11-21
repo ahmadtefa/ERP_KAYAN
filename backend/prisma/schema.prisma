@@ -1495,10 +1495,10 @@ model Item {
   /// Default selling price. The invoice line may override it.
   salePrice Decimal @default(0) @db.Decimal(19, 4)
 
-  /// Last known purchase price, used as the default on a purchase line. It is
-  /// never used for valuation: the ledger values stock from what was actually
-  /// paid.
-  purchasePrice Decimal @default(0) @db.Decimal(19, 4)
+  /// Optional last known purchase price, used only as a line-entry suggestion.
+  /// It is never used for valuation: the ledger values stock from what was
+  /// actually paid. Null means no catalogue price is known, not a zero cost.
+  purchasePrice Decimal? @db.Decimal(19, 4)
 
   /// Reorder reporting: when the quantity on hand falls to or below this, the
   /// item appears on the "needs ordering" report.
@@ -3183,8 +3183,9 @@ model PrintPriceSetting {
   /// slug, a stock document or the label sheet), or "default".
   documentType String @db.VarChar(48)
 
-  showSalePrice Boolean @default(true)
-  showCost      Boolean @default(true)
+  showSalePrice      Boolean @default(true)
+  showCost           Boolean @default(true)
+  showPurchasePrice  Boolean @default(true)
 
   updatedAt DateTime @default(now()) @updatedAt
   updatedBy String?  @db.Uuid

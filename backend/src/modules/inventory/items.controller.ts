@@ -4,7 +4,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { CreateItemDto, ListItemsDto, UpdateItemDto } from './dto/item.dto';
 import { ItemsService } from './items.service';
@@ -36,12 +36,13 @@ export class ItemsController {
   @Post()
   @RequirePermissions('inventory.items.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateItemDto) {
+    this.assertPriceWritePermissions(user, dto);
     return this.service.create(
       user.companyId,
       user.userId,
       dto,
       user.branchId,
-      canReadCost(user),
+      canReadPurchasePrice(user),
       this.mayManageBarcodes(user),
     ).then((result) => this.redactPrices(user, result));
   }
@@ -53,6 +54,7 @@ export class ItemsController {
     @Param('id') id: string,
     @Body() dto: UpdateItemDto,
   ) {
+    this.assertPriceWritePermissions(user, dto);
     // A barcode identifies a thing; changing it needs the barcode
     // permission on top of the ordinary item-edit one, so a role that may
     // correct a name cannot silently repoint a code that labels are printed
@@ -67,7 +69,7 @@ export class ItemsController {
       user.userId,
       id,
       dto,
-      canReadCost(user),
+      canReadPurchasePrice(user),
       this.mayManageBarcodes(user),
     ).then((result) => this.redactPrices(user, result));
   }
@@ -85,17 +87,51 @@ export class ItemsController {
       user.userId,
       id,
       body?.barcode,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 
+  private assertPriceWritePermissions(
+    user: AuthUser,
+    body: {
+      salePrice?: unknown;
+      purchasePrice?: unknown;
+      openingUnitCost?: unknown;
+      units?: unknown;
+    },
+  ) {
+    const rows = Array.isArray(body.units) ? body.units : [];
+    const hasValue = (key: string) =>
+      body[key as 'salePrice' | 'purchasePrice'] !== undefined ||
+      rows.some((row) => row !== null && typeof row === 'object' &&
+        (row as Record<string, unknown>)[key] !== undefined);
+    if (hasValue('salePrice') &&
+        !user.isSuperAdmin && !user.permissions.includes('inventory.items.saleprice.manage')) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية إدخال أو تعديل سعر البيع. / Missing permission: inventory.items.saleprice.manage',
+      );
+    }
+    if (hasValue('purchasePrice') &&
+        !user.isSuperAdmin && !user.permissions.includes('inventory.items.purchaseprice.manage')) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية إدخال أو تعديل سعر الشراء. / Missing permission: inventory.items.purchaseprice.manage',
+      );
+    }
+    if (body.openingUnitCost !== undefined &&
+        !user.isSuperAdmin && !user.permissions.includes('inventory.cost.manage')) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية إدخال تكلفة الرصيد الافتتاحي. / Missing permission: inventory.cost.manage',
+      );
+    }
+  }
+
   private redactPrices(user: AuthUser, response: unknown) {
-    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) });
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) });
   }
 
   /// Whether this caller may see what the goods cost the company.
   private mayReadCost(user: AuthUser): boolean {
-    return canReadCost(user);
+    return canReadPurchasePrice(user);
   }
 
   private mayManageBarcodes(user: AuthUser): boolean {
@@ -109,7 +145,7 @@ export class ItemsController {
       user.companyId,
       user.userId,
       id,
-      canReadCost(user),
+      canReadPurchasePrice(user),
     ).then((result) => this.redactPrices(user, result));
   }
 

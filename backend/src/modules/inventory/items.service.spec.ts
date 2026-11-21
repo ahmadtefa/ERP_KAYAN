@@ -62,6 +62,20 @@ function build() {
 }
 
 describe('ItemsService opening stock', () => {
+  it('stores an omitted catalogue purchase price as unknown, not zero', async () => {
+    const { service, tx } = build();
+    await service.create('company-1', 'user-1', {
+      code: 'NO-PRICE',
+      nameEn: 'Unpriced item',
+      nameAr: 'صنف بلا سعر',
+    });
+    expect(tx.item.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ purchasePrice: null }),
+      }),
+    );
+  });
+
   it('writes stock, balance and a balanced opening entry with the item', async () => {
     const { service, prisma, tx, posting, ledger } = build();
 

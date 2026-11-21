@@ -5,7 +5,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { SalesOrdersService } from './sales-orders.service';
 
@@ -20,7 +20,7 @@ export class SalesOrdersController {
   constructor(private readonly service: SalesOrdersService) {}
 
   private redact(user: AuthUser, response: unknown) {
-    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) }, 'sale');
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'sale');
   }
 
   @Get()

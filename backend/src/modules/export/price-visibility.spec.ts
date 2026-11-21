@@ -32,12 +32,12 @@ describe('applyPriceVisibility', () => {
 
   it('hides cost independently', () => {
     const result = applyPriceVisibility(table, { showCost: 'false' });
-    expect(result.columns.map((column) => column.key)).toEqual(['code', 'salePrice', 'quantity']);
-    expect(result.rows[0]).toEqual({ code: 'A1', salePrice: '20', quantity: '3' });
+    expect(result.columns.map((column) => column.key)).toEqual(['code', 'salePrice', 'purchasePrice', 'quantity']);
+    expect(result.rows[0]).toEqual({ code: 'A1', salePrice: '20', purchasePrice: '10', quantity: '3' });
   });
 
   it('hides both categories when both options are false', () => {
-    const result = applyPriceVisibility(table, { showSalePrice: 'false', showCost: 'false' });
+    const result = applyPriceVisibility(table, { showSalePrice: 'false', showPurchasePrice: 'false', showCost: 'false' });
     expect(result.columns.map((column) => column.key)).toEqual(['code', 'quantity']);
     expect(result.rows[0]).toEqual({ code: 'A1', quantity: '3' });
   });
@@ -138,25 +138,27 @@ it('removes profit, cost values outside the column list, and derived purchase to
   expect(sales.columns.map(column => column.key)).toEqual(['totalAmount']);
   expect(sales.rows).toEqual([{ totalAmount: '200' }]);
   expect(sales.totals).toEqual([]);
-  const purchases = applyPriceVisibility({ ...report, slug: 'purchases' }, { showCost: false });
+  const purchases = applyPriceVisibility({ ...report, slug: 'purchases' }, { showPurchasePrice: false, showCost: false });
   expect(purchases.columns).toEqual([]);
   expect(purchases.rows).toEqual([{}]);
 });
 
 describe('resolvePriceVisibility', () => {
-  const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read', 'sales.price.read'] };
+  const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read', 'purchases.price.read', 'sales.price.read'] };
   const clerk = { isSuperAdmin: false, permissions: ['inventory.items.read'] };
 
   it('honours the request of a caller who may read costs', () => {
-    expect(resolvePriceVisibility(allowed, { showSalePrice: 'true', showCost: 'false' })).toEqual({
+    expect(resolvePriceVisibility(allowed, { showSalePrice: 'true', showPurchasePrice: 'true', showCost: 'false' })).toEqual({
       showSalePrice: 'true',
+      showPurchasePrice: 'true',
       showCost: 'false',
     });
   });
 
   it('forces costs off for a caller without the cost permission, whatever the link says', () => {
-    expect(resolvePriceVisibility(clerk, { showSalePrice: 'true', showCost: 'true' })).toEqual({
+    expect(resolvePriceVisibility(clerk, { showSalePrice: 'true', showPurchasePrice: 'true', showCost: 'true' })).toEqual({
       showSalePrice: false,
+      showPurchasePrice: false,
       showCost: false,
     });
   });
@@ -182,7 +184,7 @@ describe('resolvePriceVisibility', () => {
   it('gives a super admin what they asked for', () => {
     expect(
       resolvePriceVisibility({ isSuperAdmin: true, permissions: [] }, { showCost: 'true' }),
-    ).toEqual({ showSalePrice: undefined, showCost: 'true' });
+    ).toEqual({ showSalePrice: undefined, showPurchasePrice: undefined, showCost: 'true' });
   });
 });
 
@@ -236,8 +238,8 @@ it('hides purchase unit prices and derived amounts without exposing unlisted fie
     ],
     rows: [{ quantity: '2', unitPrice: '12', netUnitPrice: '10', lineTotal: '20', paidAmount: '5' }],
   };
-  const hidden = applyPriceVisibility(purchase, { showCost: false });
+  const hidden = applyPriceVisibility(purchase, { showPurchasePrice: false });
   expect(hidden.columns.map(column => column.key)).toEqual(['quantity']);
   expect(hidden.rows).toEqual([{ quantity: '2' }]);
-  expect(applyPriceVisibility(purchase, { showSalePrice: false, showCost: true }).rows).toEqual(purchase.rows);
+  expect(applyPriceVisibility(purchase, { showSalePrice: false, showPurchasePrice: true, showCost: false }).rows).toEqual(purchase.rows);
 });

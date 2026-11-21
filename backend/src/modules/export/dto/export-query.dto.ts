@@ -31,6 +31,9 @@ export class ExportQueryDto extends PeriodQueryDto {
   showSalePrice?: string;
 
   @IsOptional() @IsIn(['true', 'false'])
+  showPurchasePrice?: string;
+
+  @IsOptional() @IsIn(['true', 'false'])
   showCost?: string;
 
   /// A one-minute download ticket, in the query string.

@@ -774,6 +774,7 @@ export class InventoryReportsService {
     companyId: string,
     filters: { branchId?: string } = {},
     mayReadCost = true,
+    mayReadPurchasePrice = true,
   ) {
     const items = await this.prisma.item.findMany({
       where: { companyId, deletedAt: null, isActive: true, isStockTracked: true },
@@ -818,10 +819,11 @@ export class InventoryReportsService {
           reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
           shortfall: shortfall.greaterThan(0) ? shortfall.toFixed(MONEY_SCALE) : '0.0000',
           averageCost: onHand.isZero() ? new Prisma.Decimal(0) : value.div(onHand),
-          estimatedOrderCost: shortfall
-            .greaterThan(0)
+          // Null means the catalogue has no purchase-price suggestion; do not
+          // invent a zero estimate or mislabel it as an actual inventory cost.
+          estimatedOrderCost: shortfall.greaterThan(0) && item.purchasePrice !== null
             ? shortfall.mul(item.purchasePrice)
-            : new Prisma.Decimal(0),
+            : null,
           branches: item.stockBalances.map((balance) => ({
             branchCode: balance.branch.code,
             quantity: balance.quantity.toFixed(MONEY_SCALE),
@@ -838,7 +840,9 @@ export class InventoryReportsService {
       .sort((a, b) => new Prisma.Decimal(b.shortfall).minus(a.shortfall).toNumber());
 
     const totalEstimatedCost = rows.reduce(
-      (sum, row) => sum.plus(row.estimatedOrderCost),
+      (sum, row) => row.estimatedOrderCost === null
+        ? sum
+        : sum.plus(row.estimatedOrderCost),
       new Prisma.Decimal(0),
     );
 
@@ -847,13 +851,13 @@ export class InventoryReportsService {
         ...row,
         value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null,
         averageCost: mayReadCost ? row.averageCost.toFixed(MONEY_SCALE) : null,
-        estimatedOrderCost: mayReadCost
+        estimatedOrderCost: mayReadPurchasePrice && row.estimatedOrderCost !== null
           ? row.estimatedOrderCost.toFixed(MONEY_SCALE)
           : null,
       })),
       totals: {
         items: rows.length,
-        estimatedOrderCost: mayReadCost
+        estimatedOrderCost: mayReadPurchasePrice
           ? totalEstimatedCost.toFixed(MONEY_SCALE)
           : null,
       },

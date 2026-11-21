@@ -196,6 +196,12 @@ describe('unit prices and display fallbacks', () => {
     expect(defaultUnitPrice('purchase', carton, D(8)).toFixed(4)).toBe('75.0000');
   });
 
+  it('does not invent a zero purchase price when neither unit nor item has one', () => {
+    expect(defaultUnitPrice('purchase', null, null)).toBeNull();
+    const carton = { id: 'u-purchase', unit: 'carton', factor: D(12), isActive: true, purchasePrice: D(15) };
+    expect(defaultUnitPrice('purchase', carton, null)?.toFixed(4)).toBe('15.0000');
+  });
+
   it('falls back to the item-level price when the unit has no own price', () => {
     const metre = cableUnits[0];
     expect(defaultUnitPrice('sale', metre, D(12)).toFixed(4)).toBe('12.0000');

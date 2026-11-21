@@ -65,9 +65,13 @@ describe('role catalogue', () => {
 
   it('separates reading cost from reading stock', () => {
     const storekeeper = SEEDED.find((role) => role.code === 'STOREKEEPER');
-    const manager = SEEDED.find((role) => role.code === 'WAREHOUSE_MANAGER');
+    const warehouseManager = SEEDED.find((role) => role.code === 'WAREHOUSE_MANAGER');
+    const financeManager = SEEDED.find((role) => role.code === 'FINANCE_MANAGER');
     expect(storekeeper?.permissions).not.toContain('inventory.cost.read');
-    expect(manager?.permissions).toContain('inventory.cost.read');
+    expect(storekeeper?.permissions).not.toContain('inventory.cost.manage');
+    expect(warehouseManager?.permissions).not.toContain('inventory.cost.read');
+    expect(warehouseManager?.permissions).not.toContain('inventory.cost.manage');
+    expect(financeManager?.permissions).toContain('inventory.cost.read');
     expect(storekeeper?.permissions).toContain('inventory.stock.read');
   });
 
@@ -79,8 +83,12 @@ describe('role catalogue', () => {
     expect(storekeeper?.permissions).not.toContain('purchases.price.read');
     expect(salesClerk?.permissions).toContain('sales.price.read');
     expect(salesClerk?.permissions).not.toContain('purchases.price.read');
-    expect(purchaseClerk?.permissions).toContain('purchases.price.read');
+    expect(purchaseClerk?.permissions).not.toContain('purchases.price.read');
+    expect(purchaseClerk?.permissions).not.toContain('inventory.cost.read');
     expect(purchaseClerk?.permissions).not.toContain('sales.price.read');
+    const purchaseManager = SEEDED.find((role) => role.code === 'PURCHASING_MANAGER');
+    expect(purchaseManager?.permissions).not.toContain('purchases.price.read');
+    expect(purchaseManager?.permissions).not.toContain('inventory.cost.read');
   });
 
   it('lets a clerk prepare but not post, and a manager post', () => {
@@ -94,6 +102,9 @@ describe('role catalogue', () => {
   it('gives read-only roles no write permission at all', () => {
     const readOnly = SEEDED.find((role) => role.code === 'READ_ONLY');
     expect(readOnly?.permissions.length).toBeGreaterThan(10);
+    expect(readOnly?.permissions).not.toContain('sales.price.read');
+    expect(readOnly?.permissions).not.toContain('purchases.price.read');
+    expect(readOnly?.permissions).not.toContain('inventory.cost.read');
     for (const code of readOnly?.permissions ?? []) {
       expect(code).toMatch(/\.read$|^dashboard\.|^notifications\./);
     }

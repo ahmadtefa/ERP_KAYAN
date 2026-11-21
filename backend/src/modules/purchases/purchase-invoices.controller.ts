@@ -3,7 +3,7 @@ import {
   AuthUser,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
@@ -17,7 +17,7 @@ export class PurchaseInvoicesController {
   constructor(private readonly service: PurchaseInvoicesService) {}
 
   private redact(user: AuthUser, response: unknown) {
-    return redactPriceFields(response, { sale: true, purchase: canReadCost(user) }, 'purchase');
+    return redactPriceFields(response, { sale: true, purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'purchase');
   }
 
   @Get()

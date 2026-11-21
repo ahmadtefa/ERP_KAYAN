@@ -212,7 +212,6 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     category: 'PURCHASING',
     permissions: [
       'purchases.',
-      'purchases.price.read',
       'parties.suppliers.',
       'inventory.items.read',
       'inventory.stock.read',
@@ -237,7 +236,6 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     permissions: [
       'purchases.invoices.read',
       'purchases.invoices.create',
-      'purchases.price.read',
       'purchases.orders.read',
       'purchases.orders.create',
       'purchases.orders.manage',
@@ -429,6 +427,17 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
 /// Prefixes that end a permission code rather than a module name.
 const EXACT_PREFIXES = new Set(['*', '.read']);
 
+// These grants must always be assigned by their exact permission code. A broad
+// module prefix or generic read-only role is not an explicit price grant.
+const EXPLICIT_ONLY_PRICE_PERMISSIONS = new Set([
+  'sales.price.read',
+  'purchases.price.read',
+  'inventory.cost.read',
+  'inventory.items.saleprice.manage',
+  'inventory.items.purchaseprice.manage',
+  'inventory.cost.manage',
+]);
+
 /**
  * Expands the prefixes of one role against the permission catalogue.
  *
@@ -446,11 +455,15 @@ export function permissionsForRole(
       continue;
     }
     if (prefix === '.read') {
-      for (const code of catalogue) if (code.endsWith('.read')) wanted.add(code);
+      for (const code of catalogue) {
+        if (code.endsWith('.read') && !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code)) wanted.add(code);
+      }
       continue;
     }
     for (const code of catalogue) {
-      if (code === prefix || code.startsWith(prefix)) wanted.add(code);
+      const explicit = code === prefix;
+      if ((explicit || code.startsWith(prefix)) &&
+          (explicit || !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code))) wanted.add(code);
     }
   }
   return [...wanted].sort();

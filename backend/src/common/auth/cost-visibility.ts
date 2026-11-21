@@ -19,21 +19,23 @@ export interface CostVisibilityCaller {
   permissions: string[];
 }
 
-/** Whether this principal is allowed to receive cost/purchase-price fields. */
+/** Whether this principal may receive purchase-list prices. */
 export function canReadPurchasePrice(user: CostVisibilityCaller): boolean {
-  // `inventory.cost.read` is retained as a compatibility grant for existing
-  // roles and direct assignments. It is intentionally purchase-side only;
-  // selling-price visibility is an independent privilege.
-  return user.isSuperAdmin || user.permissions.includes(PURCHASE_PRICE_READ_PERMISSION) ||
-    user.permissions.includes(COST_READ_PERMISSION);
+  // The old inventory.cost.read code is deliberately not an alias here.
+  // Deployments retain its original cost visibility, while purchase prices
+  // require the independently granted purchases.price.read permission.
+  return user.isSuperAdmin || user.permissions.includes(PURCHASE_PRICE_READ_PERMISSION);
 }
 
+/** Whether this principal may receive selling prices. */
 export function canReadSalePrice(user: CostVisibilityCaller): boolean {
   return user.isSuperAdmin || user.permissions.includes(SALES_PRICE_READ_PERMISSION);
 }
 
-/** Backwards-compatible name used by valuation and cost-bearing services. */
-export const canReadCost = canReadPurchasePrice;
+/** Whether this principal may receive inventory valuation/cost fields. */
+export function canReadCost(user: CostVisibilityCaller): boolean {
+  return user.isSuperAdmin || user.permissions.includes(COST_READ_PERMISSION);
+}
 
 /** A cost value as a fixed-scale string for allowed callers, `null` otherwise. */
 export function redactMoney(

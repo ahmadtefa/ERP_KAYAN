@@ -1,17 +1,22 @@
-/** API-edge redaction for price-bearing response payloads. This changes only
- * serialized response objects; business calculations and accepted writes are
- * untouched. A null field preserves the established response shape for clients.
+/** API-edge redaction for sale prices, purchase prices and inventory costs.
+ * This changes serialized responses only; business calculations and accepted
+ * writes remain internal. Sensitive leaf fields are omitted rather than sent
+ * with a placeholder that reveals the shape of a price column.
  */
 export interface PriceVisibility {
   sale: boolean;
   purchase: boolean;
+  cost: boolean;
 }
 
 const SALE_KEYS = new Set([
   'salePrice', 'sellingPrice', 'salesValue', 'invoiceDiscountAmount',
 ]);
 const PURCHASE_KEYS = new Set([
-  'purchasePrice', 'unitCost', 'averageCost', 'costOfGoods', 'costTotal',
+  'purchasePrice', 'purchaseUnitPrice',
+]);
+const COST_KEYS = new Set([
+  'unitCost', 'averageCost', 'costPrice', 'costOfGoods', 'costTotal',
   'landedCostAmount', 'landedCostCharges', 'runningValue', 'stockValue',
   'costValue', 'valuation', 'costOfGoodsSold',
 ]);
@@ -36,11 +41,20 @@ export function redactPriceFields<T>(
   if (value === null || typeof value !== 'object' || value instanceof Date) return value;
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    const hiddenProfit = PROFIT_KEYS.has(key) && (!visibility.sale || !visibility.purchase);
+    const hiddenProfit = PROFIT_KEYS.has(key) && (!visibility.sale || !visibility.cost);
+    const hiddenSaleAmount = amountSide === 'sale' && (
+      SALE_AMOUNT_KEYS.has(key) || key === 'unitPrice' || key === 'netUnitPrice' ||
+      key === 'lineTotal' || key === 'grossLineTotal' || key === 'taxAmount'
+    );
+    const hiddenPurchaseAmount = amountSide === 'purchase' && (
+      PURCHASE_AMOUNT_KEYS.has(key) || key === 'unitPrice' || key === 'netUnitPrice' ||
+      key === 'lineTotal' || key === 'grossLineTotal'
+    );
     const hidden = hiddenProfit ||
-      (!visibility.sale && (SALE_KEYS.has(key) || (amountSide === 'sale' && (SALE_AMOUNT_KEYS.has(key) || key === 'unitPrice' || key === 'netUnitPrice' || key === 'lineTotal' || key === 'grossLineTotal' || key === 'taxAmount')))) ||
-      (!visibility.purchase && (PURCHASE_KEYS.has(key) || (amountSide === 'purchase' && (PURCHASE_AMOUNT_KEYS.has(key) || key === 'unitPrice' || key === 'netUnitPrice' || key === 'lineTotal' || key === 'grossLineTotal'))));
-    result[key] = hidden ? null : redactPriceFields(child, visibility, amountSide);
+      (!visibility.sale && (SALE_KEYS.has(key) || hiddenSaleAmount)) ||
+      (!visibility.purchase && (PURCHASE_KEYS.has(key) || hiddenPurchaseAmount)) ||
+      (!visibility.cost && COST_KEYS.has(key));
+    if (!hidden) result[key] = redactPriceFields(child, visibility, amountSide);
   }
   return result as T;
 }

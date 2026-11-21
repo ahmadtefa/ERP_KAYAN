@@ -147,6 +147,9 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['inventory.cost.read', 'View legacy cost and purchase prices', 'عرض صلاحية التكلفة وأسعار الشراء القديمة', 'inventory'],
   ['purchases.price.read', 'View purchase prices', 'عرض أسعار الشراء', 'purchases'],
   ['sales.price.read', 'View selling prices', 'عرض أسعار البيع', 'sales'],
+  ['inventory.items.purchaseprice.manage', 'Set item purchase prices', 'إدخال وتعديل أسعار شراء الأصناف', 'inventory'],
+  ['inventory.items.saleprice.manage', 'Set item sale prices', 'إدخال وتعديل أسعار بيع الأصناف', 'inventory'],
+  ['inventory.cost.manage', 'Enter inventory valuation costs', 'إدخال تكاليف التقييم المخزني', 'inventory'],
   // A barcode is an identifier, so changing one is guarded separately from
   // editing the item's descriptive fields. Generating a code is a write too.
   ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],

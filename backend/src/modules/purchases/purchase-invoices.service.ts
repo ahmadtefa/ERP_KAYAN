@@ -1097,6 +1097,11 @@ export class PurchaseInvoicesService {
           ? listed.price
           : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
+      if (unitPrice === null) {
+        throw new BadRequestException(
+          `Line ${index + 1}: enter a purchase unit price; this item has no saved default price`,
+        );
+      }
 
       // Missing or cleared tax is zero. Conversion callers pass the stored
       // rate explicitly so historical document snapshots are preserved.

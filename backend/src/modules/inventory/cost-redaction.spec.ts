@@ -356,7 +356,7 @@ describe('cost redaction - inventory reports', () => {
 
   it('reorder redacts cost-derived columns but keeps quantities and shortfall', async () => {
     const service = reportsService();
-    const redacted = await service.reorder('c1', {}, NO_COST);
+    const redacted = await service.reorder('c1', {}, NO_COST, false);
     const row = redacted.rows[0];
     expect(row.averageCost).toBeNull();
     expect(row.estimatedOrderCost).toBeNull();
@@ -364,6 +364,15 @@ describe('cost redaction - inventory reports', () => {
     expect(row.onHand).toBe('10.0000');
     expect(row.shortfall).toBe('10.0000');
     expect(redacted.totals.estimatedOrderCost).toBeNull();
+  });
+
+  it('reorder may expose purchase-price estimates without inventory cost', async () => {
+    const service = reportsService();
+    const report = await service.reorder('c1', {}, NO_COST, true);
+    expect(report.rows[0].averageCost).toBeNull();
+    expect(report.rows[0].value).toBeNull();
+    expect(report.rows[0].estimatedOrderCost).toBe('110.0000');
+    expect(report.totals.estimatedOrderCost).toBe('110.0000');
   });
 
   it('slow-moving redacts the tied-up value without cost.read', async () => {

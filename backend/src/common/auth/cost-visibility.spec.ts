@@ -13,19 +13,28 @@ describe('cost-visibility helper', () => {
     expect(canReadCost({ isSuperAdmin: true, permissions: [] })).toBe(true);
   });
 
-  it('grants cost access when the role carries inventory.cost.read', () => {
-    expect(
-      canReadCost({ isSuperAdmin: false, permissions: [COST_READ_PERMISSION] }),
-    ).toBe(true);
+  it('retains legacy inventory.cost.read for cost only, not purchase prices', () => {
+    const legacyCost = { isSuperAdmin: false, permissions: [COST_READ_PERMISSION] };
+    expect(canReadCost(legacyCost)).toBe(true);
+    expect(canReadPurchasePrice(legacyCost)).toBe(false);
   });
 
-  it('keeps purchase and selling-price visibility independent', () => {
+  it('keeps sale price, purchase price, and inventory cost independent', () => {
     const purchaseOnly = { isSuperAdmin: false, permissions: [PURCHASE_PRICE_READ_PERMISSION] };
     const saleOnly = { isSuperAdmin: false, permissions: [SALES_PRICE_READ_PERMISSION] };
+    const costOnly = { isSuperAdmin: false, permissions: [COST_READ_PERMISSION] };
+
     expect(canReadPurchasePrice(purchaseOnly)).toBe(true);
+    expect(canReadCost(purchaseOnly)).toBe(false);
     expect(canReadSalePrice(purchaseOnly)).toBe(false);
-    expect(canReadPurchasePrice(saleOnly)).toBe(false);
+
     expect(canReadSalePrice(saleOnly)).toBe(true);
+    expect(canReadPurchasePrice(saleOnly)).toBe(false);
+    expect(canReadCost(saleOnly)).toBe(false);
+
+    expect(canReadCost(costOnly)).toBe(true);
+    expect(canReadPurchasePrice(costOnly)).toBe(false);
+    expect(canReadSalePrice(costOnly)).toBe(false);
   });
 
   it('denies cost access to an ordinary role without the permission', () => {

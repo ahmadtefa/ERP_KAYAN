@@ -244,14 +244,35 @@ export function resolveUnitSelection(input: {
  * The returned value is always per chosen unit.
  */
 export function defaultUnitPrice(
-  kind: 'sale' | 'purchase',
+  kind: 'sale',
   row: ItemUnitLike | null,
   itemLevelPrice: Prisma.Decimal,
-): Prisma.Decimal {
+): Prisma.Decimal;
+export function defaultUnitPrice(
+  kind: 'purchase',
+  row: ItemUnitLike | null,
+  itemLevelPrice: Prisma.Decimal,
+): Prisma.Decimal;
+export function defaultUnitPrice(
+  kind: 'purchase',
+  row: ItemUnitLike | null,
+  itemLevelPrice: null,
+): Prisma.Decimal | null;
+export function defaultUnitPrice(
+  kind: 'purchase',
+  row: ItemUnitLike | null,
+  itemLevelPrice: Prisma.Decimal | null,
+): Prisma.Decimal | null;
+export function defaultUnitPrice(
+  kind: 'sale' | 'purchase',
+  row: ItemUnitLike | null,
+  itemLevelPrice: Prisma.Decimal | null,
+): Prisma.Decimal | null {
   const unitPrice = kind === 'sale' ? row?.salePrice : row?.purchasePrice;
   if (unitPrice !== null && unitPrice !== undefined) {
     return new Prisma.Decimal(unitPrice).toDecimalPlaces(QUANTITY_SCALE);
   }
+  if (itemLevelPrice === null) return null;
   const factor = row ? parseFactor(row.factor, 'unit factor') : new Prisma.Decimal(1);
   return itemLevelPrice.mul(factor).toDecimalPlaces(QUANTITY_SCALE);
 }

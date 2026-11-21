@@ -100,7 +100,7 @@ export class ItemsService {
         quantityPerScan: '1.000000',
         quantityPerScanFitsLedgerScale: true,
         salePrice: item.salePrice.toFixed(MONEY_SCALE),
-        purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
+        purchasePrice: mayReadCost ? item.purchasePrice?.toFixed(MONEY_SCALE) ?? null : null,
         item: this.toResponse(item, mayReadCost),
         units: item.units.map((unit) =>
           this.unitResponse(unit, item.unit, mayReadCost),
@@ -131,7 +131,7 @@ export class ItemsService {
       salePrice:
         unit.salePrice?.toFixed(MONEY_SCALE) ?? owner.salePrice.toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
-        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? owner.purchasePrice.toFixed(MONEY_SCALE)
+        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? owner.purchasePrice?.toFixed(MONEY_SCALE) ?? null
         : null,
       item: this.toResponse(owner, mayReadCost),
       units: owner.units.map((row) =>
@@ -266,8 +266,7 @@ export class ItemsService {
       factor: unit.factor.toFixed(6),
       barcode: unit.barcode,
       salePrice: unit.salePrice?.toFixed(MONEY_SCALE) ?? null,
-      // A unit's own purchase price is a cost, exactly like the item-level
-      // one: absent from the response when the caller lacks cost.read.
+      // Purchase-list prices are independent of valuation-cost visibility.
       purchasePrice: mayReadCost
         ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
         : null,
@@ -401,7 +400,7 @@ export class ItemsService {
           unit: baseUnit,
           barcode,
           salePrice: this.money(dto.salePrice, 'salePrice'),
-          purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
+          purchasePrice: this.optionalMoney(dto.purchasePrice, 'purchasePrice'),
           reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
           taxRate: this.rate(dto.taxRate, 'taxRate'),
           isStockTracked,
@@ -609,7 +608,7 @@ export class ItemsService {
       data.countryOfOrigin = String(dto.countryOfOrigin).trim() || null;
     }
     if (dto.salePrice !== undefined) data.salePrice = this.money(dto.salePrice, 'salePrice');
-    if (dto.purchasePrice !== undefined) data.purchasePrice = this.money(dto.purchasePrice, 'purchasePrice');
+    if (dto.purchasePrice !== undefined) data.purchasePrice = this.optionalMoney(dto.purchasePrice, 'purchasePrice');
     if (dto.reorderLevel !== undefined) data.reorderLevel = this.money(dto.reorderLevel, 'reorderLevel');
     if (dto.taxRate !== undefined) {
       data.taxRate = this.rate(dto.taxRate, 'taxRate');
@@ -753,7 +752,7 @@ export class ItemsService {
     unit: string;
     barcode: string | null;
     salePrice: Prisma.Decimal;
-    purchasePrice: Prisma.Decimal;
+    purchasePrice: Prisma.Decimal | null;
     reorderLevel: Prisma.Decimal;
     taxRate: Prisma.Decimal | null;
     isStockTracked: boolean;
@@ -772,8 +771,8 @@ export class ItemsService {
       isActive?: boolean;
       createdAt?: Date | null;
     }>;
-    // False for callers without `inventory.cost.read`: prices that reveal cost
-    // are redacted in the response (from the barcode/cost-permission work).
+    // The boolean controls purchase-price serialization; valuation costs are
+    // handled by their own permission at endpoints that return them.
   }, mayReadCost = true) {
     return {
       id: item.id,
@@ -784,7 +783,7 @@ export class ItemsService {
       unit: item.unit,
       barcode: item.barcode,
       salePrice: item.salePrice.toFixed(MONEY_SCALE),
-      purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
+      purchasePrice: mayReadCost ? item.purchasePrice?.toFixed(MONEY_SCALE) ?? null : null,
       reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
       // Null here means "follow the company default", which is different
       // from the string "0" meaning exempt.

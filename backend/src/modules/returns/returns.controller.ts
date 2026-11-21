@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { ReturnsService } from './returns.service';
 
@@ -15,7 +15,7 @@ export class ReturnsController {
   constructor(private readonly service: ReturnsService) {}
 
   private redact(user: AuthUser, response: unknown, side: 'sale' | 'purchase') {
-    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadCost(user) }, side);
+    return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, side);
   }
 
   @Get('sales')

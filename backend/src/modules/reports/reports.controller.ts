@@ -5,7 +5,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
@@ -180,7 +180,7 @@ export class ReportsController {
   @RequirePermissions('reports.read')
   salesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.sales(user.companyId, query, canReadCost(user)).then((result) =>
-      redactPriceFields(result, { sale: canReadSalePrice(user), purchase: canReadCost(user) }, 'sale'),
+      redactPriceFields(result, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'sale'),
     );
   }
 
@@ -188,7 +188,7 @@ export class ReportsController {
   @RequirePermissions('reports.read')
   purchasesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.purchases(user.companyId, query).then((result) =>
-      redactPriceFields(result, { sale: true, purchase: canReadCost(user) }, 'purchase'),
+      redactPriceFields(result, { sale: true, purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'purchase'),
     );
   }
 
