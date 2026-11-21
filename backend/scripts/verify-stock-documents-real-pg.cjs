@@ -1641,7 +1641,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(resolved.factor,factor);
         assert.equal(resolved.quantityPerScan,factor);
         assert.equal(resolved.quantityPerScanFitsLedgerScale,false);
-        assert.equal(resolved.purchasePrice,null);
+        assert.equal(Object.hasOwn(resolved,'purchasePrice'),false);
         const post=(quantity)=>fetch(base+'/sales/invoices',{method:'POST',headers:{'content-type':'application/json','x-allowed':'yes'},
           body:JSON.stringify({customerId:customer.id,invoiceDate:date,lines:[{itemId:taxItem.id,unitName,quantity,unitPrice:'100',taxRate:'0'}]})});
         const before=await prisma.salesInvoice.count({where:{companyId:company}});
