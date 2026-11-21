@@ -1365,7 +1365,7 @@ async function main() {
       'the machine distinguishes unsupported complete backup from gated database-archive restore',
       capabilities.data?.fullBackupSupported === false &&
         capabilities.data?.fullRestoreSupported === false &&
-        capabilities.data?.databaseRestoreSupported === true,
+        capabilities.data?.databaseRestoreSupported === false,
       `complete backup=${capabilities.data?.fullBackupSupported}, complete restore=${capabilities.data?.fullRestoreSupported}, database restore=${capabilities.data?.databaseRestoreSupported}`,
     );
 
@@ -1436,28 +1436,19 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
-    // This legacy route restores a PostgreSQL archive only. Its independent
-    // machine gate, scratch rehearsal, safety copy, and post-restore licence
-    // reconciliation are required; it must never claim to restore files or
-    // the machine-bound licence from the archive.
+    // This scenario explicitly switches destructive database restores off.
+    // The request must be refused before maintenance or data replacement; the
+    // separate complete-backup scenario exercises the enabled restore path.
     check(
-      'the database-only restore is rehearsed, safety-backed, and licence-reconciled without claiming a full restore',
-      restored.status === 201 &&
-        restored.data?.restored === true &&
-        restored.data?.checked === true &&
-        restored.data?.rehearsed === true &&
-        restored.data?.fullRestore === false &&
-        restored.data?.includesExternalFiles === false &&
-        restored.data?.includesLicence === false &&
-        restored.data?.licenceReconciled === true &&
-        Boolean(restored.data?.safetyBackup),
-      `status ${restored.status}, ${JSON.stringify(restored.data).slice(0, 240)}`,
+      'the operator-disabled database restore is refused by the independent machine gate',
+      restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+      `status ${restored.status}, code ${restored.data?.code ?? '?'}`,
     );
-    const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
+    const afterRefusedRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
-      'after the restore the data is still there, including what this run created',
-      (afterRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
-      `${afterRestore.data?.items?.length ?? 0} matching customers after the restore`,
+      'a refused restore leaves the data created by this run untouched',
+      (afterRefusedRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
+      `${afterRefusedRestore.data?.items?.length ?? 0} matching customers after refusal`,
     );
     const companyJson = await api('/backup/download');
     const companyBackup = companyJson.data;
