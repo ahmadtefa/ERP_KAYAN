@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -13,8 +13,8 @@ const input = () => ({idempotencyKey:'stock-voucher-edit-key-00001',expectedVers
 function harness() {
   const original = doc();
   const tx = {$queryRaw:jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{id:'doc'}]).mockResolvedValueOnce([]),
-    $executeRaw:jest.fn(),stockDocument:{findUniqueOrThrow:jest.fn().mockResolvedValue(original),update:jest.fn(async (_arg:unknown) => undefined)},
-    stockDocumentLine:{deleteMany:jest.fn(),createMany:jest.fn(async (_arg:{data:Array<{id?:string;quantity:Prisma.Decimal;unitCost:Prisma.Decimal;unitFactor:Prisma.Decimal | null}>}) => undefined)},
+    $executeRaw:jest.fn(),stockDocument:{findUniqueOrThrow:jest.fn().mockResolvedValue(original),update:jest.fn(async (_arg:unknown) => { void _arg; })},
+    stockDocumentLine:{deleteMany:jest.fn(),createMany:jest.fn(async (_arg:{data:Array<{id?:string;quantity:Prisma.Decimal;unitCost:Prisma.Decimal;unitFactor:Prisma.Decimal | null}>}) => { void _arg; })},
     warehouse:{findFirst:jest.fn().mockResolvedValue({id:'warehouse'})},
     item:{findFirst:jest.fn().mockResolvedValue({id:'item',isStockTracked:true,unit:'piece',units:[{unit:'box',factor:D('5'),isActive:false}]})}};
   const prisma = {$transaction:jest.fn(async (fn:(arg:typeof tx)=>Promise<void>) => fn(tx))};
@@ -42,6 +42,13 @@ describe('stock voucher draft edit', () => {
     await h.service.updateVoucher('company','branch','user','doc',request,false);
     const line = h.tx.stockDocumentLine.createMany.mock.calls[0][0].data[0];
     expect(line.unitCost.toString()).toBe('3');
+  });
+  it('rejects a receipt editor without cost access from submitting a unit cost', async () => {
+    const h = harness();
+    await expect(h.service.updateVoucher('company','branch','user','doc',input(),false))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    expect(h.tx.stockDocumentLine.deleteMany).not.toHaveBeenCalled();
+    expect(h.audit.recordRequired).not.toHaveBeenCalled();
   });
   it('does not let an issue editor without cost access overwrite a saved cost', async () => {
     const h = harness();

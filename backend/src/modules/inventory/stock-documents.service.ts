@@ -764,6 +764,9 @@ export class StockDocumentsService {
           unitName = resolved.snapshot.unitName; unitFactor = resolved.snapshot.unitFactor; unitQuantity = entered;
         } else { quantity = entered; unitName = null; unitFactor = null; unitQuantity = null; }
         const costMissing = raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '';
+        if (!mayReadCost && document.voucherKind === 'RECEIPT' && !costMissing) {
+          throw new ForbiddenException('inventory.cost.read permission is required to submit receipt unit costs');
+        }
         const sameSavedItem = old !== undefined && old.itemId === item.id;
         const preserveHiddenCost = !mayReadCost && sameSavedItem &&
           (document.voucherKind === 'ISSUE' || costMissing);
