@@ -178,9 +178,14 @@ const path = require('node:path');
         {archiveContentReadable:true,fullRestoreRehearsed:false,includesExternalFiles:false,includesLicence:false,fullBackup:false});
       assert.equal((await fetch(`${base}/synthetic-corrupt.dump/verify`, {method:'POST',headers})).status, 503);
       assert.equal((await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers:{'x-fixture-super':'no'}})).status, 403);
-      const denied = await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers});
-      assert.equal(denied.status, 409);
-      assert.equal((await denied.json()).code, 'BACKUP_DELETE_PROTECTED');
+      // Authorized deletion is allowed for a surplus archive, while the
+      // original remains available as the recovery copy for the rest of the
+      // fixture. The last-copy refusal is covered by the service unit tests.
+      const httpSurplus = (await service.list()).find(file => file.name !== backup.file.name);
+      assert.ok(httpSurplus, 'the HTTP fixture must have a surplus archive');
+      const removed = await fetch(`${base}/${httpSurplus.name}`, {method:'DELETE',headers});
+      assert.ok([200,204].includes(removed.status), `unexpected surplus-delete status ${removed.status}`);
+      assert.equal((await service.list()).some(file => file.name === httpSurplus.name), false);
       assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
       assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     } finally { await http.close(); }
