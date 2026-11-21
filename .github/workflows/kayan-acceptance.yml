@@ -90,18 +90,36 @@ jobs:
       - name: Render updated dashboard golden for RTL review
         if: always()
         run: |
+          set +e
           flutter test --no-pub --update-goldens test/screenshots/design_screenshots_test.dart --plain-name 'screenshot: dashboard inside the shell (Arabic RTL)'
-          # GitHub truncates individual annotation messages at 4,096 characters.
-          # A full PNG base64 string is therefore not reconstructable from those
-          # notices. Emit a clearly-labelled low-resolution preview instead;
-          # the full golden comparison still runs above and this preview never
-          # replaces or changes the checked-in baseline.
-          node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
-          # The thumbnail is convenient for the check summary; lossless chunks
-          # let us reconstruct the exact rendered pixels when a golden differs.
-          for group in 0 1 2 3 4; do
-            node scripts/emit-screenshot-lossless.cjs dashboard_ar.png "$group"
-          done
+          render_status=$?
+          # The dedicated review render rewrites the golden only in this
+          # disposable checkout. Preserve the exact actual pixels as CI
+          # evidence; never commit this generated image as an approved baseline.
+          mkdir -p build/acceptance
+          if [ -s test/screenshots/goldens/dashboard_ar.png ]; then
+            cp test/screenshots/goldens/dashboard_ar.png build/acceptance/dashboard_ar.rendered.png
+          fi
+          exit "$render_status"
+      # The complete rendered PNG is also uploaded as acceptance evidence.
+      # Small, independent chunks remain available in check annotations when a
+      # download is blocked; keep each group in a separate step because GitHub
+      # limits how many notices it records per step.
+      - name: Dashboard RTL pixels (diagnostic chunks 1 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 0
+      - name: Dashboard RTL pixels (diagnostic chunks 2 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 1
+      - name: Dashboard RTL pixels (diagnostic chunks 3 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 2
+      - name: Dashboard RTL pixels (diagnostic chunks 4 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 3
+      - name: Dashboard RTL pixels (diagnostic chunks 5 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 4
       - name: Preserve a report when setup or test execution fails early
         if: always()
         shell: bash
