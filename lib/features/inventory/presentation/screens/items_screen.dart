@@ -101,8 +101,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final user = ref.read(currentUserProvider);
-    final canSeeSalePrice = user?.canReadSalePrice ?? false;
-    final canSeePurchasePrice = user?.canReadPurchasePrice ?? false;
+    final canManageSalePrice = user?.canManageSalePrice ?? false;
+    final canManagePurchasePrice = user?.canManagePurchasePrice ?? false;
+    final canManageInventoryCost = user?.canManageInventoryCost ?? false;
     final values = await showFormSheet(
       context,
       exitRelay: _exitRelay,
@@ -113,8 +114,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec('nameAr', 'الاسم (عربي)'),
         FieldSpec('unit', l10n.unit),
         FieldSpec('barcode', 'Barcode'),
-        if (canSeeSalePrice)
+        if (canManageSalePrice)
           FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
+        if (canManagePurchasePrice)
+          FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice, kind: FieldKind.decimal),
         FieldSpec(
           'taxRate',
           l10n.taxRate,
@@ -128,14 +131,14 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           kind: FieldKind.toggle,
           helper: l10n.stockTrackingDoesNotAddQuantity,
         ),
-        if (!isEdit && canSeePurchasePrice) ...[
+        if (!isEdit && canManageInventoryCost) ...[
           FieldSpec(
             'openingQuantity',
             l10n.openingQuantity,
             kind: FieldKind.decimal,
             helper: l10n.openingStockHint,
           ),
-          if (canSeePurchasePrice)
+          if (canManageInventoryCost)
             FieldSpec(
               'openingUnitCost',
               l10n.openingUnitCost,
@@ -152,14 +155,21 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       initial: existing,
       onSubmit: (draft) async {
         final client = ref.read(apiClientProvider);
+        final payload = Map<String, dynamic>.from(draft);
+        // Empty optional prices mean “no price supplied”, not a zero price and
+        // not “clear the saved value”. Clearing remains an explicit workflow.
+        for (final key in ['salePrice', 'purchasePrice', 'openingUnitCost']) {
+          final value = payload[key];
+          if (value == null || value.toString().trim().isEmpty) payload.remove(key);
+        }
         try {
           if (isEdit) {
             await client.patch(
               '/inventory/items/${existing['id']}',
-              body: draft,
+              body: payload,
             );
           } else {
-            await client.post('/inventory/items', body: draft);
+            await client.post('/inventory/items', body: payload);
           }
         } catch (error) {
           // The server may have committed before a transport error. Reload
@@ -243,8 +253,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         ref.read(currentUserProvider)?.can('inventory.barcodes.manage') ??
         false;
     final currentUser = ref.read(currentUserProvider);
-    final canSeeCost = currentUser?.canReadPurchasePrice ?? false;
-    final canSeeSalePrice = currentUser?.canReadSalePrice ?? false;
+    final canSeePurchasePrice = currentUser?.canReadPurchasePrice ?? false;
+    final canManagePurchasePrice = currentUser?.canManagePurchasePrice ?? false;
+    final canManageSalePrice = currentUser?.canManageSalePrice ?? false;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
 
     Future<List<Map<String, dynamic>>> loadUnits() async {
@@ -421,13 +432,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            if (canSeeSalePrice)
+            if (canManageSalePrice)
               FieldSpec(
                 'salePrice',
                 l10n.unitsBarcodesFieldSalePrice,
                 kind: FieldKind.decimal,
               ),
-            if (canSeeCost)
+            if (canManagePurchasePrice)
               FieldSpec(
                 'purchasePrice',
                 l10n.unitsBarcodesFieldPurchasePrice,
@@ -556,8 +567,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             'unit': unit['unit'],
             'factor': unit['factor'],
             if (canManageBarcodes) 'barcode': unit['barcode'],
-            if (canSeeSalePrice) 'salePrice': unit['salePrice'],
-            if (canSeeCost) 'purchasePrice': unit['purchasePrice'],
+            if (canManageSalePrice && (currentUser?.canReadSalePrice ?? false)) 'salePrice': unit['salePrice'],
+            if (canManagePurchasePrice && canSeePurchasePrice) 'purchasePrice': unit['purchasePrice'],
             'isDefaultSale': unit['isDefaultSale'] == true,
             'isDefaultPurchase': unit['isDefaultPurchase'] == true,
           },
@@ -579,13 +590,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
-            if (canSeeSalePrice)
+            if (canManageSalePrice)
               FieldSpec(
                 'salePrice',
                 l10n.unitsBarcodesFieldSalePrice,
                 kind: FieldKind.decimal,
               ),
-            if (canSeeCost)
+            if (canManagePurchasePrice)
               FieldSpec(
                 'purchasePrice',
                 l10n.unitsBarcodesFieldPurchasePrice,

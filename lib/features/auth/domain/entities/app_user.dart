@@ -34,9 +34,13 @@ class AppUser {
   /// that would be refused the moment it was pressed.
   bool can(String permission) => isSuperAdmin || permissions.contains(permission);
 
-  bool get canReadPurchasePrice =>
-      can('purchases.price.read') || can('inventory.cost.read');
+  bool get canReadPurchasePrice => can('purchases.price.read');
   bool get canReadSalePrice => can('sales.price.read');
+  bool get canReadCost => can('inventory.cost.read');
+  bool get canManagePurchasePrice =>
+      isSuperAdmin || can('inventory.items.purchaseprice.manage');
+  bool get canManageSalePrice => can('inventory.items.saleprice.manage');
+  bool get canManageInventoryCost => can('inventory.cost.manage');
 
   bool hasRole(String role) => roles.contains(role);
 

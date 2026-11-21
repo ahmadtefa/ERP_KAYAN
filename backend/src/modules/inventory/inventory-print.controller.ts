@@ -25,6 +25,7 @@ interface PriceQuery {
   lang?: string;
   auto?: string;
   showSalePrice?: string;
+  showPurchasePrice?: string;
   showCost?: string;
   branchId?: string;
   categoryId?: string;
@@ -245,11 +246,12 @@ export class InventoryPrintController {
     const visibility = await this.printSettings.resolve(
       user.companyId,
       user,
-      { showSalePrice: query.showSalePrice, showCost: query.showCost },
+      { showSalePrice: query.showSalePrice, showPurchasePrice: query.showPurchasePrice, showCost: query.showCost },
       typeKey,
     );
     return applyPriceVisibility(table, {
       showSalePrice: visibility.showSalePrice ? 'true' : 'false',
+      showPurchasePrice: visibility.showPurchasePrice ? 'true' : 'false',
       showCost: visibility.showCost ? 'true' : 'false',
     });
   }

@@ -1,4 +1,4 @@
-import { canReadCost, canReadSalePrice, type CostVisibilityCaller } from '../auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice, type CostVisibilityCaller } from '../auth/cost-visibility';
 
 /// What a printed copy is allowed to carry, per kind of print.
 ///
@@ -33,6 +33,7 @@ export interface PrintType {
   carriesSalePrice: boolean;
   /// Whether this print can carry a cost/purchase price.
   carriesCost: boolean;
+  carriesPurchasePrice: boolean;
 }
 
 /// The company-wide fallback, used for anything the screen has not configured.
@@ -44,14 +45,15 @@ const document = (key: string, labelEn: string, labelAr: string): PrintType => (
   labelEn,
   labelAr,
   carriesSalePrice: key.startsWith('sales-') || key === 'sales-quotation',
-  carriesCost: key.startsWith('purchase-') || key === 'sales-invoice',
+  carriesCost: key === 'sales-invoice',
+  carriesPurchasePrice: key.startsWith('purchase-'),
 });
 
 const list = (
   key: string,
   labelEn: string,
   labelAr: string,
-  carries: { sale?: boolean; cost?: boolean } = {},
+  carries: { sale?: boolean; cost?: boolean; purchase?: boolean } = {},
 ): PrintType => ({
   key,
   category: 'LIST',
@@ -59,13 +61,14 @@ const list = (
   labelAr,
   carriesSalePrice: carries.sale ?? false,
   carriesCost: carries.cost ?? false,
+  carriesPurchasePrice: carries.purchase ?? false,
 });
 
 const report = (
   key: string,
   labelEn: string,
   labelAr: string,
-  carries: { sale?: boolean; cost?: boolean } = {},
+  carries: { sale?: boolean; cost?: boolean; purchase?: boolean } = {},
 ): PrintType => ({
   key,
   category: 'REPORT',
@@ -73,6 +76,7 @@ const report = (
   labelAr,
   carriesSalePrice: carries.sale ?? false,
   carriesCost: carries.cost ?? false,
+  carriesPurchasePrice: carries.purchase ?? false,
 });
 
 /// Every print the program can actually produce.
@@ -98,14 +102,15 @@ export const PRINT_TYPES: readonly PrintType[] = [
     labelAr: 'مستند مخزني (جرد، تحويل، تسوية)',
     carriesSalePrice: false,
     carriesCost: true,
+    carriesPurchasePrice: false,
   },
 
   // Lists
-  list('items', 'Items', 'الأصناف', { sale: true, cost: true }),
+  list('items', 'Items', 'الأصناف', { sale: true, purchase: true, cost: true }),
   list('stock', 'Stock balances', 'أرصدة المخزون', { cost: true }),
   list('stock-ledger', 'Stock movement', 'حركة المخزون', { cost: true }),
   list('sales-invoices', 'Sales invoices', 'فواتير البيع', { sale: true }),
-  list('purchase-invoices', 'Purchase invoices', 'فواتير الشراء', { cost: true }),
+  list('purchase-invoices', 'Purchase invoices', 'فواتير الشراء', { cost: true, purchase: true }),
   list('customers', 'Customers', 'العملاء'),
   list('suppliers', 'Suppliers', 'الموردون'),
   list('cash-accounts', 'Cash accounts', 'الحسابات النقدية'),
@@ -120,13 +125,13 @@ export const PRINT_TYPES: readonly PrintType[] = [
 
   // Financial and operational reports
   report('sales', 'Sales report', 'تقرير المبيعات', { sale: true, cost: true }),
-  report('purchases', 'Purchases report', 'تقرير المشتريات', { cost: true }),
+  report('purchases', 'Purchases report', 'تقرير المشتريات', { cost: true, purchase: true }),
   report('expenses', 'Expenses report', 'تقرير المصروفات'),
   report('income', 'Income report', 'تقرير الإيرادات', { sale: true }),
   report('payments', 'Payments report', 'تقرير المدفوعات'),
   report('cash', 'Cash report', 'تقرير النقدية'),
   report('outstanding-invoices', 'Outstanding invoices', 'الفواتير المستحقة', { sale: true }),
-  report('party-statement', 'Party statement', 'كشف حساب طرف', { sale: true, cost: true }),
+  report('party-statement', 'Party statement', 'كشف حساب طرف', { sale: true, cost: true, purchase: true }),
   report('trial-balance', 'Trial balance', 'ميزان المراجعة'),
   report('general-journal', 'General journal', 'دفتر اليومية'),
   report('profit-and-loss', 'Profit and loss', 'الأرباح والخسائر', { sale: true, cost: true }),
@@ -157,6 +162,7 @@ export const PRINT_TYPES: readonly PrintType[] = [
     labelAr: 'ملصقات الباركود',
     carriesSalePrice: true,
     carriesCost: false,
+    carriesPurchasePrice: false,
   },
 ];
 
@@ -175,17 +181,20 @@ export interface PrintPriceSetting {
   documentType: string;
   showSalePrice: boolean;
   showCost: boolean;
+  showPurchasePrice: boolean;
 }
 
 export interface ResolvedPrintVisibility {
   showSalePrice: boolean;
   showCost: boolean;
+  showPurchasePrice: boolean;
   /// Which rule produced the answer, so the screen can say why a cost checkbox
   /// is locked instead of silently ignoring the click.
   source: 'request' | 'type' | 'default' | 'builtin';
   /// True when the caller may not read costs at all: the answer is forced,
   /// whatever the request or the settings say.
   costLocked: boolean;
+  purchasePriceLocked: boolean;
   salePriceLocked: boolean;
 }
 
@@ -193,6 +202,7 @@ export interface ResolvedPrintVisibility {
 export interface RequestedVisibility {
   showSalePrice?: string | boolean;
   showCost?: string | boolean;
+  showPurchasePrice?: string | boolean;
 }
 
 function flag(value: string | boolean | undefined): boolean | undefined {
@@ -216,6 +226,7 @@ export function resolvePrintVisibility(
   typeKey?: string | null,
 ): ResolvedPrintVisibility {
   const mayReadCost = canReadCost(caller);
+  const mayReadPurchasePrice = canReadPurchasePrice(caller);
   const mayReadSalePrice = canReadSalePrice(caller);
   const byType = new Map(saved.map((row) => [row.documentType, row]));
   const forType = typeKey ? byType.get(typeKey) : undefined;
@@ -223,26 +234,32 @@ export function resolvePrintVisibility(
 
   const requestedSale = flag(requested.showSalePrice);
   const requestedCost = flag(requested.showCost);
+  const requestedPurchasePrice = flag(requested.showPurchasePrice);
 
   let showSalePrice: boolean;
   let showCost: boolean;
+  let showPurchasePrice: boolean;
   let source: ResolvedPrintVisibility['source'];
 
-  if (requestedSale !== undefined || requestedCost !== undefined) {
+  if (requestedSale !== undefined || requestedCost !== undefined || requestedPurchasePrice !== undefined) {
     showSalePrice = requestedSale ?? forType?.showSalePrice ?? forDefault?.showSalePrice ?? true;
     showCost = requestedCost ?? forType?.showCost ?? forDefault?.showCost ?? true;
+    showPurchasePrice = requestedPurchasePrice ?? forType?.showPurchasePrice ?? forDefault?.showPurchasePrice ?? true;
     source = 'request';
   } else if (forType) {
     showSalePrice = forType.showSalePrice;
     showCost = forType.showCost;
+    showPurchasePrice = forType.showPurchasePrice ?? true;
     source = 'type';
   } else if (forDefault) {
     showSalePrice = forDefault.showSalePrice;
     showCost = forDefault.showCost;
+    showPurchasePrice = forDefault.showPurchasePrice ?? true;
     source = 'default';
   } else {
     showSalePrice = true;
     showCost = true;
+    showPurchasePrice = true;
     source = 'builtin';
   }
 
@@ -251,8 +268,10 @@ export function resolvePrintVisibility(
     // restore either price to a caller whose role lacks its matching grant.
     showSalePrice: showSalePrice && mayReadSalePrice,
     showCost: showCost && mayReadCost,
+    showPurchasePrice: showPurchasePrice && mayReadPurchasePrice,
     source,
     costLocked: !mayReadCost,
+    purchasePriceLocked: !mayReadPurchasePrice,
     salePriceLocked: !mayReadSalePrice,
   };
 }

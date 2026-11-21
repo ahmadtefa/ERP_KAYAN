@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Put } from '@nestjs/common';
-import { IsArray, IsBoolean, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { PrintSettingsService } from './print-settings.service';
 
 class PrintPriceSettingDto {
@@ -12,6 +12,7 @@ class PrintPriceSettingDto {
   @IsString() @MaxLength(48) documentType!: string;
   @IsBoolean() showSalePrice!: boolean;
   @IsBoolean() showCost!: boolean;
+  @IsOptional() @IsBoolean() showPurchasePrice?: boolean;
 }
 
 class SavePrintSettingsDto {
@@ -37,6 +38,7 @@ export class PrintSettingsController {
       /// Whether this caller may ever see a cost, so the screen disables the
       /// checkbox with a reason instead of saving a setting that is ignored.
       costLocked: !canReadCost(user),
+      purchasePriceLocked: !canReadPurchasePrice(user),
       salePriceLocked: !canReadSalePrice(user),
     };
   }
@@ -48,6 +50,7 @@ export class PrintSettingsController {
     return {
       ...stored,
       costLocked: !canReadCost(user),
+      purchasePriceLocked: !canReadPurchasePrice(user),
       salePriceLocked: !canReadSalePrice(user),
     };
   }

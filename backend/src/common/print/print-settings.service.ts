@@ -52,6 +52,7 @@ export class PrintSettingsService {
       documentType: row.documentType,
       showSalePrice: row.showSalePrice,
       showCost: row.showCost,
+      showPurchasePrice: row.showPurchasePrice,
     }));
     return {
       types: [...PRINT_TYPES],
@@ -61,6 +62,7 @@ export class PrintSettingsService {
           documentType: DEFAULT_PRINT_TYPE,
           showSalePrice: true,
           showCost: true,
+          showPurchasePrice: true,
         },
     };
   }
@@ -71,7 +73,7 @@ export class PrintSettingsService {
   async save(
     companyId: string,
     userId: string,
-    entries: Array<{ documentType: string; showSalePrice: boolean; showCost: boolean }>,
+    entries: Array<{ documentType: string; showSalePrice: boolean; showCost: boolean; showPurchasePrice?: boolean }>,
   ): Promise<PrintSettingsResponse> {
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new BadRequestException(
@@ -116,11 +118,13 @@ export class PrintSettingsService {
             documentType: entry.documentType.trim(),
             showSalePrice: entry.showSalePrice,
             showCost: entry.showCost,
+            showPurchasePrice: entry.showPurchasePrice ?? true,
             updatedBy: userId,
           },
           update: {
             showSalePrice: entry.showSalePrice,
             showCost: entry.showCost,
+            showPurchasePrice: entry.showPurchasePrice ?? true,
             updatedBy: userId,
           },
         }),
@@ -149,7 +153,7 @@ export class PrintSettingsService {
   ): Promise<ResolvedPrintVisibility> {
     const stored = await this.prisma.printPriceSetting.findMany({
       where: { companyId },
-      select: { documentType: true, showSalePrice: true, showCost: true },
+      select: { documentType: true, showSalePrice: true, showCost: true, showPurchasePrice: true },
     });
     return resolvePrintVisibility(caller, requested, stored, typeKey);
   }

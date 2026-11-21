@@ -110,11 +110,13 @@ class ReportLinkBuilder {
     String? partyId,
     String? kind,
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       'from': ?from,
       'to': ?to,
@@ -139,11 +141,13 @@ class ReportLinkBuilder {
     String? partyId,
     String? kind,
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'from': ?from,
@@ -186,11 +190,13 @@ class ReportLinkBuilder {
     required String language,
     Map<String, String> filters = const {},
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       ...filters,
       'ticket': await _downloadTicket(),
@@ -207,11 +213,13 @@ class ReportLinkBuilder {
     bool auto = true,
     Map<String, String> filters = const {},
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       ...filters,
@@ -241,11 +249,13 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
@@ -260,11 +270,13 @@ class ReportLinkBuilder {
     required String language,
     bool auto = true,
     bool? showSalePrice,
+    bool? showPurchasePrice,
     bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
       if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
       if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),

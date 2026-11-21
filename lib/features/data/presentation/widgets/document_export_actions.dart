@@ -27,7 +27,8 @@ class DocumentExportActions extends ConsumerWidget {
     final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
     final ready = id.isNotEmpty;
     final currentUser = ref.watch(currentUserProvider);
-    final canSeeCost = currentUser?.canReadPurchasePrice ?? false;
+    final canSeeCost = currentUser?.canReadCost ?? false;
+    final canSeePurchasePrice = currentUser?.canReadPurchasePrice ?? false;
     final canSeeSalePrice = currentUser?.canReadSalePrice ?? false;
 
     Future<void> printDocument() async {
@@ -35,6 +36,7 @@ class DocumentExportActions extends ConsumerWidget {
         context,
         arabic: language == 'ar',
         canSeeCost: canSeeCost,
+        canSeePurchasePrice: canSeePurchasePrice,
         canSeeSalePrice: canSeeSalePrice,
       );
       if (visibility == null || !context.mounted) return;
@@ -43,6 +45,7 @@ class DocumentExportActions extends ConsumerWidget {
         id: id,
         language: language,
         showSalePrice: visibility['showSalePrice'],
+        showPurchasePrice: visibility['showPurchasePrice'],
         showCost: visibility['showCost'],
       ));
     }
@@ -52,6 +55,7 @@ class DocumentExportActions extends ConsumerWidget {
         context,
         arabic: language == 'ar',
         canSeeCost: canSeeCost,
+        canSeePurchasePrice: canSeePurchasePrice,
         canSeeSalePrice: canSeeSalePrice,
       );
       if (visibility == null || !context.mounted) return;
@@ -60,6 +64,7 @@ class DocumentExportActions extends ConsumerWidget {
         id: id,
         language: language,
         showSalePrice: visibility['showSalePrice'],
+        showPurchasePrice: visibility['showPurchasePrice'],
         showCost: visibility['showCost'],
       ));
     }

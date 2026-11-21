@@ -18,7 +18,8 @@ const saved = (
   documentType: string,
   showSalePrice: boolean,
   showCost: boolean,
-) => ({ documentType, showSalePrice, showCost });
+  showPurchasePrice = true,
+) => ({ documentType, showSalePrice, showCost, showPurchasePrice });
 
 describe('print price settings', () => {
   describe('the catalogue', () => {
@@ -49,7 +50,9 @@ describe('print price settings', () => {
 
     it('knows which prints can carry a sale price and which a cost', () => {
       expect(printType('sales-invoice')?.carriesSalePrice).toBe(true);
-      expect(printType('purchase-invoice')?.carriesCost).toBe(true);
+      expect(printType('purchase-invoice')?.carriesPurchasePrice).toBe(true);
+      expect(printType('items')?.carriesPurchasePrice).toBe(true);
+      expect(printType('purchase-invoice')?.carriesCost).toBe(false);
       expect(printType('journal-entry')?.carriesCost).toBe(false);
       expect(printType('journal-entry')?.carriesSalePrice).toBe(false);
       expect(printType('barcode-labels')?.carriesSalePrice).toBe(true);
@@ -61,8 +64,10 @@ describe('print price settings', () => {
       expect(resolvePrintVisibility(COST_READER, {}, [])).toEqual({
         showSalePrice: true,
         showCost: true,
+        showPurchasePrice: false,
         source: 'builtin',
         costLocked: false,
+        purchasePriceLocked: true,
         salePriceLocked: false,
       });
     });
@@ -77,6 +82,14 @@ describe('print price settings', () => {
       const result = resolvePrintVisibility(COST_READER, { showCost: 'false' }, []);
       expect(result.showSalePrice).toBe(true);
       expect(result.showCost).toBe(false);
+    });
+
+    it('keeps purchase prices independent from inventory cost', () => {
+      const purchaser = { isSuperAdmin: false, permissions: ['purchases.price.read'] };
+      const result = resolvePrintVisibility(purchaser, { showPurchasePrice: 'true', showCost: 'false' }, []);
+      expect(result.showPurchasePrice).toBe(true);
+      expect(result.showCost).toBe(false);
+      expect(result.purchasePriceLocked).toBe(false);
     });
 
     it('hides both', () => {
@@ -100,6 +113,8 @@ describe('print price settings', () => {
       );
       expect(canReadCost(CLERK)).toBe(false);
       expect(asked.showCost).toBe(false);
+      expect(asked.showPurchasePrice).toBe(false);
+      expect(asked.purchasePriceLocked).toBe(true);
       expect(asked.costLocked).toBe(true);
       // This clerk has neither permission; the URL cannot restore the price.
       expect(asked.showSalePrice).toBe(false);

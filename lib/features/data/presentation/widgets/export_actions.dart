@@ -58,7 +58,8 @@ class ReportExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
+        canSeeCost: ref.watch(currentUserProvider)?.canReadCost ?? false,
+        canSeePurchasePrice: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
         canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
@@ -69,6 +70,7 @@ class ReportExportActions extends ConsumerWidget {
         to: to,
         accountId: accountId,
         showSalePrice: visibility['showSalePrice'],
+        showPurchasePrice: visibility['showPurchasePrice'],
         showCost: visibility['showCost'],
       ));
     }
@@ -77,7 +79,8 @@ class ReportExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
+        canSeeCost: ref.watch(currentUserProvider)?.canReadCost ?? false,
+        canSeePurchasePrice: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
         canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
@@ -88,6 +91,7 @@ class ReportExportActions extends ConsumerWidget {
         to: to,
         accountId: accountId,
         showSalePrice: visibility['showSalePrice'],
+        showPurchasePrice: visibility['showPurchasePrice'],
         showCost: visibility['showCost'],
       ));
     }

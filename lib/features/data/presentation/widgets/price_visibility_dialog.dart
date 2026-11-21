@@ -3,16 +3,18 @@ import 'package:flutter/material.dart';
 /// The same choice is used by list, report and saved-document PDF/print
 /// actions. This changes only the rendered copy, never the stored document.
 ///
-/// The two switches mirror the independent API permissions. A caller may
-/// choose what to print only inside the figures their role may already read;
-/// the server enforces the same floor even if a caller edits the request.
+/// Each switch mirrors one independent API permission. A caller may choose
+/// what to print only inside the figures their role may already read; the
+/// server enforces the same floor even if a caller edits the request.
 Future<Map<String, bool>?> choosePriceVisibility(
   BuildContext context, {
   required bool arabic,
-  bool canSeeCost = true,
-  bool canSeeSalePrice = true,
+  bool canSeeCost = false,
+  bool canSeePurchasePrice = false,
+  bool canSeeSalePrice = false,
 }) async {
   var showSalePrice = canSeeSalePrice;
+  var showPurchasePrice = canSeePurchasePrice;
   var showCost = canSeeCost;
 
   return showDialog<Map<String, bool>>(
@@ -36,6 +38,21 @@ Future<Map<String, bool>?> choosePriceVisibility(
                     ),
               onChanged: canSeeSalePrice
                   ? (value) => setDialogState(() => showSalePrice = value ?? false)
+                  : null,
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: showPurchasePrice,
+              title: Text(arabic ? 'إظهار سعر الشراء' : 'Show purchase prices'),
+              subtitle: canSeePurchasePrice
+                  ? null
+                  : Text(
+                      arabic
+                          ? 'ليس لديك صلاحية عرض أسعار الشراء.'
+                          : 'Your role may not view purchase prices.',
+                    ),
+              onChanged: canSeePurchasePrice
+                  ? (value) => setDialogState(() => showPurchasePrice = value ?? false)
                   : null,
             ),
             CheckboxListTile(
@@ -70,6 +87,7 @@ Future<Map<String, bool>?> choosePriceVisibility(
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop({
               'showSalePrice': showSalePrice && canSeeSalePrice,
+              'showPurchasePrice': showPurchasePrice && canSeePurchasePrice,
               'showCost': showCost && canSeeCost,
             }),
             child: Text(arabic ? 'متابعة' : 'Continue'),

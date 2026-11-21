@@ -7,7 +7,12 @@ import 'test_harness.dart';
 void main() {
   /// A screen with one button that opens the shared dialog and keeps the
   /// answer, so the test reads what the export actions would send.
-  Widget host(void Function(Map<String, bool>?) write, {required bool canSeeCost}) {
+  Widget host(
+    void Function(Map<String, bool>?) write, {
+    required bool canSeeCost,
+    bool canSeePurchasePrice = false,
+    bool canSeeSalePrice = true,
+  }) {
     return wrapWithApp(
       child: Scaffold(
         body: Builder(
@@ -19,6 +24,8 @@ void main() {
                     context,
                     arabic: false,
                     canSeeCost: canSeeCost,
+                    canSeePurchasePrice: canSeePurchasePrice,
+                    canSeeSalePrice: canSeeSalePrice,
                   ),
                 );
               },
@@ -42,7 +49,7 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(answer, {'showSalePrice': true, 'showCost': false});
+    expect(answer, {'showSalePrice': true, 'showPurchasePrice': false, 'showCost': false});
   });
 
   testWidgets('lets the sale price be hidden while the cost stays', (tester) async {
@@ -56,7 +63,38 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(answer, {'showSalePrice': false, 'showCost': true});
+    expect(answer, {'showSalePrice': false, 'showPurchasePrice': false, 'showCost': true});
+  });
+
+  testWidgets('purchase-price permission is independent of cost permission', (tester) async {
+    Map<String, bool>? answer;
+    await tester.pumpWidget(host(
+      (value) => answer = value,
+      canSeeCost: false,
+      canSeePurchasePrice: true,
+      canSeeSalePrice: false,
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    final purchase = tester.widget<CheckboxListTile>(
+      find.ancestor(
+        of: find.text('Show purchase prices'),
+        matching: find.byType(CheckboxListTile),
+      ),
+    );
+    expect(purchase.value, isTrue);
+    expect(purchase.onChanged, isNotNull);
+    await tester.tap(find.text('Show purchase prices'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(answer, {
+      'showSalePrice': false,
+      'showPurchasePrice': false,
+      'showCost': false,
+    });
   });
 
   testWidgets('does not offer a cost to a role that may not read one', (tester) async {
@@ -76,7 +114,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Even if the server were asked nicely, nothing here can ask for costs.
-    expect(answer, {'showSalePrice': true, 'showCost': false});
+    expect(answer, {'showSalePrice': true, 'showPurchasePrice': false, 'showCost': false});
   });
 
   testWidgets('cancelling returns nothing, so no request is made', (tester) async {
