@@ -28,6 +28,7 @@ import '../../features/inventory/presentation/screens/item_thresholds_screen.dar
 import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
 import '../../features/inventory/presentation/screens/write_offs_screen.dart';
 import '../../features/inventory/presentation/screens/stock_documents_screen.dart';
+import '../../features/inventory/presentation/screens/stock_transfers_screen.dart';
 import '../../features/inventory/presentation/screens/inventory_reports_screen.dart';
 import '../../features/inventory/presentation/screens/warehouse_access_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
@@ -106,6 +107,7 @@ class AppRoutes {
   static const warehouseAccess = '/inventory/warehouse-access';
   static const inventoryReports = '/inventory/reports';
   static const stockDocuments = '/inventory/documents';
+  static const stockTransfers = '/inventory/stock-transfers';
   static const operationsInputs = '/operations/inputs';
   static const operationsOutputs = '/operations/outputs';
 }
@@ -275,6 +277,8 @@ final routerProvider = Provider<GoRouter>((ref) {
                                     ? WriteOffsScreen()
                                     : route.path == AppRoutes.stockDocuments
                                       ? StockDocumentsScreen(navigationKey: state.pageKey)
+                                      : route.path == AppRoutes.stockTransfers
+                                        ? StockTransfersScreen()
                                       : route.path == AppRoutes.inventoryReports
                                         ? InventoryReportsScreen(initialReportSlug: state.uri.queryParameters['report'])
                                         : route.path == AppRoutes.reports
@@ -298,6 +302,7 @@ const _guardedShellPaths = <String>{
   AppRoutes.stockTakes,
   AppRoutes.writeOffs,
   AppRoutes.stockDocuments,
+  AppRoutes.stockTransfers,
   AppRoutes.inventoryReports,
   AppRoutes.warehouseAccess,
   AppRoutes.notifications,
@@ -340,6 +345,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.stockTakes, child: StockTakesScreen()),
   (path: AppRoutes.writeOffs, child: WriteOffsScreen()),
   (path: AppRoutes.stockDocuments, child: StockDocumentsScreen()),
+  (path: AppRoutes.stockTransfers, child: StockTransfersScreen()),
   (path: AppRoutes.inventoryReports, child: InventoryReportsScreen()),
   (path: AppRoutes.warehouseAccess, child: WarehouseAccessScreen()),
   (path: AppRoutes.salesOrders, child: OrdersScreen(kind: InvoiceKind.sales)),

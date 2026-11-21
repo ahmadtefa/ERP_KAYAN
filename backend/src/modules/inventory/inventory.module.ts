@@ -21,6 +21,8 @@ import { ItemsService } from './items.service';
 import { StockController } from './stock.controller';
 import { StockDocumentsController } from './stock-documents.controller';
 import { StockDocumentsService } from './stock-documents.service';
+import { StockTransfersController } from './stock-transfers.controller';
+import { StockTransfersService } from './stock-transfers.service';
 import { StockService } from './stock.service';
 import { StockTakesController } from './stock-takes.controller';
 import { StockTakesService } from './stock-takes.service';
@@ -40,6 +42,7 @@ import { WarehousesController } from './warehouses.controller';
     ItemsController,
     StockController,
     StockDocumentsController,
+    StockTransfersController,
     InventoryReportsController,
     InventoryAnalysisController,
     InventoryPrintController,
@@ -55,6 +58,7 @@ import { WarehousesController } from './warehouses.controller';
     ItemsService,
     StockService,
     StockDocumentsService,
+    StockTransfersService,
     InventoryReportsService,
     InventoryAnalysisService,
     BarcodeLabelsService,

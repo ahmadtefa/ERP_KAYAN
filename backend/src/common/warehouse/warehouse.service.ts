@@ -63,7 +63,7 @@ export class WarehouseService {
     scope: WarehouseScope = null,
     warehouseIds?: string[],
   ) {
-    const where: Prisma.WarehouseWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.WarehouseWhereInput = { companyId, deletedAt: null, isTransit: false };
     if (!query.includeInactive) where.isActive = true;
     if (query.branchId) where.branchId = query.branchId;
     // Outside a person's branches there is nothing to show, and saying so by
@@ -82,7 +82,7 @@ export class WarehouseService {
   }
 
   async findOne(companyId: string, id: string, scope: WarehouseScope = null) {
-    const where: Prisma.WarehouseWhereInput = { id, companyId, deletedAt: null };
+    const where: Prisma.WarehouseWhereInput = { id, companyId, deletedAt: null, isTransit: false };
     if (scope !== null) where.branchId = { in: scope };
     const row = await this.prisma.warehouse.findFirst({
       where,
@@ -130,7 +130,7 @@ export class WarehouseService {
     // The first warehouse of a branch is its default without being asked:
     // a branch with none would leave documents with nowhere to post.
     const count = await this.prisma.warehouse.count({
-      where: { companyId, branchId, deletedAt: null },
+      where: { companyId, branchId, deletedAt: null, isTransit: false },
     });
     const isDefault = dto.isDefault === true || count === 0;
 
@@ -176,7 +176,7 @@ export class WarehouseService {
     scope: WarehouseScope = null,
   ) {
     const before = await this.prisma.warehouse.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, isTransit: false },
     });
     if (!before) throw new NotFoundException('Warehouse not found');
     this.assertInScope(scope, before.branchId);
@@ -252,7 +252,7 @@ export class WarehouseService {
     scope: WarehouseScope = null,
   ) {
     const before = await this.prisma.warehouse.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, isTransit: false },
     });
     if (!before) throw new NotFoundException('Warehouse not found');
     this.assertInScope(scope, before.branchId);
@@ -287,7 +287,7 @@ export class WarehouseService {
     scope: WarehouseScope = null,
   ) {
     const before = await this.prisma.warehouse.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, isTransit: false },
     });
     if (!before) throw new NotFoundException('Warehouse not found');
     this.assertInScope(scope, before.branchId);
@@ -372,6 +372,7 @@ export class WarehouseService {
         JOIN branches b ON b.id = w."branchId"
        WHERE m."companyId" = ${companyId}::uuid
          AND w."deletedAt" IS NULL
+         AND w."isTransit" = false
          AND m."movementDate" <= ${asOf}::date
          ${query.warehouseId ? Prisma.sql`AND w.id = ${query.warehouseId}::uuid` : Prisma.empty}
          ${warehouseIds !== undefined ? Prisma.sql`AND w.id = ANY(${warehouseIds}::uuid[])` : Prisma.empty}
@@ -525,7 +526,7 @@ export class WarehouseService {
   ): Promise<string | null> {
     if (warehouseId) {
       const named = await tx.warehouse.findFirst({
-        where: { id: warehouseId, companyId, deletedAt: null },
+        where: { id: warehouseId, companyId, deletedAt: null, isTransit: false },
         select: { id: true, branchId: true, isActive: true, code: true },
       });
       if (!named) throw new BadRequestException('The warehouse does not exist in this company');
@@ -541,7 +542,7 @@ export class WarehouseService {
     }
 
     const fallback = await tx.warehouse.findFirst({
-      where: { companyId, branchId, deletedAt: null },
+      where: { companyId, branchId, deletedAt: null, isTransit: false },
       orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
       select: { id: true },
     });
@@ -585,7 +586,7 @@ export class WarehouseService {
   ): Promise<string | null> {
     if (!warehouseId) return this.resolve(tx, companyId, branchId);
     const historical = await tx.warehouse.findFirst({
-      where: { id: warehouseId, companyId, branchId, deletedAt: null },
+      where: { id: warehouseId, companyId, branchId, deletedAt: null, isTransit: false },
       select: { id: true },
     });
     if (!historical) {
@@ -686,6 +687,7 @@ export class WarehouseService {
         id: warehouseId,
         companyId,
         deletedAt: null,
+        isTransit: false,
         ...(scope !== null ? { branchId: { in: scope } } : {}),
       },
       include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },

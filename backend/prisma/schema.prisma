@@ -75,6 +75,7 @@ model Company {
   fixedAssets      FixedAsset[]
   depreciationRuns DepreciationRun[]
   stockDocuments   StockDocument[]
+  stockTransfers   StockTransfer[]
   backupRuns       BackupRun[]
   items            Item[]
   stockBalances    StockBalance[]
@@ -149,6 +150,8 @@ model Branch {
   fixedAssets      FixedAsset[]
   depreciationRuns DepreciationRun[]
   stockDocuments   StockDocument[]
+  transfersOut     StockTransfer[] @relation("StockTransferSourceBranch")
+  transfersIn      StockTransfer[] @relation("StockTransferDestinationBranch")
   warehouses       Warehouse[]
   storageLocations StorageLocation[]
   itemBatches      ItemBatch[]
@@ -1043,6 +1046,110 @@ model OpeningBalanceLine {
 
 // ------------------------------------------------------- stock documents
 
+/// A staged, auditable movement between company warehouses. Dispatch moves
+/// goods to an internal transit shelf; each receipt moves only accepted units.
+model StockTransfer {
+  id                     String    @id @default(uuid()) @db.Uuid
+  companyId              String    @db.Uuid
+  sourceBranchId         String    @db.Uuid
+  destinationBranchId    String    @db.Uuid
+  sourceWarehouseId      String    @db.Uuid
+  destinationWarehouseId String    @db.Uuid
+  documentNumber         String    @db.VarChar(48)
+  transferDate           DateTime  @db.Date
+  reason                 String
+  notes                  String?
+  status                 String    @default("DRAFT") @db.VarChar(24)
+  version                Int       @default(0)
+  idempotencyKey         String?   @db.VarChar(120)
+  costCenterId           String?   @db.Uuid
+  createdBy              String    @db.Uuid
+  reviewedBy             String?  @db.Uuid
+  reviewedAt             DateTime?
+  approvedBy             String?  @db.Uuid
+  approvedAt             DateTime?
+  rejectedBy             String?  @db.Uuid
+  rejectedAt             DateTime?
+  rejectionReason        String?
+  settlementDocumentId   String?  @db.Uuid
+  settlementRequestedBy  String?  @db.Uuid
+  settlementApprovedBy   String?  @db.Uuid
+  settlementApprovedAt   DateTime?
+  dispatchedBy           String?  @db.Uuid
+  dispatchedAt           DateTime?
+  closedBy               String?  @db.Uuid
+  closedAt               DateTime?
+  cancelledBy            String?  @db.Uuid
+  cancelledAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sourceBranch         Branch                @relation("StockTransferSourceBranch", fields: [sourceBranchId], references: [id], onDelete: Restrict)
+  destinationBranch    Branch                @relation("StockTransferDestinationBranch", fields: [destinationBranchId], references: [id], onDelete: Restrict)
+  sourceWarehouse      Warehouse             @relation("StockTransferSourceWarehouse", fields: [sourceWarehouseId], references: [id], onDelete: Restrict)
+  destinationWarehouse Warehouse             @relation("StockTransferDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
+  lines                StockTransferLine[]
+  actions              StockTransferAction[]
+
+  @@unique([companyId, documentNumber])
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, status, transferDate])
+  @@index([sourceWarehouseId, status])
+  @@index([destinationWarehouseId, status])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id                 String   @id @default(uuid()) @db.Uuid
+  transferId         String   @db.Uuid
+  itemId             String   @db.Uuid
+  lineNumber         Int
+  requestedQuantity  Decimal  @db.Decimal(19, 4)
+  dispatchedQuantity Decimal  @default(0) @db.Decimal(19, 4)
+  receivedQuantity   Decimal  @default(0) @db.Decimal(19, 4)
+  returnedQuantity   Decimal  @default(0) @db.Decimal(19, 4)
+  writtenOffQuantity Decimal  @default(0) @db.Decimal(19, 4)
+  reportedShortage   Decimal  @default(0) @db.Decimal(19, 4)
+  reportedDamage     Decimal  @default(0) @db.Decimal(19, 4)
+  unitCost           Decimal  @default(0) @db.Decimal(19, 4)
+  unitName           String?  @db.VarChar(40)
+  unitFactor         Decimal? @db.Decimal(19, 6)
+  unitQuantity       Decimal? @db.Decimal(19, 4)
+  sourceBatchId      String?  @db.Uuid
+  transitBatchId     String?  @db.Uuid
+  notes              String?
+  differenceReason   String?
+
+  transfer          StockTransfer   @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  item              Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  sourceBatch       ItemBatch?      @relation("StockTransferSourceBatch", fields: [sourceBatchId], references: [id], onDelete: Restrict)
+  transitBatch      ItemBatch?      @relation("StockTransferTransitBatch", fields: [transitBatchId], references: [id], onDelete: Restrict)
+  writeOffDocuments StockDocument[]
+
+  @@unique([transferId, lineNumber])
+  @@index([itemId, transferId])
+  @@map("stock_transfer_lines")
+}
+
+/// An idempotency fingerprint committed with each state-changing action.
+model StockTransferAction {
+  id            String        @id @default(uuid()) @db.Uuid
+  transferId    String        @db.Uuid
+  companyId     String        @db.Uuid
+  requestKey    String        @db.VarChar(120)
+  requestHash   String        @db.VarChar(64)
+  action        String    @db.VarChar(24)
+  stockDocumentId String?  @db.Uuid
+  resultVersion Int
+  createdAt     DateTime      @default(now())
+  transfer      StockTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, transferId, requestKey])
+  @@index([transferId, action])
+  @@map("stock_transfer_actions")
+}
+
 enum StockDocumentKind {
   ADJUSTMENT
   TRANSFER
@@ -1106,6 +1213,7 @@ model StockDocument {
   /// Transfers never carry one: a movement between two warehouses is not a
   /// cost, and inventing an owner for it would be a lie.
   costCenterId   String?           @db.Uuid
+  stockTransferLineId String?      @db.Uuid
 
   journalEntryId String?           @db.Uuid
   postedAt       DateTime?
@@ -1121,6 +1229,7 @@ model StockDocument {
   fromWarehouse Warehouse?         @relation("StockDocumentFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
+  stockTransferLine StockTransferLine? @relation(fields: [stockTransferLineId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
   creationRequests StockDocumentCreationRequest[]
 
@@ -1448,6 +1557,7 @@ model Item {
   purchaseLines  PurchaseInvoiceLine[]
   openingLines   OpeningBalanceLine[]
   stockDocumentLines StockDocumentLine[]
+  stockTransferLines StockTransferLine[]
   priceListItems PriceListItem[]
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines SalesOrderLine[]
@@ -2216,6 +2326,8 @@ model Warehouse {
   /// per branch; the service moves the flag rather than allowing two.
   isDefault Boolean @default(false)
   isActive  Boolean @default(true)
+  /// Internal shelf for stock physically between its source and destination.
+  isTransit Boolean @default(false)
 
   /// MAIN is a warehouse the company keeps stock in; SUB is a store room
   /// inside it (a shop floor, a van, a quarantine cage). A sub-warehouse
@@ -2249,6 +2361,8 @@ model Warehouse {
   purchaseInvoices     PurchaseInvoice[]
   stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
   stockDocumentsTo     StockDocument[] @relation("StockDocumentToWarehouse")
+  transfersOut          StockTransfer[] @relation("StockTransferSourceWarehouse")
+  transfersIn           StockTransfer[] @relation("StockTransferDestinationWarehouse")
   openingBalances      OpeningBalance[]
 
   @@unique([companyId, code])
@@ -2746,6 +2860,8 @@ model ItemBatch {
   movements StockMovement[]
   stockDocumentLines StockDocumentLine[]
   stockTakeLines     StockTakeLine[]
+  transferSourceLines StockTransferLine[] @relation("StockTransferSourceBatch")
+  transferTransitLines StockTransferLine[] @relation("StockTransferTransitBatch")
 
   @@unique([warehouseId, itemId, batchNumber])
   @@index([companyId, itemId, expiryDate])

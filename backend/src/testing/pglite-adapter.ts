@@ -61,7 +61,7 @@ function revive(row: Row): Row {
     if (
       typeof value === 'string' &&
       /^-?\d+(\.\d+)?$/.test(value) &&
-      /quantity|value|cost|price|amount|factor|tax|discount|total/i.test(key)
+      /quantity|value|cost|price|amount|factor|tax|discount|total|shortage|damage/i.test(key)
     ) {
       out[key] = new Prisma.Decimal(value);
     } else if (value instanceof Date) {
@@ -297,6 +297,9 @@ export function pglitePrisma(db: PgliteLike) {
     salesInvoice: {
       lines: { model: 'salesInvoiceLine', table: 'sales_invoice_lines', foreignKey: 'invoiceId' },
     },
+    stockTransfer: {
+      lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
+    },
   };
 
   /// The relations the posting walks. Prisma loads them with a second query;
@@ -319,6 +322,23 @@ export function pglitePrisma(db: PgliteLike) {
         foreignKey: 'id',
         parentField: 'customerId',
       },
+    },
+    stockTransfer: {
+      lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
+      actions: { model: 'stockTransferAction', table: 'stock_transfer_actions', foreignKey: 'transferId' },
+      sourceWarehouse: { model: 'warehouse', table: 'warehouses', foreignKey: 'id', parentField: 'sourceWarehouseId' },
+      destinationWarehouse: { model: 'warehouse', table: 'warehouses', foreignKey: 'id', parentField: 'destinationWarehouseId' },
+    },
+    item: {
+      units: { model: 'itemUnit', table: 'item_units', foreignKey: 'itemId' },
+    },
+    stockTransferLine: {
+      item: { model: 'item', table: 'items', foreignKey: 'id', parentField: 'itemId' },
+      sourceBatch: { model: 'itemBatch', table: 'item_batches', foreignKey: 'id', parentField: 'sourceBatchId' },
+      transitBatch: { model: 'itemBatch', table: 'item_batches', foreignKey: 'id', parentField: 'transitBatchId' },
+    },
+    warehouse: {
+      branch: { model: 'branch', table: 'branches', foreignKey: 'id', parentField: 'branchId' },
     },
     journalEntry: {
       lines: { model: 'journalLine', table: 'journal_lines', foreignKey: 'journalEntryId' },
@@ -429,10 +449,17 @@ export function pglitePrisma(db: PgliteLike) {
         const params: unknown[] = [];
         const sets: string[] = [];
         for (const [field, value] of Object.entries(args.data as Row)) {
-          params.push(
-            Prisma.Decimal.isDecimal(value) ? (value as Prisma.Decimal).toString() : value,
-          );
-          sets.push(`"${columnFor(table, field)}" = $${params.length}`);
+          const op = value as Record<string, unknown>;
+          if (op && typeof op === 'object' && 'increment' in op) {
+            params.push(op.increment);
+            sets.push(`"${columnFor(table, field)}" = "${columnFor(table, field)}" + $${params.length}`);
+          } else if (op && typeof op === 'object' && 'decrement' in op) {
+            params.push(op.decrement);
+            sets.push(`"${columnFor(table, field)}" = "${columnFor(table, field)}" - $${params.length}`);
+          } else {
+            params.push(Prisma.Decimal.isDecimal(value) ? (value as Prisma.Decimal).toString() : value);
+            sets.push(`"${columnFor(table, field)}" = $${params.length}`);
+          }
         }
         const where = whereToSql(table, args.where as Row, params);
         const rows = await q(
@@ -445,10 +472,17 @@ export function pglitePrisma(db: PgliteLike) {
         const params: unknown[] = [];
         const sets: string[] = [];
         for (const [field, value] of Object.entries(args.data as Row)) {
-          params.push(
-            Prisma.Decimal.isDecimal(value) ? (value as Prisma.Decimal).toString() : value,
-          );
-          sets.push(`"${columnFor(table, field)}" = $${params.length}`);
+          const op = value as Record<string, unknown>;
+          if (op && typeof op === 'object' && 'increment' in op) {
+            params.push(op.increment);
+            sets.push(`"${columnFor(table, field)}" = "${columnFor(table, field)}" + $${params.length}`);
+          } else if (op && typeof op === 'object' && 'decrement' in op) {
+            params.push(op.decrement);
+            sets.push(`"${columnFor(table, field)}" = "${columnFor(table, field)}" - $${params.length}`);
+          } else {
+            params.push(Prisma.Decimal.isDecimal(value) ? (value as Prisma.Decimal).toString() : value);
+            sets.push(`"${columnFor(table, field)}" = $${params.length}`);
+          }
         }
         const where = whereToSql(table, args.where as Row, params);
         // RETURNING reports the rows the UPDATE really matched, so a guarded
@@ -672,6 +706,10 @@ export function pglitePrisma(db: PgliteLike) {
     // The lot suite above only needs the stock tables. These are here so the
     // posting and its reversal can be driven as the real service, against the
     // real schema, rather than as a mock of themselves.
+    itemUnit: plainModel('itemUnit', 'item_units'),
+    stockTransfer: plainModel('stockTransfer', 'stock_transfers'),
+    stockTransferLine: plainModel('stockTransferLine', 'stock_transfer_lines'),
+    stockTransferAction: plainModel('stockTransferAction', 'stock_transfer_actions'),
     salesInvoice: plainModel('salesInvoice', 'sales_invoices'),
     salesInvoiceLine: plainModel('salesInvoiceLine', 'sales_invoice_lines'),
     journalEntry: plainModel('journalEntry', 'journal_entries'),

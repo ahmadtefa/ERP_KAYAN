@@ -372,6 +372,11 @@ class OperationsRegistry {
           path: AppRoutes.stockDocuments, permission: 'inventory.stock.read',
           groupAr: _inventory.$1, groupEn: _inventory.$2),
         OpsItem(
+          id: 'stock-transfers', ar: 'التحويلات المخزنية', en: 'Stock transfers',
+          icon: Icons.swap_horiz_rounded, color: inventoryColor,
+          path: AppRoutes.stockTransfers, permission: 'inventory.transfer.read',
+          groupAr: _inventory.$1, groupEn: _inventory.$2),
+        OpsItem(
           id: 'batches', ar: 'الدفعات', en: 'Batches',
           icon: Icons.layers_rounded, color: inventoryColor,
           path: AppRoutes.batches, permission: 'inventory.batches.read',

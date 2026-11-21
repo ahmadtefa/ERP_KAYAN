@@ -483,6 +483,15 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
+      _NavItem(
+        AppRoutes.stockTransfers,
+        Icons.swap_horiz_rounded,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'التحويلات المخزنية'
+            : 'Stock transfers',
+        permissions: const ['inventory.transfer.read'],
+        group: _NavGroup.inventory,
+      ),
       // Everything that is not a voucher. The voucher list is its own screen
       // and is left exactly as it is.
       _NavItem(
