@@ -27,4 +27,10 @@ describe('API price redaction', () => {
       { sale: false, purchase: true, cost: false },
     )).toEqual({ purchasePrice: '10' });
   });
+
+  it('redacts inventory and returned valuation fields unless cost access is granted', () => {
+    const payload = { inventoryCostTotal: '125.00', returnedCostTotal: '25.00' };
+    expect(redactPriceFields(payload, { sale: true, purchase: true, cost: false })).toEqual({});
+    expect(redactPriceFields(payload, { sale: true, purchase: true, cost: true })).toEqual(payload);
+  });
 });

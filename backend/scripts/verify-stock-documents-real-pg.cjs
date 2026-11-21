@@ -1489,7 +1489,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','purchases.invoices.read',...(req.headers['x-cost']==='yes'?['inventory.cost.read']:[]),'inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','purchases.invoices.read',...(req.headers['x-purchase-price']==='yes'?['purchases.price.read']:[]),...(req.headers['x-cost']==='yes'?['inventory.cost.read']:[]),'inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -1559,7 +1559,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
           {itemId:taxItem.id,quantity:'1',unitPrice:'100'},
           {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'14'},
         ];
-        const send=(allowed)=>fetch(base+route,{method:'POST',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},
+        const send=(allowed)=>fetch(base+route,{method:'POST',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no',
+          ...(kind==='purchase'?{'x-purchase-price':'yes'}:{})},
           body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
         const before=await model.count({where:{companyId:company}});
         assert.equal((await send(false)).status,403,kind);
@@ -1569,28 +1570,29 @@ let difference = '70000000-0000-4000-8000-000000000005';
         const body=await response.json();
         assert.ok(body.id,kind);
         if (kind === 'sales') {
-          assert.equal(body.costOfGoods,null); assert.equal(body.grossProfit,null);
-          assert.ok(body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+          assert.ok(!Object.hasOwn(body,'costOfGoods') && !Object.hasOwn(body,'grossProfit'));
+          assert.ok(body.lines.every(line=>!Object.hasOwn(line,'unitCost') && !Object.hasOwn(line,'costTotal')));
         }
-        const update=await fetch(base+route+'/'+body.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes'},
+        const update=await fetch(base+route+'/'+body.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes',
+          ...(kind==='purchase'?{'x-purchase-price':'yes'}:{})},
           body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
         assert.equal(update.status,200,`${kind} update`);
         const updated=await update.json();
         if (kind === 'sales') {
-          assert.equal(updated.costOfGoods,null); assert.equal(updated.grossProfit,null);
-          assert.ok(updated.lines.every(line=>line.unitCost===null && line.costTotal===null));
+          assert.ok(!Object.hasOwn(updated,'costOfGoods') && !Object.hasOwn(updated,'grossProfit'));
+          assert.ok(updated.lines.every(line=>!Object.hasOwn(line,'unitCost') && !Object.hasOwn(line,'costTotal')));
         }
         if (kind === 'purchase') {
           for (const response of [body, updated]) {
-            assert.ok(response.lines.every(line => line.inventoryCostTotal === null &&
-              line.landedCostAmount === null && line.returnedCostTotal === null));
+            assert.ok(response.lines.every(line => !Object.hasOwn(line,'inventoryCostTotal') &&
+              !Object.hasOwn(line,'landedCostAmount') && !Object.hasOwn(line,'returnedCostTotal')));
             assert.equal(response.lines[0].unitPrice, '100.0000');
           }
           const path = base + route + '/' + body.id;
-          const restricted = await fetch(path,{headers:{'x-allowed':'yes'}});
+          const restricted = await fetch(path,{headers:{'x-allowed':'yes','x-purchase-price':'yes'}});
           assert.equal(restricted.status,200);
-          assert.equal((await restricted.json()).lines[0].inventoryCostTotal,null);
-          const permitted = await fetch(path,{headers:{'x-allowed':'yes','x-cost':'yes'}});
+          assert.ok(!Object.hasOwn((await restricted.json()).lines[0],'inventoryCostTotal'));
+          const permitted = await fetch(path,{headers:{'x-allowed':'yes','x-purchase-price':'yes','x-cost':'yes'}});
           assert.equal(permitted.status,200);
           assert.equal((await permitted.json()).lines[0].inventoryCostTotal,'100.0000');
           console.log('PASS: purchase invoice valuation is redacted on create, edit and read without inventory.cost.read.');
@@ -1945,8 +1947,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal((await prisma.salesInvoice.findUniqueOrThrow({where:{id:converted.sales.invoiceId}})).status,'DRAFT');
     const salesPosted=await salesInvoiceHttp('POST',`${converted.sales.invoiceId}/post`,false);
     assert.equal(salesPosted.status,201);
-    assert.equal(salesPosted.body.costOfGoods,null); assert.equal(salesPosted.body.grossProfit,null);
-    assert.ok(salesPosted.body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+    assert.ok(!Object.hasOwn(salesPosted.body,'costOfGoods') && !Object.hasOwn(salesPosted.body,'grossProfit'));
+    assert.ok(salesPosted.body.lines.every(line=>!Object.hasOwn(line,'unitCost') && !Object.hasOwn(line,'costTotal')));
     const salesAllowed=await salesInvoiceHttp('GET',converted.sales.invoiceId,true);
     assert.equal(salesAllowed.status,200);
     assert.ok(Number(salesAllowed.body.costOfGoods)>0);
@@ -1991,8 +1993,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
       if (kind === 'sales') {
         const reversed=await salesInvoiceHttp('POST',`${target.invoiceId}/reverse`,false);
         assert.equal(reversed.status,201);
-        assert.equal(reversed.body.costOfGoods,null); assert.equal(reversed.body.grossProfit,null);
-        assert.ok(reversed.body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+        assert.ok(!Object.hasOwn(reversed.body,'costOfGoods') && !Object.hasOwn(reversed.body,'grossProfit'));
+        assert.ok(reversed.body.lines.every(line=>!Object.hasOwn(line,'unitCost') && !Object.hasOwn(line,'costTotal')));
       } else {
         await svc.reverse(company,user,target.invoiceId);
       }

@@ -17,8 +17,8 @@ const PURCHASE_KEYS = new Set([
 ]);
 const COST_KEYS = new Set([
   'unitCost', 'averageCost', 'costPrice', 'costOfGoods', 'costTotal',
-  'landedCostAmount', 'landedCostCharges', 'runningValue', 'stockValue',
-  'costValue', 'valuation', 'costOfGoodsSold',
+  'inventoryCostTotal', 'returnedCostTotal', 'landedCostAmount', 'landedCostCharges',
+  'runningValue', 'stockValue', 'costValue', 'valuation', 'costOfGoodsSold',
 ]);
 const SALE_AMOUNT_KEYS = new Set([
   'subTotal', 'subtotal', 'totalAmount', 'grandTotal', 'netTotal', 'total',
