@@ -19,7 +19,24 @@ From the repository root, run PowerShell without interactive package prompts:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File distribution\windows\build-installer.ps1
 ```
 
-The script writes the staging tree under `build\windows-installer-stage\KAYAN-ERP\` and the installer under `build\windows-installer\KAYAN-ERP-Setup-<pubspec version>-x64.exe`. It does not touch the working tree's existing `docker-compose.yml`, backend-gate, or `.env` changes. It refuses to use a runtime download whose integrity verification fails.
+The script writes the staging tree under `build\windows-installer-stage\KAYAN-ERP\` and the installer under the chosen output directory. It does not touch the working tree's existing `docker-compose.yml`, backend-gate, or `.env` changes. It refuses to use a runtime download whose integrity verification fails.
+
+For the established local D: build layout, first refresh the disposable source copy at `D:\KAYAN-Windows` from `C:\Users\ahmed\ERP_KAYAN`, then run this in that copy (choose a new output path for each run):
+
+```powershell
+Set-Location 'D:\KAYAN-Windows'
+$run = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\distribution\windows\build-installer.ps1 `
+  -DisposableSource `
+  -Output "D:\KAYAN-BUILD\output-$run" `
+  -DownloadsCache 'D:\KAYAN-BUILD\downloads-cache' `
+  -PubCache 'D:\KAYAN-BUILD\pub-cache' `
+  -NpmCache 'D:\KAYAN-BUILD\npm-cache' `
+  -TempRoot 'D:\KAYAN-BUILD\temp' `
+  -IsccPath 'C:\Users\ahmed\AppData\Local\Programs\Inno Setup 6\ISCC.exe'
+```
+
+The Node and PostgreSQL archives are reused from the downloads cache only after their pinned SHA-256 checks pass. The VC++ redistributable is reused only after its Microsoft Authenticode signature verifies. Invalid cache files are left untouched and not used; valid downloads are copied into the cache without deleting existing entries. npm, Pub, and temporary paths are redirected only when explicitly supplied. CI does not require these local paths and keeps its runner-managed caches.
 
 The installer itself (not the build) requires elevation because it registers a PostgreSQL Windows service. Its post-install checkbox offers to launch KAYAN ERP.
 

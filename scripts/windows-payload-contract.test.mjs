@@ -35,6 +35,27 @@ test('the build script stages every runtime the product needs', async () => {
   assert.match(build, /migration\.sql/, 'the build must refuse a package with no migration');
 });
 
+test('local persistent caches are opt-in and every cached installer is verified before reuse', async () => {
+  const build = await read('distribution/windows/build-installer.ps1');
+  assert.match(build, /\[string\]\$DownloadsCache\s*=\s*''/);
+  assert.match(build, /\[string\]\$NpmCache\s*=\s*''/);
+  assert.match(build, /\[string\]\$PubCache\s*=\s*''/);
+  assert.match(build, /\[string\]\$TempRoot\s*=\s*''/);
+  assert.match(build, /\$env:npm_config_cache\s*=\s*\$npmCachePath/);
+  assert.match(build, /\$env:PUB_CACHE\s*=\s*\$pubCachePath/);
+  assert.match(build, /\$env:TEMP\s*=\s*\$tempRootPath/);
+  assert.match(build, /function Import-VerifiedCachedArtifact/);
+  assert.match(build, /Test-VerifiedArtifact \$cached \$Sha256/,
+    'a cache hit must be checked before the cached file is copied into staging');
+  assert.match(build, /function Save-VerifiedCachedArtifact/);
+  assert.match(build, /Test-VerifiedArtifact \$Source \$Sha256/,
+    'only verified downloads may be added to the persistent cache');
+  assert.match(build, /Import-VerifiedCachedArtifact \$nodeArchive \$nodeZip \$nodeSha256/);
+  assert.match(build, /Import-VerifiedCachedArtifact \$postgresArchive \$pgZip \$postgresSha256/);
+  assert.match(build, /Import-VerifiedCachedArtifact 'vc_redist\.x64\.exe' \$vcRuntime '' -RequireMicrosoftSignature/,
+    'the VC++ redistributable cache hit must pass Microsoft Authenticode verification');
+});
+
 test('PostgreSQL extraction skips pgAdmin while retaining the verified runtime and notices', async () => {
   const build = await read('distribution/windows/build-installer.ps1');
 

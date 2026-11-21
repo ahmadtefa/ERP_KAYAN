@@ -5,6 +5,13 @@ param(
   # which modify generated files. Use only a reviewed disposable source copy.
   [switch]$DisposableSource,
   [switch]$SkipInstaller,
+  # Optional persistent caches. Leave unset in CI to use runner defaults; local
+  # builds can point these at the operator's D: drive without baking that
+  # machine-specific layout into CI requirements.
+  [string]$DownloadsCache = '',
+  [string]$NpmCache = '',
+  [string]$PubCache = '',
+  [string]$TempRoot = '',
   # Builds the product without licences enforced. Only for development: such a
   # build refuses every customer key, and it must never be handed to a
   # customer. Without this switch a build that cannot find the operator's
@@ -79,6 +86,30 @@ if ($LASTEXITCODE -ne 0) { throw 'Licence build policy validation failed. No ins
 # required, not merely an empty shared one that another process could use.
 if (Test-Path -LiteralPath $outputPath) { throw 'Installer output path already exists; choose a new directory.' }
 if (Test-Path -LiteralPath $stage) { throw 'The unique staging directory already exists; refusing to reuse it.' }
+
+# Persistent caches are opt-in and caller-owned. CI runners use their normal
+# ephemeral cache setup unless a workflow explicitly supplies cache paths.
+$script:downloadsCachePath = $null
+if ($DownloadsCache) {
+  $script:downloadsCachePath = [IO.Path]::GetFullPath($DownloadsCache)
+  [void](New-Item -ItemType Directory -Force -Path $script:downloadsCachePath)
+}
+if ($NpmCache) {
+  $npmCachePath = [IO.Path]::GetFullPath($NpmCache)
+  [void](New-Item -ItemType Directory -Force -Path $npmCachePath)
+  $env:npm_config_cache = $npmCachePath
+}
+if ($PubCache) {
+  $pubCachePath = [IO.Path]::GetFullPath($PubCache)
+  [void](New-Item -ItemType Directory -Force -Path $pubCachePath)
+  $env:PUB_CACHE = $pubCachePath
+}
+if ($TempRoot) {
+  $tempRootPath = [IO.Path]::GetFullPath($TempRoot)
+  [void](New-Item -ItemType Directory -Force -Path $tempRootPath)
+  $env:TEMP = $tempRootPath
+  $env:TMP = $tempRootPath
+}
 [void](New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop)
 
 # The build log is the only thing that can explain a failed build, and the
@@ -151,6 +182,57 @@ function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$Sha256
   }
   $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Sha256) { throw "Checksum mismatch for $([IO.Path]::GetFileName($Destination)); refusing to use it." }
+}
+function Test-VerifiedArtifact([string]$Path, [string]$Sha256, [switch]$RequireMicrosoftSignature) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf) -or (Get-Item -LiteralPath $Path).Length -le 0) { return $false }
+  if ($Sha256) {
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $Sha256.ToLowerInvariant()) { return $false }
+  }
+  if ($RequireMicrosoftSignature) {
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { return $false }
+  }
+  return $true
+}
+function Import-VerifiedCachedArtifact([string]$Name, [string]$Destination, [string]$Sha256, [switch]$RequireMicrosoftSignature) {
+  if (-not $script:downloadsCachePath) { return $false }
+  $cached = Join-Path $script:downloadsCachePath $Name
+  if (-not (Test-Path -LiteralPath $cached -PathType Leaf)) { return $false }
+  if (-not (Test-VerifiedArtifact $cached $Sha256 -RequireMicrosoftSignature:$RequireMicrosoftSignature)) {
+    Write-Warning "Cached artifact failed integrity/signature verification and was left untouched: $cached"
+    return $false
+  }
+  Copy-Item -LiteralPath $cached -Destination $Destination
+  if (-not (Test-VerifiedArtifact $Destination $Sha256 -RequireMicrosoftSignature:$RequireMicrosoftSignature)) {
+    throw "Cached artifact changed while being copied: $Name"
+  }
+  Write-Host "Using verified cached artifact: $Name"
+  return $true
+}
+function Save-VerifiedCachedArtifact([string]$Name, [string]$Source, [string]$Sha256, [switch]$RequireMicrosoftSignature) {
+  if (-not $script:downloadsCachePath) { return }
+  if (-not (Test-VerifiedArtifact $Source $Sha256 -RequireMicrosoftSignature:$RequireMicrosoftSignature)) {
+    throw "Refusing to cache an unverified artifact: $Name"
+  }
+  $target = Join-Path $script:downloadsCachePath $Name
+  if (Test-Path -LiteralPath $target -PathType Leaf) {
+    if (-not (Test-VerifiedArtifact $target $Sha256 -RequireMicrosoftSignature:$RequireMicrosoftSignature)) {
+      Write-Warning "Existing cache entry is invalid and will not be overwritten: $target"
+    }
+    return
+  }
+  $temporary = "$target.$([guid]::NewGuid().ToString('N')).tmp"
+  try {
+    Copy-Item -LiteralPath $Source -Destination $temporary
+    if (-not (Test-VerifiedArtifact $temporary $Sha256 -RequireMicrosoftSignature:$RequireMicrosoftSignature)) {
+      throw "Cached copy failed integrity/signature verification: $Name"
+    }
+    Move-Item -LiteralPath $temporary -Destination $target
+    Write-Host "Cached verified artifact: $Name"
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+  }
 }
 function Run-Native([string]$File, [string[]]$Arguments, [string]$WorkingDirectory) {
   Push-Location $WorkingDirectory
@@ -258,14 +340,23 @@ if ($free -and $free -lt 5GB) { throw 'At least 5 GB of free space is required f
 New-Item -ItemType Directory -Force -Path $stage, $outputPath, (Join-Path $stage 'downloads') | Out-Null
 $nodeZip = Join-Path $stage "downloads\$nodeArchive"
 $pgZip = Join-Path $stage "downloads\$postgresArchive"
-Get-VerifiedArchive $nodeUrl $nodeZip $nodeSha256
-Get-VerifiedArchive $postgresUrl $pgZip $postgresSha256
+if (-not (Import-VerifiedCachedArtifact $nodeArchive $nodeZip $nodeSha256)) {
+  Get-VerifiedArchive $nodeUrl $nodeZip $nodeSha256
+  Save-VerifiedCachedArtifact $nodeArchive $nodeZip $nodeSha256
+}
+if (-not (Import-VerifiedCachedArtifact $postgresArchive $pgZip $postgresSha256)) {
+  Get-VerifiedArchive $postgresUrl $pgZip $postgresSha256
+  Save-VerifiedCachedArtifact $postgresArchive $pgZip $postgresSha256
+}
 $vcRuntime = Join-Path $stage 'downloads\vc_redist.x64.exe'
-if (-not (Test-Path $vcRuntime)) { Invoke-DownloadWithRetry -Url $vcRuntimeUrl -Destination $vcRuntime }
+if (-not (Import-VerifiedCachedArtifact 'vc_redist.x64.exe' $vcRuntime '' -RequireMicrosoftSignature)) {
+  Invoke-DownloadWithRetry -Url $vcRuntimeUrl -Destination $vcRuntime
+}
 $vcSignature = Get-AuthenticodeSignature -FilePath $vcRuntime
 if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
   throw 'The Microsoft Visual C++ x64 redistributable signature could not be verified.'
 }
+Save-VerifiedCachedArtifact 'vc_redist.x64.exe' $vcRuntime '' -RequireMicrosoftSignature
 
 $app = Join-Path $stage 'KAYAN-ERP'
 if (Test-Path -LiteralPath $app) { throw 'Staging app directory already exists; refusing to replace it.' }
