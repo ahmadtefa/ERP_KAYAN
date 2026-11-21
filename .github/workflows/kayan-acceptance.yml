@@ -39,7 +39,28 @@ jobs:
       - name: Resolve locked Flutter packages
         run: flutter pub get --enforce-lockfile
       - name: Analyze Flutter
-        run: flutter analyze --no-pub
+        continue-on-error: true
+        run: |
+          mkdir -p build/acceptance
+          set +e
+          flutter analyze --no-pub > build/acceptance/flutter-analyze.log 2>&1
+          status=$?
+          cat build/acceptance/flutter-analyze.log
+          printf '%s\n' "$status" > build/acceptance/flutter-analyze.status
+          node - build/acceptance/flutter-analyze.log <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const text = fs.readFileSync(file, 'utf8');
+          for (const line of text.split(/\r?\n/)) {
+            const match = line.match(/^\s*(error|warning|info)\s+•\s+(.*?)\s+•\s+(.+?):(\d+):(\d+)\s+•\s+(\S+)/);
+            if (match) {
+              const [, level, message, path, row, column, code] = match;
+              const escaped = message.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+              console.log(`::${level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'notice'} file=${path},line=${row},col=${column},title=Dart ${code}::${escaped}`);
+            }
+          }
+          NODE
+          exit 0
       - name: Run acceptance tests and capture real exit codes
         shell: bash
         run: |
@@ -50,9 +71,18 @@ jobs:
           flutter test test --reporter json > build/acceptance/flutter.jsonl 2> build/acceptance/flutter.stderr
           flutter_status=$?
           BACKEND_STATUS="$backend_status" FLUTTER_STATUS="$flutter_status" node scripts/kayan-acceptance-results.mjs build/acceptance/flutter.jsonl build/acceptance/results.json
+          node - build/acceptance/results.json <<'NODE'
+          const fs = require('node:fs');
+          const results = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const failure of results.flutter_full_suite?.failures ?? []) {
+            const text = `${failure.path}: ${failure.name}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+            console.log(`::error title=Flutter test failure::${text}`);
+          }
+          NODE
           node scripts/kayan-acceptance-scan.mjs build/acceptance/screen-audit.json
           node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
-          if [ "$backend_status" -ne 0 ] || [ "$flutter_status" -ne 0 ]; then
+          analyze_status=$(cat build/acceptance/flutter-analyze.status 2>/dev/null || echo 1)
+          if [ "$backend_status" -ne 0 ] || [ "$flutter_status" -ne 0 ] || [ "$analyze_status" -ne 0 ]; then
             echo 'Acceptance tests failed; evidence was retained in build/acceptance.' >&2
             exit 1
           fi
@@ -170,8 +200,26 @@ jobs:
           # generator or HMAC-backed licence store; they belong on the approved VM.
           isolated='/(installed-corrupt-state-safety|license-corruption-recovery|license-generator|license-key|license-proof|license-store|licensing-http-guard|licensing-key-replacement|licensing-keyring-integration|licensing-upgrade-model|licensing\.enforcement|licensing\.service)\.spec\.ts$'
           node ../scripts/ci-workflow-safety.test.cjs
+          set +e
           npm test -- --runInBand --testPathIgnorePatterns="/modules/licensing$isolated" --json --outputFile="$RUNNER_TEMP/jest.json"
-          node -e 'const r=require(process.argv[1]); if(!r.numPassedTests || r.numPendingTests || r.numTodoTests) throw Error("Incomplete backend suite")' "$RUNNER_TEMP/jest.json"
+          status=$?
+          node - "$RUNNER_TEMP/jest.json" <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const suite of report.testResults ?? []) {
+            for (const test of suite.assertionResults ?? []) {
+              if (test.status !== 'failed') continue;
+              const message = `${suite.name}: ${test.fullName}\n${(test.failureMessages ?? []).join('\n')}`.slice(0, 3000)
+                .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+              console.log(`::error title=Backend test failure::${message}`);
+            }
+          }
+          if (!report.numPassedTests || report.numPendingTests || report.numTodoTests) {
+            console.log(`::error title=Backend suite incomplete::${report.numPassedTests} passed, ${report.numFailedTests} failed, ${report.numPendingTests} pending`);
+            process.exitCode = 1;
+          }
+          NODE
+          [ "$status" -eq 0 ]
       - name: Seed isolated database
         if: matrix.suite != 'backend'
         run: npx ts-node prisma/seed.ts
