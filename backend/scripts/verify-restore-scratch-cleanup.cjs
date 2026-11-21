@@ -120,7 +120,13 @@ const path = require('node:path');
     await assert.rejects(service.verify('synthetic-corrupt.dump'), /could not read/);
     assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
-    await assert.rejects(service.remove(backup.file.name, 'fixture'), error => error.getStatus?.() === 409);
+    // Surplus archives may be removed, but never the final remaining copy.
+    // The concurrent and scheduled dumps mean an older file is removable;
+    // keep the original for the following HTTP/download assertions.
+    const spare = (await service.list()).find(file => file.name !== backup.file.name);
+    assert.ok(spare, 'the fixture must have a spare archive before deletion');
+    await service.remove(spare.name, 'fixture');
+    assert.equal((await service.list()).some(file => file.name === spare.name), false);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
 
     // Exercise the real controller and service over HTTP with real archive
