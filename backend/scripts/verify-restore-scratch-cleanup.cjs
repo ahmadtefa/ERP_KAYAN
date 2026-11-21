@@ -123,10 +123,11 @@ const path = require('node:path');
     // Surplus archives may be removed, but never the final remaining copy.
     // The concurrent and scheduled dumps mean an older file is removable;
     // keep the original for the following HTTP/download assertions.
-    const spare = (await service.list()).find(file => file.name !== backup.file.name);
-    assert.ok(spare, 'the fixture must have a spare archive before deletion');
-    await service.remove(spare.name, 'fixture');
-    assert.equal((await service.list()).some(file => file.name === spare.name), false);
+    const spareName = [copyA.file.name, copyB.file.name, scheduled.fileName]
+      .find(name => name !== backup.file.name);
+    assert.ok(spareName, 'the fixture must have a valid spare archive before deletion');
+    await service.remove(spareName, 'fixture');
+    assert.equal((await service.list()).some(file => file.name === spareName), false);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
 
     // Exercise the real controller and service over HTTP with real archive
@@ -181,11 +182,12 @@ const path = require('node:path');
       // Authorized deletion is allowed for a surplus archive, while the
       // original remains available as the recovery copy for the rest of the
       // fixture. The last-copy refusal is covered by the service unit tests.
-      const httpSurplus = (await service.list()).find(file => file.name !== backup.file.name);
-      assert.ok(httpSurplus, 'the HTTP fixture must have a surplus archive');
-      const removed = await fetch(`${base}/${httpSurplus.name}`, {method:'DELETE',headers});
+      const httpSurplusName = [copyA.file.name, copyB.file.name, scheduled.fileName]
+        .find(name => name !== backup.file.name && name !== spareName);
+      assert.ok(httpSurplusName, 'the HTTP fixture must have a second valid surplus archive');
+      const removed = await fetch(`${base}/${httpSurplusName}`, {method:'DELETE',headers});
       assert.ok([200,204].includes(removed.status), `unexpected surplus-delete status ${removed.status}`);
-      assert.equal((await service.list()).some(file => file.name === httpSurplus.name), false);
+      assert.equal((await service.list()).some(file => file.name === httpSurplusName), false);
       assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
       assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     } finally { await http.close(); }
