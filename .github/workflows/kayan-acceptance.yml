@@ -97,6 +97,11 @@ jobs:
           # the full golden comparison still runs above and this preview never
           # replaces or changes the checked-in baseline.
           node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
+          # The thumbnail is convenient for the check summary; lossless chunks
+          # let us reconstruct the exact rendered pixels when a golden differs.
+          for group in 0 1 2 3 4; do
+            node scripts/emit-screenshot-lossless.cjs dashboard_ar.png "$group"
+          done
       - name: Preserve a report when setup or test execution fails early
         if: always()
         shell: bash
