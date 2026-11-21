@@ -26,6 +26,7 @@ const activePrincipal = {
     {
       role: {
         code: 'storekeeper',
+        isActive: true,
         rolePermissions: [
           { permission: { code: 'inventory.items.read' } },
           { permission: { code: 'reports.read' } },
@@ -172,6 +173,21 @@ describe('JwtAuthGuard account status and live authorization', () => {
     });
   });
 
+  it('does not expose inactive role codes in the authenticated principal', async () => {
+    const principal = {
+      ...activePrincipal,
+      userRoles: [
+        ...activePrincipal.userRoles,
+        { role: { code: 'GENERAL_MANAGER', isActive: false, rolePermissions: [] } },
+      ],
+    } as never;
+    const { guard } = makeGuard({ principal });
+    const { context, request } = makeContext();
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({ roles: ['storekeeper'] });
+  });
+
   it('preserves a selected branch only while it remains assigned and active', async () => {
     const { guard } = makeGuard({
       tokenPayload: { ...payload, branchId: 'branch-current' },
@@ -215,7 +231,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
   it('honors a permission revocation before the access token expires', async () => {
     const principal = {
       ...activePrincipal,
-      userRoles: [{ role: { code: 'viewer', rolePermissions: [] } }],
+      userRoles: [{ role: { code: 'viewer', isActive: true, rolePermissions: [] } }],
     };
     const { guard } = makeGuard({ principal });
     const { context, request } = makeContext();

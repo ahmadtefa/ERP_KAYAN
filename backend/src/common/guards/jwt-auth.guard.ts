@@ -191,6 +191,7 @@ export class JwtAuthGuard implements CanActivate {
     const roles = [
       ...new Set(
         principal.userRoles
+          .filter((userRole) => (userRole.role as { isActive?: boolean }).isActive === true)
           .map((userRole) => (userRole.role as { code?: string }).code)
           .filter((code): code is string => typeof code === 'string' && code.length > 0),
       ),
