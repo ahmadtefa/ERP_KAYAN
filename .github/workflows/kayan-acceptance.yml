@@ -91,15 +91,12 @@ jobs:
         if: always()
         run: |
           flutter test --no-pub --update-goldens test/screenshots/design_screenshots_test.dart --plain-name 'screenshot: dashboard inside the shell (Arabic RTL)'
-          node - test/screenshots/goldens/dashboard_ar.png <<'NODE'
-          const fs = require('node:fs');
-          const image = fs.readFileSync(process.argv[2]).toString('base64');
-          const size = 40000;
-          const parts = Math.ceil(image.length / size);
-          for (let index = 0; index < parts; index += 1) {
-            console.log(`::notice title=Dashboard golden ${index + 1} of ${parts}::${image.slice(index * size, (index + 1) * size)}`);
-          }
-          NODE
+          # GitHub truncates individual annotation messages at 4,096 characters.
+          # A full PNG base64 string is therefore not reconstructable from those
+          # notices. Emit a clearly-labelled low-resolution preview instead;
+          # the full golden comparison still runs above and this preview never
+          # replaces or changes the checked-in baseline.
+          node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
       - name: Preserve a report when setup or test execution fails early
         if: always()
         shell: bash
