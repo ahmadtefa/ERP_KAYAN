@@ -932,7 +932,6 @@ export class StockDocumentsService {
     }
     const settings = await this.settings.get(companyId);
 
-    let result: { journal: { id: string; entryNumber: string } | null; valueChange: Prisma.Decimal };
     await this.prisma.$transaction(async (tx) => {
       // Claim the row before reading the lines used for posting. An edit or
       // workflow transition may have committed after the preliminary read;
@@ -1334,7 +1333,6 @@ export class StockDocumentsService {
         },
       }, );
 
-      result = { journal, valueChange };
     });
 
     return this.findOne(companyId, id, mayReadCost, voucherBranchId);
@@ -1356,7 +1354,6 @@ export class StockDocumentsService {
         document.lines.some((line) => line.quantity.isNegative())) {
       throw new BadRequestException('Cannot automatically reverse a transfer with negative quantities; contact support');
     }
-    const settings = await this.settings.get(companyId);
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
         where: { id, status: InvoiceStatus.POSTED },
