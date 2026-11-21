@@ -71,17 +71,21 @@ export function dashboardSectionsFor(
   const financial = granted.has('dashboard.financial');
   for (const section of DASHBOARD_SECTIONS) {
     if (granted.has(DASHBOARD_SECTION_PERMISSION[section])) {
-      // Price-bearing dashboard values have the same permission floor as the
-      // underlying documents: section visibility alone cannot expose invoice
-      // totals, stock cost, or top-sales totals.
-      const maySeeSection =
-        (section !== 'stock' || granted.has('inventory.cost.read') || granted.has('purchases.price.read')) &&
-        (section !== 'sales' || granted.has('sales.price.read')) &&
-        (section !== 'purchases' || granted.has('inventory.cost.read') || granted.has('purchases.price.read')) &&
-        (section !== 'top' || granted.has('sales.price.read'));
-      if (maySeeSection) allowed.add(section);
+      // Price-bearing dashboard values inherit the same permission floor as the
+      // documents they summarize; dashboard visibility alone cannot reveal them.
+      const maySeePriceBearingSection =
+        (section !== 'sales' && section !== 'top' || granted.has('sales.price.read')) &&
+        (section !== 'purchases' && section !== 'payables' || granted.has('purchases.price.read') || granted.has('inventory.cost.read')) &&
+        (section !== 'stock' || granted.has('purchases.price.read') || granted.has('inventory.cost.read')) &&
+        (section !== 'receivables' || granted.has('sales.price.read')) &&
+        (section !== 'revenue' && section !== 'profit' ||
+          (granted.has('sales.price.read') && (granted.has('purchases.price.read') || granted.has('inventory.cost.read'))));
+      if (maySeePriceBearingSection) allowed.add(section);
     } else if (financial && FINANCIAL_SECTIONS.has(section)) {
-      allowed.add(section);
+      const maySeePriceAggregates = section !== 'revenue' && section !== 'profit' ||
+        (granted.has('sales.price.read') &&
+          (granted.has('purchases.price.read') || granted.has('inventory.cost.read')));
+      if (maySeePriceAggregates) allowed.add(section);
     }
   }
   return allowed;

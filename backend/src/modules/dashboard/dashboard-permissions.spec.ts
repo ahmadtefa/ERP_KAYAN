@@ -8,9 +8,13 @@ import {
 
 describe('dashboard section permissions', () => {
   it('grants just the independently-authorized sections and maps the legacy financial grant narrowly', () => {
-    expect([...dashboardSectionsFor({ permissions: ['dashboard.sales'] })]).toEqual([]);
+expect([...dashboardSectionsFor({ permissions: ['dashboard.sales'] })]).toEqual([]);
     expect([...dashboardSectionsFor({ permissions: ['dashboard.sales', 'sales.price.read'] })]).toEqual(['sales']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.purchases', 'purchases.price.read'] })]).toEqual(['purchases']);
     expect([...dashboardSectionsFor({ permissions: ['dashboard.financial'] })].sort()).toEqual([
+      'cash', 'movements',
+    ]);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.financial', 'sales.price.read', 'purchases.price.read'] })].sort()).toEqual([
       'cash', 'movements', 'profit', 'revenue',
     ]);
   });
@@ -83,6 +87,7 @@ describe('dashboard section permissions', () => {
   it('requires the existing inventory cost permission before granting the stock-value KPI', () => {
     expect([...dashboardSectionsFor({ permissions: ['dashboard.stock'] })]).toEqual([]);
     expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'inventory.cost.read'] })]).toEqual(['stock']);
+    expect([...dashboardSectionsFor({ permissions: ['dashboard.stock', 'purchases.price.read'] })]).toEqual(['stock']);
   });
 
   it('strips monthly series and sales-derived counts independently', () => {

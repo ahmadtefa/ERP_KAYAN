@@ -801,11 +801,19 @@ Set<String> _dashboardSectionsFor(AppUser? user) {
   final allowed = <String>{
     for (final entry in permissions.entries)
       if (user.can(entry.value) &&
-          (entry.key != 'stock' || user.canReadPurchasePrice))
+          (entry.key != 'stock' || user.canReadPurchasePrice) &&
+          (entry.key != 'sales' && entry.key != 'top' || user.canReadSalePrice) &&
+          (entry.key != 'purchases' && entry.key != 'payables' || user.canReadPurchasePrice) &&
+          (entry.key != 'receivables' || user.canReadSalePrice) &&
+          (entry.key != 'revenue' && entry.key != 'profit' ||
+              (user.canReadSalePrice && user.canReadPurchasePrice)))
         entry.key,
   };
   if (user.can('dashboard.financial')) {
-    allowed.addAll(const ['revenue', 'profit', 'cash', 'movements']);
+    allowed.addAll(const ['cash', 'movements']);
+    if (user.canReadSalePrice && user.canReadPurchasePrice) {
+      allowed.addAll(const ['revenue', 'profit']);
+    }
   }
   return allowed;
 }
