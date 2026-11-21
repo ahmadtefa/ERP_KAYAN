@@ -39,6 +39,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['inventory.stock.read', 'View stock balances', 'عرض أرصدة المخزون', 'inventory'],
   ['inventory.stock.review', 'Review stock vouchers', 'مراجعة أذون المخزون', 'inventory'],
   ['inventory.stock.approve', 'Approve stock vouchers', 'اعتماد أذون المخزون', 'inventory'],
+  ['inventory.stock.voucher.create', 'Create and edit warehouse receipt/issue vouchers', 'إنشاء وتعديل أذون الإضافة والصرف', 'inventory'],
+  ['inventory.stock.voucher.post', 'Post and reverse approved warehouse vouchers', 'ترحيل وعكس أذون المخازن المعتمدة', 'inventory'],
 
   ['sales.invoices.read', 'View sales invoices', 'عرض فواتير البيع', 'sales'],
   ['sales.invoices.create', 'Create sales invoices', 'إنشاء فواتير البيع', 'sales'],

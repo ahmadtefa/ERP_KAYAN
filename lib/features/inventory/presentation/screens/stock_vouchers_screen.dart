@@ -149,15 +149,17 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
-    final canCreate = user?.can('inventory.stock.adjust') ?? false;
+    final canCreate =
+        user?.can('inventory.stock.voucher.create') == true ||
+        user?.can('inventory.stock.adjust') == true;
     final canPrepare =
         canCreate &&
+        (user?.can('inventory.stock.read') ?? false) &&
         (user?.can('inventory.items.read') ?? false) &&
         (user?.can('inventory.warehouses.read') ?? false);
     final canAssignCostCenter =
         user?.can('accounting.costcenters.read') ?? false;
     final canIssue = canPrepare && canAssignCostCenter;
-    final canSeeCost = user?.canReadPurchasePrice ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text(_label(context, 'أذون المخزون', 'Stock vouchers')),
@@ -167,7 +169,7 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
           Wrap(
             spacing: 8,
             children: [
-              if (canPrepare && canSeeCost)
+              if (canPrepare)
                 FilledButton(
                   onPressed: () => _create('RECEIPT'),
                   child: Text(_label(context, 'إذن إضافة', 'New receipt')),
@@ -375,10 +377,16 @@ class _StockVoucherDetailScreenState
     if (!ok) return;
     setState(() => _busy = true);
     try {
+      final useDedicatedVoucherPermission =
+          ref.read(currentUserProvider)?.can('inventory.stock.voucher.post') ==
+          true;
       await ref
           .read(apiClientProvider)
           .post(
-            '$_base/${widget.id}/$action',
+            (action == 'post' || action == 'reverse') &&
+                    useDedicatedVoucherPermission
+                ? '$_base/vouchers/${widget.id}/$action'
+                : '$_base/${widget.id}/$action',
             body: {'expectedVersion': version},
           );
       if (mounted) {
@@ -480,8 +488,10 @@ class _StockVoucherDetailScreenState
                     subtitle: Text(
                       '${_label(context, 'الكمية', 'Quantity')}: ${text(line, 'unitQuantity', fallback: text(line, 'quantity'))} • ${text(line, 'unit')}${text(line, 'notes').isEmpty ? '' : ' • ${text(line, 'notes')}'}',
                     ),
-                    trailing: can('inventory.cost.read')
-                        ? Text(
+                    trailing:
+                        (ref.watch(currentUserProvider)?.canReadPurchasePrice ??
+                                false)
+                            ? Text(
                             '${_label(context, 'تكلفة الوحدة الأساسية', 'Base unit cost')}: ${text(line, 'unitCost')}',
                           )
                         : null,
@@ -497,11 +507,12 @@ class _StockVoucherDetailScreenState
                   spacing: 8,
                   children: [
                     if (status == 'draft' &&
-                        can('inventory.stock.adjust') &&
+                        (can('inventory.stock.voucher.create') ||
+                            can('inventory.stock.adjust')) &&
                         can('inventory.items.read') &&
                         can('inventory.warehouses.read') &&
-                        (text(doc, 'voucherKind') != 'RECEIPT' ||
-                            can('inventory.cost.read')) &&
+                        (text(doc, 'voucherKind') != 'ISSUE' ||
+                            can('accounting.costcenters.read')) &&
                         doc['editVersion'] is int)
                       OutlinedButton(
                         onPressed: _busy || _confirming
@@ -535,14 +546,17 @@ class _StockVoucherDetailScreenState
                     if (status == 'draft' &&
                         version != null &&
                         approved &&
-                        can('inventory.stock.adjust'))
+                        (can('inventory.stock.voucher.post') ||
+                            can('inventory.stock.adjust')))
                       FilledButton(
                         onPressed: _busy || _confirming
                             ? null
                             : () => _action('post', version),
                         child: Text(_label(context, 'ترحيل', 'Post')),
                       ),
-                    if (status == 'posted' && can('inventory.stock.adjust'))
+                    if (status == 'posted' &&
+                        (can('inventory.stock.voucher.post') ||
+                            can('inventory.stock.adjust')))
                       OutlinedButton(
                         onPressed: _busy || _confirming
                             ? null
@@ -683,9 +697,18 @@ class _StockVoucherCreateScreenState
   String? _warehouse, _center, _scope;
   int? _editVersion;
   bool get _editing => widget.initialDocument != null;
-  String get _path => _editing
-      ? '$_base/${text(widget.initialDocument!, 'id')}/voucher-draft'
-      : _base;
+  bool get _useDedicatedVoucherPermission =>
+      ref.read(currentUserProvider)?.can('inventory.stock.voucher.create') == true;
+  String get _path {
+    if (_useDedicatedVoucherPermission) {
+      return _editing
+          ? '$_base/vouchers/${text(widget.initialDocument!, 'id')}/draft'
+          : '$_base/vouchers';
+    }
+    return _editing
+        ? '$_base/${text(widget.initialDocument!, 'id')}/voucher-draft'
+        : _base;
+  }
   OrderRetryStore? _store;
   Map<String, dynamic>? _pending;
   late Future<List<List<Json>>> _options;

@@ -330,7 +330,6 @@ export class StockDocumentsService {
     if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
     if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
     if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
-    if (voucherKind === 'RECEIPT' && !mayReadCost) throw new ForbiddenException('Receipt vouchers require inventory.cost.read');
 
     // The request fingerprint is the authority for retries. A document key
     // alone is not enough: reusing it with a different payload must conflict.
@@ -693,7 +692,6 @@ export class StockDocumentsService {
       if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
       const document = await tx.stockDocument.findUniqueOrThrow({ where: { id }, include: { lines: true } });
       if (!document.voucherKind) throw new NotFoundException('Stock voucher not found');
-      if (document.voucherKind === 'RECEIPT' && !mayReadCost) throw new ForbiddenException('Receipt vouchers require inventory.cost.read');
       const previous = await tx.$queryRaw<Array<{ documentId: string; requestHash: string; resultVersion: number }>>(Prisma.sql`
         SELECT "documentId", "requestHash", "resultVersion" FROM stock_voucher_edit_requests
         WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid AND "requestKey" = ${identity.key}
@@ -759,14 +757,21 @@ export class StockDocumentsService {
           quantity = entered.isNegative() ? resolved.baseQuantity.negated() : resolved.baseQuantity;
           unitName = resolved.snapshot.unitName; unitFactor = resolved.snapshot.unitFactor; unitQuantity = entered;
         } else { quantity = entered; unitName = null; unitFactor = null; unitQuantity = null; }
-        if (document.voucherKind === 'RECEIPT' && (raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '')) {
+        const costMissing = raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '';
+        const sameSavedItem = old !== undefined && old.itemId === item.id;
+        const preserveHiddenCost = !mayReadCost && sameSavedItem &&
+          (document.voucherKind === 'ISSUE' || costMissing);
+        if (document.voucherKind === 'RECEIPT' && costMissing && !preserveHiddenCost) {
           throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
         }
-        // Issue-only editors may not have cost visibility. Omitted or
-        // unauthorized issue cost never destroys or replaces a saved cost.
-        const unitCost = document.voucherKind === 'ISSUE' && (!mayReadCost || raw.unitCost === undefined)
-          ? (old && old.itemId === item.id ? old.unitCost : new Prisma.Decimal(0))
-          : raw.unitCost === undefined ? new Prisma.Decimal(0) : this.decimal(raw.unitCost, `Line ${index + 1} unit cost`);
+        // Editors without purchase-price visibility can still update quantities
+        // and metadata without blanking or changing a saved valuation. A new
+        // receipt line still needs an explicitly supplied cost.
+        const unitCost = preserveHiddenCost
+          ? old.unitCost
+          : raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === ''
+            ? new Prisma.Decimal(0)
+            : this.decimal(raw.unitCost, `Line ${index + 1} unit cost`);
         if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException(`Line ${index + 1}: invalid stock value`);
         if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
         lines.push({ id: old?.id ?? randomUUID(), itemId: item.id, lineNumber: index + 1, quantity, unitCost, unitName, unitFactor, unitQuantity, notes: raw.notes ?? null });

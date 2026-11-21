@@ -279,6 +279,9 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     permissions: [
       'inventory.items.read',
       'inventory.stock.read',
+      'inventory.stock.voucher.create',
+      'inventory.stock.voucher.post',
+      'accounting.costcenters.read',
       'inventory.batches.read',
       'inventory.batches.receive',
       'inventory.batches.issue',

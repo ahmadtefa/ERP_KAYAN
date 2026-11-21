@@ -266,13 +266,13 @@ class OperationsRegistry {
           id: 'stock-receipt-new', ar: 'إذن إضافة مخزني جديد', en: 'New stock receipt voucher',
           icon: Icons.move_to_inbox_rounded, color: inventoryColor,
           path: '${AppRoutes.stock}?new=1&voucher=RECEIPT',
-          permission: 'inventory.stock.adjust&inventory.items.read&inventory.warehouses.read&inventory.cost.read',
+          permission: 'inventory.stock.voucher.create&inventory.stock.read&inventory.items.read&inventory.warehouses.read|inventory.stock.adjust&inventory.stock.read&inventory.items.read&inventory.warehouses.read&inventory.cost.read',
           groupAr: _inventory.$1, groupEn: _inventory.$2, opensForm: true),
         OpsItem(
           id: 'stock-issue-new', ar: 'إذن صرف مخزني جديد', en: 'New stock issue voucher',
           icon: Icons.outbox_rounded, color: inventoryColor,
           path: '${AppRoutes.stock}?new=1&voucher=ISSUE',
-          permission: 'inventory.stock.adjust&inventory.items.read&inventory.warehouses.read&accounting.costcenters.read',
+          permission: 'inventory.stock.voucher.create&inventory.stock.read&inventory.items.read&inventory.warehouses.read&accounting.costcenters.read|inventory.stock.adjust&inventory.stock.read&inventory.items.read&inventory.warehouses.read&accounting.costcenters.read',
           groupAr: _inventory.$1, groupEn: _inventory.$2, opensForm: true),
         OpsItem(
           id: 'stock-transfer-new', ar: 'تحويل مخزني جديد', en: 'New stock transfer',

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -32,13 +32,16 @@ describe('stock voucher draft edit', () => {
     expect((h.tx.stockDocument.update.mock.calls[0][0] as {data:unknown}).data).toEqual(expect.objectContaining({reviewedAt:null,approvedAt:null,editVersion:3}));
     expect(h.tx.$executeRaw).toHaveBeenCalledTimes(1); expect(h.audit.recordRequired).toHaveBeenCalledTimes(1);
   });
-  it('refuses stale edits and cost access before modifying lines', async () => {
+  it('refuses stale edits before modifying lines', async () => {
     const h = harness();
     await expect(h.service.updateVoucher('company','branch','user','doc',{...input(),expectedVersion:1},true)).rejects.toBeInstanceOf(ConflictException);
     expect(h.tx.stockDocumentLine.deleteMany).not.toHaveBeenCalled();
-    const h2 = harness();
-    await expect(h2.service.updateVoucher('company','branch','user','doc',input(),false)).rejects.toBeInstanceOf(ForbiddenException);
-    expect(h2.tx.stockDocumentLine.deleteMany).not.toHaveBeenCalled();
+  });
+  it('allows a receipt editor without purchase-price visibility to preserve its saved cost', async () => {
+    const h = harness(); const request = input(); request.lines[0].unitCost = '';
+    await h.service.updateVoucher('company','branch','user','doc',request,false);
+    const line = h.tx.stockDocumentLine.createMany.mock.calls[0][0].data[0];
+    expect(line.unitCost.toString()).toBe('3');
   });
   it('does not let an issue editor without cost access overwrite a saved cost', async () => {
     const h = harness();
