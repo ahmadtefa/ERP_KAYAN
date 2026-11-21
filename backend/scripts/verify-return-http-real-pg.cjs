@@ -23,23 +23,29 @@ module.exports=async function verifyReturnHttp({prisma,returns,company,user,bran
   const side=kind==='sales'?'sales':'purchases';
   app.use((req,_res,next)=>{req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:false,
     permissions:[`${side}.invoices.read`,`${side}.invoices.create`,`${side}.invoices.post`,
+      ...(req.headers['x-price']==='yes'?[`${side}.price.read`]:[]),
       ...(req.headers['x-cost']==='yes'?['inventory.cost.read']:[])]};next();});
   app.useGlobalGuards(new PermissionsGuard(new Reflector()));app.useGlobalFilters(new ProblemDetailsFilter());
   const model=kind==='sales'?prisma.salesInvoice:prisma.purchaseInvoice;
   const lineModel=kind==='sales'?prisma.salesInvoiceLine:prisma.purchaseInvoiceLine;
   const balance=async()=>await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:item}}});
   const checkHidden=body=>{
-    assert.equal(body.landedCostAmount,null);
+    assert.equal(Object.hasOwn(body,'landedCostAmount'),false);
     assert.equal(body.lines.length,1);
-    if(kind==='sales'){assert.equal(body.lines[0].unitCost,null);assert.equal(body.lines[0].costTotal,null);}
-    else {assert.equal(body.lines[0].landedCostAmount,null);assert.equal(body.lines[0].inventoryCostTotal,null);}
-    assert.ok(body.lines[0].unitPrice!==null);
+    assert.equal(Object.hasOwn(body.lines[0],'unitPrice'),false);
+    if(kind==='sales'){
+      assert.equal(Object.hasOwn(body.lines[0],'unitCost'),false);
+      assert.equal(Object.hasOwn(body.lines[0],'costTotal'),false);
+    } else {
+      assert.equal(Object.hasOwn(body.lines[0],'landedCostAmount'),false);
+      assert.equal(Object.hasOwn(body.lines[0],'inventoryCostTotal'),false);
+    }
   };
   try {
     await app.listen(0,'127.0.0.1');
     const base=`http://127.0.0.1:${app.getHttpServer().address().port}/returns/${side}`;
-    const send=(method,path='',data,mayReadCost=false)=>fetch(base+path,{method,
-      headers:{'content-type':'application/json','x-cost':mayReadCost?'yes':'no'},
+    const send=(method,path='',data,mayReadCost=false,mayReadPrice=false)=>fetch(base+path,{method,
+      headers:{'content-type':'application/json','x-cost':mayReadCost?'yes':'no','x-price':mayReadPrice?'yes':'no'},
       ...(data===undefined?{}:{body:JSON.stringify(data)})});
     const before=await balance();
     assert.equal((await lineModel.findUniqueOrThrow({where:{id:lineId}})).returnedQuantity.toFixed(4),'0.0000');
@@ -59,6 +65,12 @@ module.exports=async function verifyReturnHttp({prisma,returns,company,user,bran
     const full=await send('GET',`/${draft.id}`,undefined,true);assert.equal(full.status,200);
     const fullBody=await full.json();
     assert.ok(Number(kind==='sales'?fullBody.lines[0].costTotal:fullBody.lines[0].inventoryCostTotal)>0);
+    assert.equal(Object.hasOwn(fullBody.lines[0],'unitPrice'),false);
+    const priceOnly=await send('GET',`/${draft.id}`,undefined,false,true);assert.equal(priceOnly.status,200);
+    const priceBody=await priceOnly.json();
+    assert.ok(Number(priceBody.lines[0].unitPrice)>0);
+    if(kind==='sales') assert.equal(Object.hasOwn(priceBody.lines[0],'unitCost'),false);
+    else assert.equal(Object.hasOwn(priceBody.lines[0],'inventoryCostTotal'),false);
     const reversed=await send('POST',`/${draft.id}/reverse`,{});assert.equal(reversed.status,201);
     const reversedBody=await reversed.json();checkHidden(reversedBody);
     assert.equal((await model.findUniqueOrThrow({where:{id:draft.id}})).status,'REVERSED');

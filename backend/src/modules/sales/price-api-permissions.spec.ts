@@ -1,5 +1,6 @@
 import { SalesInvoicesController } from './sales-invoices.controller';
 import { PurchaseInvoicesController } from '../purchases/purchase-invoices.controller';
+import { ReturnsController } from '../returns/returns.controller';
 
 describe('price-read permissions on invoice API responses', () => {
   const principal = (permissions: string[]) => ({
@@ -34,5 +35,25 @@ describe('price-read permissions on invoice API responses', () => {
     expect(allowed).toMatchObject({ unitPrice: '9.0000', totalAmount: '18.0000', status: 'draft' });
     const costOnly = await controller.findOne(principal(['inventory.cost.read']) as never, 'invoice') as Record<string, unknown>;
     expect(costOnly).toEqual({ status: 'draft' });
+  });
+
+  it('keeps return price and inventory cost permissions independent', async () => {
+    const service = { findOne: jest.fn().mockResolvedValue({
+      id: 'return',
+      lines: [{
+        unitPrice: '10.0000', unitCost: '6.0000', costTotal: '6.0000',
+        inventoryCostTotal: '7.0000', returnedCostTotal: '1.0000', landedCostAmount: '1.0000',
+      }],
+    }) };
+    const controller = new ReturnsController(service as never);
+    const blocked = await controller.getSales(principal([]) as never, 'return') as Record<string, unknown>;
+    expect(blocked).toEqual({ id: 'return', lines: [{}] });
+    const priceOnly = await controller.getSales(principal(['sales.price.read']) as never, 'return') as Record<string, unknown>;
+    expect(priceOnly).toEqual({ id: 'return', lines: [{ unitPrice: '10.0000' }] });
+    const costOnly = await controller.getSales(principal(['inventory.cost.read']) as never, 'return') as Record<string, unknown>;
+    expect(costOnly).toEqual({ id: 'return', lines: [{
+      unitCost: '6.0000', costTotal: '6.0000', inventoryCostTotal: '7.0000',
+      returnedCostTotal: '1.0000', landedCostAmount: '1.0000',
+    }] });
   });
 });
