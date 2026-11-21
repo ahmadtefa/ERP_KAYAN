@@ -50,6 +50,72 @@ void main() {
     },
   );
 
+  testWidgets('server errors render and clear for toggles and selections', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrapWithApp(
+        child: Scaffold(
+          body: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showFormSheet(
+                context,
+                title: 'Edit',
+                fields: const [
+                  FieldSpec('active', 'Active', kind: FieldKind.toggle),
+                  FieldSpec(
+                    'kind',
+                    'Kind',
+                    kind: FieldKind.select,
+                    options: [FieldOption('one', 'Option one')],
+                  ),
+                  FieldSpec(
+                    'roles',
+                    'Roles',
+                    kind: FieldKind.multiSelect,
+                    options: [FieldOption('role', 'Role one')],
+                  ),
+                ],
+                onSubmit: (_) async => throw const ApiFailure(
+                  'Invalid',
+                  statusCode: 422,
+                  fieldErrors: {
+                    'active': 'Active is invalid',
+                    'kind': 'Kind is invalid',
+                    'roles': 'Roles are invalid',
+                  },
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Active is invalid'), findsOneWidget);
+    expect(find.text('Kind is invalid'), findsOneWidget);
+    expect(find.text('Roles are invalid'), findsOneWidget);
+
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(find.text('Active is invalid'), findsNothing);
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Option one').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Kind is invalid'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Role one'));
+    await tester.pumpAndSettle();
+    expect(find.text('Roles are invalid'), findsNothing);
+  });
+
   /// A screen with one button that opens the shared form sheet, and keeps
   /// whatever the sheet returns.
   Widget host(

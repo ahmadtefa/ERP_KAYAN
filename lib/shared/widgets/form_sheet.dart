@@ -289,7 +289,9 @@ class _FormSheetState extends State<_FormSheet> {
             '${picked.year.toString().padLeft(4, '0')}-'
             '${picked.month.toString().padLeft(2, '0')}-'
             '${picked.day.toString().padLeft(2, '0')}';
+        _fieldErrors.remove(field.key);
       });
+      _fieldKeys[field.key]?.currentState?.validate();
     }
   }
 
@@ -426,14 +428,39 @@ class _FormSheetState extends State<_FormSheet> {
       case FieldKind.toggle:
         return Padding(
           padding: padding,
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(field.label),
-            subtitle: field.helper == null ? null : Text(field.helper!),
-            value: _toggles[field.key] ?? false,
-            onChanged: widget.readOnly
-                ? null
-                : (value) => setState(() => _toggles[field.key] = value),
+          child: Focus(
+            focusNode: _focusNodes[field.key],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  key: _fieldKeys[field.key],
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(field.label),
+                  subtitle: field.helper == null ? null : Text(field.helper!),
+                  value: _toggles[field.key] ?? false,
+                  onChanged: widget.readOnly
+                      ? null
+                      : (value) => setState(() {
+                          _toggles[field.key] = value;
+                          _fieldErrors.remove(field.key);
+                        }),
+                ),
+                if (_fieldErrors[field.key] case final error?)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 16,
+                      bottom: 8,
+                    ),
+                    child: Text(
+                      error,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       case FieldKind.select:
@@ -459,74 +486,95 @@ class _FormSheetState extends State<_FormSheet> {
                   child: Text(option.label),
                 ),
             ],
-            validator: field.required
-                ? (value) => (value == null || value.isEmpty)
-                      ? context.l10n.requiredField
-                      : null
-                : null,
+            validator: (value) {
+              final serverError = _fieldErrors[field.key];
+              if (serverError != null) return serverError;
+              if (field.required && (value == null || value.isEmpty)) {
+                return context.l10n.requiredField;
+              }
+              return null;
+            },
             onChanged: widget.readOnly
                 ? null
-                : (value) => setState(() {
-                    _selections[field.key] = value;
-                    _fieldErrors.remove(field.key);
-                  }),
+                : (value) {
+                    setState(() {
+                      _selections[field.key] = value;
+                      _fieldErrors.remove(field.key);
+                    });
+                    _fieldKeys[field.key]?.currentState?.validate();
+                  },
           ),
         );
       case FieldKind.multiSelect:
         return Padding(
           padding: padding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                field.label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              if (field.helper != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    field.helper!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+          child: Focus(
+            focusNode: _focusNodes[field.key],
+            child: Column(
+              key: _fieldKeys[field.key],
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  field.label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-              const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  for (final option in field.options)
-                    FilterChip(
-                      label: Text(option.label),
-                      selected:
-                          _multiSelections[field.key]?.contains(option.value) ??
-                          false,
-                      onSelected:
-                          widget.readOnly ||
-                              (!option.enabled &&
-                                  !(_multiSelections[field.key]?.contains(
-                                        option.value,
-                                      ) ??
-                                      false))
-                          ? null
-                          : (selected) => setState(() {
-                              final chosen =
-                                  _multiSelections[field.key] ?? <String>{};
-                              if (selected) {
-                                chosen.add(option.value);
-                              } else {
-                                chosen.remove(option.value);
-                              }
-                              _multiSelections[field.key] = chosen;
-                            }),
+                if (field.helper != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      field.helper!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                ],
-              ),
-            ],
+                  ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    for (final option in field.options)
+                      FilterChip(
+                        label: Text(option.label),
+                        selected:
+                            _multiSelections[field.key]?.contains(option.value) ??
+                            false,
+                        onSelected:
+                            widget.readOnly ||
+                                (!option.enabled &&
+                                    !(_multiSelections[field.key]?.contains(
+                                          option.value,
+                                        ) ??
+                                        false))
+                            ? null
+                            : (selected) => setState(() {
+                                final chosen =
+                                    _multiSelections[field.key] ?? <String>{};
+                                if (selected) {
+                                  chosen.add(option.value);
+                                } else {
+                                  chosen.remove(option.value);
+                                }
+                                _multiSelections[field.key] = chosen;
+                                _fieldErrors.remove(field.key);
+                              }),
+                      ),
+                  ],
+                ),
+                if (_fieldErrors[field.key] case final error?)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(top: 8),
+                    child: Text(
+                      error,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       case FieldKind.date:
@@ -549,8 +597,13 @@ class _FormSheetState extends State<_FormSheet> {
                           Localizations.localeOf(context).languageCode == 'ar'
                           ? 'مسح التاريخ'
                           : 'Clear date',
-                      onPressed: () =>
-                          setState(() => _controllers[field.key]!.clear()),
+                      onPressed: () {
+                        setState(() {
+                          _controllers[field.key]!.clear();
+                          _fieldErrors.remove(field.key);
+                        });
+                        _fieldKeys[field.key]?.currentState?.validate();
+                      },
                       icon: const Icon(Icons.clear),
                     )
                   : const Icon(Icons.calendar_today_outlined),
