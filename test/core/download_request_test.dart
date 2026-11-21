@@ -50,6 +50,16 @@ void main() {
       );
     });
 
+    test('accepts a JSON archive and refuses an HTML page saved as JSON', () {
+      final archive = Uint8List.fromList('{"format":"kayan-master-data-backup"}'.codeUnits);
+      expect(() => validateDownloadedFile(archive, 'kayan-items.json'), returnsNormally);
+      final html = Uint8List.fromList('<html>missing route</html>'.codeUnits);
+      expect(
+        () => validateDownloadedFile(html, 'kayan-items.json'),
+        throwsA(isA<DownloadFailure>()),
+      );
+    });
+
     test('leaves text formats to the server status alone', () {
       final csv = Uint8List.fromList('code,name\n1,One\n'.codeUnits);
       expect(() => validateDownloadedFile(csv, 'report.csv'), returnsNormally);

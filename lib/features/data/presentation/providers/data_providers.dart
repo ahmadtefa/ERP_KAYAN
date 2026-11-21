@@ -313,6 +313,20 @@ class ReportLinkBuilder {
     );
   }
 
+  /// A separate master-data backup that can only restore the selected list.
+  Future<DownloadRequest> masterDataBackup({
+    required String kind,
+  }) async {
+    if (!const {'items', 'customers', 'suppliers'}.contains(kind)) {
+      throw ArgumentError.value(kind, 'kind', 'Unknown master-data backup type');
+    }
+    final query = {'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/master-data-backups/$kind/download?${_encode(query)}',
+      fileName: 'kayan-$kind.json',
+    );
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<DownloadRequest> importTemplate({
     required String kind,

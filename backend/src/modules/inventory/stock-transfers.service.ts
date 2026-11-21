@@ -443,7 +443,9 @@ export class StockTransfersService {
         if (!old) await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: actionKey, requestHash: actionHash, action: 'CANCEL', resultVersion: current.version + 1 } });
       });
       await this.audit.record({ companyId, userId, action: 'CANCEL_AND_REVERSE', entity: 'stock_transfers', entityId: id });
-      return this.findOne(companyId, id);
+      const cancelled = await this.findOne(companyId, id);
+      await this.notifyNextStages(cancelled);
+      return cancelled;
     }
     throw new ConflictException('This transfer cannot be cancelled at its current stage');
   }
@@ -493,6 +495,14 @@ export class StockTransfersService {
     }
     if (transfer.status === 'SETTLEMENT_PENDING') stages.push(STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED);
     if (['RECEIVED', 'SETTLED'].includes(transfer.status)) stages.push(STOCK_TRANSFER_CLOSE_REQUIRED);
+    // Keep the current human task visible until it is completed; close the
+    // previous stage so a dispatched task does not linger after receipt.
+    await this.notifications.resolveEntity(
+      transfer.companyId,
+      'StockTransfer',
+      transfer.id,
+      stages,
+    );
     for (const type of stages) await this.notifyStage(transfer, type);
   }
 
@@ -552,7 +562,9 @@ export class StockTransfersService {
       entityId: transfer.id,
       entityRef: documentNumber,
       actionPath: `/inventory/stock-transfers?transferId=${encodeURIComponent(transfer.id)}`,
-      dedupe: dedupeKey({ type, entityId: transfer.id, suffix: `v${transfer.version}` }),
+      // A transfer's current task is one deduplicated alert, even if the
+      // shipment arrives in several dispatch/receipt batches.
+      dedupe: dedupeKey({ type, entityId: transfer.id }),
     });
   }
 

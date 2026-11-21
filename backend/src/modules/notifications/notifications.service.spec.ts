@@ -9,6 +9,7 @@ import {
   STOCK_EXPIRED_WRITE_OFF_PENDING,
   STOCK_EXPIRY_SOON,
   STOCK_OUT_OF_STOCK,
+  STOCK_TRANSFER_RECEIPT_REQUIRED,
 } from './notification-kinds';
 import { NotificationsService } from './notifications.service';
 
@@ -441,6 +442,64 @@ describe('notifications', () => {
     );
 
     expect(answer.items.map((row) => row.id)).toEqual(['mine', 'company-wide']);
+  });
+
+  it('shows receipt tasks only to users who may receive at that warehouse', async () => {
+    const { service } = makeHarness({
+      notifications: [
+        notification({
+          id: 'receipt',
+          type: STOCK_TRANSFER_RECEIPT_REQUIRED,
+          permission: 'inventory.transfer.receive',
+          entityType: 'StockTransfer',
+          entityId: 'transfer-1',
+        }),
+        notification({ id: 'ordinary' }),
+      ],
+    });
+    const base = {
+      permissions: ['inventory.stock.read', 'inventory.transfer.receive'],
+      warehouseAccess: [{ warehouseId: WAREHOUSE, canView: true, canReceive: false }],
+    };
+    expect((await service.list(user(base) as never)).items.map((row) => row.id)).toEqual(['ordinary']);
+    expect((await service.list(user({
+      ...base,
+      warehouseAccess: [{ warehouseId: WAREHOUSE, canView: true, canReceive: true }],
+    }) as never)).items.map((row) => row.id)).toContain('receipt');
+  });
+
+  it('does not reveal or mutate a receipt alert outside the assigned warehouse', async () => {
+    const { service } = makeHarness({
+      notifications: [notification({
+        id: 'private-receipt',
+        type: STOCK_TRANSFER_RECEIPT_REQUIRED,
+        permission: 'inventory.transfer.receive',
+        entityType: 'StockTransfer',
+        entityId: 'transfer-private',
+      })],
+    });
+    await expect(service.markRead(user({
+      permissions: ['inventory.transfer.receive'],
+      warehouseAccess: [{ warehouseId: 'different-warehouse', canView: true, canReceive: true }],
+    }) as never, 'private-receipt')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('closes an obsolete workflow stage while preserving the current task', async () => {
+    const { service, state } = makeHarness({
+      notifications: [
+        notification({ type: 'STOCK_TRANSFER_DISPATCH_REQUIRED', entityType: 'StockTransfer', entityId: 'transfer-1' }),
+        notification({ type: STOCK_TRANSFER_RECEIPT_REQUIRED, entityType: 'StockTransfer', entityId: 'transfer-1', dedupeKey: `${STOCK_TRANSFER_RECEIPT_REQUIRED}:transfer-1` }),
+        notification({ type: STOCK_TRANSFER_RECEIPT_REQUIRED, entityType: 'StockTransfer', entityId: 'transfer-1', dedupeKey: `${STOCK_TRANSFER_RECEIPT_REQUIRED}:transfer-1:v2` }),
+        notification({ type: STOCK_TRANSFER_RECEIPT_REQUIRED, entityType: 'StockTransfer', entityId: 'other-transfer' }),
+      ],
+    });
+    await service.resolveEntity(COMPANY, 'StockTransfer', 'transfer-1', [STOCK_TRANSFER_RECEIPT_REQUIRED]);
+    expect(state.notifications.map((row) => [row.entityId, row.type, row.status])).toEqual([
+      ['transfer-1', 'STOCK_TRANSFER_DISPATCH_REQUIRED', 'CLOSED'],
+      ['transfer-1', STOCK_TRANSFER_RECEIPT_REQUIRED, 'OPEN'],
+      ['transfer-1', STOCK_TRANSFER_RECEIPT_REQUIRED, 'CLOSED'],
+      ['other-transfer', STOCK_TRANSFER_RECEIPT_REQUIRED, 'OPEN'],
+    ]);
   });
 
   it('gives a super administrator the whole centre', async () => {

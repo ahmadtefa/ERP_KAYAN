@@ -53,7 +53,28 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
       approve:jest.fn(async (...args:string[])=>{const id=args[2];const d=docsState.get(id)!;d.approvedAt=new Date();return d;}),
       post:jest.fn(async (...args:string[])=>{const id=args[2];posted.push(id);docsState.get(id)!.status='POSTED';return {status:'POSTED'};}),
     };
-    service=new StockTransfersService(prisma as never,docs as never,{record:async()=>undefined} as never,{raise:async(input:Record<string,unknown>)=>{raised.push(input);const dedupe=String(input.dedupe);storedNotifications.set(dedupe,input);return {id:`notification-${storedNotifications.size}`};}} as never);
+    service=new StockTransfersService(
+      prisma as never,
+      docs as never,
+      {record:async()=>undefined} as never,
+      {
+        raise:async(input:Record<string,unknown>)=>{
+          raised.push(input);
+          const dedupe=String(input.dedupe);
+          const existing=storedNotifications.get(dedupe);
+          storedNotifications.set(dedupe,{...existing,...input,status:existing?.status??'OPEN'});
+          return {id:`notification-${storedNotifications.size}`};
+        },
+        resolveEntity:async(_companyId:string,_entityType:string,entityId:string,activeTypes:readonly string[])=>{
+          for(const [key,notification] of storedNotifications) {
+            if(notification.entityId===entityId&&!activeTypes.includes(String(notification.type))) {
+              storedNotifications.set(key,{...notification,status:'CLOSED'});
+            }
+          }
+          return {closed:0};
+        },
+      } as never,
+    );
   });
   afterEach(async()=>db.close());
 
@@ -69,9 +90,13 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     expect(dispatched.status).toBe('DISPATCHED');
     expect(dispatched.lines[0].dispatchedQuantity.toString()).toBe('10');
     expect(posted).toHaveLength(1);
+    const receiptTask=[...storedNotifications.values()].find(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')!;
+    expect(receiptTask.status).toBe('OPEN');
+    expect(receiptTask.warehouseId).toBe(TO);
     const received=await service.receive(COMPANY,USER_B,row.id,'receive-001',[{lineId:row.lines[0].id,quantity:'4'}]);
     expect(received.status).toBe('PARTIALLY_RECEIVED');
     expect(received.lines[0].receivedQuantity.toString()).toBe('4');
+    expect([...storedNotifications.values()].find(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')?.status).toBe('OPEN');
     const settled=await service.settle(COMPANY,USER_B,row.id,'settle-001',[{lineId:row.lines[0].id,returnedQuantity:'6',reason:'Unneeded units returned'}]);
     expect(settled.status).toBe('SETTLED');
     expect(settled.lines[0].returnedQuantity.toString()).toBe('6');
@@ -89,11 +114,14 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     ]);
     expect(raised[0].dedupe).toBe(raised[1].dedupe);
     const storedRows = [...storedNotifications.values()];
-    expect(storedRows).toHaveLength(6);
+    expect(storedRows).toHaveLength(5);
     const receipt = storedRows.find(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')!;
     expect(receipt.warehouseId).toBe(TO);
     expect(receipt.branchId).toBe(BRANCH_B);
     expect(receipt.actionPath).toBe(`/inventory/stock-transfers?transferId=${row.id}`);
+    expect(receipt.status).toBe('CLOSED');
+    expect(storedRows.filter(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')).toHaveLength(1);
+    expect(storedRows.every(event=>event.status==='CLOSED')).toBe(true);
     expect(JSON.stringify(storedRows)).not.toMatch(/unitCost|purchasePrice|costOfGoods|inventoryCostTotal/);
   });
 

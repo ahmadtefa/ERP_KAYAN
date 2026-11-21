@@ -221,6 +221,11 @@ jobs:
           status=$?
           cat ../build/acceptance-postgres/jest.log
           exit "$status"
+      - name: Round-trip each independent master-data backup on PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_MASTER_DATA_BACKUP_PG: '1'
+        run: npm test -- --runInBand src/modules/master-data-backup/master-data-backup.postgres.spec.ts
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash

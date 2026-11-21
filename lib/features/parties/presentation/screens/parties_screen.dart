@@ -18,6 +18,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/master_data_backup_actions.dart';
 import '../../presentation/widgets/party_statement_dialog.dart';
 import '../providers/party_providers.dart';
 
@@ -188,17 +189,27 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
       actions: [
         ListExportActions(list: _isCustomer ? 'customers' : 'suppliers'),
       ],
-      trailing: Row(
+      trailing: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           SearchField(
             hint: l10n.searchParties,
             onChanged: (value) => setState(() => _query = value.trim()),
           ),
-          const SizedBox(width: 12),
           FilledButton.icon(
             onPressed: _busy ? null : () => _save(),
             icon: const Icon(Icons.add),
             label: Text(_isCustomer ? l10n.newCustomer : l10n.newSupplier),
+          ),
+          MasterDataBackupActions(
+            kind: _isCustomer ? 'customers' : 'suppliers',
+            onRestored: () {
+              ref.invalidate(_provider);
+              ref.invalidate(customersProvider);
+              ref.invalidate(suppliersProvider);
+            },
           ),
         ],
       ),

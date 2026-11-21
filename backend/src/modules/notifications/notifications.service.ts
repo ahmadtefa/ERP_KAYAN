@@ -24,6 +24,7 @@ import {
   STOCK_EXPIRED_WRITE_OFF_PENDING,
   STOCK_EXPIRY_SOON,
   STOCK_OUT_OF_STOCK,
+  STOCK_TRANSFER_RECEIPT_REQUIRED,
   STOCK_VOUCHER_PENDING_APPROVAL,
   assertKnownKind,
   dedupeKey,
@@ -43,7 +44,11 @@ export interface NotificationUser {
   /// those people; an alert raised yesterday keeps the audience it was raised
   /// for, because the row stores the list it was addressed to.
   roles?: string[] | null;
-  warehouseAccess?: Array<{ warehouseId: string; canView: boolean }> | null;
+  warehouseAccess?: Array<{
+    warehouseId: string;
+    canView: boolean;
+    canReceive?: boolean;
+  }> | null;
 }
 
 /// 1, 2, 3. Sorting the word alphabetically puts WARNING behind INFO.
@@ -431,16 +436,34 @@ export class NotificationsService {
         ? { OR: [{ audienceRoles: { isEmpty: true } }, { audienceRoles: { hasSome: roles } }] }
         : { audienceRoles: { isEmpty: true } };
     // A person restricted to certain shelves is not told about the others.
-    const grants = (user.warehouseAccess ?? []).filter((row) => row && row.canView);
-    const warehouse: Prisma.NotificationWhereInput =
-      grants.length > 0
-        ? {
-            OR: [
-              { warehouseId: null },
-              { warehouseId: { in: grants.map((row) => row.warehouseId) } },
-            ],
-          }
-        : {};
+    // Receipt work is addressed more narrowly still: seeing a warehouse does
+    // not imply permission to receive goods there.
+    const configuredWarehouseAccess = user.warehouseAccess;
+    let warehouse: Prisma.NotificationWhereInput = {};
+    if (configuredWarehouseAccess && configuredWarehouseAccess.length > 0) {
+      const visibleIds = configuredWarehouseAccess
+        .filter((row) => row && row.canView)
+        .map((row) => row.warehouseId);
+      const receivingIds = configuredWarehouseAccess
+        .filter((row) => row && row.canView && row.canReceive === true)
+        .map((row) => row.warehouseId);
+      const addressed: Prisma.NotificationWhereInput[] = [{ warehouseId: null }];
+      if (visibleIds.length > 0) {
+        addressed.push({
+          AND: [
+            { type: { not: STOCK_TRANSFER_RECEIPT_REQUIRED } },
+            { warehouseId: { in: visibleIds } },
+          ],
+        });
+      }
+      if (receivingIds.length > 0) {
+        addressed.push({
+          type: STOCK_TRANSFER_RECEIPT_REQUIRED,
+          warehouseId: { in: receivingIds },
+        });
+      }
+      warehouse = { OR: addressed };
+    }
     return { AND: [branch, permission, audience, warehouse] };
   }
 
@@ -452,7 +475,7 @@ export class NotificationsService {
 
   private async require(user: NotificationUser, id: string) {
     const row = await this.prisma.notification.findFirst({
-      where: { id, companyId: user.companyId },
+      where: { id, companyId: user.companyId, ...this.visibleTo(user) },
     });
     if (!row) throw new NotFoundException('Notification not found');
     if (!this.maySee(user, row.permission)) {
@@ -579,6 +602,40 @@ export class NotificationsService {
   }
 
   // ─────────────────────────────────────────────────────────────── raising
+
+  /// Closes tasks for this business record when its workflow advances.
+  /// Active stage types remain open; obsolete stages leave the unread centre
+  /// but remain in history for audit and personal read state.
+  async resolveEntity(
+    companyId: string,
+    entityType: string,
+    entityId: string,
+    activeTypes: readonly string[],
+  ): Promise<{ closed: number }> {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        companyId,
+        entityType,
+        entityId,
+        status: { in: ['OPEN', 'READ'] },
+        ...(activeTypes.length
+          ? {
+              OR: [
+                { type: { notIn: [...activeTypes] } },
+                {
+                  type: { in: [...activeTypes] },
+                  dedupeKey: {
+                    notIn: activeTypes.map((type) => dedupeKey({ type, entityId })),
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      data: { status: 'CLOSED', readAt: new Date() },
+    });
+    return { closed: result.count };
+  }
 
   /// Records one fact, once.
   ///

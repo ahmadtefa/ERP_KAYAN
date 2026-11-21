@@ -22,6 +22,7 @@ import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/master_data_backup_actions.dart';
 import '../../data/item_image_data_source.dart';
 import '../widgets/barcode_labels_dialog.dart';
 import '../widgets/item_picture.dart';
@@ -698,6 +699,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             onPressed: _busy ? null : () => _save(),
             icon: const Icon(Icons.add),
             label: Text(l10n.newItem),
+          ),
+          MasterDataBackupActions(
+            kind: 'items',
+            onRestored: () {
+              ref.invalidate(itemsListProvider);
+              ref.invalidate(itemsProvider);
+            },
           ),
         ],
       ),
