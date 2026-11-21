@@ -81,6 +81,20 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Sign In'), findsOneWidget);
   });
 
+  testWidgets('offers pre-login password change and its bilingual secure fields', (
+    tester,
+  ) async {
+    await pumpLogin(tester);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Change password'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current password'), findsOneWidget);
+    expect(find.text('New password'), findsOneWidget);
+    expect(find.text('Confirm new password'), findsOneWidget);
+    expect(find.byType(TextField), findsNWidgets(5));
+    expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
+  });
+
   testWidgets('blocks submission and reports both empty fields', (
     tester,
   ) async {

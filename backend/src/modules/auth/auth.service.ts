@@ -211,7 +211,7 @@ export class AuthService {
         username: username.trim(),
         deletedAt: null,
         isActive: true,
-        company: { code: companyCode.trim(), isActive: true },
+        company: { code: companyCode.trim().toUpperCase(), isActive: true },
       },
     });
     if (!user || (user.lockedUntil && user.lockedUntil > new Date())) throw invalid;

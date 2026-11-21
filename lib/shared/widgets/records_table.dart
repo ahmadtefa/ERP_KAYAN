@@ -73,6 +73,38 @@ class _CellWithLeading extends StatelessWidget {
 }
 
 
+class _PersistentHorizontalScroll extends StatefulWidget {
+  const _PersistentHorizontalScroll({required this.child});
+  final Widget child;
+
+  @override
+  State<_PersistentHorizontalScroll> createState() =>
+      _PersistentHorizontalScrollState();
+}
+
+class _PersistentHorizontalScrollState extends State<_PersistentHorizontalScroll> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _controller,
+    thumbVisibility: true,
+    trackVisibility: true,
+    notificationPredicate: (notification) => notification.depth <= 1,
+    child: SingleChildScrollView(
+      controller: _controller,
+      scrollDirection: Axis.horizontal,
+      child: widget.child,
+    ),
+  );
+}
+
 /// A record list that stays readable on a phone and on a desktop.
 ///
 /// Wide screens get a real table, dense enough for financial review: 42 px
@@ -131,12 +163,8 @@ class RecordsTable extends StatelessWidget {
     return Scrollbar(
       child: SingleChildScrollView(
         scrollDirection: Axis.vertical,
-        child: Scrollbar(
-          thumbVisibility: true,
-          trackVisibility: true,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
+        child: _PersistentHorizontalScroll(
+          child: DataTable(
             showCheckboxColumn: false,
             headingTextStyle: theme.textTheme.labelSmall?.copyWith(
               color: scheme.onSurfaceVariant,
@@ -192,7 +220,6 @@ class RecordsTable extends StatelessWidget {
                   ],
                 ),
             ],
-            ),
           ),
         ),
       ),

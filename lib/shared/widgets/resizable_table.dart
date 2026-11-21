@@ -77,6 +77,13 @@ class _ResizableTableState extends State<ResizableTable> {
       .map((column) => math.max(column.width, _minFor(column)))
       .toList(growable: false);
   TableDensity _density = TableDensity.normal;
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
 
   String get _key => 'resizable-table.${widget.storageKey ?? 'default'}';
 
@@ -221,9 +228,11 @@ class _ResizableTableState extends State<ResizableTable> {
           child: ClipRRect(
             borderRadius: AppRadii.control,
             child: Scrollbar(
+              controller: _horizontalController,
               thumbVisibility: true,
               trackVisibility: true,
               child: SingleChildScrollView(
+                controller: _horizontalController,
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
                 width: math.max(totalWidth, 320.0),
