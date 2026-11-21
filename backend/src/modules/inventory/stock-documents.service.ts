@@ -328,6 +328,12 @@ export class StockDocumentsService {
       : null;
     const voucherKind = dto.voucherKind === undefined ? null : String(dto.voucherKind).toUpperCase();
     if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
+    // A receipt records inventory valuation. The controller also checks the
+    // warehouse cost grant, but enforce the service contract so internal and
+    // background callers cannot submit a cost without cost-read authority.
+    if (voucherKind === 'RECEIPT' && !mayReadCost) {
+      throw new ForbiddenException('inventory.cost.read permission is required to record receipt unit costs');
+    }
     if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
     if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
 
