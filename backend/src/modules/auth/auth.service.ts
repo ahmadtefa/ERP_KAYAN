@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -188,6 +189,93 @@ export class AuthService {
       refreshToken,
       user: this.toSessionUser(user, roles, permissions, branchId),
     };
+  }
+
+  /** Change a password before sign-in without revealing whether an account exists. */
+  async changeOwnPassword(
+    username: string,
+    companyCode: string,
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<{ success: true }> {
+    const invalid = new UnauthorizedException('Invalid username or current password');
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException('New password confirmation does not match');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        username: username.trim(),
+        deletedAt: null,
+        isActive: true,
+        company: { code: companyCode.trim(), isActive: true },
+      },
+    });
+    if (!user || (user.lockedUntil && user.lockedUntil > new Date())) throw invalid;
+
+    let passwordMatches = false;
+    try {
+      passwordMatches = await argon2.verify(user.passwordHash, currentPassword);
+    } catch {
+      // A malformed stored hash must fail closed with the same public result.
+    }
+    if (!passwordMatches) {
+      const updated = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginCount: { increment: 1 } },
+        select: { failedLoginCount: true },
+      });
+      if (updated.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) },
+        });
+      }
+      await this.audit.record({
+        companyId: user.companyId,
+        userId: user.id,
+        action: 'PASSWORD_CHANGE_FAILED',
+        entity: 'users',
+        entityId: user.id,
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      });
+      throw invalid;
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must differ from the current password');
+    }
+    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          tokenVersion: { increment: 1 },
+          failedLoginCount: 0,
+          lockedUntil: null,
+        },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await this.audit.recordRequired({
+        companyId: user.companyId,
+        userId: user.id,
+        action: 'user.password_changed_self',
+        entity: 'users',
+        entityId: user.id,
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      }, tx);
+    });
+
+    return { success: true };
   }
 
   async refresh(token: string) {

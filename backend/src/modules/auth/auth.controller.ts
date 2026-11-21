@@ -8,6 +8,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { LoginDto, RefreshDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -22,6 +23,20 @@ export class AuthController {
     return this.auth.login(
       dto.username,
       dto.password,
+      req.ip ?? undefined,
+      req.headers['user-agent'] ?? undefined,
+    );
+  }
+
+  @Public()
+  @Post('change-password')
+  changePassword(@Body() dto: ChangePasswordDto, @Req() req: Request) {
+    return this.auth.changeOwnPassword(
+      dto.username,
+      dto.companyCode,
+      dto.currentPassword,
+      dto.newPassword,
+      dto.confirmPassword,
       req.ip ?? undefined,
       req.headers['user-agent'] ?? undefined,
     );

@@ -159,6 +159,182 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _changePassword() async {
+    final username = TextEditingController(text: _username.text.trim());
+    final companyCode = TextEditingController();
+    final currentPassword = TextEditingController();
+    final newPassword = TextEditingController();
+    final confirmPassword = TextEditingController();
+    var showCurrent = false;
+    var showNew = false;
+    var showConfirm = false;
+    var saving = false;
+    String? error;
+
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final arabic = Localizations.localeOf(context).languageCode == 'ar';
+          return AlertDialog(
+            title: Text(context.l10n.changePassword),
+            content: SizedBox(
+              width: 460,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: username,
+                      enabled: !saving,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(labelText: context.l10n.username),
+                    ),
+                    TextField(
+                      controller: companyCode,
+                      enabled: !saving,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(labelText: context.l10n.companyCode),
+                    ),
+                    TextField(
+                      controller: currentPassword,
+                      enabled: !saving,
+                      obscureText: !showCurrent,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'كلمة المرور الحالية' : 'Current password',
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showCurrent = !showCurrent),
+                          icon: Icon(showCurrent ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    TextField(
+                      controller: newPassword,
+                      enabled: !saving,
+                      obscureText: !showNew,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'كلمة المرور الجديدة' : 'New password',
+                        helperText: context.l10n.passwordHelper,
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showNew = !showNew),
+                          icon: Icon(showNew ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    TextField(
+                      controller: confirmPassword,
+                      enabled: !saving,
+                      obscureText: !showConfirm,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'تأكيد كلمة المرور الجديدة' : 'Confirm new password',
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showConfirm = !showConfirm),
+                          icon: Icon(showConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    if (error != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _ErrorBanner(message: error!),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(dialogContext).pop(false),
+                child: Text(context.l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        final currentUser = username.text.trim();
+                        final company = companyCode.text.trim();
+                        final current = currentPassword.text;
+                        final next = newPassword.text;
+                        if (currentUser.length < 3 || company.isEmpty || current.isEmpty) {
+                          setDialogState(() => error = arabic
+                              ? 'أكمل اسم المستخدم وكود الشركة وكلمة المرور الحالية.'
+                              : 'Enter the username, company code, and current password.');
+                          return;
+                        }
+                        if (next.length < 12 || next.length > 200) {
+                          setDialogState(() => error = context.l10n.passwordHelper);
+                          return;
+                        }
+                        if (next != confirmPassword.text) {
+                          setDialogState(() => error = arabic
+                              ? 'كلمتا المرور الجديدتان غير متطابقتين.'
+                              : 'The new passwords do not match.');
+                          return;
+                        }
+                        setDialogState(() {
+                          saving = true;
+                          error = null;
+                        });
+                        try {
+                          await ref.read(apiClientProvider).post(
+                            '/auth/change-password',
+                            body: {
+                              'username': currentUser,
+                              'companyCode': company,
+                              'currentPassword': current,
+                              'newPassword': next,
+                              'confirmPassword': confirmPassword.text,
+                            },
+                          );
+                          await ref.read(tokenStoreProvider).clear();
+                          if (_remember) {
+                            await _credentials.save(
+                              remember: true,
+                              username: currentUser,
+                              password: next,
+                            );
+                          } else {
+                            await _credentials.clear();
+                          }
+                          if (dialogContext.mounted) Navigator.of(dialogContext).pop(true);
+                        } catch (failure) {
+                          if (!dialogContext.mounted) return;
+                          setDialogState(() {
+                            saving = false;
+                            error = localizedError(context, failure);
+                          });
+                        }
+                      },
+                child: saving
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(context.l10n.changePassword),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    final changedUsername = changed == true ? username.text : null;
+    username.dispose();
+    companyCode.dispose();
+    currentPassword.dispose();
+    newPassword.dispose();
+    confirmPassword.dispose();
+
+    if (changedUsername != null && mounted) {
+      _username.text = changedUsername;
+      _password.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.passwordChanged)),
+      );
+    }
+  }
+
   Future<void> _submit() async {
     if (_busy) return;
     setState(() => _error = null);
@@ -275,6 +451,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ? null
           : (value) => setState(() => _remember = value),
       onClearSaved: _busy ? null : _clearSaved,
+      onChangePassword: _busy ? null : _changePassword,
       onSubmit: _busy ? null : _submit,
     );
 
@@ -350,6 +527,7 @@ class _SignInForm extends StatelessWidget {
     required this.onToggleObscure,
     required this.onToggleRemember,
     required this.onClearSaved,
+    required this.onChangePassword,
     required this.onSubmit,
   });
 
@@ -363,6 +541,7 @@ class _SignInForm extends StatelessWidget {
   final VoidCallback onToggleObscure;
   final ValueChanged<bool>? onToggleRemember;
   final VoidCallback? onClearSaved;
+  final VoidCallback? onChangePassword;
   final VoidCallback? onSubmit;
 
   @override
@@ -466,6 +645,12 @@ class _SignInForm extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Text(l10n.signIn),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextButton.icon(
+            onPressed: onChangePassword,
+            icon: const Icon(Icons.lock_reset_outlined),
+            label: Text(l10n.changePassword),
           ),
         ],
       ),
