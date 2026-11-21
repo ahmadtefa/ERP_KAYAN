@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/browser_actions.dart';
-import '../../../../core/platform/picked_file.dart';
-import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
