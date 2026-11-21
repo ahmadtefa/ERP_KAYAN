@@ -45,7 +45,7 @@ Future<bool?> showOpeningBalanceDraft(
       all('/parties/suppliers')
     else
       Future.value(<_Record>[]),
-    if (user.can('inventory.items.read') && user.canReadPurchasePrice)
+    if (user.can('inventory.items.read') && user.canManageInventoryCost)
       all('/inventory/items')
     else
       Future.value(<_Record>[]),

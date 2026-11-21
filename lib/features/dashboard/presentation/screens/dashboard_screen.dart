@@ -801,7 +801,7 @@ Set<String> _dashboardSectionsFor(AppUser? user) {
   final allowed = <String>{
     for (final entry in permissions.entries)
       if (user.can(entry.value) &&
-          (entry.key != 'stock' || user.canReadPurchasePrice) &&
+          (entry.key != 'stock' || user.canReadCost) &&
           (entry.key != 'sales' && entry.key != 'top' || user.canReadSalePrice) &&
           (entry.key != 'purchases' && entry.key != 'payables' || user.canReadPurchasePrice) &&
           (entry.key != 'receivables' || user.canReadSalePrice) &&

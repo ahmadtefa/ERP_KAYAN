@@ -81,8 +81,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(stockListProvider);
-    final canReadCost =
-        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
+    final canReadCost = ref.watch(currentUserProvider)?.canReadCost ?? false;
 
     return ModuleScaffold(
       title: l10n.stockBalances,
@@ -224,8 +223,7 @@ class _StockCostCenterReportScreenState
   @override
   Widget build(BuildContext context) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    final canReadCost =
-        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
+    final canReadCost = ref.watch(currentUserProvider)?.canReadCost ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -398,8 +396,7 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
-    final canReadCost =
-        ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false;
+    final canReadCost = ref.watch(currentUserProvider)?.canReadCost ?? false;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 

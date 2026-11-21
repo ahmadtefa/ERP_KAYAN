@@ -489,7 +489,7 @@ class _StockVoucherDetailScreenState
                       '${_label(context, 'الكمية', 'Quantity')}: ${text(line, 'unitQuantity', fallback: text(line, 'quantity'))} • ${text(line, 'unit')}${text(line, 'notes').isEmpty ? '' : ' • ${text(line, 'notes')}'}',
                     ),
                     trailing:
-                        (ref.watch(currentUserProvider)?.canReadPurchasePrice ??
+                        (ref.watch(currentUserProvider)?.canReadCost ??
                                 false)
                             ? Text(
                             '${_label(context, 'تكلفة الوحدة الأساسية', 'Base unit cost')}: ${text(line, 'unitCost')}',
