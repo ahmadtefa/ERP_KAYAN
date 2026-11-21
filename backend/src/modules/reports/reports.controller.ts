@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 
 import {
   AuthUser,
@@ -6,6 +6,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { CompanyAggregateVisibilityInterceptor } from '../../common/auth/company-aggregate-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
@@ -24,6 +25,7 @@ import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
+@UseInterceptors(CompanyAggregateVisibilityInterceptor)
 export class ReportsController {
   constructor(
     private readonly service: ReportsService,

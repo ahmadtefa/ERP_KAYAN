@@ -13,6 +13,8 @@ require('reflect-metadata');
 require('ts-node/register/transpile-only');
 const { Client } = require('pg');
 const { FullBackupService } = require('../src/modules/backup/full-backup.service');
+const { RestoreGateService } = require('../src/modules/backup/system/restore-gate.service');
+const { ServiceUnavailableException } = require('@nestjs/common');
 const { BackupScheduleService } = require('../src/modules/backup/backup-schedule.service');
 const { pgBackupConnectionEnv } = require('../src/modules/backup/pg-backup-connection');
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
@@ -22,6 +24,21 @@ const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
 const { ProblemDetailsFilter } = require('../src/common/filters/problem-details.filter');
 const { Module: NestModule } = require('@nestjs/common');
 const { NestFactory, Reflector } = require('@nestjs/core');
+const restoreGateUnavailable = {
+  probe: async () => ({
+    fullRestoreSupported: false,
+    reasons: ['synthetic fixture requires the restore gate to remain closed'],
+    checks: [],
+  }),
+  assertAllowed: async () => {
+    throw new ServiceUnavailableException({
+      code: 'FULL_RESTORE_UNAVAILABLE',
+      message: 'Synthetic fixture keeps destructive restore unavailable.',
+      reasons: ['synthetic fixture'],
+      checks: [],
+    });
+  },
+};
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -138,6 +155,7 @@ const path = require('node:path');
     NestModule({ controllers: [FullBackupController], providers: [
       { provide: FullBackupService, useValue: service },
       { provide: MaintenanceService, useValue: maintenance },
+      { provide: RestoreGateService, useValue: restoreGateUnavailable },
     ] })(BackupHttpFixtureModule);
     const http = await NestFactory.create(BackupHttpFixtureModule, { logger: false });
     try {
@@ -332,6 +350,7 @@ const path = require('node:path');
     class RestoreHttpFixtureModule {}
     NestModule({controllers:[FullBackupController],providers:[
       {provide:FullBackupService,useValue:clean},{provide:MaintenanceService,useValue:cleanMaintenance},
+      {provide:RestoreGateService,useValue:restoreGateUnavailable},
     ]})(RestoreHttpFixtureModule);
     const restoreHttp=await NestFactory.create(RestoreHttpFixtureModule,{logger:false});
     try {

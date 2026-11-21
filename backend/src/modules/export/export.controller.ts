@@ -24,6 +24,7 @@ import {
 import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
 import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
+import { filterReportAggregates } from './aggregate-visibility';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -338,7 +339,7 @@ export class ExportController {
     // Reports as files get the same enforcement as reports as PDF/print:
     // resolvePriceVisibility forces showCost=false without inventory.cost.read.
     const table = applyPriceVisibility(
-      await this.tables.build(slug, user.companyId, query, lang),
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
       this.visibility(user, query),
     );
     const header = await this.companyHeader(user.companyId, lang);
@@ -379,7 +380,10 @@ export class ExportController {
     this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), this.visibility(user, query));
+    const table = applyPriceVisibility(
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -407,7 +411,10 @@ export class ExportController {
   ) {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), this.visibility(user, query));
+    const table = applyPriceVisibility(
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {

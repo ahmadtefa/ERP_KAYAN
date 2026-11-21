@@ -5,6 +5,7 @@ import { AllowQueryToken } from '../../common/decorators/allow-query-token.decor
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
+import { filterReportAggregates } from '../export/aggregate-visibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PrintSettingsService } from '../../common/print/print-settings.module';
 import { applyPriceVisibility } from '../export/price-visibility';
@@ -249,11 +250,14 @@ export class InventoryPrintController {
       { showSalePrice: query.showSalePrice, showPurchasePrice: query.showPurchasePrice, showCost: query.showCost },
       typeKey,
     );
-    return applyPriceVisibility(table, {
+    const priceSafe = applyPriceVisibility(table, {
       showSalePrice: visibility.showSalePrice ? 'true' : 'false',
       showPurchasePrice: visibility.showPurchasePrice ? 'true' : 'false',
       showCost: visibility.showCost ? 'true' : 'false',
     });
+    return typeKey === 'stock-document'
+      ? priceSafe
+      : filterReportAggregates(priceSafe, user);
   }
 
   // -------------------------------------------------------------- rendering
