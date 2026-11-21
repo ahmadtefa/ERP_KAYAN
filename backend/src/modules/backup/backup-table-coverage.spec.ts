@@ -118,6 +118,9 @@ describe('the company backup covers every table that belongs to a company', () =
       'quotationColumnTemplate',
       'budget',
       'stockDocumentCreationRequest',
+      'stockTransfer',
+      'stockTransferLine',
+      'stockTransferAction',
       'orderCreationRequest',
       'userProfilePhoto',
     ]) {

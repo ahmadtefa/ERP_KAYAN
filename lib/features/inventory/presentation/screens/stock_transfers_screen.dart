@@ -28,12 +28,60 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
       IconButton(tooltip:t('تحديث','Refresh'),onPressed:()=>ref.read(stockTransfersProvider.notifier).reload(),icon:const Icon(Icons.refresh)),
       if(user?.can('inventory.transfer.report')??false) IconButton(tooltip:t('تقرير التحويلات والطريق','Transfer/transit report'),onPressed:_report,icon:const Icon(Icons.assessment_outlined)),
       if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('طلب تحويل','Request transfer'))),
-    ]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,__)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}
+    ]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}
   List<Json> _visible(List<Json> rows)=>rows.where((r)=>_query.isEmpty||'${r['documentNumber']} ${r['reason']} ${r['status']}'.toLowerCase().contains(_query)).toList();
   String _status(String s)=>switch(s){'DRAFT'=>t('مسودة','Draft'),'REVIEWED'=>t('قيد المراجعة','Reviewed'),'APPROVED'=>t('معتمد','Approved'),'DISPATCHING'=>t('جارٍ التسليم','Dispatching'),'RECEIVING'=>t('جارٍ الاستلام','Receiving'),'SETTLING'=>t('جارٍ التسوية','Settling'),'PARTIALLY_DISPATCHED'=>t('تسليم جزئي','Partially dispatched'),'DISPATCHED'=>t('تم التسليم','Dispatched'),'PARTIALLY_RECEIVED'=>t('استلام جزئي','Partially received'),'RECEIVED'=>t('تم الاستلام','Received'),'SETTLEMENT_PENDING'=>t('إعدام بانتظار الاعتماد','Write-off approval pending'),'SETTLED'=>t('تمت التسوية','Settled'),'CLOSED'=>t('مغلق','Closed'),'REJECTED'=>t('مرفوض','Rejected'),'CANCELLED'=>t('ملغى','Cancelled'),_=>s};
   Future<void> _create() async {try{final api=ref.read(apiClientProvider);final warehouses=await api.getList('/inventory/warehouses');final items=await api.getList('/inventory/items');final batches=await api.getList('/inventory/batches');if(!mounted)return;final body=await showDialog<Json>(context:context,barrierDismissible:false,builder:(_)=>_CreateTransferDialog(ar:ar,warehouses:warehouses,items:items,batches:batches,api:api));if(body==null||!mounted)return;setState(()=>_busy=true);await api.post('/inventory/stock-transfers',body:body,idempotencyKey:'create-${DateTime.now().microsecondsSinceEpoch}');await ref.read(stockTransfersProvider.notifier).reload();}catch(e){if(mounted)_msg(e.toString());}finally{if(mounted)setState(()=>_busy=false);}}
   Future<void> _details(Json row) async {final changed=await showDialog<bool>(context:context,builder:(_)=>_TransferDialog(id:text(row,'id'),ar:ar));if(changed==true&&mounted)await ref.read(stockTransfersProvider.notifier).reload();}
-  Future<void> _report() async {try{final report=await ref.read(apiClientProvider).getObject('/inventory/stock-transfers/report');if(!mounted)return;final lines=(report['rows'] as List? ??const[]).whereType<Map>().toList();await showDialog<void>(context:context,builder:(_)=>AlertDialog(title:Text(t('تقرير التحويلات والأرصدة بالطريق','Transfers & transit report')),content:SizedBox(width:760,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(columns:[DataColumn(label:Text(t('رقم','Number'))),DataColumn(label:Text(t('الحالة','Status'))),DataColumn(label:Text(t('مرسل','Dispatched'))),DataColumn(label:Text(t('مستلم','Received'))),DataColumn(label:Text(t('بالطريق','In transit'))),DataColumn(label:Text(t('فروق','Differences')))],rows:lines.map((r)=>DataRow(cells:[DataCell(Text('${r['documentNumber']}')),DataCell(Text(_status('${r['status']}'))),DataCell(Text('${r['dispatched']}')),DataCell(Text('${r['received']}')),DataCell(Text('${r['inTransit']}')),DataCell(Text('${r['differences']}'))])).toList()))),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:Text(t('إغلاق','Close'))]));}catch(e){if(mounted)_msg(e.toString());}}
+  Future<void> _report() async {
+    try {
+      final report = await ref.read(apiClientProvider).getObject(
+        '/inventory/stock-transfers/report',
+      );
+      if (!mounted) return;
+      final rows = (report['rows'] as List? ?? const [])
+          .whereType<Map>()
+          .toList();
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(t('تقرير التحويلات والأرصدة بالطريق', 'Transfers & transit report')),
+          content: SizedBox(
+            width: 760,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: [
+                  DataColumn(label: Text(t('رقم', 'Number'))),
+                  DataColumn(label: Text(t('الحالة', 'Status'))),
+                  DataColumn(label: Text(t('مرسل', 'Dispatched'))),
+                  DataColumn(label: Text(t('مستلم', 'Received'))),
+                  DataColumn(label: Text(t('بالطريق', 'In transit'))),
+                  DataColumn(label: Text(t('فروق', 'Differences'))),
+                ],
+                rows: rows.map((row) => DataRow(cells: [
+                  DataCell(Text('${row['documentNumber']}')),
+                  DataCell(Text(_status('${row['status']}'))),
+                  DataCell(Text('${row['dispatched']}')),
+                  DataCell(Text('${row['received']}')),
+                  DataCell(Text('${row['inTransit']}')),
+                  DataCell(Text('${row['differences']}')),
+                ])).toList(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(t('إغلاق', 'Close')),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) _msg(e.toString());
+    }
+  }
   void _msg(String s)=>ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(s),behavior:SnackBarBehavior.floating));
 }
 
@@ -64,9 +112,9 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
   @override Widget build(BuildContext context)=>AlertDialog(
     title:Text(t('طلب تحويل مخزني','Request stock transfer')),
     content:SizedBox(width:920,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField<String>(value:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_from=v)),
+      DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_from=v)),
       const SizedBox(height:8),
-      DropdownButtonFormField<String>(value:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_to=v)),
+      DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_to=v)),
       const SizedBox(height:12),
       BarcodeScanField(controller:_barcode,arabic:ar,enabled:!_scanning,label:t('مسح لإضافة صنف أو وحدة','Scan to add item or unit'),onSubmitted:_scan),
       const SizedBox(height:10),
@@ -78,10 +126,10 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
         final selectedUnits=units.isNotEmpty?units:<Json>[{'unit':item?['unit']??''}];
         final lots=widget.batches.where((b)=>b['warehouseId']==_from&&b['itemId']==line.itemId&&(double.tryParse('${b['remainingQuantity']}')??0)>0).toList();
         return Padding(padding:const EdgeInsets.only(bottom:12),child:Wrap(spacing:8,runSpacing:8,children:[
-          SizedBox(width:270,child:DropdownButtonFormField<String>(value:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item')),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v)=>setState(()=>{line.itemId=v,line.batchId=null,line.unitName=null}))),
+          SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item')),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v)=>setState(() {line.itemId=v;line.batchId=null;line.unitName=null;}))),
           SizedBox(width:115,child:TextField(controller:line.quantity,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity')))),
-          if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(value:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit')),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}'))).toList(),onChanged:(v)=>setState(()=>line.unitName=v))),
-          if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(value:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),
+          if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit')),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}'))).toList(),onChanged:(v)=>setState(()=>line.unitName=v))),
+          if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),
           IconButton(tooltip:t('حذف البند','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),
         ]));
       }),
@@ -124,14 +172,272 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
 
 class _TransferDialog extends ConsumerStatefulWidget {const _TransferDialog({required this.id,required this.ar});final String id;final bool ar;@override ConsumerState<_TransferDialog> createState()=>_TransferDialogState();}
 class _TransferDialogState extends ConsumerState<_TransferDialog>{Json? row;bool loading=true,busy=false;bool get ar=>widget.ar;String t(String a,String e)=>ar?a:e;@override void initState(){super.initState();_load();}Future<void> _load()async{try{final x=await ref.read(apiClientProvider).getObject('/inventory/stock-transfers/${widget.id}');if(mounted)setState(()=>row=x);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}finally{if(mounted)setState(()=>loading=false);}}
-  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · ${status}'),const SizedBox(height:10),Flexible(child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList())))])),actions:[if(status=='DRAFT'&&(user?.can('inventory.transfer.review')??false))_action('review',t('مراجعة','Review')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.approve')??false))_action('approve',t('اعتماد','Approve')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.review')??false))_action('reject',t('رفض','Reject')),if(['APPROVED','PARTIALLY_DISPATCHED','DISPATCHING'].contains(status)&&(user?.can('inventory.transfer.dispatch')??false))_action('dispatch',t('تسليم','Dispatch')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','RECEIVING'].contains(status)&&(user?.can('inventory.transfer.receive')??false))_action('receive',t('استلام','Receive')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','SETTLING'].contains(status)&&(user?.can('inventory.transfer.settle')??false))_action('settle',t('تسوية الفروق','Settle differences')),if(status=='SETTLEMENT_PENDING'&&(user?.can('inventory.transfer.settle.approve')??false))_action('settle/approve',t('اعتماد الإعدام','Approve write-off')),if(['RECEIVED','SETTLED'].contains(status)&&(user?.can('inventory.transfer.close')??false))_action('close',t('إغلاق','Close')),if(!['CLOSED','CANCELLED','REJECTED','SETTLEMENT_PENDING'].contains(status)&&(user?.can('inventory.transfer.cancel')??false))_action('cancel',t('إلغاء/عكس','Cancel/reverse')),TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done')))]);}
+  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · $status'),const SizedBox(height:10),Flexible(child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList())))])),actions:[if(status=='DRAFT'&&(user?.can('inventory.transfer.review')??false))_action('review',t('مراجعة','Review')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.approve')??false))_action('approve',t('اعتماد','Approve')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.review')??false))_action('reject',t('رفض','Reject')),if(['APPROVED','PARTIALLY_DISPATCHED','DISPATCHING'].contains(status)&&(user?.can('inventory.transfer.dispatch')??false))_action('dispatch',t('تسليم','Dispatch')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','RECEIVING'].contains(status)&&(user?.can('inventory.transfer.receive')??false))_action('receive',t('استلام','Receive')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','SETTLING'].contains(status)&&(user?.can('inventory.transfer.settle')??false))_action('settle',t('تسوية الفروق','Settle differences')),if(status=='SETTLEMENT_PENDING'&&(user?.can('inventory.transfer.settle.approve')??false))_action('settle/approve',t('اعتماد الإعدام','Approve write-off')),if(['RECEIVED','SETTLED'].contains(status)&&(user?.can('inventory.transfer.close')??false))_action('close',t('إغلاق','Close')),if(!['CLOSED','CANCELLED','REJECTED','SETTLEMENT_PENDING'].contains(status)&&(user?.can('inventory.transfer.cancel')??false))_action('cancel',t('إلغاء/عكس','Cancel/reverse')),TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done')))]);}
   Widget _action(String action,String label)=>TextButton(onPressed:busy?null:()=>_run(action),child:Text(label));
-  Future<void> _run(String action)async{final api=ref.read(apiClientProvider);final ls=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();Object? body;final key='$action-${DateTime.now().microsecondsSinceEpoch}';if(action=='dispatch'||action=='receive'){final selected=await showDialog<List<Json>>(context:context,builder:(_)=>_QuantityDialog(ar:ar,lines:ls,receive:action=='receive'));if(selected==null)return;body={'lines':selected};}if(action=='settle'){final selected=await showDialog<List<Json>>(context:context,builder:(_)=>_SettlementDialog(ar:ar,lines:ls));if(selected==null)return;body={'lines':selected};}if(action=='reject'){final reason=await _ask(t('سبب الرفض','Rejection reason'));if(reason==null)return;body={'reason':reason};}setState(()=>busy=true);try{await api.post('/inventory/stock-transfers/${widget.id}/$action',body:body,idempotencyKey:key);await _load();}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}finally{if(mounted)setState(()=>busy=false);}}
+  Future<void> _run(String action) async {
+    final api = ref.read(apiClientProvider);
+    final lines = (row?['lines'] as List? ?? const [])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+    Object? body;
+    final key = '$action-${DateTime.now().microsecondsSinceEpoch}';
+    if (action == 'dispatch' || action == 'receive') {
+      final selected = await showDialog<List<Json>>(
+        context: context,
+        builder: (_) => _QuantityDialog(
+          ar: ar,
+          lines: lines,
+          receive: action == 'receive',
+        ),
+      );
+      if (selected == null || !mounted) return;
+      body = {'lines': selected};
+    }
+    if (action == 'settle') {
+      final selected = await showDialog<List<Json>>(
+        context: context,
+        builder: (_) => _SettlementDialog(ar: ar, lines: lines),
+      );
+      if (selected == null || !mounted) return;
+      body = {'lines': selected};
+    }
+    if (action == 'reject') {
+      final reason = await _ask(t('سبب الرفض', 'Rejection reason'));
+      if (reason == null || !mounted) return;
+      body = {'reason': reason};
+    }
+    if (!mounted) return;
+    setState(() => busy = true);
+    try {
+      await api.post(
+        '/inventory/stock-transfers/${widget.id}/$action',
+        body: body,
+        idempotencyKey: key,
+      );
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
   Future<String?> _ask(String title)async{final c=TextEditingController();final value=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(title:Text(title),content:TextField(controller:c),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:()=>Navigator.pop(ctx,c.text),child:Text(t('تأكيد','Confirm')))]));c.dispose();return value;}
 }
 
-class _QuantityDialog extends StatefulWidget{const _QuantityDialog({required this.ar,required this.lines,required this.receive});final bool ar,receive;final List<Json> lines;@override State<_QuantityDialog> createState()=>_QuantityDialogState();}
-class _QuantityDialogState extends State<_QuantityDialog>{late final List<TextEditingController> cs;@override void initState(){super.initState();cs=widget.lines.map((l){final d=double.tryParse('${l['dispatchedQuantity']}')??0,r=double.tryParse('${l['receivedQuantity']}')??0,q=double.tryParse('${l['requestedQuantity']}')??0,returned=double.tryParse('${l['returnedQuantity']}')??0,written=double.tryParse('${l['writtenOffQuantity']}')??0;return TextEditingController(text:widget.receive?(d-r-returned-written).clamp(0,double.infinity).toString():(q-d).clamp(0,double.infinity).toString());}).toList();}@override void dispose(){for(final c in cs)c.dispose();super.dispose();}@override Widget build(BuildContext context)=>AlertDialog(title:Text(widget.ar?(widget.receive?'تسجيل الاستلام':'تسجيل التسليم'):(widget.receive?'Receive quantities':'Dispatch quantities')),content:SizedBox(width:520,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:List.generate(widget.lines.length,(i){final item=widget.lines[i]['item'] as Map? ??const{};return Row(children:[Expanded(child:Text('${item[widget.ar?'nameAr':'nameEn']??item['nameEn']??item['nameAr']}')),SizedBox(width:110,child:TextField(controller:cs[i],keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:widget.ar?'كمية':'Qty')))]);})))),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:Text(widget.ar?'إلغاء':'Cancel')),FilledButton(onPressed:(){final result=<Json>[];for(var i=0;i<widget.lines.length;i++){final n=double.tryParse(cs[i].text)??0;if(n>0)result.add({'lineId':widget.lines[i]['id'],'quantity':cs[i].text});}Navigator.pop(context,result);},child:Text(widget.ar?'تأكيد':'Confirm'))]);}
+class _QuantityDialog extends StatefulWidget {
+  const _QuantityDialog({
+    required this.ar,
+    required this.lines,
+    required this.receive,
+  });
 
-class _SettlementDialog extends StatefulWidget{const _SettlementDialog({required this.ar,required this.lines});final bool ar;final List<Json> lines;@override State<_SettlementDialog> createState()=>_SettlementDialogState();}
-class _SettlementDialogState extends State<_SettlementDialog>{late final List<TextEditingController> returns,shortages,damages,reasons;String t(String a,String e)=>widget.ar?a:e;@override void initState(){super.initState();returns=List.generate(widget.lines.length,(_)=>TextEditingController(text:'0'));shortages=List.generate(widget.lines.length,(_)=>TextEditingController(text:'0'));damages=List.generate(widget.lines.length,(_)=>TextEditingController(text:'0'));reasons=List.generate(widget.lines.length,(_)=>TextEditingController());}@override void dispose(){for(final group in [returns,shortages,damages,reasons]){for(final c in group)c.dispose();}super.dispose();}@override Widget build(BuildContext context)=>AlertDialog(title:Text(t('تسوية البضاعة بالطريق','Settle goods in transit')),content:SizedBox(width:780,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:SingleChildScrollView(child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مرتجع','Return'))),DataColumn(label:Text(t('مفقود','Shortage'))),DataColumn(label:Text(t('تالف','Damaged'))),DataColumn(label:Text(t('السبب','Reason')))],rows:List.generate(widget.lines.length,(i){final item=widget.lines[i]['item'] as Map? ??const{};return DataRow(cells:[DataCell(SizedBox(width:140,child:Text('${item[widget.ar?'nameAr':'nameEn']??item['nameEn']??item['nameAr']}'))),DataCell(_field(returns[i])),DataCell(_field(shortages[i])),DataCell(_field(damages[i])),DataCell(SizedBox(width:190,child:TextField(controller:reasons[i],decoration:InputDecoration(hintText:t('سبب الفقد أو التلف','Reason for loss/damage')))))]);})))),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:(){final result=<Json>[];for(var i=0;i<widget.lines.length;i++){final r=double.tryParse(returns[i].text)??0,s=double.tryParse(shortages[i].text)??0,d=double.tryParse(damages[i].text)??0;if(r>0||s>0||d>0)result.add({'lineId':widget.lines[i]['id'],'returnedQuantity':returns[i].text,'shortage':shortages[i].text,'damage':damages[i].text,'reason':reasons[i].text});}if(result.isNotEmpty)Navigator.pop(context,result);},child:Text(t('إرسال التسوية','Submit settlement')))]);Widget _field(TextEditingController c)=>SizedBox(width:85,child:TextField(controller:c,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(isDense:true)));}
+  final bool ar;
+  final bool receive;
+  final List<Json> lines;
+
+  @override
+  State<_QuantityDialog> createState() => _QuantityDialogState();
+}
+
+class _QuantityDialogState extends State<_QuantityDialog> {
+  late final List<TextEditingController> controllers;
+
+  @override
+  void initState() {
+    super.initState();
+    controllers = widget.lines.map((line) {
+      final dispatched = double.tryParse('${line['dispatchedQuantity']}') ?? 0;
+      final received = double.tryParse('${line['receivedQuantity']}') ?? 0;
+      final requested = double.tryParse('${line['requestedQuantity']}') ?? 0;
+      final returned = double.tryParse('${line['returnedQuantity']}') ?? 0;
+      final writtenOff = double.tryParse('${line['writtenOffQuantity']}') ?? 0;
+      final remaining = widget.receive
+          ? dispatched - received - returned - writtenOff
+          : requested - dispatched;
+      return TextEditingController(text: remaining.clamp(0, double.infinity).toString());
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(widget.ar
+            ? (widget.receive ? 'تسجيل الاستلام' : 'تسجيل التسليم')
+            : (widget.receive ? 'Receive quantities' : 'Dispatch quantities')),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(widget.lines.length, (index) {
+                final item = widget.lines[index]['item'] as Map? ?? const {};
+                final itemName = widget.ar
+                    ? (item['nameAr'] ?? item['nameEn'])
+                    : (item['nameEn'] ?? item['nameAr']);
+                return Row(
+                  children: [
+                    Expanded(child: Text('$itemName')),
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: controllers[index],
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(labelText: widget.ar ? 'كمية' : 'Qty'),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(widget.ar ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final result = <Json>[];
+              for (var index = 0; index < widget.lines.length; index++) {
+                final quantity = double.tryParse(controllers[index].text) ?? 0;
+                if (quantity > 0) {
+                  result.add({
+                    'lineId': widget.lines[index]['id'],
+                    'quantity': controllers[index].text,
+                  });
+                }
+              }
+              Navigator.pop(context, result);
+            },
+            child: Text(widget.ar ? 'تأكيد' : 'Confirm'),
+          ),
+        ],
+      );
+}
+
+class _SettlementDialog extends StatefulWidget {
+  const _SettlementDialog({required this.ar, required this.lines});
+  final bool ar;
+  final List<Json> lines;
+
+  @override
+  State<_SettlementDialog> createState() => _SettlementDialogState();
+}
+
+class _SettlementDialogState extends State<_SettlementDialog> {
+  late final List<TextEditingController> returns;
+  late final List<TextEditingController> shortages;
+  late final List<TextEditingController> damages;
+  late final List<TextEditingController> reasons;
+
+  String t(String arabic, String english) => widget.ar ? arabic : english;
+
+  @override
+  void initState() {
+    super.initState();
+    returns = List.generate(widget.lines.length, (_) => TextEditingController(text: '0'));
+    shortages = List.generate(widget.lines.length, (_) => TextEditingController(text: '0'));
+    damages = List.generate(widget.lines.length, (_) => TextEditingController(text: '0'));
+    reasons = List.generate(widget.lines.length, (_) => TextEditingController());
+  }
+
+  @override
+  void dispose() {
+    for (final group in [returns, shortages, damages, reasons]) {
+      for (final controller in group) {
+        controller.dispose();
+      }
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(t('تسوية البضاعة بالطريق', 'Settle goods in transit')),
+        content: SizedBox(
+          width: 780,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SingleChildScrollView(
+              child: DataTable(
+                columns: [
+                  DataColumn(label: Text(t('الصنف', 'Item'))),
+                  DataColumn(label: Text(t('مرتجع', 'Return'))),
+                  DataColumn(label: Text(t('مفقود', 'Shortage'))),
+                  DataColumn(label: Text(t('تالف', 'Damaged'))),
+                  DataColumn(label: Text(t('السبب', 'Reason'))),
+                ],
+                rows: List.generate(widget.lines.length, (index) {
+                  final item = widget.lines[index]['item'] as Map? ?? const {};
+                  final name = widget.ar
+                      ? (item['nameAr'] ?? item['nameEn'])
+                      : (item['nameEn'] ?? item['nameAr']);
+                  return DataRow(cells: [
+                    DataCell(SizedBox(width: 140, child: Text('$name'))),
+                    DataCell(_field(returns[index])),
+                    DataCell(_field(shortages[index])),
+                    DataCell(_field(damages[index])),
+                    DataCell(SizedBox(
+                      width: 190,
+                      child: TextField(
+                        controller: reasons[index],
+                        decoration: InputDecoration(
+                          hintText: t('سبب الفقد أو التلف', 'Reason for loss/damage'),
+                        ),
+                      ),
+                    )),
+                  ]);
+                }),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(t('إلغاء', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () {
+              final result = <Json>[];
+              for (var index = 0; index < widget.lines.length; index++) {
+                final returned = double.tryParse(returns[index].text) ?? 0;
+                final shortage = double.tryParse(shortages[index].text) ?? 0;
+                final damage = double.tryParse(damages[index].text) ?? 0;
+                if (returned > 0 || shortage > 0 || damage > 0) {
+                  result.add({
+                    'lineId': widget.lines[index]['id'],
+                    'returnedQuantity': returns[index].text,
+                    'shortage': shortages[index].text,
+                    'damage': damages[index].text,
+                    'reason': reasons[index].text,
+                  });
+                }
+              }
+              if (result.isNotEmpty) Navigator.pop(context, result);
+            },
+            child: Text(t('إرسال التسوية', 'Submit settlement')),
+          ),
+        ],
+      );
+
+  Widget _field(TextEditingController controller) => SizedBox(
+        width: 85,
+        child: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(isDense: true),
+        ),
+      );
+}

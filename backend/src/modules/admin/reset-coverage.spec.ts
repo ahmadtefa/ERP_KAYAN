@@ -104,6 +104,8 @@ describe('the company reset covers every table that belongs to a company', () =>
       'quotationTermTemplate',
       'quotationColumnTemplate',
       'stockDocumentCreationRequest',
+      'stockTransferAction',
+      'stockTransfer',
       'orderCreationRequest',
       'backupRun',
       'userProfilePhoto',

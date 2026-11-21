@@ -526,7 +526,7 @@ export class WarehouseService {
   ): Promise<string | null> {
     if (warehouseId) {
       const named = await tx.warehouse.findFirst({
-        where: { id: warehouseId, companyId, deletedAt: null, isTransit: false },
+        where: { id: warehouseId, companyId, deletedAt: null },
         select: { id: true, branchId: true, isActive: true, code: true },
       });
       if (!named) throw new BadRequestException('The warehouse does not exist in this company');
@@ -542,7 +542,7 @@ export class WarehouseService {
     }
 
     const fallback = await tx.warehouse.findFirst({
-      where: { companyId, branchId, deletedAt: null, isTransit: false },
+      where: { companyId, branchId, deletedAt: null },
       orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
       select: { id: true },
     });
@@ -586,7 +586,7 @@ export class WarehouseService {
   ): Promise<string | null> {
     if (!warehouseId) return this.resolve(tx, companyId, branchId);
     const historical = await tx.warehouse.findFirst({
-      where: { id: warehouseId, companyId, branchId, deletedAt: null, isTransit: false },
+      where: { id: warehouseId, companyId, branchId, deletedAt: null },
       select: { id: true },
     });
     if (!historical) {

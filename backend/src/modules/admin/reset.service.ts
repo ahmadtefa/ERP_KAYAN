@@ -392,6 +392,18 @@ export class ResetService {
             });
             return count;
           });
+          await step('stockTransferActions', async () => {
+            const { count } = await tx.stockTransferAction.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('stockTransfers', async () => {
+            const { count } = await tx.stockTransfer.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('openingBalanceLines', async () => {
             const { count } = await tx.openingBalanceLine.deleteMany({
               where: { openingBalance: { companyId: me.companyId } },
