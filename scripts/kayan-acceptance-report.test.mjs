@@ -54,6 +54,7 @@ test('a failure outside mapped widget groups fails full Flutter acceptance', () 
     writeFileSync(log, [
       { type: 'suite', suite: { id: 1, path: 'test/features/orders/order_flow_test.dart' } },
       { type: 'testStart', test: { id: 2, suiteID: 1, name: 'posting failure' } },
+      { type: 'error', testID: 2, error: 'Expected one result, got none' },
       { type: 'testDone', testID: 2, result: 'failure', skipped: false },
     ].map(event => JSON.stringify(event)).join('\n'));
     const result = spawnSync(process.execPath, ['scripts/kayan-acceptance-results.mjs', log, output],
@@ -62,6 +63,7 @@ test('a failure outside mapped widget groups fails full Flutter acceptance', () 
     const parsed = JSON.parse(readFileSync(output, 'utf8'));
     assert.equal(parsed.flutter_full_suite.status, 'FAIL');
     assert.match(parsed.flutter_full_suite.failures[0].path, /order_flow_test\.dart/);
+    assert.equal(parsed.flutter_full_suite.failures[0].error, 'Expected one result, got none');
     const report = spawnSync(process.execPath, ['scripts/kayan-acceptance-report.mjs', output, reportPath], { encoding: 'utf8' });
     assert.equal(report.status, 0, report.stderr);
     assert.equal(JSON.parse(readFileSync(reportPath, 'utf8')).checks.find(check => check.id === 'X10').status, 'FAIL');

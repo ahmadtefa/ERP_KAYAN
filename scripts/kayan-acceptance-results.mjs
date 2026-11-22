@@ -25,6 +25,7 @@ const groups = {
 };
 const suites = new Map();
 const tests = new Map();
+const errors = new Map();
 const verdicts = new Map(Object.keys(groups).map(key => [key, []]));
 const skipped = [];
 const allTests = [];
@@ -36,11 +37,14 @@ for (const line of bytes.toString(encoding).replace(/^\uFEFF/, '').split(/\r?\n/
   try { event = JSON.parse(line); } catch { continue; }
   if (event.type === 'suite') suites.set(event.suite.id, event.suite.path);
   if (event.type === 'testStart') tests.set(event.test.id, event.test);
+  if (event.type === 'error' && typeof event.error === 'string') {
+    errors.set(event.testID, event.error.slice(0, 2000));
+  }
   if (event.type !== 'testDone') continue;
   const test = tests.get(event.testID);
   const path = suites.get(test?.suiteID) ?? '';
   if (event.hidden) continue;
-  allTests.push({ path, name: test?.name ?? 'unknown', status: event.skipped ? 'NOT TESTED' : event.result === 'success' ? 'PASS' : 'FAIL' });
+  allTests.push({ path, name: test?.name ?? 'unknown', status: event.skipped ? 'NOT TESTED' : event.result === 'success' ? 'PASS' : 'FAIL', ...(errors.has(event.testID) ? { error: errors.get(event.testID) } : {}) });
   if (event.skipped) skipped.push({ path, name: test?.name ?? 'unknown' });
   for (const [group, pattern] of Object.entries(groups)) {
     if (pattern.test(path)) verdicts.get(group).push(event.skipped ? 'NOT TESTED' : event.result === 'success' ? 'PASS' : 'FAIL');

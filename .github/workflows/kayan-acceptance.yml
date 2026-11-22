@@ -75,7 +75,7 @@ jobs:
           const fs = require('node:fs');
           const results = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           for (const failure of results.flutter_full_suite?.failures ?? []) {
-            const text = `${failure.path}: ${failure.name}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+            const text = `${failure.path}: ${failure.name}\n${failure.error ?? ''}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
             console.log(`::error title=Flutter test failure::${text}`);
           }
           NODE
