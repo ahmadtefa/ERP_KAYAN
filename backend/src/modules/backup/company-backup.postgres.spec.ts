@@ -8,7 +8,7 @@ import { cleanDatabaseUrl } from './system/pg-support';
 import { RESTORE_LOCK_KEY } from './system/restore-lock';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AuthService } from '../auth/auth.service';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
@@ -196,16 +196,15 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     const changedId = randomUUID();
     await prisma.customer.create({ data: { id: changedId, companyId, code: 'NEW', nameEn: 'Created later', nameAr: 'أضيف لاحقاً' } });
 
-    // A non-directory backup location must fail closed before any deletes.
-    const unavailable = join(backupDir, 'not-a-directory');
-    await writeFile(unavailable, 'not a directory');
-    process.env.KAYAN_BACKUP_DIR = unavailable;
+    // A readable directory that cannot accept a file lets the journal check
+    // pass but forces an actual safety-copy write failure on the CI runner.
+    await chmod(backupDir, 0o555);
     try {
       await expect(service.restore(snapshot, companyId, { replace: true })).rejects.toThrow(/safety backup/i);
       expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Changed after backup');
       expect(await prisma.customer.findUnique({ where: { id: changedId } })).not.toBeNull();
     } finally {
-      process.env.KAYAN_BACKUP_DIR = backupDir;
+      await chmod(backupDir, 0o700);
     }
 
     const invalid = structuredClone(snapshot);
