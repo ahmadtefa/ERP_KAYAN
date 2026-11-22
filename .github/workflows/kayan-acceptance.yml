@@ -226,6 +226,11 @@ jobs:
         env:
           KAYAN_MASTER_DATA_BACKUP_PG: '1'
         run: npm test -- --runInBand src/modules/master-data-backup/master-data-backup.postgres.spec.ts
+      - name: Verify company JSON backup and rollback on isolated PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_COMPANY_BACKUP_PG: '1'
+        run: npm test -- --runInBand src/modules/backup/company-backup.postgres.spec.ts
       - name: Verify password-change concurrency on isolated PostgreSQL
         if: matrix.suite == 'backend'
         env:
