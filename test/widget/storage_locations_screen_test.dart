@@ -221,7 +221,7 @@ void main() {
     expect(find.byTooltip('Delete'), findsNWidgets(2));
   });
 
-  testWidgets('creating a location saves its warehouse, names and kind', (
+  testWidgets('creates a root location without asking the user for a code', (
     tester,
   ) async {
     final api = _LocationsApi();
@@ -229,22 +229,17 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'New location'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextFormField).at(0), 'NEW-BIN');
-    await tester.enterText(find.byType(TextFormField).at(1), 'New bin');
-    await tester.enterText(find.byType(TextFormField).at(2), 'خانة جديدة');
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Bin').last);
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'North zone');
+    await tester.enterText(find.byType(TextFormField).at(1), 'المنطقة الشمالية');
+    expect(find.text('Code'), findsNothing);
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     expect(api.creations, hasLength(1));
     expect(api.creations.single, {
-      'code': 'NEW-BIN',
-      'nameEn': 'New bin',
-      'nameAr': 'خانة جديدة',
-      'kind': 'BIN',
+      'nameEn': 'North zone',
+      'nameAr': 'المنطقة الشمالية',
+      'kind': 'ZONE',
       'warehouseId': 'wh-1',
     });
     expect(tester.takeException(), isNull);

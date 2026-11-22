@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../app/build_info.dart';
 import 'company_setup_data.dart';
 import 'setup_state.dart';
 
@@ -713,6 +714,11 @@ class LocalBackend {
           // interface (the installation is a company server); an operator who
           // wants this copy private sets HOST=127.0.0.1 in the settings file.
           'NODE_ENV': 'production',
+          // Expose the exact binary/source pairing through /health so an
+          // installed build can distinguish a stale API from a UI defect.
+          'KAYAN_SOURCE_COMMIT': AppBuildInfo.sourceCommit,
+          'KAYAN_SOURCE_DIRTY': AppBuildInfo.sourceDirty,
+          'KAYAN_APP_VERSION': AppBuildInfo.version,
           // The server writes to a file, where escape sequences are noise.
           'NO_COLOR': '1',
         },

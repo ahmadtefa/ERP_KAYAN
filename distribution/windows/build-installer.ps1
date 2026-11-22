@@ -439,14 +439,24 @@ foreach ($stagedRoot in $stagedRoots) {
 if ($removedMaps -gt 0) { Write-Host "  removed $removedMaps source map file(s) from the payload" }
 
 Write-Host '[3/8] Build Flutter Windows x64 and production Web'
-Run-Native $flutterCommand @('build','windows','--release','--dart-define=APP_ENV=production') $root
+$sourceCommit = (& git -C $root rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Unable to read the exact source HEAD for the runtime build identity.' }
+$sourceStatus = @(& git -C $root status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to read source working-tree status.' }
+$sourceDirty = ($sourceStatus.Count -gt 0).ToString().ToLowerInvariant()
+$buildIdentity = @(
+  "--dart-define=KAYAN_APP_VERSION=$version",
+  "--dart-define=KAYAN_SOURCE_COMMIT=$sourceCommit",
+  "--dart-define=KAYAN_SOURCE_DIRTY=$sourceDirty"
+)
+Run-Native $flutterCommand (@('build','windows','--release','--dart-define=APP_ENV=production') + $buildIdentity) $root
 $release = Join-Path $root 'build\windows\x64\runner\Release'
 if (-not (Test-Path (Join-Path $release 'erp_kayan.exe'))) {
   $release = Join-Path $root 'build\windows\runner\Release'
 }
 if (-not (Test-Path (Join-Path $release 'erp_kayan.exe'))) { throw 'Flutter Windows x64 release output is missing erp_kayan.exe.' }
 Copy-Item (Join-Path $release '*') $app -Recurse -Force
-Run-Native $flutterCommand @('build','web','--release','--base-href=/','--dart-define=APP_ENV=production','--dart-define=API_BASE_URL=/api/v1') $root
+Run-Native $flutterCommand (@('build','web','--release','--base-href=/','--dart-define=APP_ENV=production','--dart-define=API_BASE_URL=/api/v1') + $buildIdentity) $root
 Copy-Item (Join-Path $root 'build\web\*') (Join-Path $app 'build\web') -Recurse -Force
 
 Write-Host '[4/8] Bundle official Node.js x64 and PostgreSQL 17 x64'

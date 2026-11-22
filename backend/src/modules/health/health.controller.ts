@@ -79,6 +79,9 @@ export class HealthController {
 
     const databaseName = database === 'up' ? await this.readDatabaseName() : null;
     const license = this.licensing?.licenseSummary() ?? null;
+    const sourceCommit = process.env.KAYAN_SOURCE_COMMIT?.trim() ?? '';
+    const sourceDirty = process.env.KAYAN_SOURCE_DIRTY?.trim() ?? '';
+    const appVersion = process.env.KAYAN_APP_VERSION?.trim() ?? '';
     return {
       status: database === 'up' ? 'ok' : 'degraded',
       database,
@@ -86,6 +89,11 @@ export class HealthController {
       needsSetup,
       recoveryRequired,
       license,
+      appVersion: /^[0-9A-Za-z.+-]{1,40}$/.test(appVersion) ? appVersion : 'unknown',
+      sourceCommit: /^[0-9a-f]{40}$/i.test(sourceCommit) ? sourceCommit : 'unknown',
+      sourceDirty: ['true', 'false'].includes(sourceDirty.toLowerCase())
+        ? sourceDirty.toLowerCase()
+        : 'unknown',
       timestamp: new Date().toISOString(),
     };
   }

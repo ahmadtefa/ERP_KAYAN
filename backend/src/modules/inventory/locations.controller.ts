@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -11,7 +11,7 @@ class LocationDto implements LocationInput {
   @IsString() warehouseId!: string;
   @IsOptional() @IsString() parentId?: string | null;
   @IsOptional() @IsIn(['ZONE', 'AISLE', 'RACK', 'SHELF', 'BIN']) kind?: string;
-  @IsString() code!: string;
+  @IsOptional() @IsString() @MaxLength(40) code?: string;
   @IsString() nameEn!: string;
   @IsString() nameAr!: string;
   @IsOptional() @IsBoolean() isActive?: boolean;

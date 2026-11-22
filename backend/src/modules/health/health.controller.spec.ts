@@ -65,6 +65,35 @@ describe('HealthController', () => {
     expect(res.databaseName).toBe('erp_kayan');
   });
 
+  it('reports a validated runtime build identity without echoing arbitrary environment data', async () => {
+    const previous = {
+      commit: process.env.KAYAN_SOURCE_COMMIT,
+      dirty: process.env.KAYAN_SOURCE_DIRTY,
+      version: process.env.KAYAN_APP_VERSION,
+    };
+    process.env.KAYAN_SOURCE_COMMIT = 'a'.repeat(40);
+    process.env.KAYAN_SOURCE_DIRTY = 'TRUE';
+    process.env.KAYAN_APP_VERSION = '0.1.0+7';
+    try {
+      await expect(controller.check()).resolves.toMatchObject({
+        sourceCommit: 'a'.repeat(40),
+        sourceDirty: 'true',
+        appVersion: '0.1.0+7',
+      });
+      process.env.KAYAN_SOURCE_COMMIT = 'database-password-must-not-appear';
+      await expect(controller.check()).resolves.toMatchObject({
+        sourceCommit: 'unknown',
+      });
+    } finally {
+      if (previous.commit === undefined) delete process.env.KAYAN_SOURCE_COMMIT;
+      else process.env.KAYAN_SOURCE_COMMIT = previous.commit;
+      if (previous.dirty === undefined) delete process.env.KAYAN_SOURCE_DIRTY;
+      else process.env.KAYAN_SOURCE_DIRTY = previous.dirty;
+      if (previous.version === undefined) delete process.env.KAYAN_APP_VERSION;
+      else process.env.KAYAN_APP_VERSION = previous.version;
+    }
+  });
+
   it('does not report first-run setup for an existing company with no users', async () => {
     mockPrisma.user = { count: jest.fn().mockResolvedValue(0) };
     const res = await controller.check();

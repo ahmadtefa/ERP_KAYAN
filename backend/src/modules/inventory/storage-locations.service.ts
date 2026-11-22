@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, StockDirection } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
@@ -32,7 +33,7 @@ export interface LocationInput {
   warehouseId: string;
   parentId?: string | null;
   kind?: string;
-  code: string;
+  code?: string;
   nameEn: string;
   nameAr: string;
   isActive?: boolean;
@@ -167,8 +168,9 @@ export class StorageLocationsService {
       );
     }
 
+    const code = input.code?.trim() || `LOC-${randomUUID()}`;
     const duplicate = await this.prisma.storageLocation.findFirst({
-      where: { companyId, warehouseId: warehouse.id, code: input.code.trim(), deletedAt: null },
+      where: { companyId, warehouseId: warehouse.id, code, deletedAt: null },
       select: { id: true },
     });
     if (duplicate) {
@@ -184,7 +186,9 @@ export class StorageLocationsService {
         warehouseId: warehouse.id,
         parentId: parent?.id ?? null,
         kind,
-        code: input.code.trim(),
+        // Human-maintained codes are optional. The opaque suffix is generated
+        // server-side so users do not need to memorize identifiers.
+        code,
         nameEn: input.nameEn.trim(),
         nameAr: input.nameAr.trim(),
         isActive: input.isActive ?? true,
@@ -279,7 +283,7 @@ export class StorageLocationsService {
       where: { id },
       data: {
         parentId: input.parentId === undefined ? undefined : input.parentId,
-        code: input.code?.trim(),
+        code: input.code?.trim() || undefined,
         nameEn: input.nameEn?.trim(),
         nameAr: input.nameAr?.trim(),
         isActive: input.isActive,

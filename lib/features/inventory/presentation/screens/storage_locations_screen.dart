@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -265,19 +266,36 @@ class StorageLocationsScreen extends ConsumerWidget {
         (options == null || options.isEmpty ? null : text(options.first, 'id'));
     if (warehouseId == null) return;
 
+    final existingLocations =
+        ref.read(storageLocationsProvider).value ?? const <Json>[];
+    const allowedParents = <String, Set<String>>{
+      'ZONE': <String>{},
+      'AISLE': <String>{'ZONE'},
+      'RACK': <String>{'ZONE', 'AISLE'},
+      'SHELF': <String>{'AISLE', 'RACK'},
+      'BIN': <String>{'RACK', 'SHELF'},
+    };
+    final locationOptions = [
+      for (final location in existingLocations)
+        if (flag(location, 'isActive', fallback: true) ||
+            text(location, 'id') == text(row ?? const {}, 'parentId'))
+          FieldOption(
+            text(location, 'id'),
+            '${_label(context, text(location, 'kind'))} · '
+            '${text(location, 'code')} · '
+            '${arabic ? text(location, 'nameAr') : text(location, 'nameEn')}',
+          ),
+    ];
     final submitted = await showFormSheet(
       context,
       title: row == null
           ? (arabic ? 'موقع جديد' : 'New location')
           : (arabic ? 'تعديل الموقع' : 'Edit location'),
       submitLabel: arabic ? 'حفظ' : 'Save',
-      initial: row ?? {'warehouseId': warehouseId},
+      initial: row ?? {'warehouseId': warehouseId, 'kind': 'ZONE'},
       fields: [
-        FieldSpec(
-          'code',
-          arabic ? 'الكود' : 'Code',
-          required: true,
-        ),
+        if (row != null)
+          FieldSpec('code', arabic ? 'الكود' : 'Code'),
         FieldSpec(
           'nameEn',
           arabic ? 'الاسم بالإنجليزية' : 'Name (English)',
@@ -293,14 +311,46 @@ class StorageLocationsScreen extends ConsumerWidget {
           arabic ? 'النوع' : 'Kind',
           kind: FieldKind.select,
           required: true,
-          emptyValue: 'BIN',
           options: [
             for (final kind in _kinds)
               FieldOption(kind, _label(context, kind)),
           ],
         ),
+        FieldSpec(
+          'parentId',
+          arabic ? 'الموقع الأب' : 'Parent location',
+          kind: FieldKind.select,
+          searchable: true,
+          helper: arabic
+              ? 'المنطقة جذرية؛ الأنواع الأخرى تحتاج موقعًا أبًا مناسبًا.'
+              : 'Zones are roots; other kinds require a compatible parent.',
+          options: locationOptions,
+        ),
       ],
       onSubmit: (values) async {
+        final kind = asString(values['kind']) ?? 'ZONE';
+        final parentId = asString(values['parentId']);
+        final parent = existingLocations
+            .where((location) => text(location, 'id') == parentId)
+            .firstOrNull;
+        final validParentKinds = allowedParents[kind] ?? const <String>{};
+        if ((kind == 'ZONE' && parentId != null) ||
+            (kind != 'ZONE' &&
+                (parentId == null ||
+                    parent == null ||
+                    !validParentKinds.contains(text(parent, 'kind'))))) {
+          throw ApiFailure(
+            arabic
+                ? 'اختر موقعًا أبًا مناسبًا لهذا النوع قبل الحفظ.'
+                : 'Choose a compatible parent location before saving.',
+            statusCode: 400,
+            fieldErrors: {
+              'parentId': arabic
+                  ? 'المنطقة لا تحتاج موقعًا أبًا، ويجب اختيار أب مناسب لبقية الأنواع.'
+                  : 'Zones have no parent; choose a compatible parent for other kinds.',
+            },
+          );
+        }
         final api = ref.read(apiClientProvider);
         if (row == null) {
           await api.post('/inventory/locations', body: {

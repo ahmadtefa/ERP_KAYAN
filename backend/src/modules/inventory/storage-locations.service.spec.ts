@@ -254,6 +254,21 @@ describe('storage locations', () => {
     );
   });
 
+  it('generates a unique warehouse-local code when an operator omits it', async () => {
+    const { service, state } = makeHarness();
+
+    const created = await service.create(
+      COMPANY,
+      USER,
+      { warehouseId: WAREHOUSE, kind: 'ZONE', nameEn: 'North', nameAr: 'الشمالي' },
+      null,
+    );
+
+    expect(created.code).toMatch(/^LOC-[0-9a-f-]{36}$/i);
+    expect(created.code).toHaveLength(40);
+    expect(state.created).toHaveLength(1);
+  });
+
   it('places an aisle inside a zone', async () => {
     const { service } = makeHarness({ locations: [zone()] });
 
