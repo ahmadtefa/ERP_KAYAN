@@ -251,8 +251,18 @@ export class AuthService {
     }
     const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: user.id },
+      // Verification happened before hashing, so the account may have been
+      // disabled, locked or had its password changed in the meantime. Only
+      // the request that still matches the verified hash may update it.
+      const updated = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          passwordHash: user.passwordHash,
+          isActive: true,
+          deletedAt: null,
+          company: { isActive: true },
+          OR: [{ lockedUntil: null }, { lockedUntil: { lte: new Date() } }],
+        },
         data: {
           passwordHash,
           tokenVersion: { increment: 1 },
@@ -260,6 +270,7 @@ export class AuthService {
           lockedUntil: null,
         },
       });
+      if (updated.count !== 1) throw invalid;
       await tx.refreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },

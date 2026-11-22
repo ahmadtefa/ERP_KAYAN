@@ -226,6 +226,11 @@ jobs:
         env:
           KAYAN_MASTER_DATA_BACKUP_PG: '1'
         run: npm test -- --runInBand src/modules/master-data-backup/master-data-backup.postgres.spec.ts
+      - name: Verify password-change concurrency on isolated PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_AUTH_PASSWORD_PG: '1'
+        run: npm test -- --runInBand src/modules/auth/auth.change-password.postgres.spec.ts
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash

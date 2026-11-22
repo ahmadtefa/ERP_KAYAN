@@ -20,7 +20,7 @@ describe('self-service password change', () => {
       lockedUntil: null,
     };
     const tx = {
-      user: { update: jest.fn().mockResolvedValue({}) },
+      user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
@@ -60,8 +60,8 @@ describe('self-service password change', () => {
         company: { code: 'KAYAN', isActive: true },
       },
     });
-    const update = tx.user.update.mock.calls[0]![0];
-    expect(update.where).toEqual({ id: userId });
+    const update = tx.user.updateMany.mock.calls[0]![0];
+    expect(update.where).toMatchObject({ id: userId, passwordHash: user.passwordHash, isActive: true, deletedAt: null, company: { isActive: true } });
     expect(update.data).toMatchObject({ tokenVersion: { increment: 1 }, failedLoginCount: 0, lockedUntil: null });
     expect(await argon2.verify(update.data.passwordHash, 'a-brand-new-secret')).toBe(true);
     expect(update.data.passwordHash).not.toBe('a-brand-new-secret');
@@ -77,6 +77,17 @@ describe('self-service password change', () => {
     expect(JSON.stringify(tx.auditLog.create.mock.calls)).not.toContain('a-brand-new-secret');
     expect(JSON.stringify(tx.auditLog.create.mock.calls)).not.toContain('correct-current-password');
     expect(user.passwordHash).not.toBe(update.data.passwordHash);
+  });
+
+  it('refuses a stale verification if the account or password changed before the update', async () => {
+    const { service, tx, audit } = await fixture();
+    tx.user.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.changeOwnPassword(
+      'cashier', 'KAYAN', 'correct-current-password',
+      'a-brand-new-secret', 'a-brand-new-secret',
+    )).rejects.toMatchObject({ status: 401 });
+    expect(tx.refreshToken.updateMany).not.toHaveBeenCalled();
+    expect(audit.recordRequired).not.toHaveBeenCalled();
   });
 
   it('returns the same authentication error for a wrong current password and records no secret', async () => {
