@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,6 +19,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { grantsOf } from '../../common/warehouse/warehouse-access';
+import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { BarcodeLabelsService } from './barcode-labels.service';
 import { BarcodeLabelsQueryDto } from './dto/barcode-labels.dto';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -192,6 +194,23 @@ export class InventoryReportsController {
     }
   }
 
+  private reportBranch(user: AuthUser, requested?: string): string | undefined {
+    const scope = warehouseScopeOf(user);
+    if (scope === null) return requested;
+    if (requested) {
+      if (!scope.includes(requested)) {
+        throw new ForbiddenException('This report is outside your assigned branches.');
+      }
+      return requested;
+    }
+    if (scope.length === 1) return scope[0];
+    if (user.branchId && scope.includes(user.branchId)) return user.branchId;
+    if (scope.length === 0) {
+      throw new ForbiddenException('No branch is assigned to this account.');
+    }
+    throw new BadRequestException('Select one of your assigned branches to run this report.');
+  }
+
   private mayManageBarcodes(user: AuthUser): boolean {
     return user.isSuperAdmin || user.permissions.includes('inventory.barcodes.manage');
   }
@@ -204,9 +223,10 @@ export class InventoryReportsController {
     @Query('categoryId') categoryId?: string,
   ) {
     this.assertUnrestrictedWarehouseReport(user);
+    const scopedBranchId = this.reportBranch(user, branchId);
     return this.service.valuation(
       user.companyId,
-      { branchId, categoryId },
+      { branchId: scopedBranchId, categoryId },
       canReadCost(user),
     );
   }
@@ -216,11 +236,13 @@ export class InventoryReportsController {
   costCenterMovements(
     @CurrentUser() user: AuthUser,
     @Query('costCenterId') costCenterId?: string,
+    @Query('branchId') branchId?: string,
   ) {
     this.assertUnrestrictedWarehouseReport(user);
+    const scopedBranchId = this.reportBranch(user, branchId);
     return this.service.costCenterMovements(
       user.companyId,
-      { costCenterId },
+      { costCenterId, branchId: scopedBranchId },
       canReadCost(user),
     );
   }
@@ -233,11 +255,12 @@ export class InventoryReportsController {
     @Query('branchId') branchId?: string,
   ) {
     this.assertUnrestrictedWarehouseReport(user);
+    const scopedBranchId = this.reportBranch(user, branchId);
     return this.service.slowMoving(
       user.companyId,
       {
         days: days ? Number(days) : undefined,
-        branchId,
+        branchId: scopedBranchId,
       },
       canReadCost(user),
     );
@@ -247,9 +270,10 @@ export class InventoryReportsController {
   @RequirePermissions('inventory.stock.read')
   reorder(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
     this.assertUnrestrictedWarehouseReport(user);
+    const scopedBranchId = this.reportBranch(user, branchId);
     return this.service.reorder(
       user.companyId,
-      { branchId },
+      { branchId: scopedBranchId },
       canReadCost(user),
       canReadPurchasePrice(user),
     );

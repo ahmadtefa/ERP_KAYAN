@@ -626,11 +626,15 @@ export class InventoryReportsService {
    */
   async costCenterMovements(
     companyId: string,
-    filters: { costCenterId?: string } = {},
+    filters: { costCenterId?: string; branchId?: string } = {},
     mayReadCost = true,
   ) {
-    if (filters.costCenterId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.costCenterId)) {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (filters.costCenterId && !uuid.test(filters.costCenterId)) {
       throw new BadRequestException('costCenterId must be a UUID');
+    }
+    if (filters.branchId && !uuid.test(filters.branchId)) {
+      throw new BadRequestException('branchId must be a UUID');
     }
     const raw = await this.prisma.$queryRaw<Array<{
       id: string; movementDate: Date; direction: string; quantity: Prisma.Decimal;
@@ -653,6 +657,7 @@ export class InventoryReportsService {
          AND m."referenceType" IN ('STOCK_ADJUSTMENT', 'STOCK_COUNT', 'STOCK_DOCUMENT_REVERSAL')
          AND (m."referenceType" <> 'STOCK_DOCUMENT_REVERSAL' OR d.id IS NULL OR d.kind <> 'TRANSFER')
          AND (${filters.costCenterId ?? null}::uuid IS NULL OR m."costCenterId" = ${filters.costCenterId ?? null}::uuid)
+         AND (${filters.branchId ?? null}::uuid IS NULL OR m."branchId" = ${filters.branchId ?? null}::uuid)
        ORDER BY m."movementDate" DESC, m."createdAt" DESC, m.id
     `);
 
