@@ -66,6 +66,25 @@ describe('MaintenanceInterceptor', () => {
     ).toBe(stream);
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
+  it.each(['/backup/complete/status', '/backup/complete/recovery'])('allows complete restore status %s in maintenance', (path) => {
+    const maintenance = new MaintenanceService();
+    maintenance.begin('Restoring');
+    const next = { handle: jest.fn(() => of('ok')) };
+    new MaintenanceInterceptor(maintenance).intercept(context('GET', path), next);
+    expect(next.handle).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['/backup/complete/restore', '/backup/complete/recovery/resume'])('does not count the controlled restore request %s as business work', async (path) => {
+    const maintenance = new MaintenanceService();
+    const stream = new Subject<string>();
+    const interceptor = new MaintenanceInterceptor(maintenance);
+    interceptor.intercept(context('POST', path), { handle: () => stream }).subscribe();
+    maintenance.begin('Restoring');
+    await expect(maintenance.waitForBusinessRequests(10)).resolves.toBeUndefined();
+    interceptor.intercept(context('POST', path), { handle: () => of('ok') });
+    stream.complete();
+  });
+
   it('drains admitted business handlers and refuses new work during the wait', async () => {
     const maintenance = new MaintenanceService();
     const interceptor = new MaintenanceInterceptor(maintenance);

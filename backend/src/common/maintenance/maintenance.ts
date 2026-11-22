@@ -101,12 +101,15 @@ export class MaintenanceInterceptor implements NestInterceptor {
     const safeDiagnostic = path === '/health' || path.startsWith('/health/');
     const safeBackup = path === '/backup/full' ||
       path === '/backup/full/status' || path === '/backup/full/capabilities' ||
+      path === '/backup/complete/status' || path === '/backup/complete/recovery' ||
       /^\/backup\/full\/[^/]+\/download\/?$/.test(path);
     // The in-flight restore continues in its already-admitted request.
     // Any fresh attempt still goes through the service's own concurrency and
     // maintenance checks; admission here is not permission to mutate data.
-    const isRestoreRequest =
-      method === 'POST' && path === '/backup/full/restore';
+    const isRestoreRequest = method === 'POST' && (
+      path === '/backup/full/restore' || path === '/backup/complete/restore' ||
+      path === '/backup/complete/recovery/resume'
+    );
     if ((isRead && (safeDiagnostic || safeBackup)) || isRestoreRequest) return next.handle();
     if (!this.maintenance.isActive) {
       const release = this.maintenance.trackBusinessRequest();

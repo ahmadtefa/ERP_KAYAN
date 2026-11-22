@@ -60,8 +60,8 @@ import { extractTar } from './tar';
  *   3. the archive is verified against its own manifest and SHA-256
  *   4. it is restored into a scratch database, which catches a damaged file
  *      while the real database is still untouched
- *   5. a complete safety backup is written; if that fails, nothing happens
- *   6. writes are blocked and the journal says "db-replacing"
+ *   5. business requests are blocked and drained, then a safety backup is written
+ *   6. the journal says "db-replacing" before the live database is changed
  *   7. the schema is replaced under the live database
  *   8. the data is checked against the manifest's own counts
  *   9. the uploads folder is swapped, keeping the old one reachable
@@ -240,6 +240,10 @@ export class SystemRestoreService implements OnModuleInit {
 
     // One restore at a time, across processes as well as inside this one.
     const lock = await this.holdAdvisoryLock();
+    if (this.running) {
+      await lock?.end().catch(() => {});
+      throw new ConflictException('A restore or recovery is already running.');
+    }
     this.running = true;
     try {
       // 3. Verify the archive before anything is believed about it.
@@ -336,6 +340,14 @@ export class SystemRestoreService implements OnModuleInit {
         ],
       });
 
+      // Stop and drain admitted requests before taking the safety snapshot.
+      // Otherwise a successful write between the snapshot and replacement could
+      // be lost on either restore or rollback.
+      this.maintenance.begin(
+        `Restoring the system from ${label}. The program will be back shortly.`,
+      );
+      await this.maintenance.waitForBusinessRequests();
+
       // 6. The safety copy. No safety copy, no restore.
       let safety;
       try {
@@ -348,10 +360,7 @@ export class SystemRestoreService implements OnModuleInit {
       }
       journal = await this.journals.advance(journal, 'safety-taken', { safetyBackup: safety.name });
 
-      // 7. Replace the database, with writes blocked.
-      this.maintenance.begin(
-        `Restoring the system from ${label}. The program will be back shortly.`,
-      );
+      // 7. Replace the database, with business requests still blocked.
       journal = await this.journals.advance(journal, 'db-replacing');
 
       try {
@@ -523,37 +532,52 @@ export class SystemRestoreService implements OnModuleInit {
     safetyBackup: string | null;
     detail: string;
   }> {
-    const journal = await this.journals.read();
-    if (!journal) {
-      this.maintenance.end();
-      return {
-        recovered: false,
-        phase: null,
-        safetyBackup: null,
-        detail: 'There is no interrupted restore to recover from.',
-      };
+    if (this.running) {
+      throw new ConflictException('A restore or recovery is already running.');
     }
-    if (!journal.safetyBackup) {
-      // Nothing was replaced, so there is nothing to put back.
-      await this.journals.clear();
-      this.maintenance.end();
+    this.running = true;
+    let lock: Client | null = null;
+    try {
+      lock = await this.holdAdvisoryLock();
+      const journal = await this.journals.read();
+      if (!journal) {
+        return {
+          recovered: false,
+          phase: null,
+          safetyBackup: null,
+          detail: 'There is no interrupted restore to recover from.',
+        };
+      }
+      if (!journal.safetyBackup) {
+        if (DESTRUCTIVE_PHASES.includes(journal.phase)) {
+          throw new ServiceUnavailableException(
+            'The interrupted restore may have changed data but no safety backup is recorded. Maintenance remains active.',
+          );
+        }
+        // Nothing was replaced, so there is nothing to put back.
+        await this.journals.clear();
+        this.maintenance.end();
+        return {
+          recovered: false,
+          phase: journal.phase,
+          safetyBackup: null,
+          detail:
+            'The interrupted restore stopped before any data was replaced, so there was nothing ' +
+            'to recover. The journal was cleared.',
+        };
+      }
+      const result = await this.rollback(journal, userId);
+      await this.gate.forget();
       return {
-        recovered: false,
+        recovered: result.recovered,
         phase: journal.phase,
-        safetyBackup: null,
-        detail:
-          'The interrupted restore stopped before any data was replaced, so there was nothing ' +
-          'to recover. The journal was cleared.',
+        safetyBackup: journal.safetyBackup,
+        detail: result.detail,
       };
+    } finally {
+      this.running = false;
+      await lock?.end().catch(() => {});
     }
-    const result = await this.rollback(journal, userId);
-    await this.gate.forget();
-    return {
-      recovered: result.recovered,
-      phase: journal.phase,
-      safetyBackup: journal.safetyBackup,
-      detail: result.detail,
-    };
   }
 
   /**
@@ -571,10 +595,10 @@ export class SystemRestoreService implements OnModuleInit {
     this.maintenance.begin(
       `Recovering from the safety backup ${safetyName}. Do not enter data yet.`,
     );
-    await this.journals.advance(journal, 'rolling-back');
-
     const workDir = join(backupDirectory(), '.recovery', `${Date.now()}-${process.pid}`);
     try {
+      await this.maintenance.waitForBusinessRequests();
+      await this.journals.advance(journal, 'rolling-back');
       await mkdir(workDir, { recursive: true });
       const safetyPath = this.backups.pathOf(safetyName);
       if (!existsSync(safetyPath)) {
@@ -884,7 +908,9 @@ export class SystemRestoreService implements OnModuleInit {
   /// released when that client is closed.
   private async holdAdvisoryLock(): Promise<Client | null> {
     const url = process.env.DATABASE_URL;
-    if (!url) return null;
+    if (!url) {
+      throw new ServiceUnavailableException('Cannot lock the restore: DATABASE_URL is not configured.');
+    }
     const client = new Client({ connectionString: cleanDatabaseUrl(url) });
     try {
       await client.connect();
@@ -900,8 +926,10 @@ export class SystemRestoreService implements OnModuleInit {
     } catch (error) {
       await client.end().catch(() => {});
       if (error instanceof ConflictException) throw error;
-      this.logger.warn(`Could not take the restore advisory lock: ${(error as Error).message}`);
-      return null;
+      this.logger.warn('Could not take the restore advisory lock.');
+      throw new ServiceUnavailableException(
+        'Cannot safely lock the database for restore or recovery. No data was changed.',
+      );
     }
   }
 
