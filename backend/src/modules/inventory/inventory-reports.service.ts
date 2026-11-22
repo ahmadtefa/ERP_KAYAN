@@ -544,23 +544,38 @@ export class InventoryReportsService {
   /// holds - and the totals row says so.
   async valuation(
     companyId: string,
-    filters: { branchId?: string; categoryId?: string } = {},
+    filters: { branchId?: string; categoryId?: string; warehouseIds?: string[] } = {},
     mayReadCost = true,
   ) {
     const settings = await this.settings.get(companyId);
 
-    const balances = await this.prisma.stockBalance.findMany({
-      where: {
-        companyId,
-        ...(filters.branchId ? { branchId: filters.branchId } : {}),
-        ...(filters.categoryId ? { item: { categoryId: filters.categoryId } } : {}),
-      },
-      include: {
-        item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
-        branch: { select: { code: true, nameEn: true } },
-      },
-      orderBy: { itemId: 'asc' },
-    });
+    const balances = filters.warehouseIds
+      ? await this.prisma.warehouseStockBalance.findMany({
+          where: {
+            companyId,
+            warehouseId: { in: filters.warehouseIds },
+            ...(filters.branchId ? { branchId: filters.branchId } : {}),
+            ...(filters.categoryId ? { item: { categoryId: filters.categoryId } } : {}),
+          },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            branch: { select: { code: true, nameEn: true } },
+            warehouse: { select: { code: true } },
+          },
+          orderBy: [{ itemId: 'asc' }, { warehouseId: 'asc' }],
+        })
+      : await this.prisma.stockBalance.findMany({
+          where: {
+            companyId,
+            ...(filters.branchId ? { branchId: filters.branchId } : {}),
+            ...(filters.categoryId ? { item: { categoryId: filters.categoryId } } : {}),
+          },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            branch: { select: { code: true, nameEn: true } },
+          },
+          orderBy: { itemId: 'asc' },
+        });
 
     const rows = balances
       .filter((balance) => !balance.quantity.isZero() || !balance.value.isZero())
@@ -572,6 +587,7 @@ export class InventoryReportsService {
         unit: balance.item.unit,
         branchCode: balance.branch.code,
         branchNameEn: balance.branch.nameEn,
+        ...('warehouse' in balance ? { warehouseCode: (balance as { warehouse: { code: string } }).warehouse.code } : {}),
         quantity: balance.quantity.toFixed(MONEY_SCALE),
         // Cost fields: kept as Decimals until the totals are computed, then
         // serialized (or redacted) in the final mapping below.
@@ -588,7 +604,7 @@ export class InventoryReportsService {
 
     // The ledger's own balance for the inventory account, so the report can
     // say whether the two agree instead of assuming it.
-    const ledgerRows = await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
+    const ledgerRows = filters.warehouseIds ? [] : await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
       SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
         FROM journal_lines l
         JOIN journal_entries e ON e.id = l."journalEntryId"
@@ -596,6 +612,7 @@ export class InventoryReportsService {
        WHERE e."companyId" = ${companyId}::uuid
          AND e.status IN ('POSTED', 'REVERSED')
          AND a.code = '1104'
+         AND (${filters.branchId ?? null}::uuid IS NULL OR e."branchId" = ${filters.branchId ?? null}::uuid)
     `);
     const ledgerValue = new Prisma.Decimal(ledgerRows[0]?.net ?? 0);
 
@@ -610,8 +627,8 @@ export class InventoryReportsService {
         value: mayReadCost ? totalValue.toFixed(MONEY_SCALE) : null,
         // The ledger comparison is itself a cost reconciliation: withhold the
         // whole block from callers who may not read costs.
-        ledgerValue: mayReadCost ? ledgerValue.toFixed(MONEY_SCALE) : null,
-        difference: mayReadCost
+        ledgerValue: mayReadCost && !filters.warehouseIds ? ledgerValue.toFixed(MONEY_SCALE) : null,
+        difference: mayReadCost && !filters.warehouseIds
           ? totalValue.minus(ledgerValue).toFixed(MONEY_SCALE)
           : null,
       },
@@ -626,7 +643,7 @@ export class InventoryReportsService {
    */
   async costCenterMovements(
     companyId: string,
-    filters: { costCenterId?: string; branchId?: string } = {},
+    filters: { costCenterId?: string; branchId?: string; warehouseIds?: string[] } = {},
     mayReadCost = true,
   ) {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -639,13 +656,13 @@ export class InventoryReportsService {
     const raw = await this.prisma.$queryRaw<Array<{
       id: string; movementDate: Date; direction: string; quantity: Prisma.Decimal;
       unitCost: Prisma.Decimal; totalCost: Prisma.Decimal; referenceType: string;
-      referenceNumber: string | null; itemId: string; itemCode: string;
+      referenceNumber: string | null; warehouseId: string | null; itemId: string; itemCode: string;
       itemNameEn: string; itemNameAr: string; unit: string;
       costCenterId: string | null; costCenterCode: string | null;
       costCenterNameEn: string | null; costCenterNameAr: string | null;
     }>>(Prisma.sql`
       SELECT m.id, m."movementDate", m.direction, m.quantity, m."unitCost", m."totalCost",
-             m."referenceType", m."referenceNumber", i.id AS "itemId", i.code AS "itemCode",
+             m."referenceType", m."referenceNumber", m."warehouseId", i.id AS "itemId", i.code AS "itemCode",
              i."nameEn" AS "itemNameEn", i."nameAr" AS "itemNameAr", i.unit,
              m."costCenterId", c.code AS "costCenterCode", c."nameEn" AS "costCenterNameEn",
              c."nameAr" AS "costCenterNameAr"
@@ -658,6 +675,7 @@ export class InventoryReportsService {
          AND (m."referenceType" <> 'STOCK_DOCUMENT_REVERSAL' OR d.id IS NULL OR d.kind <> 'TRANSFER')
          AND (${filters.costCenterId ?? null}::uuid IS NULL OR m."costCenterId" = ${filters.costCenterId ?? null}::uuid)
          AND (${filters.branchId ?? null}::uuid IS NULL OR m."branchId" = ${filters.branchId ?? null}::uuid)
+         ${filters.warehouseIds ? Prisma.sql`AND m."warehouseId" = ANY(${filters.warehouseIds}::uuid[])` : Prisma.empty}
        ORDER BY m."movementDate" DESC, m."createdAt" DESC, m.id
     `);
 
@@ -688,6 +706,7 @@ export class InventoryReportsService {
         unitCost: mayReadCost ? row.unitCost.toFixed(MONEY_SCALE) : null,
         value: mayReadCost ? row.totalCost.toFixed(MONEY_SCALE) : null,
         referenceType: row.referenceType, referenceNumber: row.referenceNumber,
+        warehouseId: row.warehouseId,
         itemId: row.itemId, itemCode: row.itemCode, itemNameEn: row.itemNameEn,
         itemNameAr: row.itemNameAr, unit: row.unit,
         costCenterId: row.costCenterId, costCenterCode: row.costCenterCode,
@@ -711,11 +730,33 @@ export class InventoryReportsService {
   /// Items nobody has bought for a while, with what they tie up in cash.
   async slowMoving(
     companyId: string,
-    filters: { days?: number; branchId?: string } = {},
+    filters: { days?: number; branchId?: string; warehouseIds?: string[] } = {},
     mayReadCost = true,
   ) {
     const days = Math.max(filters.days ?? 90, 1);
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    if (filters.warehouseIds) {
+      const balances = await this.prisma.warehouseStockBalance.findMany({
+        where: { companyId, warehouseId: { in: filters.warehouseIds }, quantity: { gt: 0 }, ...(filters.branchId ? { branchId: filters.branchId } : {}) },
+        include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } }, warehouse: { select: { code: true } } },
+      });
+      const movements = await this.prisma.stockMovement.findMany({
+        where: { companyId, warehouseId: { in: filters.warehouseIds }, direction: 'OUT', ...(filters.branchId ? { branchId: filters.branchId } : {}) },
+        orderBy: { movementDate: 'desc' }, select: { warehouseId: true, itemId: true, movementDate: true },
+      });
+      const lastByKey = new Map<string, Date>();
+      for (const movement of movements) if (movement.warehouseId) {
+        const key = `${movement.warehouseId}:${movement.itemId}`;
+        if (!lastByKey.has(key)) lastByKey.set(key, movement.movementDate);
+      }
+      const rows = balances.map((balance) => {
+        const last = lastByKey.get(`${balance.warehouseId}:${balance.itemId}`) ?? null;
+        return { itemId: balance.itemId, itemCode: balance.item.code, itemNameEn: balance.item.nameEn, itemNameAr: balance.item.nameAr, unit: balance.item.unit, warehouseCode: balance.warehouse.code, quantity: balance.quantity.toFixed(MONEY_SCALE), value: balance.value, lastIssuedOn: last?.toISOString().slice(0, 10) ?? null, daysSinceLastIssue: last ? Math.floor((Date.now() - last.getTime()) / 86_400_000) : null };
+      }).filter((row) => row.lastIssuedOn === null || new Date(row.lastIssuedOn) <= since);
+      const totalValue = rows.reduce((sum, row) => sum.plus(row.value), new Prisma.Decimal(0));
+      return { days, rows: rows.map((row) => ({ ...row, value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null })), totals: { value: mayReadCost ? totalValue.toFixed(MONEY_SCALE) : null, items: rows.length } };
+    }
 
     const balances = await this.prisma.stockBalance.findMany({
       where: {
@@ -728,7 +769,7 @@ export class InventoryReportsService {
 
     const lastOut = await this.prisma.stockMovement.groupBy({
       by: ['itemId'],
-      where: { companyId, direction: 'OUT' },
+      where: { companyId, direction: 'OUT', ...(filters.branchId ? { branchId: filters.branchId } : {}) },
       _max: { movementDate: true },
     });
     const lastOutByItem = new Map(lastOut.map((row) => [row.itemId, row._max.movementDate]));
@@ -777,10 +818,43 @@ export class InventoryReportsService {
   /// What needs ordering: on hand at or below the reorder level.
   async reorder(
     companyId: string,
-    filters: { branchId?: string } = {},
+    filters: { branchId?: string; warehouseIds?: string[] } = {},
     mayReadCost = true,
     mayReadPurchasePrice = true,
   ) {
+    if (filters.warehouseIds) {
+      const items = await this.prisma.item.findMany({
+        where: { companyId, deletedAt: null, isActive: true, isStockTracked: true },
+        select: {
+          id: true, code: true, nameEn: true, nameAr: true, unit: true, reorderLevel: true, purchasePrice: true,
+          category: { select: { code: true, nameEn: true } },
+          warehouseBalances: {
+            where: { warehouseId: { in: filters.warehouseIds }, ...(filters.branchId ? { branchId: filters.branchId } : {}) },
+            select: { quantity: true, value: true, warehouse: { select: { code: true } } },
+          },
+        },
+      });
+      const rows = items.map((item) => {
+        const onHand = item.warehouseBalances.reduce((sum, row) => sum.plus(row.quantity), new Prisma.Decimal(0));
+        const value = item.warehouseBalances.reduce((sum, row) => sum.plus(row.value), new Prisma.Decimal(0));
+        const shortfall = item.reorderLevel.minus(onHand);
+        return {
+          itemId: item.id, itemCode: item.code, itemNameEn: item.nameEn, itemNameAr: item.nameAr, unit: item.unit,
+          category: item.category?.code ?? null, categoryNameEn: item.category?.nameEn ?? null,
+          onHand: onHand.toFixed(MONEY_SCALE), value, reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
+          shortfall: shortfall.greaterThan(0) ? shortfall.toFixed(MONEY_SCALE) : '0.0000',
+          averageCost: onHand.isZero() ? new Prisma.Decimal(0) : value.div(onHand),
+          estimatedOrderCost: shortfall.greaterThan(0) && item.purchasePrice !== null ? shortfall.mul(item.purchasePrice) : null,
+          warehouses: item.warehouseBalances.map((row) => ({ warehouseCode: row.warehouse.code, quantity: row.quantity.toFixed(MONEY_SCALE) })),
+        };
+      }).filter((row) => !new Prisma.Decimal(row.reorderLevel).isZero() && new Prisma.Decimal(row.onHand).lessThanOrEqualTo(row.reorderLevel))
+        .sort((a, b) => new Prisma.Decimal(b.shortfall).minus(a.shortfall).toNumber());
+      const total = rows.reduce((sum, row) => row.estimatedOrderCost === null ? sum : sum.plus(row.estimatedOrderCost), new Prisma.Decimal(0));
+      return {
+        rows: rows.map((row) => ({ ...row, value: mayReadCost ? row.value.toFixed(MONEY_SCALE) : null, averageCost: mayReadCost ? row.averageCost.toFixed(MONEY_SCALE) : null, estimatedOrderCost: mayReadPurchasePrice && row.estimatedOrderCost !== null ? row.estimatedOrderCost.toFixed(MONEY_SCALE) : null })),
+        totals: { items: rows.length, estimatedOrderCost: mayReadPurchasePrice ? total.toFixed(MONEY_SCALE) : null },
+      };
+    }
     const items = await this.prisma.item.findMany({
       where: { companyId, deletedAt: null, isActive: true, isStockTracked: true },
       select: {
@@ -882,7 +956,7 @@ export class InventoryReportsService {
   /// cartons") can be checked against the ledger ("48 pieces") on paper.
   async stockTakeVariance(
     companyId: string,
-    filters: { from?: string; to?: string; branchId?: string; warehouseId?: string } = {},
+    filters: { from?: string; to?: string; branchId?: string; warehouseId?: string; warehouseIds?: string[] } = {},
     mayReadCost = true,
   ) {
     const dateFilter: Prisma.DateTimeFilter = {};
@@ -898,7 +972,7 @@ export class InventoryReportsService {
         // A count of one warehouse names it as the destination, the same way
         // a transfer does; the count of a branch that names no warehouse
         // belongs to the branch's default store.
-        ...(filters.warehouseId ? { toWarehouseId: filters.warehouseId } : {}),
+        ...(filters.warehouseIds ? { toWarehouseId: { in: filters.warehouseIds } } : filters.warehouseId ? { toWarehouseId: filters.warehouseId } : {}),
         ...(Object.keys(dateFilter).length ? { documentDate: dateFilter } : {}),
       },
       orderBy: [{ documentDate: 'asc' }, { documentNumber: 'asc' }],

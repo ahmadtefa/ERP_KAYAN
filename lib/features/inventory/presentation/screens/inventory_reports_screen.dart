@@ -16,6 +16,16 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 /// a report added to the backend appears here without a second list to keep in
 /// step - and a report removed stops being offered instead of failing when
 /// pressed.
+final _warehouseOptionsProvider = FutureProvider<List<Json>>((ref) async {
+  try {
+    return await ref.read(apiClientProvider).getList('/inventory/warehouses');
+  } catch (_) {
+    // The API still applies all assigned grants automatically when the caller
+    // is not permitted to browse the warehouse catalogue.
+    return const [];
+  }
+});
+
 final _catalogueProvider = FutureProvider<List<Json>>((ref) async {
   final response = await ref
       .read(apiClientProvider)
@@ -195,6 +205,10 @@ class _InventoryReportsScreenState
                     _arabic ? '${rows.length} سجل' : '${rows.length} rows',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  if ((report['filters'] as List? ?? const []).contains('warehouseId')) ...[
+                    const SizedBox(width: 8),
+                    _warehouseFilter(),
+                  ],
                   if (mayExport) ...[
                     const SizedBox(width: 12),
                     FilledButton.tonalIcon(
@@ -222,6 +236,60 @@ class _InventoryReportsScreenState
           ],
         );
       },
+    );
+  }
+
+  Widget _warehouseFilter() {
+    final available = ref.watch(_warehouseOptionsProvider).valueOrNull ?? const <Json>[];
+    if (available.isEmpty) return const SizedBox.shrink();
+    final filters = ref.watch(_reportFilterProvider);
+    final selected = (asString(filters['warehouseIds']) ?? '')
+        .split(',').where((id) => id.isNotEmpty).toSet();
+    final label = selected.isEmpty
+        ? (_arabic ? 'كل المستودعات المسموحة' : 'All assigned warehouses')
+        : (_arabic ? 'المستودعات: ${selected.length}' : 'Warehouses: ${selected.length}');
+    return OutlinedButton.icon(
+      onPressed: () async {
+        final chosen = await showDialog<Set<String>>(
+          context: context,
+          builder: (dialogContext) {
+            final draft = selected.isEmpty
+                ? available.map((warehouse) => text(warehouse, 'id')).toSet()
+                : {...selected};
+            return StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+              title: Text(_arabic ? 'نطاق المستودعات' : 'Warehouse scope'),
+              content: SizedBox(
+                width: 420,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final warehouse in available)
+                      CheckboxListTile(
+                        value: draft.contains(text(warehouse, 'id')),
+                        title: Text('${text(warehouse, 'code')} · ${_arabic ? text(warehouse, 'nameAr') : text(warehouse, 'nameEn')}'),
+                        onChanged: (checked) => setDialogState(() {
+                          final id = text(warehouse, 'id');
+                          if (checked == true) { draft.add(id); } else { draft.remove(id); }
+                        }),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),
+                TextButton(onPressed: () => Navigator.pop(dialogContext, <String>{}), child: Text(_arabic ? 'الكل' : 'All assigned')),
+                FilledButton(onPressed: () => Navigator.pop(dialogContext, draft), child: Text(_arabic ? 'تطبيق' : 'Apply')),
+              ],
+            ));
+          },
+        );
+        if (chosen == null) return;
+        ref.read(_reportFilterProvider.notifier).set(
+          'warehouseIds', chosen.isEmpty ? null : chosen.join(','),
+        );
+      },
+      icon: const Icon(Icons.warehouse_outlined, size: 18),
+      label: Text(label),
     );
   }
 

@@ -18,8 +18,8 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
-import { grantsOf } from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
+import { resolveInventoryReportAccess } from './inventory-report-access';
 import { BarcodeLabelsService } from './barcode-labels.service';
 import { BarcodeLabelsQueryDto } from './dto/barcode-labels.dto';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -186,14 +186,6 @@ export class InventoryReportsController {
     return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) });
   }
 
-  private assertUnrestrictedWarehouseReport(user: AuthUser): void {
-    if (grantsOf(user) !== null) {
-      throw new ForbiddenException(
-        'This report is not yet scoped to individual warehouse grants. Use the warehouse-filtered inventory reports. / هذا التقرير غير مقيّد بعد بصلاحيات كل مستودع.',
-      );
-    }
-  }
-
   private reportBranch(user: AuthUser, requested?: string): string | undefined {
     const scope = warehouseScopeOf(user);
     if (scope === null) return requested;
@@ -219,15 +211,14 @@ export class InventoryReportsController {
   @RequirePermissions('inventory.stock.read')
   valuation(
     @CurrentUser() user: AuthUser,
-    @Query('branchId') branchId?: string,
-    @Query('categoryId') categoryId?: string,
+    @Query() query: { branchId?: string; categoryId?: string; warehouseId?: string; warehouseIds?: string | string[] },
   ) {
-    this.assertUnrestrictedWarehouseReport(user);
-    const scopedBranchId = this.reportBranch(user, branchId);
+    const access = resolveInventoryReportAccess(user, query);
+    const scopedBranchId = this.reportBranch(user, query.branchId);
     return this.service.valuation(
       user.companyId,
-      { branchId: scopedBranchId, categoryId },
-      canReadCost(user),
+      { branchId: scopedBranchId, categoryId: query.categoryId, warehouseIds: access.warehouseIds },
+      access.canReadCost,
     );
   }
 
@@ -235,15 +226,14 @@ export class InventoryReportsController {
   @RequirePermissions('inventory.stock.read')
   costCenterMovements(
     @CurrentUser() user: AuthUser,
-    @Query('costCenterId') costCenterId?: string,
-    @Query('branchId') branchId?: string,
+    @Query() query: { costCenterId?: string; branchId?: string; warehouseId?: string; warehouseIds?: string | string[] },
   ) {
-    this.assertUnrestrictedWarehouseReport(user);
-    const scopedBranchId = this.reportBranch(user, branchId);
+    const access = resolveInventoryReportAccess(user, query);
+    const scopedBranchId = this.reportBranch(user, query.branchId);
     return this.service.costCenterMovements(
       user.companyId,
-      { costCenterId, branchId: scopedBranchId },
-      canReadCost(user),
+      { costCenterId: query.costCenterId, branchId: scopedBranchId, warehouseIds: access.warehouseIds },
+      access.canReadCost,
     );
   }
 
@@ -251,31 +241,30 @@ export class InventoryReportsController {
   @RequirePermissions('inventory.stock.read')
   slowMoving(
     @CurrentUser() user: AuthUser,
-    @Query('days') days?: string,
-    @Query('branchId') branchId?: string,
+    @Query() query: { days?: string; branchId?: string; warehouseId?: string; warehouseIds?: string | string[] },
   ) {
-    this.assertUnrestrictedWarehouseReport(user);
-    const scopedBranchId = this.reportBranch(user, branchId);
+    const access = resolveInventoryReportAccess(user, query);
+    const scopedBranchId = this.reportBranch(user, query.branchId);
     return this.service.slowMoving(
       user.companyId,
-      {
-        days: days ? Number(days) : undefined,
-        branchId: scopedBranchId,
-      },
-      canReadCost(user),
+      { days: query.days ? Number(query.days) : undefined, branchId: scopedBranchId, warehouseIds: access.warehouseIds },
+      access.canReadCost,
     );
   }
 
   @Get('reports/reorder')
   @RequirePermissions('inventory.stock.read')
-  reorder(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
-    this.assertUnrestrictedWarehouseReport(user);
-    const scopedBranchId = this.reportBranch(user, branchId);
+  reorder(
+    @CurrentUser() user: AuthUser,
+    @Query() query: { branchId?: string; warehouseId?: string; warehouseIds?: string | string[] },
+  ) {
+    const access = resolveInventoryReportAccess(user, query);
+    const scopedBranchId = this.reportBranch(user, query.branchId);
     return this.service.reorder(
       user.companyId,
-      { branchId: scopedBranchId },
-      canReadCost(user),
-      canReadPurchasePrice(user),
+      { branchId: scopedBranchId, warehouseIds: access.warehouseIds },
+      access.canReadCost,
+      access.canReadPurchasePrice,
     );
   }
 

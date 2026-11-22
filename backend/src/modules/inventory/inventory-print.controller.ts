@@ -1,10 +1,9 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
 import { filterReportAggregates } from '../export/aggregate-visibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PrintSettingsService } from '../../common/print/print-settings.module';
@@ -20,6 +19,8 @@ import {
   stockTakeVarianceTable,
 } from './inventory-print';
 import { InventoryReportsService } from './inventory-reports.service';
+import { resolveInventoryReportAccess, type InventoryReportAccess } from './inventory-report-access';
+import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockDocumentsService } from './stock-documents.service';
 
 interface PriceQuery {
@@ -34,6 +35,7 @@ interface PriceQuery {
   from?: string;
   to?: string;
   warehouseId?: string;
+  warehouseIds?: string | string[];
 }
 
 /// The warehouse's own paper: a stock document, and the three inventory
@@ -184,58 +186,95 @@ export class InventoryPrintController {
     id: string,
     query: PriceQuery,
   ): Promise<ReportTable> {
-    const document = await this.documents.findOne(user.companyId, id, canReadCost(user));
+    const access = this.reportAccess(user, query);
+    const document = await this.documents.findOne(
+      user.companyId, id, access.canReadCost, undefined, access.warehouseIds, warehouseScopeOf(user),
+    );
+    if (access.restricted) {
+      const allowed = new Set(access.warehouseIds ?? []);
+      const documentWarehouses = [document.fromWarehouseId, document.toWarehouseId].filter((value): value is string => Boolean(value));
+      if (documentWarehouses.length === 0 || documentWarehouses.some((warehouseId) => !allowed.has(warehouseId))) {
+        throw new ForbiddenException('This stock document is outside your assigned warehouses.');
+      }
+    }
     const table = stockDocumentTable(document as never);
-    return this.redact(user, table, query, 'stock-document');
+    return this.redact(user, table, this.costSafeQuery(query, access), 'stock-document');
   }
 
   private async valuationFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
+    const access = this.reportAccess(user, query);
     const report = await this.reports.valuation(
       user.companyId,
-      { branchId: query.branchId, categoryId: query.categoryId },
-      canReadCost(user),
+      { branchId: this.reportBranch(user, query.branchId), categoryId: query.categoryId, warehouseIds: access.warehouseIds },
+      access.canReadCost,
     );
-    return this.redact(user, inventoryValuationTable(report as never), query, 'inventory-valuation');
+    return this.redact(user, inventoryValuationTable(report as never), this.costSafeQuery(query, access), 'inventory-valuation');
   }
 
   private async slowMovingFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
+    const access = this.reportAccess(user, query);
     const report = await this.reports.slowMoving(
       user.companyId,
-      { days: query.days ? Number(query.days) : undefined, branchId: query.branchId },
-      canReadCost(user),
+      { days: query.days ? Number(query.days) : undefined, branchId: this.reportBranch(user, query.branchId), warehouseIds: access.warehouseIds },
+      access.canReadCost,
     );
-    return this.redact(user, slowMovingTable(report as never), query, 'slow-moving');
+    return this.redact(user, slowMovingTable(report as never), this.costSafeQuery(query, access), 'slow-moving');
   }
 
   private async reorderFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
+    const access = this.reportAccess(user, query);
     const report = await this.reports.reorder(
       user.companyId,
-      { branchId: query.branchId },
-      canReadCost(user),
+      { branchId: this.reportBranch(user, query.branchId), warehouseIds: access.warehouseIds },
+      access.canReadCost,
+      access.canReadPurchasePrice,
     );
-    return this.redact(user, reorderTable(report as never), query, 'reorder');
+    return this.redact(user, reorderTable(report as never), this.costSafeQuery(query, access), 'reorder');
   }
 
   private async stockTakeVarianceFor(
     user: AuthUser,
     query: PriceQuery,
   ): Promise<ReportTable> {
+    const access = this.reportAccess(user, query);
     const report = await this.reports.stockTakeVariance(
       user.companyId,
       {
         from: query.from,
         to: query.to,
-        branchId: query.branchId,
-        warehouseId: query.warehouseId,
+        branchId: this.reportBranch(user, query.branchId),
+        warehouseId: access.warehouseIds?.length === 1 ? access.warehouseIds[0] : undefined,
+        warehouseIds: access.warehouseIds,
       },
-      canReadCost(user),
+      access.canReadCost,
     );
     return this.redact(
       user,
       stockTakeVarianceTable(report as never),
-      query,
+      this.costSafeQuery(query, access),
       'stock-take-variance',
     );
+  }
+
+  private reportAccess(user: AuthUser, query: PriceQuery): InventoryReportAccess {
+    return resolveInventoryReportAccess(user, query);
+  }
+
+  private costSafeQuery(query: PriceQuery, access: InventoryReportAccess): PriceQuery {
+    return access.canReadCost ? query : { ...query, showCost: 'false' };
+  }
+
+  private reportBranch(user: AuthUser, requested?: string): string | undefined {
+    const scope = warehouseScopeOf(user);
+    if (requested && scope !== null && !scope.includes(requested)) {
+      throw new ForbiddenException('This report is outside your assigned branches.');
+    }
+    if (requested) return requested;
+    if (scope === null) return undefined;
+    if (scope.length === 1) return scope[0];
+    if (scope.length === 0) throw new ForbiddenException('No branch is assigned to this account.');
+    if (user.branchId && scope.includes(user.branchId)) return user.branchId;
+    throw new BadRequestException('Select one of your assigned branches to run this report.');
   }
 
   private async redact(

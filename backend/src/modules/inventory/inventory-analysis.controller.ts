@@ -1,128 +1,157 @@
-import { Controller, ForbiddenException, Get, Param, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Query,
+  Res,
+} from "@nestjs/common";
+import type { Response } from "express";
 
-import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
-import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { canReadCost } from '../../common/auth/cost-visibility';
-import { assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
-import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
-import { InventoryAnalysisService, ReportFilter } from './inventory-analysis.service';
+import { AllowQueryToken } from "../../common/decorators/allow-query-token.decorator";
+import {
+  AuthUser,
+  CurrentUser,
+} from "../../common/decorators/current-user.decorator";
+import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
+import { warehouseScopeOf } from "../../common/warehouse/warehouse.service";
+import {
+  InventoryAnalysisService,
+  ReportFilter,
+} from "./inventory-analysis.service";
+import {
+  assertWarehouseReportSupported,
+  resolveInventoryReportAccess,
+  type InventoryReportQuery,
+} from "./inventory-report-access";
 
-/// The analytical reports: the item card, the movement, the valuation per
-/// shelf, the idle stock, the lots and their money, write-offs, transfers,
-/// count variances, and the reconciliation against the ledger.
-///
-/// One endpoint per report, all through the same filters, and one CSV export
-/// that renders whatever the JSON endpoint would have returned - so a new
-/// report is never a new export format to get wrong.
-@Controller('inventory/reports')
+@Controller("inventory/reports")
 export class InventoryAnalysisController {
   constructor(private readonly service: InventoryAnalysisService) {}
 
   @Get()
-  @RequirePermissions('inventory.stock.read')
-  catalogue() {
-    return this.service.catalogue();
+  @RequirePermissions("inventory.stock.read")
+  catalogue(@CurrentUser() user: AuthUser) {
+    const access = resolveInventoryReportAccess(user, {});
+    const result = this.service.catalogue();
+    return {
+      ...result,
+      reports: result.reports.filter((report) => {
+        try {
+          assertWarehouseReportSupported(report.slug, access);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    };
   }
 
-  @Get(':slug/export')
+  @Get(":slug/export")
   @AllowQueryToken()
-  @RequirePermissions('inventory.export')
+  @RequirePermissions("inventory.export")
   async exportCsv(
     @CurrentUser() user: AuthUser,
-    @Param('slug') slug: string,
-    @Query() query: Record<string, string>,
+    @Param("slug") slug: string,
+    @Query() query: InventoryReportQuery,
     @Res() response: Response,
   ) {
     const report = await this.run(user, slug, query);
-    const rows = (report as { rows?: Array<Record<string, unknown>> }).rows ?? [];
+    const rows =
+      (report as { rows?: Array<Record<string, unknown>> }).rows ?? [];
     const header = rows.length > 0 ? Object.keys(rows[0]) : [];
     const escape = (value: unknown) => {
-      if (value === null || value === undefined) return '';
-      const text = value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
+      if (value === null || value === undefined) return "";
+      const text =
+        value instanceof Date
+          ? value.toISOString().slice(0, 10)
+          : String(value);
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    const csv = [header.join(','), ...rows.map((row) => header.map((key) => escape(row[key])).join(','))]
-      .join('\r\n');
-    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    const csv = [
+      header.join(","),
+      ...rows.map((row) => header.map((key) => escape(row[key])).join(",")),
+    ].join("\r\n");
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
     response.setHeader(
-      'Content-Disposition',
+      "Content-Disposition",
       `attachment; filename="kayan-${slug}-${new Date().toISOString().slice(0, 10)}.csv"`,
     );
-    // A byte-order mark so Excel opens Arabic headings as Arabic.
     response.send(`\ufeff${csv}`);
     return undefined;
   }
 
-  @Get(':slug')
-  @RequirePermissions('inventory.stock.read')
+  @Get(":slug")
+  @RequirePermissions("inventory.stock.read")
   run(
     @CurrentUser() user: AuthUser,
-    @Param('slug') slug: string,
-    @Query() query: Record<string, string>,
+    @Param("slug") slug: string,
+    @Query() query: InventoryReportQuery,
   ) {
-    const grant = grantsOf(user);
-    if (grant !== null) {
-      const warehouseScopedReports = new Set([
-        'item-card',
-        'item-movement',
-        'balance-by-warehouse',
-        'valuation-by-warehouse',
-        'below-minimum',
-        'above-maximum',
-        'slow-moving',
-        'dead-stock',
-        'zero-stock',
-        'lots',
-        'expiring',
-        'expired',
-        'value-at-risk',
-        'cost-by-warehouse',
-      ]);
-      if (!query.warehouseId || !warehouseScopedReports.has(slug)) {
-        throw new ForbiddenException(
-          'This report must be filtered to one visible warehouse, or is not yet available for restricted warehouse access. / يجب تحديد مستودع مسموح به لهذا التقرير.',
-        );
-      }
-      assertWarehouseAccess(user, query.warehouseId, 'view');
-    } else if (query.warehouseId) {
-      assertWarehouseAccess(user, query.warehouseId, 'view');
+    if (
+      !user.isSuperAdmin &&
+      !user.permissions.includes("inventory.stock.read")
+    ) {
+      throw new ForbiddenException("Missing permission: inventory.stock.read");
     }
-    const warehouseGrant = query.warehouseId
-      ? grant?.find((row) => row.warehouseId === query.warehouseId)
-      : undefined;
-    const mayReadReportCost = canReadCost(user) && (warehouseGrant === undefined || warehouseGrant.canSeeCost);
+    const access = resolveInventoryReportAccess(user, query);
+    assertWarehouseReportSupported(slug, access);
     const filter: ReportFilter = {
-      from: query.from,
-      to: query.to,
-      warehouseId: query.warehouseId,
-      branchId: query.branchId,
-      itemId: query.itemId,
-      categoryId: query.categoryId,
-      days: query.days ? Number(query.days) : undefined,
-      limit: query.limit ? Number(query.limit) : undefined,
+      from: query.from as string | undefined,
+      to: query.to as string | undefined,
+      warehouseId:
+        access.warehouseIds?.length === 1 ? access.warehouseIds[0] : undefined,
+      warehouseIds: access.warehouseIds,
+      branchId: access.branchId,
+      itemId: query.itemId as string | undefined,
+      categoryId: query.categoryId as string | undefined,
+      days: query.days ? Number(query.days as string) : undefined,
+      limit: query.limit ? Number(query.limit as string) : undefined,
     };
-    return this.service.run(slug, user.companyId, filter, warehouseScopeOf(user)).then((report) => {
-      if (mayReadReportCost) return report;
-      const costFields = new Set([
-        'unitCost',
-        'totalCost',
-        'averageCost',
-        'value',
-        'balanceValue',
-        'varianceValue',
-      ]);
-      const hideCosts = (value: unknown): unknown => {
-        if (Array.isArray(value)) return value.map(hideCosts);
-        if (value === null || typeof value !== 'object') return value;
-        return Object.fromEntries(
-          Object.entries(value as Record<string, unknown>)
-            .filter(([key]) => !costFields.has(key))
-            .map(([key, child]) => [key, hideCosts(child)]),
-        );
-      };
-      return hideCosts(report);
-    });
+    if (query.warehouseId && access.warehouseIds?.length === 0) {
+      throw new ForbiddenException(
+        "This report is outside your assigned warehouses.",
+      );
+    }
+
+    const scope = access.branchId ? [access.branchId] : warehouseScopeOf(user);
+    return this.service
+      .run(slug, user.companyId, filter, scope)
+      .then((report) => {
+        const hide = (value: unknown, remove: Set<string>): unknown => {
+          if (Array.isArray(value))
+            return value.map((child) => hide(child, remove));
+          if (!value || typeof value !== "object") return value;
+          return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+              .filter(([key]) => !remove.has(key))
+              .map(([key, child]) => [key, hide(child, remove)]),
+          );
+        };
+        const hideCosts = new Set([
+          "unitCost",
+          "totalCost",
+          "averageCost",
+          "value",
+          "balanceValue",
+          "varianceValue",
+          "valueIn",
+          "valueOut",
+          "netValue",
+          "stockValue",
+          "ledgerValue",
+          "difference",
+          "varianceValue",
+          "estimatedOrderCost",
+        ]);
+        const hidePurchasePrices = new Set([
+          "purchasePrice",
+          "estimatedOrderCost",
+        ]);
+        let safe: unknown = report;
+        if (!access.canReadCost) safe = hide(safe, hideCosts);
+        if (!access.canReadPurchasePrice) safe = hide(safe, hidePurchasePrices);
+        return safe;
+      });
   }
 }

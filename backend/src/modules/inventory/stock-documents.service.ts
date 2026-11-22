@@ -204,9 +204,23 @@ export class StockDocumentsService {
     };
   }
 
-  async findOne(companyId: string, id: string, mayReadCost = true, voucherBranchId?: string | null) {
+  async findOne(
+    companyId: string,
+    id: string,
+    mayReadCost = true,
+    voucherBranchId?: string | null,
+    warehouseIds?: string[],
+    branchIds?: string[] | null,
+  ) {
     const document = await this.prisma.stockDocument.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id, companyId, deletedAt: null,
+        ...(branchIds !== undefined && branchIds !== null ? { branchId: { in: branchIds } } : {}),
+        ...(warehouseIds ? { OR: [
+          { fromWarehouseId: { in: warehouseIds } },
+          { toWarehouseId: { in: warehouseIds } },
+        ] } : {}),
+      },
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },

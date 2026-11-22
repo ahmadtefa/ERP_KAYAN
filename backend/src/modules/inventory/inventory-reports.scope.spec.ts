@@ -1,11 +1,12 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 
-import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { InventoryReportsService } from './inventory-reports.service';
-import { InventoryReportsController } from './inventory-reports.controller';
+import { AuthUser } from "../../common/decorators/current-user.decorator";
+import { InventoryReportsService } from "./inventory-reports.service";
+import { InventoryReportsController } from "./inventory-reports.controller";
 
-const branchA = '11111111-1111-4111-8111-111111111111';
-const branchB = '22222222-2222-4222-8222-222222222222';
+const branchA = "11111111-1111-4111-8111-111111111111";
+const branchB = "22222222-2222-4222-8222-222222222222";
+const warehouseA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 function build() {
   const service = {
@@ -20,92 +21,81 @@ function build() {
   );
   return { controller, service };
 }
-
-function user(branchIds: string[], branchId: string | null = null): AuthUser {
+function user(
+  branchIds: string[],
+  branchId: string | null = null,
+  warehouseAccess?: AuthUser["warehouseAccess"],
+): AuthUser {
   return {
-    userId: 'user-1',
-    username: 'reporter',
-    companyId: 'company-1',
+    userId: "user-1",
+    username: "reporter",
+    companyId: "company-1",
     branchId,
     branchIds,
     isSuperAdmin: false,
-    permissions: ['inventory.stock.read'],
+    permissions: ["inventory.stock.read"],
+    warehouseAccess,
   };
 }
 
-describe('legacy inventory reports branch scope', () => {
-  it('automatically filters a single-branch user to their assigned branch', () => {
+describe("legacy inventory reports branch and warehouse scope", () => {
+  it("filters a single-branch user to their branch", () => {
     const { controller, service } = build();
-
-    controller.valuation(user([branchA]), undefined, undefined);
-
+    controller.valuation(user([branchA]), {});
     expect(service.valuation).toHaveBeenCalledWith(
-      'company-1',
-      { branchId: branchA, categoryId: undefined },
+      "company-1",
+      { branchId: branchA, categoryId: undefined, warehouseIds: undefined },
       false,
     );
   });
-
-  it('rejects an explicitly requested branch outside the user scope', () => {
+  it("rejects an explicitly requested branch outside the user scope", () => {
     const { controller } = build();
-
-    expect(() => controller.reorder(user([branchA]), branchB)).toThrow(
-      ForbiddenException,
+    expect(() =>
+      controller.reorder(user([branchA]), { branchId: branchB }),
+    ).toThrow(ForbiddenException);
+  });
+  it("passes the selected visible warehouse scope to the legacy report service", () => {
+    const { controller, service } = build();
+    const restricted = user([branchA], null, [
+      {
+        warehouseId: warehouseA,
+        canView: true,
+        canReceive: false,
+        canIssue: false,
+        canTransfer: false,
+        canCount: false,
+        canApprove: false,
+        canSeeCost: false,
+      },
+    ]);
+    controller.valuation(restricted, {});
+    expect(service.valuation).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        branchId: branchA,
+        warehouseIds: [warehouseA],
+      }),
+      false,
     );
   });
-
-  it('does not expose branch-level legacy reports to warehouse-restricted users', () => {
+  it("uses active branch for multi-branch users and requires a choice if none is active", () => {
     const { controller, service } = build();
-    const restricted = {
-      ...user([branchA]),
-      warehouseAccess: [
-        {
-          warehouseId: 'warehouse-a',
-          canView: true,
-          canReceive: false,
-          canIssue: false,
-          canTransfer: false,
-          canCount: false,
-          canApprove: false,
-          canSeeCost: false,
-        },
-      ],
-    };
-
-    expect(() => controller.valuation(restricted, branchA)).toThrow(
-      ForbiddenException,
-    );
-    expect(service.valuation).not.toHaveBeenCalled();
-  });
-
-  it('uses the active branch for a multi-branch user unless another allowed branch is requested', () => {
-    const { controller, service } = build();
-
-    controller.slowMoving(user([branchA, branchB], branchB));
-
+    controller.slowMoving(user([branchA, branchB], branchB), {});
     expect(service.slowMoving).toHaveBeenCalledWith(
-      'company-1',
-      { days: undefined, branchId: branchB },
+      "company-1",
+      { days: undefined, branchId: branchB, warehouseIds: undefined },
       false,
     );
-  });
-
-  it('requires a branch choice when several branches are assigned but none is active', () => {
-    const { controller } = build();
-
-    expect(() => controller.slowMoving(user([branchA, branchB]))).toThrow(
+    expect(() => controller.slowMoving(user([branchA, branchB]), {})).toThrow(
       BadRequestException,
     );
   });
-
-  it('applies branch scope to cost-center movement reports', () => {
+  it("applies branch and warehouse scope to cost-center movement reports", () => {
     const { controller, service } = build();
-
-    controller.costCenterMovements(user([branchA]), undefined);
-
+    controller.costCenterMovements(user([branchA]), {});
     expect(service.costCenterMovements).toHaveBeenCalledWith(
-      'company-1',
-      { costCenterId: undefined, branchId: branchA },
+      "company-1",
+      { costCenterId: undefined, branchId: branchA, warehouseIds: undefined },
       false,
     );
   });

@@ -10,6 +10,7 @@ export interface ReportFilter {
   from?: string;
   to?: string;
   warehouseId?: string;
+  warehouseIds?: string[];
   branchId?: string;
   itemId?: string;
   categoryId?: string;
@@ -113,7 +114,7 @@ export class InventoryAnalysisService {
         companyId,
         itemId: filter.itemId,
         movementDate: { gte: from, lte: to },
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(scope !== null ? { branchId: { in: scope } } : {}),
       },
       orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],
@@ -132,7 +133,8 @@ export class InventoryAnalysisService {
        WHERE "companyId" = ${companyId}::uuid
          AND "itemId" = ${filter.itemId}::uuid
          AND "movementDate" < ${from.toISOString().slice(0, 10)}::date
-         ${filter.warehouseId ? Prisma.sql`AND "warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
+         ${filter.warehouseIds ? Prisma.sql`AND "warehouseId" = ANY(${filter.warehouseIds}::uuid[])` : filter.warehouseId ? Prisma.sql`AND "warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
+         ${scope !== null ? Prisma.sql`AND "branchId" = ANY(${scope}::uuid[])` : Prisma.empty}
     `);
     let runningQuantity = new Prisma.Decimal(opening[0]?.quantity ?? 0);
     let runningValue = new Prisma.Decimal(opening[0]?.value ?? 0);
@@ -178,7 +180,7 @@ export class InventoryAnalysisService {
       where: {
         companyId,
         ...(filter.itemId ? { itemId: filter.itemId } : {}),
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(scope !== null ? { branchId: { in: scope } } : {}),
         ...this.rangeWhere(filter),
       },
@@ -212,7 +214,7 @@ export class InventoryAnalysisService {
     const rows = await this.prisma.warehouseStockBalance.findMany({
       where: {
         companyId,
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(filter.itemId ? { itemId: filter.itemId } : {}),
         ...(filter.categoryId ? { item: { categoryId: filter.categoryId } } : {}),
         ...(scope !== null ? { branchId: { in: scope } } : {}),
@@ -247,6 +249,40 @@ export class InventoryAnalysisService {
   }
 
   private async balanceByBranch(companyId: string, filter: ReportFilter, scope: WarehouseScope) {
+    if (filter.warehouseIds || filter.warehouseId) {
+      const warehouses = filter.warehouseIds ?? [filter.warehouseId!];
+      const balances = await this.prisma.warehouseStockBalance.findMany({
+        where: {
+          companyId,
+          warehouseId: { in: warehouses },
+          ...(filter.branchId ? { branchId: filter.branchId } : {}),
+          ...(scope !== null ? { branchId: { in: scope } } : {}),
+          ...(filter.itemId ? { itemId: filter.itemId } : {}),
+          quantity: { not: 0 },
+        },
+        include: {
+          item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+          branch: { select: { code: true, nameEn: true } },
+        },
+      });
+      const byKey = new Map<string, { branchCode: string; branchNameEn: string; item: typeof balances[number]['item']; quantity: Prisma.Decimal; value: Prisma.Decimal }>();
+      for (const row of balances) {
+        const key = `${row.branchId}:${row.itemId}`;
+        const current = byKey.get(key) ?? {
+          branchCode: row.branch.code, branchNameEn: row.branch.nameEn, item: row.item,
+          quantity: new Prisma.Decimal(0), value: new Prisma.Decimal(0),
+        };
+        current.quantity = current.quantity.plus(row.quantity);
+        current.value = current.value.plus(row.value);
+        byKey.set(key, current);
+      }
+      const rows = [...byKey.values()].map((row) => ({
+        branchCode: row.branchCode, branchNameEn: row.branchNameEn,
+        itemCode: row.item.code, itemNameEn: row.item.nameEn, itemNameAr: row.item.nameAr,
+        quantity: row.quantity.toFixed(MONEY_SCALE), value: row.value.toFixed(MONEY_SCALE),
+      }));
+      return { slug: 'balance-by-branch', rows, totals: { value: this.sum(rows.map((row) => new Prisma.Decimal(row.value))).toFixed(MONEY_SCALE) }, rowCount: rows.length };
+    }
     const rows = await this.prisma.stockBalance.findMany({
       where: {
         companyId,
@@ -264,13 +300,9 @@ export class InventoryAnalysisService {
     return {
       slug: 'balance-by-branch',
       rows: rows.map((row) => ({
-        branchCode: row.branch.code,
-        branchNameEn: row.branch.nameEn,
-        itemCode: row.item.code,
-        itemNameEn: row.item.nameEn,
-        itemNameAr: row.item.nameAr,
-        quantity: row.quantity.toFixed(MONEY_SCALE),
-        value: row.value.toFixed(MONEY_SCALE),
+        branchCode: row.branch.code, branchNameEn: row.branch.nameEn,
+        itemCode: row.item.code, itemNameEn: row.item.nameEn, itemNameAr: row.item.nameAr,
+        quantity: row.quantity.toFixed(MONEY_SCALE), value: row.value.toFixed(MONEY_SCALE),
       })),
       totals: { value: this.sum(rows.map((row) => row.value)).toFixed(MONEY_SCALE) },
       rowCount: rows.length,
@@ -299,7 +331,7 @@ export class InventoryAnalysisService {
         JOIN "warehouses" w ON w."id" = b."warehouseId"
        WHERE b."companyId" = ${companyId}::uuid
          AND w."deletedAt" IS NULL
-         ${filter.warehouseId ? Prisma.sql`AND b."warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
+         ${filter.warehouseIds ? Prisma.sql`AND b."warehouseId" = ANY(${filter.warehouseIds}::uuid[])` : filter.warehouseId ? Prisma.sql`AND b."warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
          ${scope !== null ? Prisma.sql`AND b."branchId" = ANY(${scope}::uuid[])` : Prisma.empty}
        GROUP BY w."id", w."code", w."nameEn", w."nameAr"
        ORDER BY w."code"
@@ -331,7 +363,7 @@ export class InventoryAnalysisService {
     const settings = await this.prisma.itemWarehouseSetting.findMany({
       where: {
         companyId,
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(scope !== null ? { warehouse: { branchId: { in: scope } } } : {}),
         OR: [{ minQuantity: { gt: 0 } }, { maxQuantity: { gt: 0 } }],
       },
@@ -412,7 +444,7 @@ export class InventoryAnalysisService {
         JOIN "items" i ON i."id" = b."itemId"
        WHERE b."companyId" = ${companyId}::uuid
          AND b."quantity" > 0
-         ${filter.warehouseId ? Prisma.sql`AND b."warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
+         ${filter.warehouseIds ? Prisma.sql`AND b."warehouseId" = ANY(${filter.warehouseIds}::uuid[])` : filter.warehouseId ? Prisma.sql`AND b."warehouseId" = ${filter.warehouseId}::uuid` : Prisma.empty}
          ${scope !== null ? Prisma.sql`AND b."branchId" = ANY(${scope}::uuid[])` : Prisma.empty}
          AND NOT EXISTS (
            SELECT 1 FROM "stock_movements" m2
@@ -444,6 +476,17 @@ export class InventoryAnalysisService {
   }
 
   private async zeroStock(companyId: string, filter: ReportFilter, scope: WarehouseScope) {
+    if (filter.warehouseIds || filter.warehouseId) {
+      const warehouseIds = filter.warehouseIds ?? [filter.warehouseId!];
+      const [items, warehouses, balances] = await Promise.all([
+        this.prisma.item.findMany({ where: { companyId, deletedAt: null, isActive: true, isStockTracked: true }, take: 5000, select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } }),
+        this.prisma.warehouse.findMany({ where: { companyId, id: { in: warehouseIds }, deletedAt: null, ...(scope !== null ? { branchId: { in: scope } } : {}) }, select: { id: true, code: true } }),
+        this.prisma.warehouseStockBalance.findMany({ where: { companyId, warehouseId: { in: warehouseIds }, quantity: { not: 0 }, ...(scope !== null ? { branchId: { in: scope } } : {}) }, select: { warehouseId: true, itemId: true } }),
+      ]);
+      const held = new Set(balances.map((row) => `${row.warehouseId}:${row.itemId}`));
+      const rows = warehouses.flatMap((warehouse) => items.filter((item) => !held.has(`${warehouse.id}:${item.id}`)).map((item) => ({ warehouseCode: warehouse.code, itemCode: item.code, itemNameEn: item.nameEn, itemNameAr: item.nameAr, unit: item.unit })));
+      return { slug: 'zero-stock', rows, rowCount: rows.length };
+    }
     const items = await this.prisma.item.findMany({
       where: {
         companyId,
@@ -489,7 +532,7 @@ export class InventoryAnalysisService {
         companyId,
         deletedAt: null,
         ...(filter.itemId ? { itemId: filter.itemId } : {}),
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(scope !== null ? { warehouse: { branchId: { in: scope } } } : {}),
         remainingQuantity: { gt: 0 },
         ...(mode === 'EXPIRED'
@@ -559,6 +602,17 @@ export class InventoryAnalysisService {
         kind: kind as never,
         deletedAt: null,
         ...(scope !== null ? { branchId: { in: scope } } : {}),
+        ...(filter.warehouseIds ? {
+          ...(kind === 'TRANSFER'
+            ? { fromWarehouseId: { in: filter.warehouseIds }, toWarehouseId: { in: filter.warehouseIds } }
+            : kind === 'COUNT'
+              ? { toWarehouseId: { in: filter.warehouseIds } }
+              : { fromWarehouseId: { in: filter.warehouseIds } }),
+        } : filter.warehouseId ? {
+          ...(kind === 'TRANSFER'
+            ? { fromWarehouseId: filter.warehouseId, toWarehouseId: filter.warehouseId }
+            : kind === 'COUNT' ? { toWarehouseId: filter.warehouseId } : { fromWarehouseId: filter.warehouseId }),
+        } : {}),
         ...this.rangeWhere(filter),
       },
       orderBy: { documentDate: 'desc' },
@@ -606,7 +660,7 @@ export class InventoryAnalysisService {
     const rows = await this.prisma.warehouseStockBalance.findMany({
       where: {
         companyId,
-        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+        ...(filter.warehouseIds ? { warehouseId: { in: filter.warehouseIds } } : filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
         ...(scope !== null ? { branchId: { in: scope } } : {}),
         quantity: { not: 0 },
       },
