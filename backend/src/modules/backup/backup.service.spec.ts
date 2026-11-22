@@ -84,7 +84,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
         // the restored file left the company with none.
         count: jest.fn(async () => 1),
         deleteMany: jest.fn(async () => ({ count: 0 })),
-        createMany: jest.fn(async () => ({ count: 0 })),
+        createMany: jest.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
         updateMany: jest.fn(async () => ({ count: 0 })),
         create: jest.fn(async () => ({})),
         update: jest.fn(async () => ({})),
@@ -875,6 +875,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       await expect(service.restore(minimalBackup(), COMPANY_ID, { replace: true })).rejects.toThrow('backup storage unavailable');
       expect(txMock.customer.deleteMany).not.toHaveBeenCalled();
       expect(txMock.$queryRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    test('rejects a database insert count mismatch rather than reporting rows as restored', async () => {
+      txMock.user.createMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.restore(minimalBackup(), COMPANY_ID, { replace: true })).rejects.toThrow(/restored row count.*user/i);
+      expect(txMock.auditLog.create).not.toHaveBeenCalled();
     });
 
     test('switches the guard on, deletes, and switches it straight back off', async () => {

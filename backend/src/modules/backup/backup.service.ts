@@ -97,7 +97,7 @@ type RestoreClient = Prisma.TransactionClient | PrismaService;
 interface BackupModelDelegate {
   findMany(args: unknown): Promise<Array<Record<string, unknown>>>;
   deleteMany(args: unknown): Promise<unknown>;
-  createMany(args: unknown): Promise<unknown>;
+  createMany(args: unknown): Promise<{ count: number }>;
 }
 
 /// One table in the backup.
@@ -744,11 +744,10 @@ export class BackupService {
                 ? { ...row, status: PeriodStatus.OPEN }
                 : row)
             : rows;
-          await this.insertTable(tx, spec, restoreRows, requesterCompanyId, {
+          written[spec.model] = await this.insertTable(tx, spec, restoreRows, requesterCompanyId, {
             actorUserId: actor?.id ?? null,
             actorIsSuperAdmin: actor?.isSuperAdmin === true,
           });
-          written[spec.model] = rows.length;
         }
 
         for (const period of file.tables.fiscalPeriod ?? []) {
@@ -1068,9 +1067,11 @@ export class BackupService {
     rows: Array<Record<string, unknown>>,
     companyId: string,
     security: { actorUserId: string | null; actorIsSuperAdmin: boolean },
-  ): Promise<void> {
+  ): Promise<number> {
     const delegate = this.delegate(client, spec.model);
-    if (!delegate?.createMany) return;
+    if (!delegate?.createMany) {
+      throw new ServiceUnavailableException(`Cannot restore table ${spec.model}; its database delegate is unavailable. Nothing was changed.`);
+    }
 
     rows = this.decodeBinaryFields(rows, spec.binaryFields);
 
@@ -1182,12 +1183,16 @@ export class BackupService {
     // matters for the self-referencing tables: within one INSERT the foreign
     // key is checked after every row is in place.
     const size = 1000;
+    let inserted = 0;
     for (let index = 0; index < ordered.length; index += size) {
-      await delegate.createMany({
-        data: ordered.slice(index, index + size),
-        skipDuplicates: false,
-      });
+      const chunk = ordered.slice(index, index + size);
+      const result = await delegate.createMany({ data: chunk, skipDuplicates: false });
+      if (result.count !== chunk.length) {
+        throw new ServiceUnavailableException(`The restored row count for ${spec.model} did not match the database result. Nothing was changed.`);
+      }
+      inserted += result.count;
     }
+    return inserted;
   }
 
   private scalarModelFields(model: string): Set<string> | null {
