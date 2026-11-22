@@ -272,20 +272,23 @@ async function main() {
   const health = await request('/health');
   check('the program answers after the restore', health.status === 200, `status ${health.status}`);
 
-  const status = await request('/backup/complete/status', { token });
+  const staleStatus = await request('/backup/complete/status', { token });
+  check('the earlier access token cannot survive a complete restore', staleStatus.status === 401,
+    `status ${staleStatus.status}`);
+  const relogin = await request('/auth/login', { method: 'POST', body: { username, password } });
+  check(
+    'the restored accounts still sign in with the same credentials',
+    relogin.status < 300 && typeof relogin.data?.accessToken === 'string',
+    `status ${relogin.status}`,
+  );
+
+  const status = await request('/backup/complete/status', { token: relogin.data?.accessToken });
   check(
     'the status shows no running or interrupted restore',
     status.status === 200 &&
       status.data?.maintenance === false &&
       status.data?.journal?.unfinished !== true,
     `maintenance=${status.data?.maintenance} phase=${status.data?.journal?.phase ?? 'none'}`,
-  );
-
-  const relogin = await request('/auth/login', { method: 'POST', body: { username, password } });
-  check(
-    'the restored accounts still sign in with the same credentials',
-    relogin.status < 300 && typeof relogin.data?.accessToken === 'string',
-    `status ${relogin.status}`,
   );
 
   // Clean up the archives this run wrote, so the folder does not grow forever
