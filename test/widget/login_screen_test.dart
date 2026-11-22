@@ -2,6 +2,7 @@ import 'package:erp_kayan/core/backend/setup_state.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/result/result.dart';
+import 'package:erp_kayan/core/storage/credentials_store.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/screens/login_screen.dart';
 import 'package:erp_kayan/shared/widgets/searchable_select_field.dart';
@@ -90,7 +91,13 @@ void main() {
           authRepositoryProvider.overrideWithValue(repository),
           if (apiClient != null) apiClientProvider.overrideWithValue(apiClient),
         ],
-        child: wrapWithApp(child: const LoginScreen(), locale: locale),
+        child: wrapWithApp(
+          child: LoginScreen(credentialsStore: CredentialsStore(
+            canStorePassword: false,
+            deleteSecret: (_) async {},
+          )),
+          locale: locale,
+        ),
       ),
     );
     await tester.pumpAndSettle();

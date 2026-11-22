@@ -28,7 +28,10 @@ import '../providers/auth_providers.dart';
 /// keystore, never in plain preferences. On the web the username alone is
 /// remembered. Everything can be cleared with one tap.
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.credentialsStore});
+
+  /// An injectable keystore for tests; production uses the platform store.
+  final CredentialsStore? credentialsStore;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -38,7 +41,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _username = TextEditingController();
   final _password = TextEditingController();
-  final _credentials = CredentialsStore();
+  late final CredentialsStore _credentials;
 
   bool _obscure = true;
   bool _busy = false;
@@ -56,6 +59,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    _credentials = widget.credentialsStore ?? CredentialsStore();
     _loadSaved();
     _checkSetup();
   }
