@@ -1,23 +1,41 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
+import { AuditService } from '../../common/audit/audit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { UsersService } from './users.service';
 
 // The seat reservation happens inside user creation; its behaviour is covered
 // by the licensing specs, so the constructor gets a stand-in here.
-const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({}) } as any;
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({}) };
 
 function build(known: string[]) {
   const prisma = {
     permission: {
       findMany: jest.fn().mockResolvedValue(known.map((code) => ({ code }))),
     },
+    user: { findFirst: jest.fn() },
   };
   const service = new UsersService(
-    prisma as any,
-    { record: jest.fn() } as any,
-    licensingStub,
+    prisma as unknown as PrismaService,
+    { record: jest.fn() } as unknown as AuditService,
+    licensingStub as unknown as LicensingService,
   );
   return { service, prisma };
+}
+
+type PermissionNormalizer = {
+  normalizeExtraPermissions(
+    codes: string[] | undefined,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ): Promise<string[]>;
+};
+
+function normalize(service: UsersService, ...args: Parameters<PermissionNormalizer['normalizeExtraPermissions']>) {
+  return (
+    service as unknown as PermissionNormalizer
+  ).normalizeExtraPermissions(...args);
 }
 
 describe('UsersService extra permissions', () => {
@@ -25,11 +43,7 @@ describe('UsersService extra permissions', () => {
     const { service } = build(['cash.vouchers.create', 'reports.read']);
 
     await expect(
-      (service as any).normalizeExtraPermissions(
-        ['cash.vouchers.create'],
-        ['admin.users.manage', 'cash.vouchers.create'],
-        false,
-      ),
+      normalize(service, ['cash.vouchers.create'], ['admin.users.manage', 'cash.vouchers.create'], false),
     ).resolves.toEqual(['cash.vouchers.create']);
   });
 
@@ -37,11 +51,7 @@ describe('UsersService extra permissions', () => {
     const { service } = build(['reports.read']);
 
     await expect(
-      (service as any).normalizeExtraPermissions(
-        ['made.up.permission'],
-        ['reports.read'],
-        true,
-      ),
+      normalize(service, ['made.up.permission'], ['reports.read'], true),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -49,29 +59,21 @@ describe('UsersService extra permissions', () => {
     const { service } = build(['admin.backup']);
 
     await expect(
-      (service as any).normalizeExtraPermissions(
-        ['admin.backup'],
-        ['reports.read'],
-        false,
-      ),
+      normalize(service, ['admin.backup'], ['reports.read'], false),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('lets a super administrator grant any known code', async () => {
     const { service } = build(['admin.backup']);
 
-    await expect(
-      (service as any).normalizeExtraPermissions(
-        ['admin.backup'],
-        [],
-        true,
-      ),
-    ).resolves.toEqual(['admin.backup']);
+    await expect(normalize(service, ['admin.backup'], [], true)).resolves.toEqual([
+      'admin.backup',
+    ]);
   });
 
-  it('returns bilingual names for each assigned branch', () => {
-    const { service } = build([]);
-    const user = {
+  it('returns bilingual names for each assigned branch', async () => {
+    const { service, prisma } = build([]);
+    const row = {
       id: 'user-1',
       companyId: 'company-1',
       username: 'operator',
@@ -96,12 +98,10 @@ describe('UsersService extra permissions', () => {
       ],
       createdAt: new Date('2026-01-01T00:00:00Z'),
     };
+    prisma.user.findFirst.mockResolvedValue(row);
 
-    const response = (
-      service as unknown as {
-        toResponse: (value: typeof user) => { branches: unknown[] };
-      }
-    ).toResponse(user);
+    const response = await service.findOne('company-1', 'user-1');
+
     expect(response.branches).toEqual([
       {
         id: 'branch-1',

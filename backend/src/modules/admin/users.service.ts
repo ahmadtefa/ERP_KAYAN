@@ -23,6 +23,26 @@ import { permissionWarnings, warningsForSet } from '../../common/rbac/permission
 /// Who may be changed, and by whom.
 const SYSTEM_USERNAME = 'admin';
 
+type UserResponseRecord = Prisma.UserGetPayload<{
+  include: {
+    userRoles: {
+      include: {
+        role: {
+          select: {
+            id: true;
+            code: true;
+            nameEn: true;
+            nameAr: true;
+            isActive: true;
+          };
+        };
+      };
+    };
+    branches: { include: { branch: true } };
+    userPermissions: { include: { permission: { select: { code: true } } } };
+  };
+}>;
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -673,7 +693,7 @@ export class UsersService {
   }
 
   /// Deliberately never returns the password hash or the failed-login counter.
-  private toResponse(user: any) {
+  private toResponse(user: UserResponseRecord) {
     return {
       id: user.id,
       companyId: user.companyId,
@@ -685,7 +705,7 @@ export class UsersService {
       isSuperAdmin: user.isSuperAdmin,
       lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
       lockedUntil: user.lockedUntil?.toISOString() ?? null,
-      roles: (user.userRoles ?? []).map((ur: any) => ({
+      roles: (user.userRoles ?? []).map((ur) => ({
         id: ur.role.id,
         code: ur.role.code,
         nameEn: ur.role.nameEn,
@@ -696,14 +716,14 @@ export class UsersService {
       // withheld from them on purpose. Kept apart: they are different
       // decisions and the form shows them in different lists.
       extraPermissions: (user.userPermissions ?? [])
-        .filter((grant: any) => !grant.isDenied)
-        .map((grant: any) => grant.permission.code)
+        .filter((grant) => !grant.isDenied)
+        .map((grant) => grant.permission.code)
         .sort(),
       deniedPermissions: (user.userPermissions ?? [])
-        .filter((grant: any) => grant.isDenied)
-        .map((grant: any) => grant.permission.code)
+        .filter((grant) => grant.isDenied)
+        .map((grant) => grant.permission.code)
         .sort(),
-      branches: (user.branches ?? []).map((ub: any) => ({
+      branches: (user.branches ?? []).map((ub) => ({
         id: ub.branch.id,
         code: ub.branch.code,
         nameEn: ub.branch.nameEn,
