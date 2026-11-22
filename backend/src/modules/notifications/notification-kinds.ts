@@ -31,6 +31,7 @@ export const STOCK_TRANSFER_REVIEW_REQUIRED = 'STOCK_TRANSFER_REVIEW_REQUIRED';
 export const STOCK_TRANSFER_APPROVAL_REQUIRED = 'STOCK_TRANSFER_APPROVAL_REQUIRED';
 export const STOCK_TRANSFER_DISPATCH_REQUIRED = 'STOCK_TRANSFER_DISPATCH_REQUIRED';
 export const STOCK_TRANSFER_RECEIPT_REQUIRED = 'STOCK_TRANSFER_RECEIPT_REQUIRED';
+export const STOCK_TRANSFER_RECEIVED = 'STOCK_TRANSFER_RECEIVED';
 export const STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED = 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED';
 export const STOCK_TRANSFER_CLOSE_REQUIRED = 'STOCK_TRANSFER_CLOSE_REQUIRED';
 /// A journal entry waiting for approval.
@@ -130,6 +131,13 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     module: 'inventory',
     severity: 'CRITICAL',
     permission: 'inventory.transfer.receive',
+    entityType: 'StockTransfer',
+  },
+  {
+    type: STOCK_TRANSFER_RECEIVED,
+    module: 'inventory',
+    severity: 'INFO',
+    permission: 'inventory.transfer.dispatch',
     entityType: 'StockTransfer',
   },
   {

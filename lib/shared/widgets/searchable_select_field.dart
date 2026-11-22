@@ -7,6 +7,7 @@ import 'field_option.dart';
 /// asks a person to type one.
 class SearchableSelectField extends StatelessWidget {
   const SearchableSelectField({
+    super.key,
     required this.value,
     required this.options,
     required this.onChanged,

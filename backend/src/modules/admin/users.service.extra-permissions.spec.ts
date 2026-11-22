@@ -97,7 +97,12 @@ describe('UsersService extra permissions', () => {
       createdAt: new Date('2026-01-01T00:00:00Z'),
     };
 
-    expect((service as any).toResponse(user).branches).toEqual([
+    const response = (
+      service as unknown as {
+        toResponse: (value: typeof user) => { branches: unknown[] };
+      }
+    ).toResponse(user);
+    expect(response.branches).toEqual([
       {
         id: 'branch-1',
         code: 'HQ',

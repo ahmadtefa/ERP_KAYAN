@@ -248,6 +248,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
       if (mounted) showAppError(context, error);
       return;
     }
+    if (!mounted) return;
     final branchIds = [for (final branch in branchRows) text(branch, 'id')];
     if (branchIds.any((id) => id.isEmpty) ||
         branchIds.toSet().length != branchIds.length) {

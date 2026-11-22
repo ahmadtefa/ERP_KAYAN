@@ -10,6 +10,7 @@ import {
   STOCK_TRANSFER_CLOSE_REQUIRED,
   STOCK_TRANSFER_DISPATCH_REQUIRED,
   STOCK_TRANSFER_RECEIPT_REQUIRED,
+  STOCK_TRANSFER_RECEIVED,
   STOCK_TRANSFER_REVIEW_REQUIRED,
   STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED,
   dedupeKey,
@@ -493,6 +494,9 @@ export class StockTransfersService {
     if (['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status)) {
       stages.push(STOCK_TRANSFER_RECEIPT_REQUIRED);
     }
+    if (['PARTIALLY_RECEIVED', 'RECEIVED', 'SETTLED'].includes(transfer.status)) {
+      stages.push(STOCK_TRANSFER_RECEIVED);
+    }
     if (transfer.status === 'SETTLEMENT_PENDING') stages.push(STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED);
     if (['RECEIVED', 'SETTLED'].includes(transfer.status)) stages.push(STOCK_TRANSFER_CLOSE_REQUIRED);
     // Keep the current human task visible until it is completed; close the
@@ -538,6 +542,11 @@ export class StockTransfersService {
         titleAr: 'بضاعة بالطريق بانتظار الاستلام', titleEn: 'Goods in transit awaiting receipt',
         bodyAr: `تم تسليم التحويل ${documentNumber} من ${fromName} بتاريخ ${date} إلى البضاعة بالطريق. يُرجى استكمال الاستلام أو الإبلاغ عن الفروق في ${toName}.`,
         bodyEn: `Transfer ${documentNumber} was dispatched from ${fromName} on ${date}. Complete receipt or report differences at ${toName}.`,
+      },
+      [STOCK_TRANSFER_RECEIVED]: {
+        titleAr: 'تم استلام بضاعة التحويل', titleEn: 'Transfer goods received',
+        bodyAr: `تم تسجيل استلام التحويل ${documentNumber} في ${toName} بتاريخ ${date}.`,
+        bodyEn: `Receipt for transfer ${documentNumber} was recorded at ${toName} on ${date}.`,
       },
       [STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED]: {
         titleAr: 'فروق تحويل بانتظار الاعتماد', titleEn: 'Transfer differences awaiting approval',
