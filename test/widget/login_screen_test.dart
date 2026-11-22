@@ -21,6 +21,21 @@ class _RecoverySetupApi implements ApiClient {
   }) async => {'needsSetup': false, 'recoveryRequired': true};
 }
 
+class _CompanyOptionsApi implements ApiClient {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
+  @override
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => path == '/companies/options'
+      ? [
+          {'code': 'ACME', 'nameEn': 'Acme', 'nameAr': 'أكمي'},
+        ]
+      : const [];
+}
+
 void main() {
   late FakeTokenStore tokenStore;
   late FakeAuthRepository repository;
@@ -33,12 +48,14 @@ void main() {
   Future<void> pumpLogin(
     WidgetTester tester, {
     Locale locale = const Locale('en'),
+    ApiClient? apiClient,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(tokenStore),
           authRepositoryProvider.overrideWithValue(repository),
+          if (apiClient != null) apiClientProvider.overrideWithValue(apiClient),
         ],
         child: wrapWithApp(child: const LoginScreen(), locale: locale),
       ),
@@ -84,16 +101,18 @@ void main() {
   testWidgets('offers pre-login password change and its bilingual secure fields', (
     tester,
   ) async {
-    await pumpLogin(tester);
+    await pumpLogin(tester, apiClient: _CompanyOptionsApi());
 
     await tester.tap(find.widgetWithText(TextButton, 'Change password'));
     await tester.pumpAndSettle();
     expect(find.text('Current password'), findsOneWidget);
     expect(find.text('New password'), findsOneWidget);
     expect(find.text('Confirm new password'), findsOneWidget);
-    // The login form stays mounted behind the dialog (two fields), while the
-    // change form asks for username, company, current, new and confirmation.
-    expect(find.byType(TextField), findsNWidgets(7));
+    // Company is selected from the public options endpoint, not typed as a
+    // free-form code. The login form stays mounted behind the dialog.
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    expect(find.text('Acme · ACME'), findsOneWidget);
+    expect(find.byType(TextField), findsNWidgets(6));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
   });
 
