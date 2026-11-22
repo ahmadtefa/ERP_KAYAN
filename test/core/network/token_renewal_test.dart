@@ -24,6 +24,7 @@ class _ScriptedAdapter implements HttpClientAdapter {
 
   /// When true, the refresh endpoint answers 401 - a revoked token.
   bool refuseRefresh = false;
+  bool unavailableRefresh = false;
 
   @override
   Future<ResponseBody> fetch(
@@ -36,6 +37,9 @@ class _ScriptedAdapter implements HttpClientAdapter {
       requestBodies.add((await requestStream.toList()).expand((part) => part).toList());
     }
     if (options.path == '/auth/refresh') {
+      if (unavailableRefresh) {
+        return ResponseBody.fromString('{}', 503, headers: _json);
+      }
       if (refuseRefresh) {
         return ResponseBody.fromString('{}', 401, headers: _json);
       }
@@ -109,6 +113,20 @@ void main() {
     expect(adapter.paths, isNot(contains('/auth/refresh')));
   });
 
+  test('session restoration renews an expired access token before reading auth me', () async {
+    final adapter = _ScriptedAdapter();
+    final store = TokenStore(backend: _RefusingBackend());
+    await store.saveTokens(accessToken: 'access-1', refreshToken: 'refresh-1');
+    final client = _buildClient(adapter, store);
+    var expired = 0;
+    client.onSessionExpired = () => expired += 1;
+
+    expect((await client.get('/auth/me'))['ok'], isTrue);
+    expect(adapter.paths, ['/auth/me', '/auth/refresh', '/auth/me']);
+    expect(await store.readRefreshToken(), 'refresh-2');
+    expect(expired, 0);
+  });
+
   test('an expired token is renewed and the request is replayed', () async {
     final adapter = _ScriptedAdapter();
     final store = TokenStore(backend: _RefusingBackend());
@@ -140,6 +158,19 @@ void main() {
     expect(adapter.requestBodies.length,2);
     expect(adapter.requestBodies[0],adapter.requestBodies[1]);
     expect(utf8.decode(adapter.requestBodies[1]),contains('synthetic-photo-bytes'));
+  });
+
+  test('temporary refresh failure preserves tokens and reports a network failure', () async {
+    final adapter = _ScriptedAdapter()..unavailableRefresh = true;
+    final store = TokenStore(backend: _RefusingBackend());
+    await store.saveTokens(accessToken: 'access-1', refreshToken: 'refresh-1');
+    final client = _buildClient(adapter, store);
+    var expired = 0;
+    client.onSessionExpired = () => expired += 1;
+    await expectLater(client.get('/auth/me'), throwsA(isA<NetworkFailure>()));
+    expect(await store.readRefreshToken(), 'refresh-1');
+    expect(await store.readAccessToken(), 'access-1');
+    expect(expired, 0);
   });
 
   test('a refused refresh ends the session once, and only once', () async {

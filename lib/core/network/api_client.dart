@@ -50,10 +50,17 @@ class ApiClient {
           // endpoint itself is excluded, and a request that already played
           // this dance is not played again.
           final options = e.requestOptions;
-          final isAuthRoute = options.path.startsWith('/auth/');
+          // Only the public credential endpoints must skip refresh. /auth/me,
+          // logout and download-ticket are protected and need normal renewal;
+          // otherwise a restart with an expired access token discards a still
+          // valid refresh token and appears to end the session unnecessarily.
+          final path = Uri.parse(options.path).path;
+          final isPublicAuthRoute = path.endsWith('/auth/login') ||
+              path.endsWith('/auth/refresh') ||
+              path.endsWith('/auth/change-password');
           final alreadyRetried = options.extra[_retriedKey] == true;
           if (e.response?.statusCode == 401 &&
-              !isAuthRoute &&
+              !isPublicAuthRoute &&
               !alreadyRetried) {
             final outcome = await _refreshSession();
             final renewed = outcome.accessToken;
@@ -74,9 +81,17 @@ class ApiClient {
                 return;
               }
             }
-            // A refused refresh already ended the session (tokens cleared,
-            // app notified). A refresh that merely could not reach the
-            // server must not sign anyone out; the original error stands.
+            // A temporary failure is not evidence that the session expired.
+            // Preserve the tokens and report a connection failure, otherwise
+            // restoreSession would clear them on the original 401.
+            if (!outcome.invalid) {
+              handler.next(DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+                error: 'Session renewal temporarily unavailable',
+              ));
+              return;
+            }
           }
           handler.next(e);
         },
