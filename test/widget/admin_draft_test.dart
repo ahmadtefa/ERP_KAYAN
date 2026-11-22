@@ -42,7 +42,7 @@ class _AdminApi extends ApiClient {
     if (path == '/admin/users') {
       userReads++;
       return [{'id':'u2','username':'member','fullNameEn':'Original','fullNameAr':'أصلي','isActive':memberActive,
-        'extraPermissions':malformedPermissions ? null : ['sales.invoices.read'], 'roles':malformedRoles ? null : [{'id':'role-a','code':'ACTIVE','nameEn':'Available role'},
+        'extraPermissions':malformedPermissions ? null : ['sales.invoices.read'], 'branches':[], 'roles':malformedRoles ? null : [{'id':'role-a','code':'ACTIVE','nameEn':'Available role'},
           {'id':'role-b','code':'LEGACY','nameEn':'Unavailable role'}]}];
     }
     return [];

@@ -249,8 +249,8 @@ void main() {
     expect(find.text('br-1'), findsNothing);
     await tester.tap(find.byType(SearchableSelectField));
     await tester.pumpAndSettle();
-    expect(find.text('Head office · HQ'), findsOneWidget);
-    await tester.tap(find.text('Head office · HQ'));
+    expect(find.text('HQ — Head office'), findsOneWidget);
+    await tester.tap(find.text('HQ — Head office'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextFormField).first, 'NEW-WH');
