@@ -1,47 +1,60 @@
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { ReportsService } from './reports.service';
 
+const internals = (service: ReportsService) => service as unknown as {
+  parseDate(value: string, field: string): Date;
+  period(query: { from: string; to: string }): unknown;
+  prisma: {
+    salesInvoice: { findMany: jest.Mock };
+    purchaseInvoice: { findMany: jest.Mock };
+    cashVoucher: { findMany: jest.Mock };
+  };
+};
+
 describe('ReportsService date validation', () => {
-  const service = new ReportsService({} as any);
+  const service = new ReportsService({} as unknown as PrismaService);
 
   it('accepts a valid date-only value', () => {
-    const parsed = (service as any).parseDate('2026-02-28', 'from') as Date;
+    const parsed = internals(service).parseDate('2026-02-28', 'from') as Date;
     expect(parsed.toISOString().slice(0, 10)).toBe('2026-02-28');
   });
 
   it('rejects an impossible calendar date', () => {
-    expect(() => (service as any).parseDate('2026-02-31', 'from')).toThrow(
+    expect(() => internals(service).parseDate('2026-02-31', 'from')).toThrow(
       BadRequestException,
     );
   });
 
   it('rejects an impossible date inside an ISO timestamp', () => {
     expect(() =>
-      (service as any).parseDate('2026-02-31T00:00:00Z', 'asOf'),
+      internals(service).parseDate('2026-02-31T00:00:00Z', 'asOf'),
     ).toThrow(BadRequestException);
   });
 
   it('accepts a valid ISO timestamp', () => {
-    const parsed = (service as any).parseDate('2026-02-28T12:30:00Z', 'asOf') as Date;
+    const parsed = internals(service).parseDate('2026-02-28T12:30:00Z', 'asOf') as Date;
     expect(parsed.toISOString()).toBe('2026-02-28T12:30:00.000Z');
   });
 
   it('rejects an unparseable date', () => {
-    expect(() => (service as any).parseDate('not-a-date', 'asOf')).toThrow(
+    expect(() => internals(service).parseDate('not-a-date', 'asOf')).toThrow(
       BadRequestException,
     );
   });
 
   it('rejects a period whose start is after its end', () => {
     expect(() =>
-      (service as any).period({ from: '2026-10-02', to: '2026-10-01' }),
+      internals(service).period({ from: '2026-10-02', to: '2026-10-01' }),
     ).toThrow(BadRequestException);
   });
 });
 
 describe('account ledger manual journal navigation', () => {
   it('links a source-less movement to its own journal entry instead of a null document', async () => {
-    const d = (value: number) => new (require('@prisma/client').Prisma.Decimal)(value);
+    const d = (value: number) => new Prisma.Decimal(value);
     const prisma = {
       account: { findFirst: jest.fn().mockResolvedValue({ id: 'account' }) },
       $queryRaw: jest.fn().mockResolvedValue([{ net: d(0) }]),
@@ -50,14 +63,14 @@ describe('account ledger manual journal navigation', () => {
         entry: { entryNumber: 'JV-1', entryDate: new Date('2026-10-18'), description: 'Manual', sourceType: null, sourceId: null, sourceNumber: null, reversalOfId: null },
       }]) },
     };
-    const result = await new ReportsService(prisma as any).accountLedger('company', 'account', { from: '2026-10-01', to: '2026-10-18' });
+    const result = await new ReportsService(prisma as unknown as PrismaService).accountLedger('company', 'account', { from: '2026-10-01', to: '2026-10-18' });
     expect(result.movements[0].source).toEqual({ type: 'JOURNAL_ENTRY', id: 'journal', number: 'JV-1' });
     expect(result.closing).toBe('100.0000');
   });
 });
 
 describe('customer and supplier balance reports read returns with the right sign', () => {
-  const d = (value: string) => new (require('@prisma/client').Prisma.Decimal)(value);
+  const d = (value: string) => new Prisma.Decimal(value);
 
   const serviceFor = (invoices: unknown[], vouchers: unknown[] = []) =>
     new ReportsService({
@@ -74,7 +87,7 @@ describe('customer and supplier balance reports read returns with the right sign
       salesInvoice: { findMany: jest.fn().mockResolvedValue(invoices) },
       purchaseInvoice: { findMany: jest.fn().mockResolvedValue(invoices) },
       cashVoucher: { findMany: jest.fn().mockResolvedValue(vouchers) },
-    } as any);
+    } as unknown as PrismaService);
 
   it('subtracts a sales return from what the customer owes', async () => {
     const result = await serviceFor([
@@ -150,9 +163,21 @@ describe('customer and supplier balance reports read returns with the right sign
   it('asks only for live invoices, so a reversed invoice is not counted again', async () => {
     const service = serviceFor([]);
     await service.customerBalances('company', {});
-    const where = (service as any).prisma.salesInvoice.findMany.mock.calls[0][0].where;
+    const where = internals(service).prisma.salesInvoice.findMany.mock.calls[0][0].where;
     expect(where.status).toBe('POSTED');
-    const select = (service as any).prisma.salesInvoice.findMany.mock.calls[0][0].select;
+    const select = internals(service).prisma.salesInvoice.findMany.mock.calls[0][0].select;
     expect(select.documentType).toBe(true);
+  });
+
+  it('applies the selected branch to customer and supplier invoices and vouchers', async () => {
+    const service = serviceFor([]);
+    await service.customerBalances('company', { branchId: 'branch-1' });
+    await service.supplierBalances('company', { branchId: 'branch-1' });
+    const prisma = internals(service).prisma;
+
+    expect(prisma.salesInvoice.findMany.mock.calls[0][0].where.branchId).toBe('branch-1');
+    expect(prisma.purchaseInvoice.findMany.mock.calls[0][0].where.branchId).toBe('branch-1');
+    expect(prisma.cashVoucher.findMany.mock.calls[0][0].where.branchId).toBe('branch-1');
+    expect(prisma.cashVoucher.findMany.mock.calls[1][0].where.branchId).toBe('branch-1');
   });
 });

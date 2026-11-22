@@ -15,8 +15,8 @@ final companySettingsProvider = FutureProvider<Json>((ref) async {
 /// The company choices that change what a quotation shows and what discount it
 /// will accept.
 ///
-/// Reading the settings needs report access; changing them needs company
-/// administration. The card shows the values either way and simply does not
+/// Reading the settings needs report access; changing them needs the
+/// installation super administrator. The card shows the values either way and simply does not
 /// offer a save button to someone the server would refuse.
 class DocumentSettingsCard extends ConsumerStatefulWidget {
   const DocumentSettingsCard({super.key});
@@ -89,7 +89,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
       }
     } on Failure catch (error) {
       if (mounted) {
-        showMessage(context, error.message, error: true);
+        showMessage(context, error, error: true);
       }
     } catch (error) {
       if (mounted) {
@@ -106,7 +106,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final user = ref.watch(currentUserProvider);
-    final canEdit = user?.can('admin.company.manage') ?? false;
+    final canEdit = user?.isSuperAdmin == true;
     final canRead = user?.can('reports.read') ?? false;
     if (!canRead) return const SizedBox.shrink();
     final async = ref.watch(companySettingsProvider);

@@ -1,4 +1,5 @@
 import { PERMISSIONS } from '../../../prisma/permissions';
+import { PERMISSION_WARNING_RULES } from '../../common/rbac/permission-warnings';
 import { SETUP_PERMISSIONS } from '../company/setup.service';
 
 describe('permission catalogue', () => {
@@ -33,5 +34,27 @@ describe('permission catalogue', () => {
     expect(codes.has('admin.reset')).toBe(true);
     // Reading opening balances is its own operation, separate from managing them.
     expect(codes.has('accounting.openingbalances.read')).toBe(true);
+    expect(codes.has('sales.price.read')).toBe(true);
+    expect(codes.has('purchases.price.read')).toBe(true);
+  });
+
+  it('publishes warning rules that point at permissions that exist', () => {
+    // The screen applies these rules itself while boxes are ticked, so a rule
+    // that names a code nobody has would warn about nothing - and a rule for a
+    // dangerous code that was renamed would silently stop warning.
+    const codes = PERMISSIONS.map((row) => row[0]);
+    expect(PERMISSION_WARNING_RULES.length).toBeGreaterThan(0);
+    for (const rule of PERMISSION_WARNING_RULES) {
+      const namesSomething = rule.match.endsWith('.')
+        ? codes.some((code) => code.startsWith(rule.match))
+        : codes.includes(rule.match);
+      expect({ match: rule.match, namesSomething }).toEqual({
+        match: rule.match,
+        namesSomething: true,
+      });
+      expect(['INFO', 'WARNING', 'CRITICAL']).toContain(rule.severity);
+      expect(rule.messageEn.length).toBeGreaterThan(10);
+      expect(rule.messageAr.length).toBeGreaterThan(10);
+    }
   });
 });

@@ -26,6 +26,18 @@ describe('spreadsheet import authorization', () => {
     await expect(controller.upload({ ...user, isSuperAdmin: true, permissions: [] }, 'customers', file, { mode: 'upsert' })).resolves.toEqual({ updated: 1 });
   });
 
+  it('only permits explicit blank-tax clearing with item upsert permission', async () => {
+    const run = jest.fn().mockResolvedValue({ updated: 1 });
+    const controller = new ImportController({ run } as any);
+    const actor = { ...user, permissions: ['inventory.items.create'] };
+    await expect(controller.upload(actor, 'items', file, { mode: 'upsert', clearBlankTaxRates: 'true' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(run).not.toHaveBeenCalled();
+    await controller.upload({ ...actor, permissions: [...actor.permissions, 'inventory.items.update'] }, 'items', file, { mode: 'upsert', clearBlankTaxRates: 'true' });
+    expect(run.mock.calls[0][4]).toEqual(expect.objectContaining({ clearBlankTaxRates: true }));
+    await controller.upload({ ...actor, permissions: [...actor.permissions, 'inventory.items.update'] }, 'items', file, { mode: 'upsert', clearBlankTaxRates: 'yes' });
+    expect(run.mock.calls[1][4]).toEqual(expect.objectContaining({ clearBlankTaxRates: false }));
+  });
+
   describe('template download', () => {
     const response = () => ({
       setHeader: jest.fn(),

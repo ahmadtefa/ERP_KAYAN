@@ -10,6 +10,7 @@ import { DOWNLOAD_TICKET_TYPE } from '../download-ticket';
 import { ALLOW_QUERY_TOKEN_KEY } from '../decorators/allow-query-token.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthUser } from '../decorators/current-user.decorator';
+import { resolveEffectivePermissions } from '../rbac/effective-permissions';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -110,6 +111,8 @@ export class JwtAuthGuard implements CanActivate {
           select: {
             role: {
               select: {
+                code: true,
+                isActive: true,
                 rolePermissions: {
                   select: { permission: { select: { code: true } } },
                 },
@@ -118,7 +121,7 @@ export class JwtAuthGuard implements CanActivate {
           },
         },
         userPermissions: {
-          select: { permission: { select: { code: true } } },
+          select: { isDenied: true, permission: { select: { code: true } } },
         },
         // Do not let a stale/malformed assignment expose another tenant's
         // branch or a branch that is inactive or soft-deleted.
@@ -133,6 +136,22 @@ export class JwtAuthGuard implements CanActivate {
           select: { branchId: true },
           orderBy: { branchId: 'asc' },
         },
+        // Which shelves this person is trusted with, loaded with the session
+        // so a request never has to ask twice - and so a screen that hides a
+        // warehouse and the API that refuses it agree on the same rows.
+        warehouseAccess: {
+          where: { warehouse: { companyId: payload.companyId, deletedAt: null } },
+          select: {
+            warehouseId: true,
+            canView: true,
+            canReceive: true,
+            canIssue: true,
+            canTransfer: true,
+            canCount: true,
+            canApprove: true,
+            canSeeCost: true,
+          },
+        },
       },
     });
     if (
@@ -145,29 +164,51 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Account is inactive or unavailable');
     }
 
-    const permissions = [
-      ...new Set([
-        ...principal.userRoles.flatMap((userRole) =>
-          userRole.role.rolePermissions.map(
-            (rolePermission) => rolePermission.permission.code,
-          ),
-        ),
-        ...principal.userPermissions.map(
-          (grant) => grant.permission.code,
-        ),
-      ]),
-    ];
+    // The same arithmetic as sign-in: active roles, plus direct grants, minus
+    // explicit denies. Loading it here is what makes a revoked permission stop
+    // working on the very next request rather than when a token expires.
+    const effective = resolveEffectivePermissions(
+      principal.userRoles.map((assignment) => ({
+        companyId: payload.companyId,
+        role: {
+          code: assignment.role.code,
+          companyId: payload.companyId,
+          isActive: assignment.role.isActive,
+          rolePermissions: assignment.role.rolePermissions,
+        },
+      })),
+      principal.userPermissions,
+      payload.companyId,
+    );
+    const permissions = effective.permissions;
     const branchId =
       principal.branches.find((branch) => branch.branchId === payload.branchId)
         ?.branchId ??
       principal.branches[0]?.branchId ??
       null;
+    // The role codes, so an alert addressed to a role can find the people who
+    // hold it without a second query per notification.
+    const roles = [
+      ...new Set(
+        principal.userRoles
+          .filter((userRole) => (userRole.role as { isActive?: boolean }).isActive === true)
+          .map((userRole) => (userRole.role as { code?: string }).code)
+          .filter((code): code is string => typeof code === 'string' && code.length > 0),
+      ),
+    ];
 
     request.user = {
       userId: principal.id,
       username: principal.username,
       companyId: principal.companyId,
       branchId,
+      // The full assignment list, so a screen can show every branch the
+      // person actually works in without a second round trip.
+      branchIds: principal.branches.map((branch) => branch.branchId),
+      roles,
+      warehouseAccess: (principal as { warehouseAccess?: unknown[] }).warehouseAccess
+        ? ((principal as { warehouseAccess?: unknown[] }).warehouseAccess as never)
+        : [],
       isSuperAdmin: principal.isSuperAdmin,
       permissions,
     };

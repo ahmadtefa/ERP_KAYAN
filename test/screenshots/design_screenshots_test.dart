@@ -6,13 +6,12 @@ import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
-import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
-import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
+import 'package:erp_kayan/features/notifications/presentation/screens/notification_center_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_list_screen.dart';
 import 'package:erp_kayan/features/parties/presentation/screens/parties_screen.dart';
 import 'package:erp_kayan/features/settings/presentation/providers/company_providers.dart';
@@ -24,15 +23,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import '../widget/test_harness.dart';
+import 'screenshot_fixtures.dart';
 
 /// Design screenshots, rendered from the real screens.
 ///
-/// These tests exist so a visual change can be *seen*, not just described.
-/// CI runs this file with `--update-goldens` and uploads the PNGs as the
-/// `design-screenshots` artifact; the same file then participates in the
-/// normal test run against the freshly rendered baselines. They are
-/// screenshot generators first and regression checks second — nothing here
-/// is allowed to fail the build because a pixel moved.
+/// The normal CI job compares the current rendering to separately reviewed
+/// committed goldens. A separate diagnostic job may render synthetic preview
+/// images, but never updates the expected images used by that comparison.
 class _FakeApiClient extends ApiClient {
   _FakeApiClient()
     : super(AppConfig.forLocalServer('http://screenshot.invalid'), FakeTokenStore());
@@ -119,51 +116,22 @@ const _invoices = <Map<String, dynamic>>[
   },
 ];
 
-class _FakeChartOfAccountsController extends ChartOfAccountsController {
-  @override
-  Future<List<Account>> build() async => const [];
-}
-
-class _FakeCompanyProfileController extends CompanyProfileController {
-  @override
-  Future<Map<String, dynamic>> build() async => const {
-    'id': 'company-1',
-    'code': 'KAYAN-01',
-    'nameAr': 'شركة الكيان للتجارة',
-    'nameEn': 'Kayan Trading Co',
-    'taxId': '300123456',
-    'phone': '+20100000000',
-    'email': 'info@kayan.test',
-    'address': 'Cairo, Egypt',
-    'hasLogo': false,
-  };
-}
-
-class _FakeBranchesController extends BranchesController {
-  @override
-  Future<List<Map<String, dynamic>>> build() async => const [
-    {
-      'id': 'branch-1',
-      'code': 'HQ',
-      'nameAr': 'المقر الرئيسي',
-      'nameEn': 'Headquarters',
-      'kind': 'HEADQUARTERS',
-      'isActive': true,
-    },
-  ];
-}
-
-const _adminUser = AppUser(
-  id: 'admin-1',
-  username: 'admin',
-  fullName: 'مدير النظام',
-  companyId: 'company-1',
-  branchId: 'branch-1',
-  roles: ['ADMIN'],
-  isSuperAdmin: true,
-);
 
 final Json _summary = <String, dynamic>{
+  'allowedSections': <String>[
+    'sales',
+    'purchases',
+    'revenue',
+    'profit',
+    'cash',
+    'movements',
+    'receivables',
+    'payables',
+    'stock',
+    'charts',
+    'top',
+    'recent',
+  ],
   'from': '2026-01-01',
   'to': '2026-10-15',
   'hasData': true,
@@ -240,36 +208,43 @@ final Json _monthly = <String, dynamic>{
   ],
 };
 
-/// The app ships no font of its own; a widget-test render would otherwise
-/// draw every glyph as a box. When the machine has a real font with Arabic
-/// coverage, register it so the screenshots stay readable. Absent fonts are
-/// fine — layout and colour still render.
-Future<void> _tryLoadSystemFonts() async {
-  const candidates = <String, List<String>>{
-    'NotoNaskhArabic': [
-      '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
-      '/usr/share/fonts/truetype/fonts-noto-core/NotoNaskhArabic-Regular.ttf',
-    ],
-    'DejaVuSans': [
-      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-      '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ],
+/// The test runner defaults to Ahem and does not load application fonts. Load
+/// the exact bundled files and Flutter SDK icon font rather than accepting
+/// unreadable boxes or a machine-dependent system fallback as a golden.
+Future<void> _loadScreenshotFonts() async {
+  final loader = FontLoader('IBMPlexSansArabic');
+  for (final weight in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+    final bytes = await File(
+      'assets/fonts/IBMPlexSansArabic-$weight.ttf',
+    ).readAsBytes();
+    loader.addFont(Future.value(ByteData.sublistView(bytes)));
+  }
+  await loader.load();
+
+  final roots = <String>{
+    ?Platform.environment['FLUTTER_ROOT'],
+    for (final part in (Platform.environment['PATH'] ?? '').split(
+      Platform.isWindows ? ';' : ':',
+    ))
+      if (part.isNotEmpty) File(part).parent.path,
   };
-  for (final entry in candidates.entries) {
-    for (final path in entry.value) {
-      final file = File(path);
-      if (!await file.exists()) continue;
-      try {
-        final bytes = await file.readAsBytes();
-        final loader = FontLoader(entry.key)
-          ..addFont(Future.value(ByteData.view(bytes.buffer)));
-        await loader.load();
-      } catch (_) {
-        // A font that will not load must not fail a screenshot.
-      }
+  File? icons;
+  for (final root in roots) {
+    final candidate = File(
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    );
+    if (await candidate.exists()) {
+      icons = candidate;
       break;
     }
   }
+  if (icons == null) {
+    throw StateError('Flutter SDK MaterialIcons font is required for screenshot tests');
+  }
+  final iconBytes = await icons.readAsBytes();
+  final iconLoader = FontLoader('MaterialIcons')
+    ..addFont(Future.value(ByteData.sublistView(iconBytes)));
+  await iconLoader.load();
 }
 
 Future<void> _pumpShot(
@@ -301,16 +276,24 @@ Future<void> _pumpShot(
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
         authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_FakeApiClient()),
-        currentUserProvider.overrideWithValue(_adminUser),
+        currentUserProvider.overrideWithValue(screenshotAdmin),
         chartOfAccountsProvider.overrideWith(
-          _FakeChartOfAccountsController.new,
+          FakeChartOfAccountsController.new,
         ),
-        companyProfileProvider.overrideWith(_FakeCompanyProfileController.new),
-        branchesProvider.overrideWith(_FakeBranchesController.new),
+        companyProfileProvider.overrideWith(FakeCompanyProfileController.new),
+        branchesProvider.overrideWith(FakeBranchesController.new),
         dashboardSummaryProvider.overrideWith((ref) async => _summary),
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
+        // The bell and the dashboard panel are part of the picture, but this
+        // fixture must not reach the network to draw it: two fixed alerts, so
+        // the screenshot shows the badge and the panel without a live server.
+        notificationCountProvider.overrideWith((ref) async => 2),
+        notificationFeedProvider.overrideWith(
+          (ref) async => <Json>[_screenshotAlert1, _screenshotAlert2],
+        ),
       ],
       child: MaterialApp.router(
+        debugShowCheckedModeBanner: false,
         locale: const Locale('ar'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -320,12 +303,43 @@ Future<void> _pumpShot(
     ),
   );
   await tester.pumpAndSettle();
+  // Decode the actual bundled logo before capturing the first screen too;
+  // otherwise later screenshots see a warmed cache while the first is blank.
+  await tester.runAsync(() async {
+    await precacheImage(
+      const AssetImage('1.png'),
+      tester.element(find.byType(MaterialApp)),
+    );
+  });
+  await tester.pumpAndSettle();
+  expect(find.byWidgetPredicate((widget) => widget is ListTile && widget.selected), findsNothing);
+
 }
+
+const Json _screenshotAlert1 = <String, dynamic>{
+  'id': 'n1',
+  'type': 'INVOICE_OVERDUE',
+  'severity': 'CRITICAL',
+  'titleEn': 'Invoice SI-1042 is 12 day(s) overdue',
+  'titleAr': 'الفاتورة SI-1042 متأخرة 12 يوم',
+  'actionPath': '/sales/invoices?invoice=si-1042',
+  'isRead': false,
+};
+
+const Json _screenshotAlert2 = <String, dynamic>{
+  'id': 'n2',
+  'type': 'STOCK_EXPIRY_SOON',
+  'severity': 'WARNING',
+  'titleEn': 'Carton 12 is expiring in 9 days',
+  'titleAr': 'كرتونة 12 تنتهي خلال 9 أيام',
+  'actionPath': '/inventory/batches?batch=b-12',
+  'isRead': false,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(_tryLoadSystemFonts);
+  setUpAll(_loadScreenshotFonts);
 
   testWidgets('screenshot: dashboard inside the shell (Arabic RTL)', (
     tester,
@@ -335,6 +349,8 @@ void main() {
       route: AppRoutes.dashboard,
       child: const DashboardScreen(),
     );
+    expect(find.text('150,000'), findsOneWidget);
+    expect(find.text('90,000'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/dashboard_ar.png'),
@@ -349,6 +365,8 @@ void main() {
       route: AppRoutes.customers,
       child: const PartiesScreen(kind: PartyKind.customer),
     );
+    expect(find.text('CUS-001'), findsOneWidget);
+    expect(find.text('شركة النور للتجارة'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/customers_ar.png'),
@@ -363,6 +381,8 @@ void main() {
       route: AppRoutes.salesInvoices,
       child: const InvoiceListScreen(kind: InvoiceKind.sales),
     );
+    expect(find.text('SI-2026-0042'), findsOneWidget);
+    expect(find.text('Noor Trading'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/sales_invoices_ar.png'),

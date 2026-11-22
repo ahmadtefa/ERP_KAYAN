@@ -51,7 +51,7 @@ class LoadingView extends StatelessWidget {
 class ErrorView extends StatelessWidget {
   const ErrorView({super.key, required this.message, this.onRetry});
 
-  final String message;
+  final Object message;
   final VoidCallback? onRetry;
 
   @override
@@ -186,7 +186,7 @@ class AsyncStateView<T> extends StatelessWidget {
       skipLoadingOnRefresh: false,
       loading: () => LoadingView(message: loadingMessage),
       error: (error, _) =>
-          ErrorView(message: error.toString(), onRetry: onRetry),
+          ErrorView(message: error, onRetry: onRetry),
       data: (result) {
         final empty = isEmpty?.call(result) ?? false;
         if (empty) {

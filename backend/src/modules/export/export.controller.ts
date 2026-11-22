@@ -6,12 +6,14 @@ import {
   Param,
   Query,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
+import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyService } from '../company/company.service';
 import { ExportQueryDto } from './dto/export-query.dto';
@@ -23,6 +25,9 @@ import {
 } from './report-tables.service';
 import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
+import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
+import { filterReportAggregates } from './aggregate-visibility';
+import { REPORT_READ_PERMISSION } from '../reports/report-permissions';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -121,7 +126,12 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    // Spreadsheet downloads must obey the same server-side redaction as the
+    // PDF/print routes: a hand-crafted download link cannot restore costs.
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
     if (query.format === 'csv') {
@@ -148,7 +158,10 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -170,7 +183,10 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
@@ -194,6 +210,7 @@ export class ExportController {
   /// A list as a file: .xlsx by default, .csv on request.
   @Get('lists/:list/download')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listFile(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -204,7 +221,12 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    // Same redaction as the list's PDF/print routes, so an xlsx/csv download
+    // cannot carry a cost column the caller's role was never granted.
+    const table = applyPriceVisibility(
+      await this.lists.build(list, user.companyId, query),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
 
@@ -234,6 +256,7 @@ export class ExportController {
   /// A list as a PDF, downloaded straight away.
   @Get('lists/:list/pdf')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listPdf(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -244,7 +267,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -258,6 +281,7 @@ export class ExportController {
   /// A list as a page to print.
   @Get('lists/:list/print')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listPrint(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -268,7 +292,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -279,6 +303,22 @@ export class ExportController {
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.send(html);
+  }
+
+  /// A user's selected/assigned branches constrain single-document exports too;
+  /// passing only `branchId` missed users assigned to several branches.
+  private branchScope(user: AuthUser): string[] | null {
+    return user.isSuperAdmin ? null : warehouseScopeOf(user);
+  }
+
+  /// What this caller is allowed to see, whatever the URL asks for.
+  ///
+  /// The dialog on screen decides what a person wants; this decides what they
+  /// may have. A missing `inventory.cost.read` forces costs off, so adding
+  /// `showCost=true` to a link, or calling the endpoint by hand, cannot bring
+  /// back a figure the role was never granted.
+  private visibility(user: AuthUser, query: ExportQueryDto) {
+    return resolvePriceVisibility(user, query);
   }
 
   /// The permission a list needs is the one its own screen already requires.
@@ -300,21 +340,39 @@ export class ExportController {
     throw new ForbiddenException(`Missing permission: ${exportPermission}`);
   }
 
+  private assertReportRead(user: AuthUser, report: ExportableReport): void {
+    const permission = REPORT_READ_PERMISSION[report] ??
+      (report === 'fixed-assets' || report === 'depreciation'
+        ? 'accounting.fixedassets.read'
+        : report === 'party-statement'
+          ? 'reports.party-statement.read'
+          : undefined);
+    if (user.isSuperAdmin || (permission && user.permissions.includes(permission))) return;
+    throw new ForbiddenException(`Missing permission: ${permission ?? `reports.${report}.read`}`);
+  }
+
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
   @Get(':report/download')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async export(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ) {
-    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    this.allowedExport(user, 'reports.export', 'reports.export');
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const wanted = (query as { format?: string }).format ?? 'xlsx';
 
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    // Reports as files get the same enforcement as reports as PDF/print:
+    // resolvePriceVisibility forces showCost=false without inventory.cost.read.
+    const table = applyPriceVisibility(
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     if (wanted === 'csv') {
@@ -344,16 +402,21 @@ export class ExportController {
   /// and saved as a PDF. One click, no dialogue.
   @Get(':report/pdf')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async pdfFile(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ): Promise<void> {
-    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    this.allowedExport(user, 'reports.export', 'reports.export');
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -372,7 +435,7 @@ export class ExportController {
   /// one click from the button in the app.
   @Get(':report/print')
   @AllowQueryToken()
-  @RequirePermissions('reports.read')
+  @UseGuards(BranchReportScopeGuard)
   async print(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
@@ -380,8 +443,15 @@ export class ExportController {
     @Res() response: Response,
   ) {
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    if (!user.isSuperAdmin && !user.permissions.includes('reports.print')) {
+      throw new ForbiddenException('Missing permission: reports.print');
+    }
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(
+      filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {

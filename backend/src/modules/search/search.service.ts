@@ -33,7 +33,12 @@ export interface SearchResult {
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(companyId: string, q: string, limit = 8) {
+  async search(
+    companyId: string,
+    q: string,
+    limit = 8,
+    visibility: { sale: boolean; purchase: boolean } = { sale: true, purchase: true },
+  ) {
     const term = q.trim();
     if (term.length < 2) return { query: term, results: [] as SearchResult[], total: 0 };
     const take = Math.min(Math.max(limit, 1), 25);
@@ -168,7 +173,7 @@ export class SearchService {
           where: {
             companyId,
             deletedAt: null,
-            OR: [ { code: contains }, { nameEn: contains }, { nameAr: contains }, { barcode: contains } ],
+            OR: [ { code: contains }, { nameEn: contains }, { nameAr: contains }, { barcode: contains }, { units: { some: { barcode: contains } } } ],
           },
           take,
           orderBy: { code: 'asc' },
@@ -186,7 +191,7 @@ export class SearchService {
         title: row.invoiceNumber,
         subtitle: `${row.customer.nameAr} / ${row.customer.nameEn}`,
         date: row.invoiceDate.toISOString().slice(0, 10),
-        amount: money(row.totalAmount),
+        amount: visibility.sale ? money(row.totalAmount) : null,
         status: row.status,
         route: '/sales/invoices',
       })),
@@ -196,7 +201,7 @@ export class SearchService {
         title: row.invoiceNumber,
         subtitle: `${row.supplier.nameAr} / ${row.supplier.nameEn}`,
         date: row.invoiceDate.toISOString().slice(0, 10),
-        amount: money(row.totalAmount),
+        amount: visibility.purchase ? money(row.totalAmount) : null,
         status: row.status,
         route: '/purchases/invoices',
       })),
@@ -244,9 +249,9 @@ export class SearchService {
         type: 'ITEM' as const,
         id: row.id,
         title: `${row.nameAr} / ${row.nameEn}`,
-        subtitle: `${row.code} · ${money(row.salePrice) ?? ''}`,
+        subtitle: `${row.code}${visibility.sale ? ` · ${money(row.salePrice) ?? ''}` : ''}`,
         date: null,
-        amount: money(row.salePrice),
+        amount: visibility.sale ? money(row.salePrice) : null,
         status: null,
         route: '/inventory/items',
       })),

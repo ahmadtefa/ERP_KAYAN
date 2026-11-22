@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { AuditService } from '../../common/audit/audit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { BudgetsService } from './budgets.service';
 
 const center = {
@@ -55,6 +57,7 @@ function stored(overrides: Record<string, unknown> = {}) {
 
 function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
   let row = options.existing === undefined ? null : options.existing;
+  let txTarget: unknown;
   const prisma = {
     company: {
       findUnique: jest
@@ -62,14 +65,14 @@ function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
         .mockResolvedValue({ currency: 'EGP' }),
     },
     costCenter: {
-      findFirst: jest.fn(async ({ where }: any) =>
+      findFirst: jest.fn(async ({ where }: { where: { id?: string } }) =>
         where.id === center.id || where.id === 'inactive'
           ? { ...center, id: where.id, isActive: where.id !== 'inactive' }
           : null,
       ),
     },
     account: {
-      findFirst: jest.fn(async ({ where }: any) => {
+      findFirst: jest.fn(async ({ where }: { where: { id?: string } }) => {
         if (where.id === expenseAccount.id) return expenseAccount;
         if (where.id === assetAccount.id) return assetAccount;
         return null;
@@ -78,24 +81,25 @@ function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
     budget: {
       findFirst: jest.fn(async () => row),
       findMany: jest.fn(async () => (row ? [row] : [])),
-      create: jest.fn(async ({ data }: any) => {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         row = stored({ ...data, costCenter: center, account: expenseAccount });
         return row;
       }),
-      update: jest.fn(async ({ data }: any) => {
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         row = { ...(row as ReturnType<typeof stored>), ...data };
         return row;
       }),
     },
-    $transaction: jest.fn(async (operations: Array<Promise<unknown>>) =>
-      Promise.all(operations),
+    $transaction: jest.fn(async (operations: unknown[] | ((tx: unknown) => Promise<unknown>)) =>
+      typeof operations === 'function' ? operations(txTarget) : Promise.all(operations),
     ),
     $queryRaw: jest.fn().mockResolvedValue([
       { budgetId: '44444444-4444-4444-8444-444444444444', actual: new Prisma.Decimal('1200.0000') },
     ]),
   };
-  const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new BudgetsService(prisma as any, audit as any);
+  txTarget = prisma;
+  const audit = { recordRequired: jest.fn().mockResolvedValue(undefined) };
+  const service = new BudgetsService(prisma as unknown as PrismaService, audit as unknown as AuditService);
   return { service, prisma, audit, get row() { return row; } };
 }
 
@@ -116,10 +120,27 @@ describe('BudgetsService', () => {
     expect(created.amount).toBe('1000.0000');
     expect(created.costCenter?.code).toBe('PRJ-1');
     expect(created.account?.type).toBe('EXPENSE');
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ entity: 'budgets', action: 'CREATE' }),
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: 'budgets', action: 'CREATE' }), expect.anything(),
     );
   });
+
+  it.each(['CREATE', 'UPDATE', 'DELETE'] as const)(
+    'propagates a failed required audit for %s',
+    async (action) => {
+      const { service, audit } = build({ existing: action === 'CREATE' ? null : stored() });
+      audit.recordRequired.mockRejectedValue(new Error('synthetic audit failure'));
+      const operation = action === 'CREATE'
+        ? service.create('company', 'user', base)
+        : action === 'UPDATE'
+          ? service.update('company', 'user', stored().id, { amount: '1500' })
+          : service.retire('company', 'user', stored().id);
+      await expect(operation).rejects.toThrow('synthetic audit failure');
+      expect(audit.recordRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ action, entity: 'budgets' }), expect.anything(),
+      );
+    },
+  );
 
   it('refuses a balance-sheet account: a budget compares spending, not balances', async () => {
     const { service } = build({ existing: null });
@@ -215,6 +236,16 @@ describe('BudgetsService', () => {
       variance: '200.0000',
       variancePercent: '20.00',
     });
+  });
+
+  it('restricts posted actuals to the selected branch', async () => {
+    const { service, prisma } = build({ existing: stored() });
+
+    await service.report('company', { branchId: 'branch-1' });
+
+    const query = prisma.$queryRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
+    expect(query.sql.match(/branchId/g)).toHaveLength(2);
+    expect(query.values).toContain('branch-1');
   });
 
   it('reports the period it compared, so nothing looks prorated', async () => {

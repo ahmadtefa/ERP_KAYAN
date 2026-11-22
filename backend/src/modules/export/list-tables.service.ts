@@ -178,10 +178,18 @@ export class ListTablesService {
     if (!item) throw new BadRequestException('The item does not exist');
 
     const balances = await this.prisma.stockBalance.findMany({
-      where: { companyId, itemId: query.itemId },
+      where: {
+        companyId,
+        itemId: query.itemId,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
     });
     const movements = await this.prisma.stockMovement.findMany({
-      where: { companyId, itemId: query.itemId },
+      where: {
+        companyId,
+        itemId: query.itemId,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
       orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],
       include: { warehouse: { select: { code: true, nameEn: true, nameAr: true } } },
     });
@@ -268,6 +276,7 @@ export class ListTablesService {
                 { nameEn: { contains: query.q, mode: 'insensitive' as const } },
                 { nameAr: { contains: query.q, mode: 'insensitive' as const } },
                 { barcode: { contains: query.q, mode: 'insensitive' as const } },
+                { units: { some: { barcode: { contains: query.q, mode: 'insensitive' as const } } } },
               ],
             }
           : {}),
@@ -302,7 +311,7 @@ export class ListTablesService {
 
   async stock(companyId: string, query: ListQuery): Promise<ReportTable> {
     const balances = await this.prisma.stockBalance.findMany({
-      where: { companyId },
+      where: { companyId, ...(query.branchId ? { branchId: query.branchId } : {}) },
       include: { item: true, branch: true },
       orderBy: { item: { code: 'asc' } },
     });
@@ -369,6 +378,7 @@ export class ListTablesService {
       ...(query.status ? { status: query.status as never } : {}),
       ...(query.customerId && isSales ? { customerId: query.customerId } : {}),
       ...(query.supplierId && !isSales ? { supplierId: query.supplierId } : {}),
+      ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.from || query.to
         ? {
             invoiceDate: {
@@ -432,10 +442,11 @@ export class ListTablesService {
         { key: 'balanceDue', labelEn: 'Due', labelAr: 'المتبقي', numeric: true, width: 16 },
       ],
       rows: rows.map((row) => {
-        const party = (row as Record<string, any>)[partyName];
+        const rawRow = row as unknown as Record<string, unknown>;
+        const party = rawRow[partyName] as { nameEn?: string } | null | undefined;
         const out: Record<string, unknown> = { ...row };
         out.partyNameEn = party?.nameEn ?? '';
-        for (const key of amountKeys) out[key] = String((row as Record<string, any>)[key] ?? '');
+        for (const key of amountKeys) out[key] = String(rawRow[key] ?? '');
         return out;
       }),
     });
@@ -445,6 +456,7 @@ export class ListTablesService {
     const rows = await this.prisma.journalEntry.findMany({
       where: {
         companyId,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         ...(query.status ? { status: query.status as never } : {}),
         ...(query.from || query.to
           ? {
@@ -818,6 +830,7 @@ export class ListTablesService {
       where: {
         companyId,
         deletedAt: null,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         ...(query.status ? { status: query.status as never } : {}),
         ...(query.from || query.to
           ? {
@@ -884,6 +897,7 @@ export class ListTablesService {
       where: {
         companyId,
         deletedAt: null,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         ...(query.status ? { status: query.status as never } : {}),
         ...(query.from || query.to
           ? {
@@ -1049,14 +1063,14 @@ const SPECS: ListSpec[] = [
     titleEn: 'Fiscal periods',
     titleAr: 'الفترات المالية',
     permission: 'accounting.periods.read',
-    build: (service, companyId, query) => service.fiscalPeriods(companyId),
+    build: (service, companyId) => service.fiscalPeriods(companyId),
   },
   {
     slug: 'users',
     titleEn: 'Users',
     titleAr: 'المستخدمون',
     permission: 'admin.users.manage',
-    build: (service, companyId, query) => service.users(companyId),
+    build: (service, companyId) => service.users(companyId),
   },
   {
     slug: 'roles',

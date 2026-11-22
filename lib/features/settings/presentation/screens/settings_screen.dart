@@ -1,16 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/app/build_info.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/user_photo.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
 import '../widgets/reset_data_card.dart';
 import '../widgets/document_settings_card.dart';
 import '../widgets/text_scale_card.dart';
+
+final _runtimeBuildInfoProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
+  (ref) => ref.read(apiClientProvider).get('/health'),
+);
+
+String _shortCommit(String commit) =>
+    commit.length >= 12 ? commit.substring(0, 12) : commit;
 
 /// Application settings.
 ///
@@ -19,7 +30,7 @@ import '../widgets/text_scale_card.dart';
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
-  static const appVersion = '0.1.0+1';
+  static const appVersion = AppBuildInfo.version;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -28,7 +39,21 @@ class SettingsScreen extends ConsumerWidget {
     final locale = ref.watch(localeControllerProvider).value;
     final companyAsync = ref.watch(companyProfileProvider);
     final company = companyAsync.asData?.value;
+    final runtimeBuild = ref.watch(_runtimeBuildInfoProvider).asData?.value;
+    final apiCommit = runtimeBuild?['sourceCommit'] is String
+        ? runtimeBuild!['sourceCommit'] as String
+        : 'unknown';
+    final appCommit = AppBuildInfo.sourceCommit;
+    final commitMismatch = appCommit != 'unknown' &&
+        apiCommit != 'unknown' &&
+        appCommit != apiCommit;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+    final dirtyLabel = AppBuildInfo.sourceDirty == 'true'
+        ? (isArabic ? ' · مصدر غير نظيف' : ' · dirty source')
+        : '';
+    final apiStateLabel = runtimeBuild == null
+        ? (isArabic ? ' · غير متصل' : ' · unavailable')
+        : '';
     final nameAr = (company?['nameAr'] as String?)?.trim() ?? '';
     final nameEn = (company?['nameEn'] as String?)?.trim() ?? '';
     final companyName = isArabic
@@ -79,6 +104,8 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
+        const UserPhotoCard(),
+        const SizedBox(height: 16),
         const TextScaleCard(),
         const SizedBox(height: 16),
         const LanAccessCard(),
@@ -118,6 +145,19 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
+        // The licence screen: state, the activation code, and the one place a
+        // key is entered. Visible to everyone, because the person at the
+        // machine is often the one who has to read the code out.
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: Text(l10n.licence),
+            subtitle: Text(l10n.licenceSettingsSubtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go(AppRoutes.licence),
+          ),
+        ),
+        const SizedBox(height: 16),
         // Only an administrator sees this, and only when there is something
         // to reset. Everything about it is enforced again on the server.
         const ResetDataCard(),
@@ -129,7 +169,21 @@ class SettingsScreen extends ConsumerWidget {
                 leading: const Icon(Icons.info_outline),
                 title: Text(l10n.about),
                 subtitle: Text(
-                  '${l10n.aboutDescription}\n${l10n.version}: $appVersion',
+                  [
+                    l10n.aboutDescription,
+                    '${l10n.version}: $appVersion',
+                    '${isArabic ? 'بناء الواجهة' : 'Client build'}: '
+                        '${_shortCommit(appCommit)}$dirtyLabel',
+                    '${isArabic ? 'بناء الخادم' : 'API build'}: '
+                        '${_shortCommit(apiCommit)}$apiStateLabel',
+                    if (commitMismatch)
+                      isArabic
+                          ? 'تحذير: الواجهة والخادم من مصدرين مختلفين.'
+                          : 'Warning: client and server source commits differ.',
+                  ].join('\n'),
+                  style: commitMismatch
+                      ? TextStyle(color: Theme.of(context).colorScheme.error)
+                      : null,
                 ),
                 isThreeLine: true,
               ),

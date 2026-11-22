@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 /// What the platform needs to fetch a file the server is holding.
@@ -58,6 +59,15 @@ void validateDownloadedFile(Uint8List bytes, String fileName) {
       'saved. Try again; if it keeps happening, the server logs will '
       'say why.',
     );
+  }
+  if (name.endsWith('.json')) {
+    try {
+      jsonDecode(utf8.decode(bytes));
+    } catch (_) {
+      throw const DownloadFailure(
+        'The server did not send a valid JSON backup, so nothing was saved.',
+      );
+    }
   }
 }
 

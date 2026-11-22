@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/app/app_scope_restart.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/data_providers.dart';
 import '../widgets/full_backup_section.dart';
@@ -16,6 +19,51 @@ import '../widgets/full_backup_section.dart';
 /// goes through a preview of exactly what is in the file and what would be
 /// replaced, and the button that does it stays disabled until that preview has
 /// been seen.
+/// A numbered heading that makes the two halves of this screen impossible to
+/// confuse: the company JSON backup, and the system backup/restore.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.number,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String number;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 14,
+          backgroundColor: theme.colorScheme.primaryContainer,
+          child: Text(
+            number,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 2),
+              Text(subtitle, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class BackupScreen extends ConsumerStatefulWidget {
   const BackupScreen({super.key});
 
@@ -34,6 +82,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final summary = ref.watch(backupSummaryProvider);
+    final environment = ref.watch(appConfigProvider).environment;
+    // Installed product builds intentionally do not include the sample
+    // company archive. Keep real backup/restore available in all modes.
+    final showDemo = environment == AppEnvironment.development ||
+        environment == AppEnvironment.staging;
 
     return ModuleScaffold(
       title: l10n.backupTitle,
@@ -53,13 +106,23 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // The disaster-recovery half: the whole PostgreSQL database.
-          const FullBackupSection(),
-          const SizedBox(height: 16),
+          // Section one: one company's books, as a JSON file. This is the
+          // backup an accountant takes, and the only one that cannot touch
+          // another company.
+          _SectionHeader(
+            number: '1',
+            title: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'القسم الأول: نسخ واستعادة بيانات الشركة (JSON)'
+                : 'Section one: back up and restore company data (JSON)',
+            subtitle: l10n.takeBackupHint,
+          ),
+          const SizedBox(height: 8),
           _TakingCopy(summary: summary, onDownload: _download),
           const SizedBox(height: 16),
-          _DemoBackupSection(onDownload: _downloadDemo),
-          const SizedBox(height: 16),
+          if (showDemo) ...[
+            _DemoBackupSection(onDownload: _downloadDemo),
+            const SizedBox(height: 16),
+          ],
           _Restoring(
             file: _file,
             preview: _preview,
@@ -70,6 +133,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
             onInspect: _inspect,
             onRestore: _restore,
           ),
+          const SizedBox(height: 24),
+          // Section two: the whole installation. It carries its own heading
+          // and warning, because it is the one operation that can replace
+          // every company at once.
+          const FullBackupSection(),
         ],
       ),
     );
@@ -88,7 +156,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Future<void> _choose() async {
     PickedFile? picked;
     try {
-      picked = await pickFile(extensions: ['.json', '.dump']);
+      picked = await pickFile(extensions: ['.json']);
     } catch (error) {
       if (!mounted) return;
       setState(() => _failure = describeApiError(error));
@@ -107,7 +175,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         _restored = null;
         _failure =
             'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف JSON خاص بالشركة.\n'
-            'لاستعادة ملفات .dump بالكامل، يرجى استخدام قسم "النسخ الاحتياطي الكامل لقاعدة البيانات" أعلاه.';
+            'لاستعادة ملفات .dump بالكامل، يرجى استخدام القسم الثاني "النسخ الاحتياطي الكامل للنظام" أدناه.';
       });
       return;
     }
@@ -175,12 +243,36 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       final result = await ref
           .read(dataServiceProvider)
           .restoreBackup(file, replace: true);
+      final written = result['written'];
+      final total = result['total'];
+      final committedRows = written is Map
+          ? written.values.fold<num>(
+              0,
+              (sum, count) => sum + (count is num ? count : 0),
+            )
+          : -1;
+      if (written is! Map ||
+          total is! num ||
+          written.values.any((count) => count is! num || count < 0) ||
+          committedRows != total) {
+        throw const FormatException(
+          'The server did not confirm the rows committed by the company restore.',
+        );
+      }
       setState(() {
         _restored = result;
         _busy = false;
         _preview = null;
       });
-      ref.invalidate(backupSummaryProvider);
+      // A successful 200 comes from the service's committed write transaction.
+      // Clear this session and dispose every cached list/report/detail provider;
+      // otherwise screens continue to show pre-restore values and look as if
+      // the restore did nothing. The next screen load starts from the database.
+      try {
+        await ref.read(tokenStoreProvider).clear();
+      } finally {
+        restartAppScope();
+      }
     } catch (error) {
       setState(() {
         _failure = describeApiError(error);

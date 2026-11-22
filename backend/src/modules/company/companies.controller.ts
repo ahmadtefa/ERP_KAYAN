@@ -12,6 +12,7 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -19,6 +20,7 @@ import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import { UpdateCompanyProfileDto } from './dto/company.dto';
 import {
   CompanyService,
@@ -40,6 +42,12 @@ interface UploadedLogo {
 @Controller('companies')
 export class CompaniesController {
   constructor(private readonly companies: CompanyService) {}
+
+  @Public()
+  @Get('options')
+  options() {
+    return this.companies.publicOptions();
+  }
 
   @Public()
   @Get('branding')
@@ -75,12 +83,14 @@ export class CompaniesController {
 
   @Patch('profile')
   @RequirePermissions('company.profile.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   update(@CurrentUser() user: AuthUser, @Body() dto: UpdateCompanyProfileDto) {
     return this.companies.updateProfile(user.companyId, user.userId, dto);
   }
 
   @Post('logo')
   @RequirePermissions('company.profile.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1 } }),
   )
@@ -101,6 +111,7 @@ export class CompaniesController {
 
   @Delete('logo')
   @RequirePermissions('company.profile.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   async removeLogo(@CurrentUser() user: AuthUser) {
     await this.companies.deleteLogo(user.companyId, user.userId);
     return this.companies.getProfile(user.companyId);

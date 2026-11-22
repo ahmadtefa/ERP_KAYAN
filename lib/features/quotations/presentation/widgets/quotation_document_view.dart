@@ -695,28 +695,132 @@ class _Sheet extends StatelessWidget {
 
   Widget _summary() {
     if (document.sections.isEmpty) return const SizedBox.shrink();
+    final totals = document.totals;
+    final quotationDiscount = num.tryParse(totals.quotationDiscount) ?? 0;
+    final design = document.design;
     final headerStyle = TextStyle(
       color: _Doc.royal,
-      fontSize: 8.5 * scale,
+      fontSize: 8.2 * scale,
       fontWeight: FontWeight.w700,
     );
     final bodyStyle = TextStyle(
       color: _Doc.ink,
-      fontSize: 8.8 * scale,
+      fontSize: 8.2 * scale,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
 
-    Widget head(String label, {int flex = 2, bool numeric = false}) => Expanded(
+    Widget cell(
+      String label, {
+      int flex = 2,
+      bool numeric = false,
+      bool header = false,
+      TextStyle? style,
+    }) =>
+        Expanded(
           flex: flex,
           child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 6 * scale, horizontal: 5 * scale),
+            padding: EdgeInsets.symmetric(
+              vertical: 6 * scale,
+              horizontal: 4 * scale,
+            ),
             child: Text(
               label,
               textAlign: numeric ? TextAlign.end : TextAlign.start,
-              style: headerStyle,
+              style: style ?? (header ? headerStyle : bodyStyle),
             ),
           ),
         );
+
+    Widget tableRow(QuotationDocumentSection section) {
+      final discount = num.tryParse(section.discountAmount) ?? 0;
+      return Container(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: _Doc.line, width: 0.6)),
+        ),
+        child: Row(
+          children: [
+            cell(section.title, flex: 4),
+            cell(_money(section.subTotal), numeric: true),
+            cell(
+              '${discount > 0 ? '− ' : ''}${_money(section.discountAmount)}',
+              numeric: true,
+              style: TextStyle(
+                color: discount > 0 ? _Doc.muted : _Doc.ink,
+                fontSize: 8.2 * scale,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            cell(_money(section.netTotal), numeric: true),
+          ],
+        ),
+      );
+    }
+
+    Widget totalRow(
+      String label,
+      String amount, {
+      bool grand = false,
+      bool tax = false,
+      bool discount = false,
+    }) {
+      final labelStyle = _styled(
+        TextStyle(
+          color: discount ? _Doc.muted : _Doc.ink,
+          fontSize: 8.5 * scale,
+          fontWeight: FontWeight.w600,
+        ),
+        (discount || tax) ? design?.totalsLabel : null,
+      );
+      final amountStyle = _styled(
+        TextStyle(
+          color: tax ? _Doc.accent : (discount ? _Doc.muted : _Doc.ink),
+          fontSize: 8.8 * scale,
+          fontWeight: FontWeight.w600,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+        (discount || tax) ? design?.totalsValue : null,
+      );
+      final finalStyle = _styled(
+        TextStyle(
+          color: Colors.white,
+          fontSize: 10 * scale,
+          fontWeight: FontWeight.w700,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+        design?.finalTotal,
+      );
+      return Container(
+        decoration: BoxDecoration(
+          color: grand ? _Doc.royal : (tax ? _Doc.wash : null),
+          border: grand
+              ? null
+              : const Border(
+                  bottom: BorderSide(color: _Doc.line, width: 0.6),
+                ),
+        ),
+        padding: EdgeInsets.symmetric(
+          vertical: grand ? 8 * scale : 5 * scale,
+          horizontal: 8 * scale,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 8,
+              child: Text(label, style: grand ? finalStyle : labelStyle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: Text(
+                amount,
+                textAlign: TextAlign.end,
+                style: grand ? finalStyle : amountStyle,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: 18 * scale),
@@ -724,7 +828,7 @@ class _Sheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            document.arabic ? 'ملخص الأقسام' : 'Section summary',
+            document.arabic ? 'ملخص الجداول' : 'Tables summary',
             style: TextStyle(
               color: _Doc.royal,
               fontSize: 13.5 * scale,
@@ -741,173 +845,36 @@ class _Sheet extends StatelessWidget {
                   color: _Doc.wash,
                   child: Row(
                     children: [
-                      head(document.arabic ? 'القسم' : 'Section', flex: 5),
-                      head(document.arabic ? 'قبل الخصم' : 'Before discount', numeric: true, flex: 3),
-                      head(document.arabic ? 'الخصم' : 'Discount', numeric: true, flex: 2),
-                      head(document.arabic ? 'الصافي' : 'Net', numeric: true, flex: 3),
+                      cell(document.arabic ? 'الجدول' : 'Table', flex: 4, header: true),
+                      cell(document.arabic ? 'قبل الخصم' : 'Before discount', numeric: true, header: true),
+                      cell(document.arabic ? 'خصم الجدول' : 'Table discount', numeric: true, header: true),
+                      cell(document.arabic ? 'الصافي' : 'Net', numeric: true, header: true),
                     ],
                   ),
                 ),
-                for (var index = 0; index < document.sections.length; index += 1)
-                  Container(
-                    decoration: const BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: _Doc.line, width: 0.6),
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 5,
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              vertical: 6 * scale,
-                              horizontal: 5 * scale,
-                            ),
-                            child: Text(
-                              document.sections[index].title,
-                              style: bodyStyle,
-                            ),
-                          ),
-                        ),
-                        _summaryCell(_money(document.sections[index].subTotal), 3, bodyStyle),
-                        _summaryCell(
-                          document.sections[index].hasDiscount
-                              ? '− ${_money(document.sections[index].discountAmount)}'
-                              : '—',
-                          2,
-                          bodyStyle,
-                        ),
-                        _summaryCell(_money(document.sections[index].netTotal), 3, bodyStyle),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          SizedBox(height: 12 * scale),
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: SizedBox(
-              width: 320 * scale,
-              child: _totals(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryCell(String value, int flex, TextStyle style) {
-    return Expanded(
-      flex: flex,
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          vertical: 6 * scale,
-          horizontal: 5 * scale,
-        ),
-        child: Text(value, textAlign: TextAlign.end, style: style),
-      ),
-    );
-  }
-
-  Widget _totals() {
-    final totals = document.totals;
-    final tableDiscount = num.tryParse(totals.tableDiscountTotal) ?? 0;
-    final quotationDiscount = num.tryParse(totals.quotationDiscount) ?? 0;
-    final design = document.design;
-
-    Widget row(String label, String value) => Container(
-          padding: EdgeInsets.symmetric(vertical: 6 * scale, horizontal: 9 * scale),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _Doc.line, width: 0.6)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: _styled(
-                    TextStyle(color: _Doc.muted, fontSize: 8.8 * scale),
-                    design?.totalsLabel,
-                  ),
+                for (final section in document.sections) tableRow(section),
+                totalRow(
+                  document.arabic ? 'الإجمالي قبل الخصم' : 'Subtotal before discount',
+                  _money(totals.subTotal),
                 ),
-              ),
-              Text(
-                value,
-                style: _styled(
-                  TextStyle(
-                    color: _Doc.ink,
-                    fontSize: 9.3 * scale,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                if (quotationDiscount > 0)
+                  totalRow(
+                    document.arabic ? 'خصم العرض' : 'Quotation discount',
+                    '− ${_money(totals.quotationDiscount)}',
+                    discount: true,
                   ),
-                  design?.totalsValue,
-                ),
-              ),
-            ],
-          ),
-        );
-
-    return Container(
-      decoration: BoxDecoration(border: Border.all(color: _Doc.line)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          row(
-            document.arabic ? 'الإجمالي قبل الخصم' : 'Subtotal before discount',
-            _money(totals.subTotal),
-          ),
-          if (tableDiscount > 0)
-            row(
-              document.arabic ? 'خصومات الجداول' : 'Table discounts',
-              '− ${_money(totals.tableDiscountTotal)}',
-            ),
-          if (quotationDiscount > 0)
-            row(
-              document.arabic ? 'خصم العرض' : 'Quotation discount',
-              '− ${_money(totals.quotationDiscount)}',
-            ),
-          if (totals.hasTax)
-            row(
-              document.arabic
-                  ? 'الضريبة المضافة${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}'
-                  : 'Tax (VAT)${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}',
-              '+ ${_money(totals.taxAmount)}',
-            ),
-          Container(
-            color: _Doc.royal,
-            padding: EdgeInsets.symmetric(
-              vertical: 9 * scale,
-              horizontal: 9 * scale,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    document.arabic ? 'الإجمالي النهائي' : 'Final total',
-                    style: _styled(
-                      TextStyle(
-                        color: Colors.white,
-                        fontSize: 10 * scale,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      design?.finalTotal,
-                    ),
+                if (totals.hasTax)
+                  totalRow(
+                    document.arabic
+                        ? 'الضريبة المضافة${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}'
+                        : 'Tax (VAT)${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}',
+                    '+ ${_money(totals.taxAmount)}',
+                    tax: true,
                   ),
-                ),
-                Text(
+                totalRow(
+                  document.arabic ? 'الإجمالي النهائي' : 'Final total',
                   _money(totals.totalAmount),
-                  style: _styled(
-                    TextStyle(
-                      color: Colors.white,
-                      fontSize: 12 * scale,
-                      fontWeight: FontWeight.w700,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                    design?.finalTotal,
-                  ),
+                  grand: true,
                 ),
               ],
             ),
@@ -1120,6 +1087,7 @@ abstract final class _Doc {
   static const royal = Color(0xFF1E60AA);
   static const royalDeep = Color(0xFF164D84);
   static const royalTint = Color(0xFF0088CC);
+  static const accent = Color(0xFFE67E22);
   static const ink = Color(0xFF111827);
   static const muted = Color(0xFF4B5563);
   static const line = Color(0xFFD3E4FE);

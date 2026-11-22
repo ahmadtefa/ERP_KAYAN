@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -6,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
+import { resolveEffectivePermissions } from '../../common/rbac/effective-permissions';
 import { AuditService } from '../../common/audit/audit.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -121,23 +123,15 @@ export class AuthService {
     }
 
     // A user may only receive grants assigned in their own company. Shared
-    // system roles are allowed, but deleted or cross-company roles are ignored.
-    const currentUserRoles = user.userRoles.filter(
-      (ur) =>
-        ur.companyId === user.companyId &&
-        ur.role.deletedAt === null &&
-        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    // system roles are allowed, but deleted, disabled and cross-company roles
+    // are ignored, and a per-user deny removes what a role would have given.
+    const effective = resolveEffectivePermissions(
+      user.userRoles,
+      user.userPermissions,
+      user.companyId,
     );
-    const permissions = [
-      ...new Set([
-        ...currentUserRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-        // Grants made to this one person on top of their roles.
-        ...user.userPermissions.map((grant) => grant.permission.code),
-      ]),
-    ];
-    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
+    const permissions = effective.permissions;
+    const roles = effective.roles;
 
     const branches = await this.prisma.userBranch.findMany({
       where: {
@@ -197,6 +191,93 @@ export class AuthService {
     };
   }
 
+  /** Change a password before sign-in without revealing whether an account exists. */
+  async changeOwnPassword(
+    username: string,
+    companyCode: string,
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<{ success: true }> {
+    const invalid = new UnauthorizedException('Invalid username or current password');
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException('New password confirmation does not match');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        username: username.trim(),
+        deletedAt: null,
+        isActive: true,
+        company: { code: companyCode.trim().toUpperCase(), isActive: true },
+      },
+    });
+    if (!user || (user.lockedUntil && user.lockedUntil > new Date())) throw invalid;
+
+    let passwordMatches = false;
+    try {
+      passwordMatches = await argon2.verify(user.passwordHash, currentPassword);
+    } catch {
+      // A malformed stored hash must fail closed with the same public result.
+    }
+    if (!passwordMatches) {
+      const updated = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginCount: { increment: 1 } },
+        select: { failedLoginCount: true },
+      });
+      if (updated.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) },
+        });
+      }
+      await this.audit.record({
+        companyId: user.companyId,
+        userId: user.id,
+        action: 'PASSWORD_CHANGE_FAILED',
+        entity: 'users',
+        entityId: user.id,
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      });
+      throw invalid;
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must differ from the current password');
+    }
+    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          tokenVersion: { increment: 1 },
+          failedLoginCount: 0,
+          lockedUntil: null,
+        },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await this.audit.recordRequired({
+        companyId: user.companyId,
+        userId: user.id,
+        action: 'user.password_changed_self',
+        entity: 'users',
+        entityId: user.id,
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      }, tx);
+    });
+
+    return { success: true };
+  }
+
   async refresh(token: string) {
     const hash = this.hashToken(token);
     const stored = await this.prisma.refreshToken.findUnique({
@@ -250,21 +331,13 @@ export class AuthService {
     if (rotation.count !== 1) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
-    const currentUserRoles = user.userRoles.filter(
-      (ur) =>
-        ur.companyId === user.companyId &&
-        ur.role.deletedAt === null &&
-        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    const effective = resolveEffectivePermissions(
+      user.userRoles,
+      user.userPermissions,
+      user.companyId,
     );
-    const permissions = [
-      ...new Set([
-        ...currentUserRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-        ...user.userPermissions.map((grant) => grant.permission.code),
-      ]),
-    ];
-    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
+    const permissions = effective.permissions;
+    const roles = effective.roles;
     const branchId =
       user.branches
         .filter(

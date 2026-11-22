@@ -117,7 +117,7 @@ export class ReportTablesService {
       case 'payables-reconciliation':
         return this.partyReconciliation(companyId, query, 'payables');
       case 'fixed-assets':
-        return this.fixedAssetsTable(companyId);
+        return this.fixedAssetsTable(companyId, query);
       case 'depreciation':
         return this.depreciationTable(companyId, query);
       case 'receivables-aging':
@@ -591,8 +591,14 @@ export class ReportTablesService {
   ) {
     const data =
       side === 'receivables'
-        ? await this.reconciliation.receivables(companyId, { asOf: query.asOf ?? query.to })
-        : await this.reconciliation.payables(companyId, { asOf: query.asOf ?? query.to });
+        ? await this.reconciliation.receivables(companyId, {
+            asOf: query.asOf ?? query.to,
+            branchId: query.branchId,
+          })
+        : await this.reconciliation.payables(companyId, {
+            asOf: query.asOf ?? query.to,
+            branchId: query.branchId,
+          });
     return this.table({
       slug: side === 'receivables' ? 'receivables-reconciliation' : 'payables-reconciliation',
       titleEn:
@@ -639,8 +645,11 @@ export class ReportTablesService {
     });
   }
 
-  private async fixedAssetsTable(companyId: string) {
-    const data = await this.fixedAssets.summary(companyId);
+  private async fixedAssetsTable(
+    companyId: string,
+    query: PeriodQueryDto,
+  ) {
+    const data = await this.fixedAssets.summary(companyId, query.branchId);
     return this.table({
       slug: 'fixed-assets',
       titleEn: 'Fixed assets register',
@@ -679,7 +688,10 @@ export class ReportTablesService {
 
   private async depreciationTable(companyId: string, query: PeriodQueryDto) {
     const period = query.from?.slice(0, 7);
-    const data = await this.fixedAssets.listRuns(companyId, { period });
+    const data = await this.fixedAssets.listRuns(companyId, {
+      period,
+      branchId: query.branchId,
+    });
     const rows = data.items.flatMap((run) =>
       run.lines.map((line) => ({
         runNumber: run.runNumber,
@@ -729,8 +741,14 @@ export class ReportTablesService {
   ) {
     const data =
       side === 'receivables'
-        ? await this.aging.receivables(companyId, { asOf: query.to })
-        : await this.aging.payables(companyId, { asOf: query.to });
+        ? await this.aging.receivables(companyId, {
+            asOf: query.to,
+            branchId: query.branchId,
+          })
+        : await this.aging.payables(companyId, {
+            asOf: query.to,
+            branchId: query.branchId,
+          });
     return this.table({
       slug: side === 'receivables' ? 'receivables-aging' : 'payables-aging',
       titleEn: side === 'receivables' ? 'Receivables aging' : 'Payables aging',
@@ -784,7 +802,9 @@ export class ReportTablesService {
         { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
         { labelEn: 'Paid', labelAr: 'المسدَّد', value: data.totals.paid },
         { labelEn: 'Outstanding', labelAr: 'المتبقي', value: data.totals.outstanding },
-        { labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: data.totals.grossProfit },
+        // Null when the caller lacks inventory.cost.read; the matching column
+        // is removed by applyPriceVisibility anyway, so an empty cell is fine.
+        { labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: data.totals.grossProfit ?? '' },
       ],
       notes: [],
     });
@@ -941,6 +961,7 @@ export class ReportTablesService {
       kind: query.kind,
       customerId: query.customerId,
       supplierId: query.supplierId,
+      branchId: query.branchId,
     });
     return this.table({
       slug: 'outstanding-invoices',
@@ -991,6 +1012,7 @@ export class ReportTablesService {
     const data = await this.parties.statement(companyId, kind, query.partyId, {
       from: query.from,
       to: query.to,
+      branchId: query.branchId,
     });
     const party = data.party as {
       code: string;
@@ -1011,6 +1033,7 @@ export class ReportTablesService {
         { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
         { key: 'number', labelEn: 'Document', labelAr: 'المستند', width: 16 },
         { key: 'type', labelEn: 'Kind', labelAr: 'النوع', width: 16 },
+        { key: 'status', labelEn: 'Document status', labelAr: 'حالة المستند', width: 12 },
         { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 26 },
         { key: 'debit', labelEn: 'Debit', labelAr: 'مدين', numeric: true, width: 14 },
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 14 },

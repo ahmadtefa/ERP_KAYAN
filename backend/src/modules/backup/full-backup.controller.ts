@@ -1,5 +1,8 @@
 import {
   BadRequestException,
+  CanActivate,
+  Injectable,
+  ServiceUnavailableException,
   Body,
   Controller,
   Delete,
@@ -21,6 +24,7 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { FullBackupService } from './full-backup.service';
+import { RestoreGateService } from './system/restore-gate.service';
 
 interface UploadedDump {
   originalname: string;
@@ -28,6 +32,30 @@ interface UploadedDump {
   size: number;
   buffer: Buffer;
 }
+
+/**
+ * The gate in front of the database (DUMP) restore.
+ *
+ * This is not the guard for the complete restore. That one lives in
+ * `system/complete-restore-unavailable.guard.ts` and asks the same machine
+ * questions through the same RestoreGateService: the PostgreSQL tools, the
+ * writable backup folder, the isolated scratch database (via the runtime
+ * account or the limited-privilege restore-admin), and no interrupted
+ * restore waiting. A bare `pg_dump` file restores the database alone — the
+ * screen must warn before confirming that external files, images and the
+ * licence are not part of it and that a protective backup is taken first.
+ */
+@Injectable()
+export class DatabaseRestoreGuard implements CanActivate {
+  constructor(private readonly gate: RestoreGateService) {}
+  async canActivate(): Promise<boolean> {
+    await this.gate.assertAllowed();
+    return true;
+  }
+}
+
+/** Historical name kept so old imports keep working. */
+export { DatabaseRestoreGuard as DatabaseOnlyRestoreDisabledGuard };
 
 /**
  * Full-database backups: take one, list them, download one, put one back.
@@ -43,14 +71,32 @@ export class FullBackupController {
   constructor(
     private readonly service: FullBackupService,
     private readonly maintenance: MaintenanceService,
+    private readonly gate: RestoreGateService,
   ) {}
 
-  /// What this machine can do, and the state of the system right now.
+  /// What this machine can do, and the state of the system right now. The
+  /// restore gate's answer is included with its reasons and checks, so a
+  /// screen can say why a restore is unavailable and what to do about it —
+  /// never a bare "disabled".
   @Get('capabilities')
   async capabilities() {
+    const gate = await this.gate.probe();
     return {
       ...(await this.service.capabilities()),
       maintenance: this.maintenance.status,
+      // This legacy endpoint handles a database archive only. Keep the full
+      // machine-backup capability flags from FullBackupService truthful; the
+      // machine gate below describes only whether the database-only restore
+      // can be rehearsed and safely run on this installation.
+      fullBackupSupported: false,
+      fullRestoreSupported: false,
+      databaseRestoreSupported: gate.fullRestoreSupported,
+      databaseRestoreReasons: gate.reasons,
+      databaseRestoreChecks: gate.checks,
+      // Retain the legacy detail names for clients that used them to explain
+      // why the database-archive operation is currently gated.
+      restoreReasons: gate.reasons,
+      restoreChecks: gate.checks,
     };
   }
 
@@ -62,14 +108,26 @@ export class FullBackupController {
 
   /// The backups sitting in the backup folder on the server.
   @Get()
-  list() {
-    return this.service.list();
+  async list() {
+    // Legacy `kind: full` denotes a whole-database dump, not a complete
+    // machine backup. Preserve the field for old clients but make its scope
+    // explicit for every listed archive (including old and safety dumps).
+    const files = await this.service.list();
+    return files.map((file) => ({ ...file, fullBackup: false,
+      includesExternalFiles: false, includesLicence: false }));
   }
 
-  /// Takes a new full backup.
+  /// A complete backup cannot be honestly produced by the legacy pg_dump path.
   @Post()
   create(@CurrentUser() user: AuthUser) {
-    return this.service.createFull(user.userId);
+    return this.service.rejectFullBackup(user.userId, user.companyId ?? null);
+  }
+
+  /// Explicit, partial PostgreSQL archive; not a complete backup.
+  @Post('database-archive')
+  async createDatabaseArchive(@CurrentUser() user: AuthUser) {
+    const result = await this.service.createFull(user.userId);
+    return { ...result, fullBackup: false, includesExternalFiles: false, includesLicence: false };
   }
 
   /// Reads a backup back from disk and reports what is inside it. A backup
@@ -110,6 +168,7 @@ export class FullBackupController {
    * the user type the confirmation before it sends it.
    */
   @Post('restore')
+  @UseGuards(DatabaseRestoreGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 * 1024 } }),
   )

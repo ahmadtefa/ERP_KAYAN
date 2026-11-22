@@ -17,6 +17,14 @@ String? asString(Object? value) {
 String text(Json json, String key, {String fallback = ''}) =>
     asString(json[key]) ?? fallback;
 
+/// Uses the available name when the preferred language was left blank.
+String localizedRecordName(Json row, {required bool arabic}) {
+  final preferred = text(row, arabic ? 'nameAr' : 'nameEn').trim();
+  return preferred.isNotEmpty
+      ? preferred
+      : text(row, arabic ? 'nameEn' : 'nameAr').trim();
+}
+
 /// Keeps the amount as text so it is never parsed into a double.
 String amount(Json json, String key, {String fallback = '0'}) =>
     asString(json[key]) ?? fallback;

@@ -134,6 +134,27 @@ async function main() {
     json: { taxId: companyTaxId, commercialRegistration: `CR-${stamp}` },
   });
 
+  // ── the tax policy this scenario computes against ────────────────────
+  //
+  // Every expectation below adds 14% VAT to the discounted net, and a
+  // quotation takes its rate from the company's settings - not from the
+  // line's `taxRate`. Since 20261103150000_new_company_default_tax_zero the
+  // column defaults to 0, and the company reset that scenario-accounting
+  // performs (it runs earlier in the same CI job, with
+  // ENABLE_DISPOSABLE_RESET=true) deletes company_settings outright, so a
+  // fresh row is recreated at 0.
+  //
+  // Stating the rate here is what makes the arithmetic below a check of the
+  // quotation engine rather than a check of whatever the previous scenario
+  // happened to leave in the database. It matches scenario-accounting, which
+  // has always set 14 explicitly, and it changes no product default: the
+  // shipped default stays 0.
+  const taxPolicy = await must('state the tax rate this scenario computes with', '/accounting/settings', {
+    method: 'PATCH',
+    json: { taxRate: '14' },
+  });
+  check('the company tax rate is 14% for this scenario', near(taxPolicy?.taxRate, 14), taxPolicy?.taxRate);
+
   const warehouseList = await must('read warehouses', '/inventory/warehouses');
   const warehouses = Array.isArray(warehouseList) ? warehouseList : warehouseList?.items ?? [];
   const warehouseId = warehouses[0]?.id;

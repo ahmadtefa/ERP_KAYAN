@@ -1,0 +1,39 @@
+# Windows offline installer: dependency audit
+
+## Scope and evidence levels
+
+This is a source/packaging audit, **not a verified final-EXE manifest**. The previous 155714907-byte candidate from commit `1acf98c1930618bad5a89e6d3a487bfe35d216d0`, run `40858823858`, was built and its PE sections were checked; the runner did not upload it, so its bytes are unavailable. The 345735066-byte historic EXE is from `3f1e8a72c3fdc21f382d54fec06be9e8583615b9`, run `40572922703`, artifact `12767883681`. Its enclosing ZIP and EXE hashes and ZIP CRC were independently checked in memory. Its raw bytes identify Inno data version 6.7.0; Ubuntu `innoextract 1.9` could not list them. The historic CI reports a smoke test, not a clean offline test of the new EXE. See the separate `INSTALLER-SIZE-INVESTIGATION-2026-10-29.md` workspace report; it is not treated as a committed source tree.
+
+All EXE-presence and offline-runtime entries below are **NOT VERIFIED**. 'Staged by source' is not proof of payload membership, compatibility, or installation.
+
+| Component | Required / evidence | Source and intended final location | Presence in candidate EXE |
+|---|---|---|---|
+| Flutter desktop runner, plugins, Flutter DLL, assets/fonts | Required by the GUI and generated bundle; exact dynamic DLL set unenumerated | Flutter Windows release output copied into `{app}` (`build-installer.ps1`); plugin/runtime resources follow Flutter output | NOT VERIFIED |
+| Flutter web assets | Required for the bundled web surface; exact entry paths depend on Flutter build | release `build/web` copied into `{app}/build/web` | NOT VERIFIED |
+| NestJS backend and runtime dependencies | Required to serve `/api/v1`; desktop starts `backend/dist/src/main.js` | backend build `dist` and production npm dependencies under `{app}/backend` | NOT VERIFIED |
+| Node 24.21.0 | Required to run backend and database preparer | pinned Node ZIP copied to `{app}/backend/node`, including `node.exe` | NOT VERIFIED |
+| PostgreSQL 17.7 server and `initdb`, `pg_ctl`, `pg_isready`, `psql` | Required for the bundled local DB and service; installer checks executables | pinned PostgreSQL archive `bin`, `lib`, `share` staged under `{app}/backend/postgres` | NOT VERIFIED; DLL closure and `initdb` not tested |
+| `pg_dump`, `pg_restore` | Required by full backup/restore, safety backup and reset | same archive `bin`, checked by builder | NOT VERIFIED; no live backup/restore |
+| PostgreSQL DLLs, extensions, locale/timezone and `share` | Required subset depends on server, initdb and configured features | same archive `bin`, `lib`, `share`; no claim that the subset covers every supported extension | NOT VERIFIED |
+| Prisma Client, adapter, CLI, schema, migrations | Required for DB access and `migrate deploy`; schema uses Prisma client engine mode | backend npm dependencies and generated client under `{app}/backend/node_modules`; schema/migrations under `{app}/backend/prisma` | NOT VERIFIED; schema engine and dynamic dependencies not inspected |
+| MSVC redistributable | Required when target OS lacks a compatible runtime; installer handles prerequisite | Microsoft-signed downloaded `vc_redist.x64.exe` staged under `{app}/prerequisites` | NOT VERIFIED; clean-machine install untested |
+| Runtime prepare/repair/reset/control, RepairTool, migrations | Required for setup, service repair, upgrade and recovery | PowerShell/C# artifacts and `backend/scripts/prepare-database.mjs`, `database-state.mjs`, `migrate-deploy.mjs` in `{app}` | NOT VERIFIED; no upgrade/repair test |
+| Production config and first-run settings | Required; credentials and settings are generated/provided at install/first-run, not bundled customer data | install runtime and first-run setup; protected per-machine and per-user paths | NOT VERIFIED on installed Windows |
+| Public Ed25519 verification key | Required for licence enforcement; no private key is needed | public PEM staged at `{app}/public-key.pem`, then installed under `%ProgramData%/KAYAN-ERP/license`; fingerprint policy `F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7` | NOT VERIFIED in EXE; historical licence compatibility unproven |
+| pgAdmin 4 and PostgreSQL docs | Not referenced by examined product runtime scripts; not needed merely to start DB, but optional feature/extension needs require Windows evidence | full old upstream tree included in staging; new source copies `bin`, `lib`, `share` | excluded from new staging by source; exact EXE contents NOT VERIFIED |
+| Demo JSON | Not required for real backup/restore or first-run data; used by the optional demo download | intentionally absent from new product staging; production/on-premise UI hides demo panel | NOT VERIFIED in EXE; staging/source still expose demo in development modes |
+
+## Observed packaging failure risk and fix
+
+`prepare-database.mjs` previously returned zero if `node_modules/prisma/build/index.js` was absent and then logged that migrations were up to date. On an existing database this could falsely announce readiness despite unrun migrations. The focused change requires the CLI before any role/database work and fails nonzero if missing; the build-stage required list now includes the CLI, schema and migration lock and checks for at least one migration SQL. The new dependency `migrate-deploy.mjs` is included in the runtime scripts list. Node tests use synthetic temporary files and no database; they are not a `prisma migrate deploy` or Windows install test. Individual schema engines and the complete set of migration files still require EXE inspection and a genuine upgrade.
+
+## Focused checks performed
+
+- Node targeted tests (missing CLI, child exit statuses and package/key policy): 5/5 passed locally. The equivalent CI job passed in run `40862938080` on `177bd9ba98d0cebc8a8bb513260f70c0bf9ea775`; it does not open a database or invoke real Prisma migrations.
+- Flutter focused analyze and widget tests passed in [run 40863405687](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/40863405687) on `28fdd8e117d97d913a99af5f4435753f4b7179c9`: production/on-premise hide the demo section and development/staging show it, while the normal backup and restore controls remain in the rendered test. These are widget tests using fake services, not EXE tests. The earlier focused runs `40862938080` and `40863185159` failed on the analysis invocation/import and were corrected. No general backend/Prisma/Flutter suite or product installer was rerun for this audit.
+
+## Size and tests still required
+
+The historic Actions ZIP is 345322254 bytes and holds a 345735066-byte EXE; the newer EXE is 155714907 bytes. The EXE-to-EXE difference is 190020159 bytes. A separately SHA-verified PostgreSQL input archive contains pgAdmin 4 at 713457551 uncompressed bytes and PostgreSQL docs at 31660395 bytes; the newer stage deliberately omits those trees. The measurements are inputs, not their compressed size within either EXE. Both `.iss` sources specify solid LZMA2 maximum compression. These facts strongly explain a reduction, but do not prove the final payload contains all runtime dependencies or quantify the precise contribution.
+
+No new product installer was produced or uploaded for this audit. The product packaging probe is not triggered by pushes while the investigation is open. Pending gates: recover the exact candidate EXE by SHA or safely reproduce a future candidate after the size investigation, inventory Inno 6.7 with a trusted compatible tool, scan final payload without logging secrets, validate dynamic dependencies, install and reboot a clean offline Windows VM, exercise backend/UI/database, backup/restore, licences including corruption/recovery, and upgrade with synthetic data. CI results and PE checks do not substitute for these tests.

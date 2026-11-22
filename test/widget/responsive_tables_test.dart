@@ -117,20 +117,22 @@ void main() {
       expect(find.textContaining('مخزون المواد الخام'), findsWidgets);
       expect(find.textContaining('Trade payables'), findsWidgets);
 
-      if (width == 768.0) {
-        // Table form: the far columns start off-screen and a sideways
-        // drag brings the last heading into view.
-        final before = tester.getTopLeft(find.text('Note')).dx;
-        // Drag from a point that is actually on screen — the centre
-        // of a 2,500px-wide table is not inside a 768px viewport.
+      if (width >= 760.0) {
+        // The far columns start off-screen at desktop sizes too. Drag the
+        // actual table content all the way across and prove the last heading
+        // can be brought fully inside the viewport, not merely that a
+        // ScrollView happens to exist in the widget tree.
+        final before = tester.getRect(find.text('Note'));
         await tester.dragFrom(
           tester.getCenter(find.text('1104')),
-          const Offset(-500, 0),
+          const Offset(-2000, 0),
         );
         await tester.pumpAndSettle();
-        final after = tester.getTopLeft(find.text('Note')).dx;
-        expect(after, lessThan(before),
+        final after = tester.getRect(find.text('Note'));
+        expect(after.left, lessThan(before.left),
             reason: 'the table actually scrolls sideways');
+        expect(after.left, greaterThanOrEqualTo(0));
+        expect(after.right, lessThanOrEqualTo(width));
         expect(tester.takeException(), isNull);
       }
     });
@@ -146,6 +148,20 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('1104'), findsWidgets);
     expect(find.textContaining('raw materials'), findsWidgets);
+  });
+
+  testWidgets('an invoice detail retry reloads after a transient error', (tester) async {
+    _size(tester, 768);
+    final api = _RetryInvoiceApi();
+    await tester.pumpWidget(_app(const SizedBox(height: 760,
+      child: InvoiceDetailDialog(kind: InvoiceKind.purchase,
+        summary: {'id': 'inv-1', 'invoiceNumber': 'PI-1'})), api: api));
+    for (var i = 0; i < 6; i++) { await tester.pump(const Duration(milliseconds: 100)); }
+    await tester.tap(find.text('Retry'));
+    for (var i = 0; i < 6; i++) { await tester.pump(const Duration(milliseconds: 100)); }
+    expect(api.invoiceLoads, 2);
+    expect(find.text('1,234,567.89'), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a purchase invoice document reads cleanly on a phone', (
@@ -281,5 +297,14 @@ class _InvoiceApi extends ApiClient {
         },
       ],
     };
+  }
+}
+
+class _RetryInvoiceApi extends _InvoiceApi {
+  int invoiceLoads = 0;
+  @override
+  Future<Map<String, dynamic>> getObject(String path, {Map<String, dynamic>? query}) async {
+    if (!path.contains('capabilities') && ++invoiceLoads == 1) throw StateError('Synthetic temporary error');
+    return super.getObject(path, query: query);
   }
 }

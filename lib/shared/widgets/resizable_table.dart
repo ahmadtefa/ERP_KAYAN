@@ -18,6 +18,7 @@ class ResizableColumn {
     this.width = 150,
     this.minWidth = 70,
     this.emphasise = false,
+    this.leading,
   });
 
   final String label;
@@ -28,6 +29,10 @@ class ResizableColumn {
   final double width;
   final double minWidth;
   final bool emphasise;
+
+  /// A small widget drawn before the text - a picture, a swatch. Decoration
+  /// only: the text stays, so search, tooltips and export are unaffected.
+  final Widget Function(Json row)? leading;
 }
 
 /// A table whose columns can be widened by dragging their edges.
@@ -72,6 +77,13 @@ class _ResizableTableState extends State<ResizableTable> {
       .map((column) => math.max(column.width, _minFor(column)))
       .toList(growable: false);
   TableDensity _density = TableDensity.normal;
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
 
   String get _key => 'resizable-table.${widget.storageKey ?? 'default'}';
 
@@ -215,9 +227,14 @@ class _ResizableTableState extends State<ResizableTable> {
           ),
           child: ClipRRect(
             borderRadius: AppRadii.control,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
+            child: Scrollbar(
+              controller: _horizontalController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              child: SingleChildScrollView(
+                controller: _horizontalController,
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
                 width: math.max(totalWidth, 320.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -267,6 +284,7 @@ class _ResizableTableState extends State<ResizableTable> {
                 ),
               ),
             ),
+          ),
           ),
         ),
       ],
@@ -349,7 +367,9 @@ class _ResizableTableState extends State<ResizableTable> {
                     child: Tooltip(
                       message: widget.columns[index].value(row) ?? '—',
                       waitDuration: const Duration(milliseconds: 500),
-                      child: Text(
+                      child: _WithLeading(
+                        leading: widget.columns[index].leading?.call(row),
+                        child: Text(
                         widget.columns[index].value(row) ?? '—',
                         // Numbers never wrap mid-figure; with the
                         // numeric minimum width they fit whole, and the
@@ -372,6 +392,7 @@ class _ResizableTableState extends State<ResizableTable> {
                                 FontFeature.tabularFigures(),
                               ],
                             ),
+                        ),
                       ),
                     ),
                   ),
@@ -388,6 +409,29 @@ class _ResizableTableState extends State<ResizableTable> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Draws an optional leading widget beside a cell's text, and nothing when the
+/// column has none - so the cells that do not use it keep their exact layout.
+class _WithLeading extends StatelessWidget {
+  const _WithLeading({required this.leading, required this.child});
+
+  final Widget? leading;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final widget = leading;
+    if (widget == null) return child;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        widget,
+        const SizedBox(width: 8),
+        Flexible(child: child),
+      ],
     );
   }
 }

@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/failure.dart';
+
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../data/repositories/chart_of_accounts_repository_impl.dart';
@@ -28,14 +30,37 @@ final chartOfAccountsRepositoryProvider = Provider<ChartOfAccountsRepository>(
 
 /// Loads the chart of accounts and exposes the standard async states.
 class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
+  int _loadGeneration = 0;
+  Future<AsyncValue<List<Account>>>? _latestLoad;
+
   @override
-  Future<List<Account>> build() {
-    return _load();
+  Future<List<Account>> build() async {
+    ref.onDispose(() {
+      _loadGeneration++;
+      _latestLoad = null;
+    });
+    var request = _startLoad();
+    while (true) {
+      final generation = _loadGeneration;
+      final result = await request;
+      if (generation == _loadGeneration || _latestLoad == null) {
+        return result.requireValue;
+      }
+      request = _latestLoad!;
+    }
+  }
+
+  Future<AsyncValue<List<Account>>> _startLoad() {
+    _loadGeneration++;
+    return _latestLoad = AsyncValue.guard(_load);
   }
 
   Future<void> refresh() async {
+    final request = _startLoad();
+    final generation = _loadGeneration;
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(_load);
+    final result = await request;
+    if (generation == _loadGeneration) state = result;
   }
 
   Future<List<Account>> _load() async {
@@ -49,7 +74,7 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
   }
 
   /// Creates, then reloads so the tree shows the server's answer.
-  Future<String?> create(AccountInput input) async {
+  Future<Failure?> create(AccountInput input) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .createAccount(input);
@@ -58,11 +83,15 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure;
+      },
     );
   }
 
-  Future<String?> updateAccount(String id, AccountInput input) async {
+  Future<Failure?> updateAccount(String id, AccountInput input) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .updateAccount(id, input);
@@ -71,13 +100,17 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure;
+      },
     );
   }
 
   /// Activates or deactivates an account, then reloads so the tree shows
   /// the server's answer rather than an optimistic guess.
-  Future<String?> setActive(String id, {required bool isActive}) async {
+  Future<Failure?> setActive(String id, {required bool isActive}) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .setAccountActive(id, isActive: isActive);
@@ -86,11 +119,15 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure;
+      },
     );
   }
 
-  Future<String?> remove(String id) async {
+  Future<Failure?> remove(String id) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .deleteAccount(id);
@@ -99,7 +136,11 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure;
+      },
     );
   }
 }

@@ -69,16 +69,16 @@ export class ReconciliationCenterService {
     private readonly fixedAssets: FixedAssetsService,
   ) {}
 
-  async center(companyId: string, query: { asOf?: string }) {
+  async center(companyId: string, query: { asOf?: string; branchId?: string }) {
     const asOf = query.asOf
       ? query.asOf.slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
     const [receivables, payables, inventory, fixedAssets] = await Promise.all([
-      this.partySection(companyId, 'receivables', asOf),
-      this.partySection(companyId, 'payables', asOf),
-      this.inventorySection(companyId, asOf),
-      this.fixedAssetsSection(companyId),
+      this.partySection(companyId, 'receivables', asOf, query.branchId),
+      this.partySection(companyId, 'payables', asOf, query.branchId),
+      this.inventorySection(companyId, asOf, query.branchId),
+      this.fixedAssetsSection(companyId, query.branchId),
     ]);
 
     return { asOf, sections: [receivables, payables, inventory, fixedAssets] };
@@ -88,12 +88,13 @@ export class ReconciliationCenterService {
     companyId: string,
     key: 'receivables' | 'payables',
     asOf: string,
+    branchId?: string,
   ): Promise<Section> {
     try {
       const rec =
         key === 'receivables'
-          ? await this.parties.receivables(companyId, { asOf })
-          : await this.parties.payables(companyId, { asOf });
+          ? await this.parties.receivables(companyId, { asOf, branchId })
+          : await this.parties.payables(companyId, { asOf, branchId });
       const difference = rec.difference;
       const unexplained = rec.unexplained;
       return {
@@ -123,6 +124,7 @@ export class ReconciliationCenterService {
   private async inventorySection(
     companyId: string,
     asOf: string,
+    branchId?: string,
   ): Promise<Section> {
     try {
       const account = await this.prisma.account.findFirst({
@@ -141,7 +143,7 @@ export class ReconciliationCenterService {
       const asOfDate = new Date(`${asOf}T23:59:59.999Z`);
       const [stock, ledgerRows] = await Promise.all([
         this.prisma.stockBalance.aggregate({
-          where: { companyId },
+          where: { companyId, ...(branchId ? { branchId } : {}) },
           _sum: { value: true },
         }),
         this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
@@ -152,6 +154,7 @@ export class ReconciliationCenterService {
              AND e.status IN ('POSTED', 'REVERSED')
              AND e."entryDate" <= ${asOfDate}::timestamp
              AND l."accountId" = ${account.id}::uuid
+             ${branchId ? Prisma.sql`AND e."branchId" = ${branchId}::uuid` : Prisma.sql``}
         `),
       ]);
       const stockValue = new Prisma.Decimal(stock._sum.value ?? 0);
@@ -174,9 +177,9 @@ export class ReconciliationCenterService {
     }
   }
 
-  private async fixedAssetsSection(companyId: string): Promise<Section> {
+  private async fixedAssetsSection(companyId: string, branchId?: string): Promise<Section> {
     try {
-      const summary = await this.fixedAssets.summary(companyId);
+      const summary = await this.fixedAssets.summary(companyId, branchId);
       const accountRows = [
         ...summary.assetAccounts,
         ...summary.accumulatedAccounts,

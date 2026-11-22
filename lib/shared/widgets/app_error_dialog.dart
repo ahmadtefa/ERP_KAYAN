@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../core/error/app_error_text.dart';
-import '../../core/logging/app_logger.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../extensions/l10n_extension.dart';
 
@@ -16,15 +15,13 @@ import '../extensions/l10n_extension.dart';
 /// in their language.
 ///
 /// Rules it enforces:
-///  * never auto-dismisses — only "حسنًا" (or a tap outside / the back
-///    gesture, both of which are the user's own choice) closes it;
-///  * never stacks: a second error arriving while one is open is dropped
-///    and logged, so the person is not asked to dismiss five identical
-///    dialogs after a retry storm;
-///  * never shows a stack trace, an SQL fragment or a field name from the
-///    API — [AppErrorMessageResolver] decides the wording;
-///  * reads right-to-left in the Arabic interface, because the whole app is
-///    wrapped in a [Directionality] by the localisation delegates.
+///  * never auto-dismisses — the person must acknowledge it with "حسنًا";
+///  * never stacks: errors for one navigator wait for the preceding dialog
+///    to be acknowledged instead of silently losing a different failure;
+///  * uses [AppErrorMessageResolver] to withhold known technical patterns and
+///    server-error bodies; this is not a complete sensitive-data classifier;
+///  * uses Arabic and right-to-left direction even if the surrounding screen
+///    is in another language, as required for central error dialogs.
 class AppErrorDialog extends StatelessWidget {
   const AppErrorDialog({
     super.key,
@@ -43,81 +40,86 @@ class AppErrorDialog extends StatelessWidget {
     final accent = isWarning ? AppColors.warning : theme.colorScheme.error;
     final soft = isWarning ? AppColors.warningSoft : AppColors.errorSoft;
 
-    return AlertDialog(
-      // The title and the action sit at the start edge, which is the right
-      // edge under RTL.
-      titlePadding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.lg,
-        0,
-      ),
-      contentPadding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.md,
-        AppSpacing.lg,
-        AppSpacing.sm,
-      ),
-      actionsPadding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        0,
-        AppSpacing.md,
-        AppSpacing.md,
-      ),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: soft,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
+    return Directionality(
+      textDirection: Localizations.localeOf(context).languageCode == 'ar'
+          ? TextDirection.rtl
+          : TextDirection.ltr,
+      child: AlertDialog(
+        // The title and the action sit at the start edge, which is the right
+        // edge under RTL.
+        titlePadding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          0,
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.md,
+          AppSpacing.lg,
+          AppSpacing.sm,
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.md,
+        ),
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: soft,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+              ),
+              child: Icon(
+                isWarning
+                    ? Icons.warning_amber_rounded
+                    : Icons.error_outline_rounded,
+                color: accent,
+                size: 22,
+              ),
             ),
-            child: Icon(
-              isWarning
-                  ? Icons.warning_amber_rounded
-                  : Icons.error_outline_rounded,
-              color: accent,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsetsDirectional.only(top: 6),
-              child: Text(
-                isWarning ? l10n.warningDialogTitle : l10n.errorDialogTitle,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(top: 6),
+                child: Text(
+                  isWarning ? l10n.warningDialogTitle : l10n.errorDialogTitle,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
               ),
             ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Text(
+            message,
+            // Start alignment follows the ambient direction: right in Arabic,
+            // left in English, without hard-coding either.
+            textAlign: TextAlign.start,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              height: 1.6,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.okAction),
           ),
         ],
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Text(
-          message,
-          // Start alignment follows the ambient direction: right in Arabic,
-          // left in English, without hard-coding either.
-          textAlign: TextAlign.start,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            height: 1.6,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-      actions: [
-        FilledButton(
-          autofocus: true,
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.okAction),
-        ),
-      ],
     );
   }
 }
@@ -159,20 +161,16 @@ String presentErrorText(
   int? statusCode,
 }) {
   final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-  final text = AppErrorMessageResolver(
-    isArabic: isArabic,
-  ).resolve(error, statusCode: statusCode);
+  final text = AppErrorMessageResolver(isArabic: isArabic)
+      .resolve(error, statusCode: statusCode);
   final business = text.businessMessage;
   if (business != null && business.trim().isNotEmpty) return business;
   return defaultErrorMessage(context.l10n, text.reason);
 }
 
-/// True while an error dialog is on screen.
-///
-/// A single flag for the whole app on purpose: two errors arriving together
-/// (a save failing and its list reload failing, say) must not put two
-/// dialogs on top of each other.
-bool _errorDialogVisible = false;
+/// Serialize dialogs per navigator. An Expando does not keep a disposed
+/// navigator alive and a replacement navigator has its own independent queue.
+final Expando<Future<void>> _errorDialogTails = Expando<Future<void>>();
 
 /// Opens the central error dialog for [error].
 ///
@@ -187,41 +185,88 @@ Future<void> showAppError(
   if (!context.mounted) return;
   // Nowhere to show it (a screen that is being torn down). Dropping it is
   // better than an exception inside an error handler.
-  if (Navigator.maybeOf(context, rootNavigator: true) == null) return;
-  if (_errorDialogVisible) {
-    // Dropping it is deliberate: the person is already looking at an
-    // explanation, and a queue of identical dialogs is worse than one.
-    _log.warning('A second error arrived while the dialog was open; dropped');
-    return;
-  }
-
+  final navigator = Navigator.maybeOf(context, rootNavigator: true);
+  if (navigator == null) return;
   final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-  final resolved = AppErrorMessageResolver(
-    isArabic: isArabic,
-  ).resolve(error, statusCode: statusCode);
+  final resolved = AppErrorMessageResolver(isArabic: isArabic)
+      .resolve(error, statusCode: statusCode);
   final business = resolved.businessMessage;
   final message = business != null && business.trim().isNotEmpty
       ? business
       : defaultErrorMessage(context.l10n, resolved.reason);
 
-  _errorDialogVisible = true;
-  try {
+  final previous = _errorDialogTails[navigator];
+  final ready = previous == null
+      ? Future<void>.value()
+      // The previous caller still receives its error; do not poison the queue.
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+  final next = ready.then<void>((_) async {
+    if (!navigator.mounted) return;
     await showDialog<void>(
-      context: context,
-      // A tap outside or the back gesture closes it — both are the user's
-      // decision. Nothing closes it on a timer.
-      barrierDismissible: true,
+      context: navigator.context,
+      barrierDismissible: false,
       useRootNavigator: true,
-      builder: (_) =>
-          AppErrorDialog(message: message, severity: resolved.severity),
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AppErrorDialog(message: message, severity: resolved.severity),
+      ),
     );
+  });
+  _errorDialogTails[navigator] = next;
+  try {
+    await next;
   } finally {
-    _errorDialogVisible = false;
+    if (identical(_errorDialogTails[navigator], next)) {
+      _errorDialogTails[navigator] = null;
+    }
   }
 }
 
 /// Convenience for the many call sites that already hold a message string.
+///
+/// The sentence still goes through the resolver, which may reword or replace
+/// it: use this for a server or exception message, not for wording the screen
+/// wrote itself.
 Future<void> showAppErrorMessage(BuildContext context, String message) =>
     showAppError(context, message);
 
-final _log = AppLogger.of('AppErrorDialog');
+/// Shows a sentence the screen wrote itself, exactly as written.
+///
+/// [showAppError] runs every message through the resolver. That resolver is
+/// Arabic-first by design, so an English sentence the screen composed on
+/// purpose - "This branch has no warehouse defined." - was classified as
+/// untrusted and replaced with the generic fallback, and the user never learnt
+/// what was actually missing. A message this code wrote is not a diagnostic:
+/// there is nothing in it to sanitise.
+Future<void> showAppPlainError(BuildContext context, String message) async {
+  if (!context.mounted) return;
+  final navigator = Navigator.maybeOf(context, rootNavigator: true);
+  if (navigator == null) return;
+  final previous = _errorDialogTails[navigator];
+  final ready = previous == null
+      ? Future<void>.value()
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+  final next = ready.then<void>((_) async {
+    if (!navigator.mounted) return;
+    await showDialog<void>(
+      context: navigator.context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AppErrorDialog(
+          message: message,
+          severity: AppErrorSeverity.warning,
+        ),
+      ),
+    );
+  });
+  _errorDialogTails[navigator] = next;
+  try {
+    await next;
+  } finally {
+    if (identical(_errorDialogTails[navigator], next)) {
+      _errorDialogTails[navigator] = null;
+    }
+  }
+}

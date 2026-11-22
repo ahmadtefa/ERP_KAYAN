@@ -836,7 +836,11 @@ export class FixedAssetsService {
 
   async listRuns(companyId: string, query: ListDepreciationRunsDto) {
     const runs = await this.prisma.depreciationRun.findMany({
-      where: { companyId, ...(query.period ? { periodKey: query.period } : {}) },
+      where: {
+        companyId,
+        ...(query.period ? { periodKey: query.period } : {}),
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         lines: {
@@ -1095,9 +1099,9 @@ export class FixedAssetsService {
     return { items };
   }
 
-  async summary(companyId: string) {
+  async summary(companyId: string, branchId?: string) {
     const assets = await this.prisma.fixedAsset.findMany({
-      where: { companyId, deletedAt: null },
+      where: { companyId, deletedAt: null, ...(branchId ? { branchId } : {}) },
       orderBy: { code: 'asc' },
     });
     const accumulated = await this.accumulatedByAsset(
@@ -1131,6 +1135,7 @@ export class FixedAssetsService {
           JOIN journal_entries e ON e.id = l."journalEntryId"
          WHERE e."companyId" = ${companyId}::uuid
            AND e.status IN ('POSTED', 'REVERSED')
+           ${branchId ? Prisma.sql`AND e."branchId" = ${branchId}::uuid` : Prisma.sql``}
            AND l."accountId" IN (${Prisma.join(accountIds.map((v) => Prisma.sql`${v}::uuid`))})
          GROUP BY l."accountId"
       `);

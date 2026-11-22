@@ -11,6 +11,32 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 const MONEY_SCALE = 4;
 export type PartyKind = 'customer' | 'supplier';
 
+type PartyRow = {
+  id: string;
+  paymentTermDays: number | null;
+  companyId: string;
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  phone: string | null;
+  email: string | null;
+  taxNumber: string | null;
+  address: string | null;
+  creditLimit?: Prisma.Decimal | null;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: Date;
+  deletedAt?: Date | null;
+};
+
+type PartyModel = {
+  findMany(args: { where: object; orderBy?: object; skip?: number; take?: number }): Prisma.PrismaPromise<PartyRow[]>;
+  count(args: { where: object }): Prisma.PrismaPromise<number>;
+  findFirst(args: { where: object; select?: object }): Prisma.PrismaPromise<PartyRow | null>;
+  create(args: { data: object }): Prisma.PrismaPromise<PartyRow>;
+  update(args: { where: object; data: object }): Prisma.PrismaPromise<PartyRow>;
+};
+
 /**
  * Customers and suppliers differ only in a credit limit, so they share one
  * service and are separated by which table is addressed. Keeping the two code
@@ -24,8 +50,9 @@ export class PartiesService {
     private readonly audit: AuditService,
   ) {}
 
-  private model(kind: PartyKind) {
-    return kind === 'customer' ? this.prisma.customer : this.prisma.supplier;
+  private model(kind: PartyKind): PartyModel {
+    const model = kind === 'customer' ? this.prisma.customer : this.prisma.supplier;
+    return model as unknown as PartyModel;
   }
 
   async findAll(
@@ -63,7 +90,7 @@ export class PartiesService {
           : 'code';
     const direction: 'asc' | 'desc' = query.dir === 'desc' ? 'desc' : 'asc';
 
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const [items, total] = await this.prisma.$transaction([
       model.findMany({
         where,
@@ -75,7 +102,7 @@ export class PartiesService {
     ]);
 
     return {
-      items: items.map((i: any) => this.toResponse(i)),
+      items: items.map((i) => this.toResponse(i)),
       total,
       page,
       pageSize,
@@ -83,10 +110,81 @@ export class PartiesService {
   }
 
   async findOne(companyId: string, kind: PartyKind, id: string) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
     return this.toResponse(row);
+  }
+
+  /// Every voucher that touched this partner's account.
+  ///
+  /// Normally that is the voucher's own customerId/supplierId. A voucher
+  /// written before the API learned to insist on a partner could settle this
+  /// partner's invoices while naming nobody, and those invoices were reduced
+  /// all the same. The second branch is what keeps such a row on the
+  /// statement; `some` makes it one row however many invoices it settled,
+  /// because the money moved once.
+  private voucherPartyWhere(kind: PartyKind, id: string) {
+    return kind === 'customer'
+      ? {
+          OR: [
+            { customerId: id },
+            {
+              allocations: {
+                some: { salesInvoice: { customerId: id, deletedAt: null } },
+              },
+            },
+          ],
+        }
+      : {
+          OR: [
+            { supplierId: id },
+            {
+              allocations: {
+                some: { purchaseInvoice: { supplierId: id, deletedAt: null } },
+              },
+            },
+          ],
+        };
+  }
+
+  /// The same relation, narrowed to the allocations that settled *this*
+  /// partner's invoices, so the amounts can be read per partner.
+  private voucherAllocationSelect(kind: PartyKind, id: string) {
+    return {
+      where:
+        kind === 'customer'
+          ? { salesInvoice: { customerId: id, deletedAt: null } }
+          : { purchaseInvoice: { supplierId: id, deletedAt: null } },
+      select: { amount: true },
+    } as const;
+  }
+
+  private async openingEntries(
+    companyId: string,
+    kind: PartyKind,
+    id: string,
+    branchId?: string,
+  ) {
+    return this.prisma.$queryRaw<Array<{
+      id: string; number: string; date: Date; description: string | null;
+      debit: Prisma.Decimal; credit: Prisma.Decimal; type: string;
+    }>>(Prisma.sql`
+      SELECT document.id, document."documentNumber" AS number, journal."entryDate" AS date,
+             line.description,
+             CASE WHEN journal."reversalOfId" IS NULL THEN line.debit ELSE line.credit END AS debit,
+             CASE WHEN journal."reversalOfId" IS NULL THEN line.credit ELSE line.debit END AS credit,
+             CASE WHEN journal."reversalOfId" IS NULL THEN 'OPENING_BALANCE' ELSE 'OPENING_BALANCE_REVERSAL' END AS type
+      FROM opening_balance_lines AS line
+      JOIN opening_balances AS document ON document.id = line."openingBalanceId"
+      JOIN journal_entries AS journal ON journal."companyId" = document."companyId"
+        AND (journal.id = document."journalEntryId" OR journal."reversalOfId" = document."journalEntryId")
+      WHERE document."companyId" = ${companyId}::uuid
+        AND document."deletedAt" IS NULL
+        AND document.status IN ('POSTED', 'REVERSED')
+        ${branchId ? Prisma.sql`AND document."branchId" = ${branchId}::uuid` : Prisma.sql``}
+        AND ${kind === 'customer' ? Prisma.sql`line."customerId"` : Prisma.sql`line."supplierId"`} = ${id}::uuid
+    `);
   }
 
   /**
@@ -94,7 +192,7 @@ export class PartiesService {
    * last documents - everything the list screen shows when a row is opened.
    */
   async summary(companyId: string, kind: PartyKind, id: string) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
 
@@ -106,7 +204,11 @@ export class PartiesService {
               customerId: id,
               deletedAt: null,
               status: 'POSTED',
-              documentType: 'INVOICE',
+              // Both the invoices and the credit notes that came back against
+              // them: a return reduces what the partner owes, and leaving it
+              // out is how this card used to sit above the statement and the
+              // control account by exactly the value of the returns.
+              documentType: { in: ['INVOICE', 'CREDIT_NOTE'] },
             },
             select: {
               id: true,
@@ -115,6 +217,7 @@ export class PartiesService {
               dueDate: true,
               totalAmount: true,
               paidAmount: true,
+              documentType: true,
               status: true,
             },
             orderBy: { invoiceDate: 'desc' },
@@ -125,7 +228,7 @@ export class PartiesService {
               supplierId: id,
               deletedAt: null,
               status: 'POSTED',
-              documentType: 'INVOICE',
+              documentType: { in: ['INVOICE', 'DEBIT_NOTE'] },
             },
             select: {
               id: true,
@@ -134,6 +237,7 @@ export class PartiesService {
               dueDate: true,
               totalAmount: true,
               paidAmount: true,
+              documentType: true,
               status: true,
             },
             orderBy: { invoiceDate: 'desc' },
@@ -144,7 +248,7 @@ export class PartiesService {
         companyId,
         deletedAt: null,
         status: 'POSTED',
-        ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
+        ...this.voucherPartyWhere(kind, id),
       },
       select: {
         id: true,
@@ -153,10 +257,15 @@ export class PartiesService {
         kind: true,
         amount: true,
         status: true,
+        customerId: true,
+        supplierId: true,
         // What each voucher settled. Whatever it did not settle is money on
         // the partner's account, and leaving it out is how a card ends up
         // disagreeing with the statement and with the control account.
-        allocations: { select: { amount: true } },
+        // Narrowed to this partner's invoices: a legacy voucher that names
+        // nobody may have settled two partners' invoices, and only the part
+        // that settled this one belongs on this card.
+        allocations: this.voucherAllocationSelect(kind, id),
       },
       orderBy: { voucherDate: 'desc' },
     });
@@ -166,27 +275,55 @@ export class PartiesService {
     /// Everything below that has a direction is read through this one kind.
     const creditKind = kind === 'customer' ? 'RECEIPT' : 'PAYMENT';
 
-    const totalInvoiced = invoices.reduce((sum, inv) => sum.plus(inv.totalAmount), new Prisma.Decimal(0));
+    /// The money a voucher moved for this partner. A voucher that names them
+    /// moved its whole amount on their account; one that reaches them only
+    /// through allocations moved exactly what it settled here, and no more.
+    const attributed = (voucher: (typeof vouchers)[number]) => {
+      const named =
+        kind === 'customer' ? voucher.customerId === id : voucher.supplierId === id;
+      if (named) return voucher.amount;
+      return voucher.allocations.reduce(
+        (sum, allocation) => sum.plus(allocation.amount),
+        new Prisma.Decimal(0),
+      );
+    };
+
+    /// A return is stored as an invoice with the opposite meaning. Read
+    /// through this sign, both kinds of document land on the same balance.
+    const signed = (document: { documentType: string; totalAmount: Prisma.Decimal }) =>
+      document.documentType === 'CREDIT_NOTE' || document.documentType === 'DEBIT_NOTE'
+        ? document.totalAmount.negated()
+        : document.totalAmount;
+
+    const totalInvoiced = invoices.reduce(
+      (sum, inv) => sum.plus(signed(inv)),
+      new Prisma.Decimal(0),
+    );
     /// How much the partner's documents have been settled. Positive for both
     /// kinds: for a customer it is what they paid us, for a supplier what we
     /// paid them. A refund in the other direction reduces it.
     const totalPaid = vouchers.reduce(
       (sum, voucher) =>
-        voucher.kind === creditKind ? sum.plus(voucher.amount) : sum.minus(voucher.amount),
+        voucher.kind === creditKind
+          ? sum.plus(attributed(voucher))
+          : sum.minus(attributed(voucher)),
       new Prisma.Decimal(0),
     );
+    const remaining = (document: { totalAmount: Prisma.Decimal; paidAmount: Prisma.Decimal }) =>
+      document.totalAmount.minus(document.paidAmount);
     const outstanding = invoices.reduce(
-      (sum, inv) => sum.plus(inv.totalAmount).minus(inv.paidAmount),
+      (sum, inv) => sum.plus(signed({ ...inv, totalAmount: remaining(inv) })),
       new Prisma.Decimal(0),
     );
     const overdue = invoices
       .filter(
         (inv) =>
+          inv.documentType === 'INVOICE' &&
           inv.dueDate &&
           inv.dueDate.getTime() < Date.now() &&
-          inv.totalAmount.minus(inv.paidAmount).isPositive(),
+          remaining(inv).isPositive(),
       )
-      .reduce((sum, inv) => sum.plus(inv.totalAmount).minus(inv.paidAmount), new Prisma.Decimal(0));
+      .reduce((sum, inv) => sum.plus(remaining(inv)), new Prisma.Decimal(0));
 
     /// Money this partner has with us (a customer receipt) or we have with them
     /// (a supplier payment) that no invoice claimed. It sits on the control
@@ -197,19 +334,33 @@ export class PartiesService {
         (allocated, allocation) => allocated.plus(allocation.amount),
         new Prisma.Decimal(0),
       );
-      const loose = voucher.amount.minus(settled);
+      const loose = attributed(voucher).minus(settled);
       if (!loose.isPositive()) return sum;
       return voucher.kind === creditKind ? sum.plus(loose) : sum.minus(loose);
     }, new Prisma.Decimal(0));
-    const netBalance = outstanding.minus(onAccount);
+    const openings = await this.openingEntries(companyId, kind, id);
+    const openingBalance = openings.reduce(
+      (sum, row) => sum.plus(kind === 'customer' ? row.debit.minus(row.credit) : row.credit.minus(row.debit)),
+      new Prisma.Decimal(0),
+    );
+    const netBalance = outstanding.plus(openingBalance).minus(onAccount);
 
     const recentDocuments = [
       ...invoices.slice(0, 5).map((inv) => ({
-        kind: kind === 'customer' ? 'SALES_INVOICE' : 'PURCHASE_INVOICE',
+        // The kind a reader taps: a return opens the return dialog, not an
+        // invoice dialog that would hunt for an invoice it cannot find.
+        kind:
+          inv.documentType === 'CREDIT_NOTE'
+            ? 'CREDIT_NOTE'
+            : inv.documentType === 'DEBIT_NOTE'
+              ? 'DEBIT_NOTE'
+              : kind === 'customer'
+                ? 'SALES_INVOICE'
+                : 'PURCHASE_INVOICE',
         id: inv.id,
         number: inv.invoiceNumber,
         date: inv.invoiceDate.toISOString().slice(0, 10),
-        amount: inv.totalAmount.toFixed(MONEY_SCALE),
+        amount: signed(inv).toFixed(MONEY_SCALE),
         status: inv.status,
       })),
       ...vouchers.slice(0, 5).map((voucher) => ({
@@ -217,7 +368,7 @@ export class PartiesService {
         id: voucher.id,
         number: voucher.voucherNumber,
         date: voucher.voucherDate.toISOString().slice(0, 10),
-        amount: voucher.amount.toFixed(MONEY_SCALE),
+        amount: attributed(voucher).toFixed(MONEY_SCALE),
         status: voucher.status,
       })),
     ]
@@ -229,7 +380,8 @@ export class PartiesService {
       totals: {
         invoiced: totalInvoiced.toFixed(MONEY_SCALE),
         paid: totalPaid.toFixed(MONEY_SCALE),
-        outstanding: outstanding.toFixed(MONEY_SCALE),
+        outstanding: outstanding.plus(openingBalance).toFixed(MONEY_SCALE),
+        openingBalance: openingBalance.toFixed(MONEY_SCALE),
         /// Positive when the partner has left money with us (a customer
         /// credit or a supplier prepayment). Kept separate from `outstanding`
         /// so a reader can see both what is unpaid and what is already paid.
@@ -238,7 +390,9 @@ export class PartiesService {
         /// one the control account carries.
         netBalance: netBalance.toFixed(MONEY_SCALE),
         overdue: overdue.toFixed(MONEY_SCALE),
-        invoices: invoices.length,
+        // Documents, not rows: the tile says "invoices", so a return counted
+        // here would overstate how many there were.
+        invoices: invoices.filter((inv) => inv.documentType === 'INVOICE').length,
         vouchers: vouchers.length,
         lastActivity:
           recentDocuments.length > 0 ? recentDocuments[0].date : null,
@@ -259,9 +413,9 @@ export class PartiesService {
     companyId: string,
     kind: PartyKind,
     id: string,
-    query: { from?: string; to?: string },
+    query: { from?: string; to?: string; branchId?: string },
   ) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
 
@@ -274,6 +428,7 @@ export class PartiesService {
       companyId,
       deletedAt: null,
       status: 'POSTED',
+      ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
     } as const;
 
@@ -287,6 +442,7 @@ export class PartiesService {
               invoiceDate: true,
               totalAmount: true,
               documentType: true,
+              status: true,
               notes: true,
             },
             orderBy: { invoiceDate: 'asc' },
@@ -299,6 +455,7 @@ export class PartiesService {
               invoiceDate: true,
               totalAmount: true,
               documentType: true,
+              status: true,
               notes: true,
             },
             orderBy: { invoiceDate: 'asc' },
@@ -308,7 +465,8 @@ export class PartiesService {
           companyId,
           deletedAt: null,
           status: 'POSTED',
-          ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
+          ...(query.branchId ? { branchId: query.branchId } : {}),
+          ...this.voucherPartyWhere(kind, id),
         },
         select: {
           id: true,
@@ -317,6 +475,12 @@ export class PartiesService {
           kind: true,
           amount: true,
           description: true,
+          status: true,
+          customerId: true,
+          supplierId: true,
+          // Only the allocations that settled this partner's invoices; see
+          // voucherAllocationSelect.
+          allocations: this.voucherAllocationSelect(kind, id),
         },
         orderBy: { voucherDate: 'asc' },
       }),
@@ -330,8 +494,14 @@ export class PartiesService {
       description: string;
       debit: Prisma.Decimal;
       credit: Prisma.Decimal;
+      /// Only posted documents reach a statement, and the status travels with
+      /// the row so a printed sheet says so on its face.
+      status: string;
     };
-    const all: Entry[] = [];
+    const openings = await this.openingEntries(companyId, kind, id, query.branchId);
+    const all: Entry[] = openings.map((row) => ({
+      ...row, description: row.description ?? '', status: 'POSTED',
+    }));
     for (const invoice of invoices) {
       const isReturn = invoice.documentType !== 'INVOICE';
       const amount = invoice.totalAmount;
@@ -365,6 +535,7 @@ export class PartiesService {
         description: invoice.notes ?? '',
         debit,
         credit,
+        status: invoice.status,
       });
     }
     for (const voucher of vouchers) {
@@ -372,8 +543,19 @@ export class PartiesService {
       // partner: a receipt credits them (they paid / we received), a payment
       // debits them (we paid / they received). See the voucher posting.
       const isReceipt = voucher.kind === 'RECEIPT';
-      const debit = isReceipt ? new Prisma.Decimal(0) : voucher.amount;
-      const credit = isReceipt ? voucher.amount : new Prisma.Decimal(0);
+      const named = kind === 'customer' ? voucher.customerId === id : voucher.supplierId === id;
+      const amount = named
+        ? voucher.amount
+        : voucher.allocations.reduce(
+            (sum, allocation) => sum.plus(allocation.amount),
+            new Prisma.Decimal(0),
+          );
+      // A legacy voucher that names nobody is on the statement for the part
+      // that settled this partner's invoices. If that part is nothing, there
+      // is no movement to print.
+      if (!amount.isPositive()) continue;
+      const debit = isReceipt ? new Prisma.Decimal(0) : amount;
+      const credit = isReceipt ? amount : new Prisma.Decimal(0);
       all.push({
         date: voucher.voucherDate,
         type: isReceipt ? 'CASH_RECEIPT' : 'CASH_PAYMENT',
@@ -382,9 +564,19 @@ export class PartiesService {
         description: voucher.description ?? '',
         debit,
         credit,
+        status: voucher.status,
       });
     }
-    all.sort((a, b) => a.date.getTime() - b.date.getTime());
+    // Two documents can share a day, and the order they come back in decides
+    // the running balance line by line. Without a tiebreaker the same
+    // statement could print two different ways, so equal dates fall back to
+    // the document number and then to the id.
+    all.sort(
+      (a, b) =>
+        a.date.getTime() - b.date.getTime() ||
+        a.number.localeCompare(b.number) ||
+        a.id.localeCompare(b.id),
+    );
 
     // Everything before the period is the opening balance; Decimal is
     // immutable, so it is one explicit sum.
@@ -406,6 +598,7 @@ export class PartiesService {
         id: entry.id,
         number: entry.number,
         description: entry.description,
+        status: entry.status,
         debit: entry.debit.toFixed(MONEY_SCALE),
         credit: entry.credit.toFixed(MONEY_SCALE),
         balance: running.toFixed(MONEY_SCALE),
@@ -433,11 +626,15 @@ export class PartiesService {
     kind: PartyKind,
     body: object,
   ) {
-    const dto = body as Record<string, any>;
+    const dto = body as Record<string, unknown>;
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
 
-    const model = this.model(kind) as any;
+    const nameEn = String(dto.nameEn ?? '').trim();
+    const nameAr = String(dto.nameAr ?? '').trim();
+    if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+
+    const model = this.model(kind);
     const existing = await model.findFirst({
       where: { companyId, code },
       select: { id: true, deletedAt: true },
@@ -449,8 +646,8 @@ export class PartiesService {
     const data: Record<string, unknown> = {
       companyId,
       code,
-      nameEn: dto.nameEn,
-      nameAr: dto.nameAr,
+      nameEn: nameEn || nameAr,
+      nameAr: nameAr || nameEn,
       phone: (dto.phone as string) ?? null,
       email: (dto.email as string) ?? null,
       taxNumber: (dto.taxNumber as string) ?? null,
@@ -485,10 +682,17 @@ export class PartiesService {
     id: string,
     body: object,
   ) {
-    const dto = body as Record<string, any>;
-    const model = this.model(kind) as any;
+    const dto = body as Record<string, unknown>;
+    const model = this.model(kind);
     const before = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!before) throw new NotFoundException(`${kind} not found`);
+    if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
+      const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
+      const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
+      if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+      dto.nameEn = nameEn || nameAr;
+      dto.nameAr = nameAr || nameEn;
+    }
 
     const data: Record<string, unknown> = { updatedBy: userId };
     for (const key of [
@@ -535,7 +739,7 @@ export class PartiesService {
     kind: PartyKind,
     id: string,
   ) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
     if (!row.isActive) return this.toResponse(row);
@@ -579,7 +783,7 @@ export class PartiesService {
     }
   }
 
-  private toResponse(row: any) {
+  private toResponse(row: PartyRow) {
     return {
       id: row.id,
       paymentTermDays: row.paymentTermDays ?? 0,

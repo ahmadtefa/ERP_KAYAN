@@ -29,10 +29,14 @@
  *  13. prove the audit log cannot be edited or deleted, even with SQL
  *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
- *  16. take a full backup, verify it, restore it into a scratch database, and
- *      check the restored data is really there
- *  17. when explicitly enabled for an ephemeral database, verify the guarded
- *      reset, its verified safety backup, and first-run setup status afterward
+ *  16. prove that a PostgreSQL dump is never advertised as a complete
+ *      installation backup: this scenario expects an operator-disabled restore
+ *      fixture (start the API with KAYAN_FULL_RESTORE_ENABLED=0), while the
+ *      explicit database archive is still
+ *      reachable by hand and says what it leaves out
+ *  17. verify the portable company JSON backup round-trips, and when explicitly
+ *      enabled for an ephemeral database, verify the guarded reset, its
+ *      verified safety backup, and first-run setup status afterward
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
@@ -44,6 +48,14 @@ const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 const PASSWORD = process.env.ADMIN_PASSWORD ?? 'Admin@12345';
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://postgres@127.0.0.1:55432/kayan';
+
+/// The VAT rate every figure below is computed with.
+///
+/// An invoice line that omits its rate is charged at 0 - deliberately, so that
+/// a tax document never carries a rate the server guessed. The company setting
+/// drives quotations, not invoices. Stating the rate here is therefore what
+/// makes the arithmetic a check of the ledger rather than of a default.
+const TAX = '14';
 
 const results = [];
 let token = '';
@@ -322,7 +334,7 @@ async function main() {
       invoiceDate: today,
       supplierId: supplier.id,
       supplierReference: `REF-${stamp}`,
-      lines: [{ itemId: itemA.id, quantity: '10', unitPrice: '100' }],
+      lines: [{ itemId: itemA.id, quantity: '10', unitPrice: '100', taxRate: TAX }],
     },
   });
   if (!purchase) return false;
@@ -354,7 +366,7 @@ async function main() {
       invoiceDate: today,
       dueDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '4', unitPrice: '150' }],
+      lines: [{ itemId: itemA.id, quantity: '4', unitPrice: '150', taxRate: TAX }],
     },
   });
   if (!sale) return false;
@@ -540,7 +552,7 @@ async function main() {
       invoiceDate: today,
       dueDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10' }],
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10', taxRate: TAX }],
     },
   });
   // Creating a voucher against a draft invoice is allowed on purpose: the
@@ -680,10 +692,11 @@ async function main() {
   if (purchaseReturn) {
     await must('post the debit note', `/returns/purchases/${purchaseReturn.id}/post`, { method: 'POST' });
   }
+  const stockAfterReturns = await api(`/inventory/stock?itemId=${itemA.id}`);
   check(
     'one unit back in and two units out leaves 5',
-    near(quantityOf((await api(`/inventory/stock?itemId=${itemA.id}`)).data, itemA.id), 5),
-    `on hand ${quantityOf((await api(`/inventory/stock?itemId=${itemA.id}`)).data, itemA.id)}`,
+    near(quantityOf(stockAfterReturns.data, itemA.id), 5),
+    `on hand ${quantityOf(stockAfterReturns.data, itemA.id)}`,
   );
   check(
     'the credit note reversed 150 of revenue, 21 of VAT and put 100 of stock back',
@@ -694,10 +707,35 @@ async function main() {
     `sales returns ${await delta('4102')}, revenue ${await delta('4101')}, COGS ${await delta('5101')}, inventory ${await delta('1104')}`,
   );
   const purchaseAfterReturn = await api(`/purchases/invoices/${purchase.id}`);
+  const purchaseReturnDetail = purchaseReturn?.id
+    ? await api(`/returns/purchases/${purchaseReturn.id}`)
+    : { status: 0, data: null };
+  const purchaseReturnLine = purchaseReturnDetail.data?.lines?.[0];
   check(
-    'the supplier return is recorded against the purchase invoice',
-    Array.isArray(purchaseAfterReturn.data?.returns) ? purchaseAfterReturn.data.returns.length >= 1 : true,
-    `returns ${JSON.stringify(purchaseAfterReturn.data?.returns ?? []).slice(0, 120)}`,
+    'the posted supplier debit note is linked to its source purchase invoice',
+    purchaseReturnDetail.status === 200 &&
+      purchaseReturnDetail.data?.status === 'posted' &&
+      purchaseReturnDetail.data?.documentType === 'debit_note' &&
+      purchaseReturnDetail.data?.originalInvoiceNumber === purchaseAfterReturn.data?.invoiceNumber &&
+      near(purchaseReturnDetail.data?.subTotal, 200) &&
+      near(purchaseReturnDetail.data?.taxAmount, 28) &&
+      near(purchaseReturnDetail.data?.totalAmount, 228) &&
+      near(purchaseReturnLine?.quantity, 2) &&
+      near(purchaseReturnLine?.inventoryCostTotal, 200) &&
+      near(purchaseAfterReturn.data?.lines?.[0]?.returnedQuantity, 2),
+    `status ${purchaseReturnDetail.status}, source ${purchaseReturnDetail.data?.originalInvoiceNumber}, ` +
+      `sub-total/tax/total ${purchaseReturnDetail.data?.subTotal}/${purchaseReturnDetail.data?.taxAmount}/${purchaseReturnDetail.data?.totalAmount}, ` +
+      `quantity/cost ${purchaseReturnLine?.quantity}/${purchaseReturnLine?.inventoryCostTotal}, ` +
+      `source returned quantity ${purchaseAfterReturn.data?.lines?.[0]?.returnedQuantity}`,
+  );
+  check(
+    'the supplier return credits payables and reverses purchase VAT and inventory',
+    near(await delta('2101'), -412) &&
+      near(await delta('1105'), 112) &&
+      near(await delta('1104'), 500) &&
+      near(quantityOf(stockAfterReturns.data, itemA.id), 5),
+    `payables ${await delta('2101')}, input VAT ${await delta('1105')}, inventory ${await delta('1104')}, ` +
+      `on hand ${quantityOf(stockAfterReturns.data, itemA.id)}`,
   );
 
   // more than what was bought cannot be returned
@@ -1023,7 +1061,7 @@ async function main() {
     json: {
       invoiceDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemB.id, quantity: '5', unitPrice: '30' }],
+      lines: [{ itemId: itemB.id, quantity: '5', unitPrice: '30', taxRate: TAX }],
     },
   });
   if (oversell) {
@@ -1043,7 +1081,7 @@ async function main() {
     json: {
       invoiceDate: today,
       customerId: customer.id,
-      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '150' }],
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '150', taxRate: TAX }],
     },
   });
   if (draft) {
@@ -1132,7 +1170,7 @@ async function main() {
       json: {
         invoiceDate: today,
         customerId: customer.id,
-        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150', taxRate: TAX }],
       },
     }),
     must('create the second competing sale invoice', '/sales/invoices', {
@@ -1140,7 +1178,7 @@ async function main() {
       json: {
         invoiceDate: today,
         customerId: customer.id,
-        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150', taxRate: TAX }],
       },
     }),
   ]);
@@ -1319,26 +1357,63 @@ async function main() {
   // ─────────────────────────────────────────────── 17. backup and restore
   const capabilities = await api('/backup/full/capabilities');
   if (capabilities.data?.available) {
+    // Nothing on this machine may claim a complete backup exists while the
+    // external files and the licence are not part of it. The capability
+    // report is the machine's own statement of that, and it is what the
+    // settings screen shows the operator.
+    check(
+      'the machine distinguishes unsupported complete backup from gated database-archive restore',
+      capabilities.data?.fullBackupSupported === false &&
+        capabilities.data?.fullRestoreSupported === false &&
+        capabilities.data?.databaseRestoreSupported === false,
+      `complete backup=${capabilities.data?.fullBackupSupported}, complete restore=${capabilities.data?.fullRestoreSupported}, database restore=${capabilities.data?.databaseRestoreSupported}`,
+    );
+
     // The scheduled path, run once on demand: this is the same code the timer
-    // calls, so proving it here proves the schedule.
+    // calls, so proving it here proves the schedule. A schedule that cannot
+    // complete must say so in words the operator reads, not pretend success.
     const scheduled = await api('/backup/schedule/run', { method: 'POST' });
     const scheduledRun = (scheduled.data ?? [])[0];
     check(
-      'the scheduled backup runs, and reports what it wrote',
-      scheduled.status < 300 && Boolean(scheduledRun?.fileName),
+      'the scheduled full-backup attempt is visibly marked incomplete, never successful',
+      scheduled.status < 300 &&
+        scheduledRun?.status === 'FAILED' &&
+        String(scheduledRun?.message ?? '').includes('فشل اكتمال النسخة') &&
+        String(scheduledRun?.message ?? '').includes('الملفات') &&
+        String(scheduledRun?.message ?? '').includes('الترخيص'),
       `${scheduledRun?.fileName} — ${scheduledRun?.status}: ${scheduledRun?.message}`,
     );
+    // The incomplete attempt still has to appear in the history the operator
+    // reads; hiding a failure is the same defect as faking a success.
+    const scheduleHistory = await api('/backup/schedule/history');
     check(
-      'every scheduled backup is recorded in the history an operator reads',
-      (await api('/backup/schedule/history')).data?.length >= 1,
-      `${(await api('/backup/schedule/history')).data?.length ?? 0} recorded runs`,
+      'the incomplete scheduled attempt remains visible in backup history',
+      (scheduleHistory.data ?? []).some((row) =>
+        row.kind === 'SCHEDULED' &&
+        row.status === 'FAILED' &&
+        row.fileName === scheduledRun?.fileName,
+      ),
+      `${scheduleHistory.data?.length ?? 0} recorded runs`,
     );
 
-    const backup = await api('/backup/full', { method: 'POST' });
+    // The complete backup, which would also have to carry external files and
+    // the licence, is refused on purpose until those are bound and verified
+    // together. The explicit PostgreSQL archive is the path that does exist,
+    // and it says so in its own response rather than pretending to be more.
+    const refusedFull = await api('/backup/full', { method: 'POST' });
+    check(
+      'a complete backup stays refused until files and licence are bound and verified',
+      refusedFull.status === 503 && refusedFull.data?.code === 'FULL_BACKUP_INCOMPLETE',
+      `status ${refusedFull.status}, code ${refusedFull.data?.code ?? '?'}`,
+    );
+
+    const backup = await api('/backup/full/database-archive', { method: 'POST' });
     const file = backup.data?.file ?? backup.data;
     check(
-      'a full backup of the database can be taken by hand as well',
-      backup.status < 300 && Boolean(file?.name),
+      'the explicit PostgreSQL archive can be taken by hand, and admits what it leaves out',
+      backup.status < 300 && Boolean(file?.name) &&
+        backup.data?.fullBackup === false && backup.data?.includesExternalFiles === false &&
+        backup.data?.includesLicence === false,
       `${file?.name} (${file?.sizeBytes ?? '?'} bytes, ${backup.data?.durationMs ?? '?'} ms)`,
     );
     const name = scheduledRun?.fileName ?? file?.name;
@@ -1361,16 +1436,19 @@ async function main() {
       method: 'POST',
       json: { fileName: name, confirm: true },
     });
+    // This scenario explicitly switches destructive database restores off.
+    // The request must be refused before maintenance or data replacement; the
+    // separate complete-backup scenario exercises the enabled restore path.
     check(
-      'the backup can be restored, and the restore reports what it put back',
-      restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
-      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 400)}`,
+      'the operator-disabled database restore is refused by the independent machine gate',
+      restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+      `status ${restored.status}, code ${restored.data?.code ?? '?'}`,
     );
-    const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
+    const afterRefusedRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
-      'after the restore the data is still there, including what this run created',
-      (afterRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
-      `${afterRestore.data?.items?.length ?? 0} matching customers after the restore`,
+      'a refused restore leaves the data created by this run untouched',
+      (afterRefusedRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
+      `${afterRefusedRestore.data?.items?.length ?? 0} matching customers after refusal`,
     );
     const companyJson = await api('/backup/download');
     const companyBackup = companyJson.data;
@@ -1431,31 +1509,6 @@ async function main() {
   } else {
     skip('backup and restore', `pg_dump is not available here: ${capabilities.data?.reason ?? 'unknown reason'}`);
   }
-
-  // ─────────────────────── 18. the server defends itself against a flood
-  const flood = await Promise.all(
-    Array.from({ length: 30 }, () =>
-      api('/auth/login', {
-        method: 'POST',
-        json: { username: USERNAME, password: 'definitely-not-the-password' },
-        noAuth: true,
-        noRetry: true,
-      }),
-    ),
-  );
-  const limited = flood.some((row) => row.status === 429);
-  const rejected = flood.filter((row) => row.status === 401).length;
-  check(
-    'repeated failed logins are rejected and then rate-limited',
-    rejected >= 1 && limited,
-    `${rejected} rejected, rate limited: ${limited}`,
-  );
-  const detail = flood.find((row) => row.status === 429)?.data?.detail ?? '';
-  check(
-    'the refusal does not leak whether the password or the account was wrong',
-    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
-    String(detail).slice(0, 90),
-  );
 
   // This operation is intentionally disabled unless CI (or an operator using
   // a dedicated disposable database) opts in explicitly. Never let a routine
@@ -1523,11 +1576,17 @@ async function main() {
 
     const setupAfterReset = await api('/setup/status', { noAuth: true });
     const healthAfterReset = await api('/health', { noAuth: true });
+    // The reset retires the company, keeping its row so setup can be completed
+    // against it, and keeps the administrator. The settings screen promises
+    // exactly this: "the program will ask to be set up again". It is setup,
+    // not recovery - recovery is for a company that is still live but has lost
+    // every account able to sign in.
     check(
-      'setup status after reset exposes the first-run flow while keeping the administrator',
+      'setup after reset reopens first-run setup while the administrator is kept',
       setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === true &&
+        setupAfterReset.data?.recoveryRequired === false &&
         Number(setupAfterReset.data?.companyCount) === 0 && setupAfterReset.data?.hasUsers === true,
-      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
+      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, recovery ${setupAfterReset.data?.recoveryRequired}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
     );
     check(
       'the API and PostgreSQL stay healthy after reset',
@@ -1564,12 +1623,15 @@ async function main() {
         seedChartOfAccounts: true,
       },
     });
+    // Setup completes against the retired company row rather than adding a
+    // second company: one installation holds one active company, and the
+    // request's own company code and names win over the retired ones.
     check(
       'the preserved administrator can finish first-run setup on the reset company',
       completedSetup.status < 300 &&
         completedSetup.data?.companyId === reset.data?.companyId &&
         completedSetup.data?.companyCode === reset.data?.companyCode,
-      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode}, administrator ${completedSetup.data?.adminUsername}`,
+      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode ?? '-'}, administrator ${completedSetup.data?.adminUsername ?? '-'}`,
     );
 
     const setupAfterCompletion = await api('/setup/status', { noAuth: true });
@@ -1593,8 +1655,167 @@ async function main() {
       administratorAfterSetup.status === 201 && Boolean(administratorAfterSetup.data?.accessToken),
       `status ${administratorAfterSetup.status}`,
     );
+
+    // Everything from here acts as the administrator setup just confirmed.
+    // The reset revoked the token this run started with, and so did the new
+    // account row, so the old one must not be reused.
+    token = administratorAfterSetup.data?.accessToken ?? token;
+
+    // Setup leaves a fresh company on its own defaults, and a new company
+    // charges no VAT until an operator says what its rate is. The reset threw
+    // away the 14% this run set at the start, so it has to be set again before
+    // any figure below is read - otherwise every later total is quietly
+    // computed at zero and every assertion about it fails for one reason.
+    const policyAfterSetup = await api('/accounting/settings', {
+      method: 'PATCH',
+      json: { taxRate: TAX, allowNegativeStock: false },
+    });
+    check(
+      'the company policy is set again on the company that setup recreated',
+      // Decimal(9,4) comes back as "14.0000", not "14": compare the number.
+      policyAfterSetup.status === 200 && Number(policyAfterSetup.data?.taxRate) === Number(TAX),
+      `status ${policyAfterSetup.status}, tax ${policyAfterSetup.data?.taxRate}`,
+    );
   } else {
     skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
+  }
+
+  // ─────────────────────── 19. the server defends itself against a flood
+  //
+  // Two different defences answer a burst of wrong passwords, and both are
+  // checked here:
+  //
+  //  * the per-address limiter, which refuses the whole address once its
+  //    sign-in window is full, and says how long to wait;
+  //  * the per-account lock, which refuses the right password for fifteen
+  //    minutes after five failures, so guessing cannot continue slowly.
+  //
+  // Last on purpose, and on a throwaway account. Early versions of this
+  // check fired the burst at the administrator: the account lock then kept
+  // the administrator out for a quarter of an hour, and every scenario that
+  // ran afterwards - the API check, the lifecycle, the statement export -
+  // failed to sign in with nothing wrong in what it tested.
+  //
+  // The window is measured from a known state. Ten misses are sent for a name
+  // that does not exist (no account is touched by those), which is enough to
+  // fill any window; the next one must be refused, and waiting out its own
+  // Retry-After leaves a fresh window.
+  const floodStamp = Date.now().toString(36);
+  const floodUsername = `scenario_flood_${floodStamp}`;
+  const floodPassword = 'Scenario-Flood-Password-12345';
+  // A token of its own: the live-reset section above recreates the company,
+  // and the session carried in from before it is not guaranteed to still be
+  // the administrator of the company that now exists.
+  const adminForFlood = await api('/auth/login', {
+    method: 'POST',
+    json: { username: USERNAME, password: PASSWORD },
+    noAuth: true,
+    noRetry: true,
+  });
+  const floodUser = await api('/admin/users', {
+    method: 'POST',
+    noAuth: true,
+    headers: { Authorization: `Bearer ${adminForFlood.data?.accessToken ?? ''}` },
+    json: {
+      username: floodUsername,
+      password: floodPassword,
+      fullNameEn: 'Scenario Flood',
+      fullNameAr: 'مستخدم اختبار الغمر',
+    },
+  });
+  check(
+    'a throwaway account exists for the flood check',
+    floodUser.status === 201 && Boolean(floodUser.data?.id),
+    floodUser.data?.detail ?? `HTTP ${floodUser.status}`,
+  );
+
+  // Fill this address's window with misses for a name that cannot exist.
+  const fill = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const fillRefused = fill.filter((row) => row.status === 429).length;
+  const overflow = await api('/auth/login', {
+    method: 'POST',
+    json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+    noAuth: true,
+    noRetry: true,
+  });
+  if (overflow.status === 429) {
+    const seconds = Number(overflow.headers?.get('retry-after') ?? 0) + 1;
+    console.log(`  (the sign-in window is full by design; waiting ${seconds}s for a fresh one)`);
+    await sleep(seconds * 1000);
+  } else {
+    console.log(`  (note: the window was not full after 10 misses - HTTP ${overflow.status})`);
+  }
+  console.log(`  (filled the window: ${fillRefused}/10 misses were already refused)`);
+
+  // The account lock: five wrong passwords, then the right one is refused too.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await api('/auth/login', {
+      method: 'POST',
+      json: { username: floodUsername, password: 'definitely-not-the-password' },
+      noAuth: true,
+      noRetry: true,
+    });
+  }
+  const lockedOut = await api('/auth/login', {
+    method: 'POST',
+    json: { username: floodUsername, password: floodPassword },
+    noAuth: true,
+    noRetry: true,
+  });
+  check(
+    'five wrong passwords lock the account against the right one',
+    lockedOut.status === 401 && /lock/i.test(String(lockedOut.data?.detail ?? '')),
+    `HTTP ${lockedOut.status}; ${String(lockedOut.data?.detail ?? '').slice(0, 70)}`,
+  );
+
+  const flood = await Promise.all(
+    Array.from({ length: 30 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: floodUsername, password: 'definitely-not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const refusals = flood.filter((row) => row.status === 429);
+  const rejected = flood.filter((row) => row.status === 401).length;
+  const accepted = flood.filter((row) => row.status >= 200 && row.status < 300).length;
+  check(
+    'repeated failed logins are rejected and then rate-limited',
+    rejected >= 1 && refusals.length > 0 && accepted === 0,
+    `${rejected} rejected, ${refusals.length} rate limited, ${accepted} accepted`,
+  );
+  const firstRefusal = refusals[0];
+  const detail = firstRefusal?.data?.detail ?? '';
+  check(
+    'the refusal does not leak whether the password or the account was wrong',
+    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
+    String(detail).slice(0, 90),
+  );
+  check(
+    'the refusal tells the client how long to wait',
+    Number(firstRefusal?.headers?.get('retry-after') ?? 0) > 0 && /second/i.test(String(detail)),
+    `Retry-After ${firstRefusal?.headers?.get('retry-after') ?? 'missing'}; ${String(detail).slice(0, 60)}`,
+  );
+
+  // Leave the limiter as it was found. The window belongs to the API process,
+  // not to this script, so a closed one would refuse the sign-in of whatever
+  // runs next (the API check, the lifecycle scenario, the statement export) -
+  // and those are not rate-limit tests.
+  const waitSeconds = Number(firstRefusal?.headers?.get('retry-after') ?? 0);
+  if (waitSeconds > 0) {
+    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen)`);
+    await sleep((waitSeconds + 1) * 1000);
   }
 
   // ─────────────────────────────────────────────────────────── the summary

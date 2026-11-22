@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_error_text.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -78,6 +79,10 @@ class ReportLinkBuilder {
     String? to,
     String? accountId,
     String? branchId,
+    /// A partner statement carries who it is about; every other report
+    /// ignores the two.
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'format': format,
@@ -86,6 +91,8 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -100,12 +107,22 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
@@ -121,13 +138,23 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';
@@ -162,9 +189,15 @@ class ReportLinkBuilder {
     required String list,
     required String language,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       ...filters,
       'ticket': await _downloadTicket(),
     };
@@ -179,9 +212,15 @@ class ReportLinkBuilder {
     required String language,
     bool auto = true,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       ...filters,
       'ticket': await _downloadTicket(),
@@ -209,9 +248,15 @@ class ReportLinkBuilder {
     required String kind,
     required String id,
     required String language,
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -224,9 +269,15 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool auto = true,
+    bool? showSalePrice,
+    bool? showPurchasePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showPurchasePrice != null) 'showPurchasePrice': showPurchasePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),
     };
@@ -262,6 +313,20 @@ class ReportLinkBuilder {
     );
   }
 
+  /// A separate master-data backup that can only restore the selected list.
+  Future<DownloadRequest> masterDataBackup({
+    required String kind,
+  }) async {
+    if (!const {'items', 'customers', 'suppliers'}.contains(kind)) {
+      throw ArgumentError.value(kind, 'kind', 'Unknown master-data backup type');
+    }
+    final query = {'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/master-data-backups/$kind/download?${_encode(query)}',
+      fileName: 'kayan-$kind.json',
+    );
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<DownloadRequest> importTemplate({
     required String kind,
@@ -292,12 +357,69 @@ class ReportLinkBuilder {
     );
   }
 
+  /// One complete system backup, sitting on the server.
+  Future<DownloadRequest> systemBackupDownload(String name) async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/backup/complete/${Uri.encodeComponent(name)}/download'
+          '?${_encode(query)}',
+    );
+  }
+
   /// One full-database backup file, sitting on the server.
   Future<DownloadRequest> fullBackupDownload(String name) async {
     final query = <String, String>{'ticket': await _downloadTicket()};
     return DownloadRequest(
       url: '$_base/backup/full/${Uri.encodeComponent(name)}/download'
           '?${_encode(query)}',
+    );
+  }
+
+  /// Printable barcode label sheet for one item's units. Each spec is a
+  /// `unitId:copies` pair and repeats as its own query entry, so a unit never
+  /// has to share a line with another unit's barcode.
+  Future<String> barcodeLabelPrint({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+    bool auto = true,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      if (auto) 'auto=1',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return '$_base/inventory/items/$itemId/barcode-labels/print?${query.join('&')}';
+  }
+
+  /// The same label sheet rendered to PDF by the server's browser pipeline.
+  Future<DownloadRequest> barcodeLabelPdf({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return DownloadRequest(
+      url: '$_base/inventory/items/$itemId/barcode-labels/pdf?${query.join('&')}',
     );
   }
 
@@ -350,6 +472,7 @@ class ImportReport {
   int get created => _int('created');
   int get updated => _int('updated');
   int get skipped => _int('skipped');
+  int get clearedBlankTaxRates => _int('clearedBlankTaxRates');
 
   List<Map<String, dynamic>> get errors => (raw['errors'] as List? ?? const [])
       .whereType<Map>()
@@ -389,7 +512,13 @@ class ImportController extends Notifier<ImportState> {
     state = state.copyWith(mode: mode, clearReport: true);
   }
 
+  void chooseBlankTaxPolicy(bool clear) => state = state.copyWith(
+    clearBlankTaxRates: clear,
+    clearReport: true,
+  );
+
   void chooseFile(PickedFile? file) => state = state.copyWith(
+    clearBlankTaxRates: true,
     file: file,
     clearFile: file == null,
     clearReport: true,
@@ -411,6 +540,7 @@ class ImportState {
   const ImportState({
     this.kind = ImportKind.customers,
     this.mode = ImportMode.insert,
+    this.clearBlankTaxRates = true,
     this.file,
     this.busy = false,
     this.report,
@@ -419,6 +549,7 @@ class ImportState {
 
   final ImportKind kind;
   final ImportMode mode;
+  final bool clearBlankTaxRates;
   final PickedFile? file;
   final bool busy;
   final ImportReport? report;
@@ -437,6 +568,7 @@ class ImportState {
   ImportState copyWith({
     ImportKind? kind,
     ImportMode? mode,
+    bool? clearBlankTaxRates,
     PickedFile? file,
     bool clearFile = false,
     bool? busy,
@@ -447,6 +579,7 @@ class ImportState {
     return ImportState(
       kind: kind ?? this.kind,
       mode: mode ?? this.mode,
+      clearBlankTaxRates: clearBlankTaxRates ?? this.clearBlankTaxRates,
       file: clearFile ? null : (file ?? this.file),
       busy: busy ?? this.busy,
       // A report can be replaced, and it can be thrown away - but it must
@@ -475,6 +608,7 @@ class DataService {
     required PickedFile file,
     required ImportMode mode,
     required bool dryRun,
+    bool clearBlankTaxRates = true,
   }) async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
@@ -482,7 +616,7 @@ class DataService {
     final response = await _dio.post<Map<String, dynamic>>(
       '/import/${kind.slug}',
       data: form,
-      queryParameters: {'dryRun': dryRun, 'mode': mode.slug},
+      queryParameters: {'dryRun': dryRun, 'mode': mode.slug, 'clearBlankTaxRates': clearBlankTaxRates},
       options: Options(contentType: 'multipart/form-data'),
     );
     return ImportReport(Map<String, dynamic>.from(response.data ?? const {}));
@@ -556,7 +690,7 @@ class FullBackupService {
     // the default, the request was aborted on the client while the server
     // was still working, which looked like a backup that hangs forever.
     final response = await _dio.post<Map<String, dynamic>>(
-      _path,
+      '$_path/database-archive',
       options: Options(receiveTimeout: const Duration(minutes: 15)),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
@@ -564,6 +698,15 @@ class FullBackupService {
 
   Future<void> delete(String name) =>
       _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
+
+  /// Reads a database archive back and reports what is inside it.
+  Future<Map<String, dynamic>> verify(String name) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/${Uri.encodeComponent(name)}/verify',
+      options: Options(receiveTimeout: const Duration(minutes: 10)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
 
   /// Restores the whole database from a file on the server or an upload.
   ///
@@ -596,21 +739,136 @@ class FullBackupService {
   }
 }
 
+/// Complete system backups: one archive that holds the database, the uploaded
+/// files, the settings, the licence *state* and a manifest with the SHA-256 of
+/// every file — and the restore that puts it back.
+///
+/// This is a different system from the company JSON backup, and the screen
+/// keeps them apart: a company backup restores one company's books, a system
+/// backup restores the whole installation.
+class SystemBackupService {
+  SystemBackupService(this._dio);
+
+  final Dio _dio;
+
+  static const _path = '/backup/complete';
+
+  /// What this machine can do, whether it may restore at all, and why not.
+  Future<Map<String, dynamic>> capabilities() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$_path/capabilities',
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// The complete backups on the server.
+  Future<List<Map<String, dynamic>>> list() async {
+    final response = await _dio.get<List<dynamic>>(_path);
+    return (response.data ?? const [])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false);
+  }
+
+  /// Takes a complete system backup.
+  Future<Map<String, dynamic>> create() async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      // A dump plus reading every byte back to hash it takes longer than the
+      // ordinary client timeout; the request is not the place to give up.
+      options: Options(receiveTimeout: const Duration(minutes: 30)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Reads an archive back and reports what is inside it.
+  Future<Map<String, dynamic>> verify(String name) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/${Uri.encodeComponent(name)}/verify',
+      options: Options(receiveTimeout: const Duration(minutes: 10)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Checks a chosen file before anything is restored.
+  Future<Map<String, dynamic>> inspect(PickedFile file) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/inspect',
+      data: FormData.fromMap({
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      }),
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Restores a complete backup. [confirmPhrase] must be the word RESTORE:
+  /// the server refuses anything else, deliberately.
+  Future<Map<String, dynamic>> restore({
+    PickedFile? file,
+    String? fileName,
+    required bool confirm,
+    String confirmPhrase = 'RESTORE',
+  }) async {
+    final form = FormData.fromMap({
+      if (file != null)
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      'fileName': ?fileName,
+      'confirm': confirm,
+      'confirmPhrase': confirmPhrase,
+    });
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/restore',
+      data: form,
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 60),
+      ),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// How the restore is going, and whether one was interrupted.
+  Future<Map<String, dynamic>> status() async {
+    final response = await _dio.get<Map<String, dynamic>>('$_path/status');
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  /// Puts the safety backup back after an interrupted restore.
+  Future<Map<String, dynamic>> resumeRecovery() async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/recovery/resume',
+      options: Options(receiveTimeout: const Duration(minutes: 60)),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<void> delete(String name) =>
+      _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
+}
+
+final systemBackupServiceProvider = Provider<SystemBackupService>(
+  (ref) => SystemBackupService(ref.read(apiClientProvider).raw),
+);
+
 final fullBackupServiceProvider = Provider<FullBackupService>(
   (ref) => FullBackupService(ref.read(apiClientProvider).raw),
 );
 
 /// Turns whatever was thrown into something worth reading.
 ///
-/// The API answers errors as Problem Details - a title and a `detail` written
-/// to be read by a person, e.g. why a file was refused. That message is shown
-/// as it is; anything else falls back to the exception's own text rather than
-/// pretending nothing went wrong.
+/// Preserve the transport status and do not render an arbitrary response body.
+/// Known business rules may be translated; unknown internals stay hidden.
 String describeApiError(Object error) {
   final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
     final detail = _detailOf(error.response?.data);
-    if (detail != null) return _safeMessage(detail, status);
+    if (detail != null) return _safeMessage(ApiFailure(detail, statusCode: status), status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -622,7 +880,10 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return _safeMessage(error.toString(), status);
+  if (error is DownloadFailure) {
+    return _safeMessage(ApiFailure(error.message, statusCode: error.statusCode), error.statusCode);
+  }
+  return _safeMessage(error, status);
 }
 
 String? _detailOf(Object? data) {
@@ -639,7 +900,7 @@ String? _detailOf(Object? data) {
 /// screen cannot print a DTO field name or a stack frame either. It answers
 /// in English because these panels are read by administrators next to the
 /// server log.
-String _safeMessage(String raw, int? status) {
+String _safeMessage(Object raw, int? status) {
   final resolved = AppErrorMessageResolver(
     isArabic: false,
   ).resolve(raw, statusCode: status);

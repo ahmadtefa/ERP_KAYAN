@@ -27,6 +27,7 @@ class ErpApp extends ConsumerWidget {
     return MaterialApp.router(
       onGenerateTitle: (context) => context.l10n.appTitle,
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.dark,
       theme: AppTheme.light(textScale: textScale),
       darkTheme: AppTheme.dark(textScale: textScale),
       routerConfig: router,

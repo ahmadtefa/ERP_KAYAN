@@ -1,10 +1,8 @@
 name: ERP KAYAN CI
 
+# Legacy full suite includes tests that create and sign test licences.
+# Retained for review; do not dispatch until signing is moved to an approved VM.
 on:
-  pull_request:
-    branches: [main, 'arena/**']
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -42,6 +40,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -72,27 +75,111 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      # `npm ci` restores node_modules from the lockfile, which overwrites the
+      # adapter patch that keeps `prisma migrate status` and the client's
+      # driver-adapter path working: @prisma/adapter-pg 6.19.3 omits PostgreSQL
+      # type `name` (OID 19) from fieldToColumnType(), so reading current_schema()
+      # throws "Column type 'name' could not be deserialized". The script is
+      # idempotent and exits non-zero if the expected shape is not found, so a
+      # future adapter upgrade cannot silently skip the repair.
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Validate Prisma schema
         run: npx prisma validate
       - name: Type-check
         run: npx tsc --noEmit
-      - name: Run unit tests
-        # `| tee` reports tee's exit status, not the test run's, so without
-        # `-o pipefail` a failing suite would leave this step green and the
-        # whole job would pass. The log is kept because the summary step below
-        # reads it.
-        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+      # The real-PostgreSQL suites (PGlite) load an ES module, which Jest can
+      # only import when the VM has dynamic import enabled. Without this flag
+      # those suites SKIPPED silently and the job reported green while proving
+      # nothing about the SQL they exist to check. They now fail loudly instead,
+      # so the flag has to be on - not optional, not per-file.
+      - name: Prove the real-database suites are not silently skipped
+        run: |
+          node -e "const j=require('./jest.config.cjs');if(!j||!j.rootDir)process.exit(1)"
+          node -e "if(!(process.env.NODE_OPTIONS||'').includes('--experimental-vm-modules')){console.error('NODE_OPTIONS must carry --experimental-vm-modules or the PGlite suites cannot run');process.exit(1)}"
+      - name: Run all backend tests in bounded-memory batches
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
+        # Each batch runs in its own Node process, preventing Jest's retained
+        # worker state from growing until the whole suite exhausts the heap.
+        # The runner discovers every *.spec.ts file and stops on the first
+        # failure; no suites are filtered or skipped by this step.
+        run: |
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/run-tests-batched.mjs 12 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |
           summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Unit tests::${summary:-summary not captured}"
+      # A green run means nothing if the real-database suites merely skipped.
+      # This reads the log and fails when the PGlite counts are absent, so the
+      # silent-skip failure mode cannot come back through a flag change.
+      - name: Prove the real-database suites actually ran
+        if: always()
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          log = pathlib.Path('/tmp/kayan-jest.log')
+          if not log.exists():
+              print('::error title=PGlite suites::the test log is missing, so nothing can be proven')
+              sys.exit(1)
+          text = log.read_text(errors='replace')
+          # Jest prints one "PASS <path>" line per suite it actually executed.
+          ran = set(re.findall(r'^PASS\s+(\S+(?:stock-takes\.barcode-count|stock-documents\.barcode-posting|expired-issue-policy\.integration|batches\.operations\.integration|batch-transfer-hold\.integration|multi-receipt\.integration|sales-batches\.integration|sales-invoice-posting\.integration|stock-transfers\.integration)\.spec\.ts)', text, re.M))
+          expected = {
+              'stock-takes.barcode-count.spec.ts',
+              'stock-documents.barcode-posting.spec.ts',
+              'expired-issue-policy.integration.spec.ts',
+              'batches.operations.integration.spec.ts',
+              'batch-transfer-hold.integration.spec.ts',
+              'multi-receipt.integration.spec.ts',
+              'sales-batches.integration.spec.ts',
+              'sales-invoice-posting.integration.spec.ts',
+              'stock-transfers.integration.spec.ts',
+          }
+          seen = {p.split('/')[-1] for p in ran}
+          missing = sorted(expected - seen)
+          print(f'::notice title=PGlite suites::executed {len(seen)}/{len(expected)}: {sorted(seen)}')
+          if missing:
+              print('::error title=PGlite suites did not run::' + ', '.join(missing))
+              sys.exit(1)
+          print('All 9 real-database suites executed; none were skipped.')
+          PY
       - name: Build API
         run: npm run build
+      # `prisma migrate deploy` cannot run this project's migrations: Prisma
+      # 6.19.3's WASM schema engine splits PL/pgSQL dollar-quoted bodies at
+      # their internal semicolons, so the seven migrations that define
+      # triggers die with `syntax error at or near "this"`. The native engine
+      # cannot be used either - this project disables the engine download so
+      # installs work offline. scripts/apply-migrations.mjs applies the same
+      # files, in the same order, recording them in the same
+      # _prisma_migrations table with the same SHA-256 checksums, so a database
+      # it migrates is reported as up to date by `prisma migrate status`.
       - name: Apply migrations to ephemeral PostgreSQL
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      # Every stock write must go through StockLedgerService, which writes
+      # stock_movements; warehouse_stock_balances is its cached projection. The
+      # two are only ever changed inside one transaction, so on a consistent
+      # database SUM(IN - OUT) per (warehouse, item, location) always equals the
+      # stored balance. This reconciles the whole installation with a FULL OUTER
+      # JOIN so a shelf that was written without a movement - a silent cost or
+      # quantity change - fails the build instead of being found by an accountant.
+      - name: Prove the stock ledger and the shelf balances never disagree
+        run: node scripts/pg-ledger-shelf-agreement.mjs
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 
@@ -107,6 +194,22 @@ jobs:
           PGUSER: ci
           PGPASSWORD: ci
         run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
+
+      # Multi-role access control arrived as an additive migration and a
+      # start-up pass that adds the roles an older installation is missing.
+      # The check that matters is that nothing else moved: users keep their
+      # password hash, their photo, their branch and their assignments, a
+      # legacy grant stays a grant, and a role a company had already tuned is
+      # not rewritten. It builds a database at the schema before the migration,
+      # fills it with legacy rows, applies the migration and then runs the
+      # catalogue pass twice.
+      - name: Prove the multi-role upgrade on a pre-upgrade database
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: ci
+          PGPASSWORD: ci
+        run: python ../scripts/ci-diagnose.py node scripts/verify-rbac-upgrade.mjs
 
       # The release guard decides whether a Windows build may overwrite a
       # published download; a wrong answer there is not recoverable.
@@ -130,13 +233,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -162,6 +277,18 @@ jobs:
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-returns.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after return scenario failure"
             cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          # The complete backup runs before the long accounting scenarios: it
+          # replaces the whole database with a copy taken moments earlier, so
+          # it must not disturb a scenario that is halfway through building a
+          # year of figures -- and it must not be skipped because one of those
+          # scenarios failed later on.
+          echo "Running the complete system backup and restore scenario: gate, archive, verification, damaged file, restore, status, re-login..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-system-backup.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after the system backup scenario failure"
+            tail -c 8000 /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
@@ -194,14 +321,26 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-          echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
+          echo "Verifying a fresh complete backup restores into an ISOLATED database with identical data..."
+          # A complete backup, not the legacy dump-only endpoint: that one is
+          # closed on purpose, because a bare pg_dump cannot carry the uploaded
+          # files and a restore of it would leave them orphaned. The archive is
+          # taken by the program, downloaded whole, and its dump handed to
+          # pg_restore -- so this step proves the same bytes a customer would
+          # get back actually rebuild the database.
           export PGPASSWORD=ci
           LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
           TOKEN=$(node -e 'console.log(JSON.parse(process.argv[1]).accessToken)' "$LOGIN_JSON")
-          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/full -H "Authorization: Bearer $TOKEN" > /tmp/kayan-full.json
-          DUMP=$(ls -t backups/*.dump | head -n 1)
-          if [ -z "$DUMP" ] || [ ! -s "$DUMP" ]; then echo "No dump file was produced."; ls -la backups || true; exit 1; fi
-          echo "Restoring $DUMP into erp_kayan_restore_check..."
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/complete -H "Authorization: Bearer $TOKEN" > /tmp/kayan-complete.json
+          ARCHIVE=$(node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-complete.json","utf8")); process.stdout.write(r.file?.name ?? "")')
+          if [ -z "$ARCHIVE" ]; then echo "No complete archive was produced:"; head -c 2000 /tmp/kayan-complete.json; exit 1; fi
+          echo "Downloading $ARCHIVE"
+          curl -fsS "http://127.0.0.1:3000/api/v1/backup/complete/$ARCHIVE/download" -H "Authorization: Bearer $TOKEN" -o /tmp/kayan-complete.kayanbackup
+          rm -rf /tmp/kayan-archive && mkdir -p /tmp/kayan-archive
+          tar -xf /tmp/kayan-complete.kayanbackup -C /tmp/kayan-archive database/database.dump
+          DUMP=/tmp/kayan-archive/database/database.dump
+          if [ ! -s "$DUMP" ]; then echo "The archive carried no database dump."; tar -tvf /tmp/kayan-complete.kayanbackup; exit 1; fi
+          echo "Restoring the archive's dump ($(stat -c%s "$DUMP") bytes) into erp_kayan_restore_check..."
           psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_restore_check' -c 'CREATE DATABASE erp_kayan_restore_check'
           if ! pg_restore -h 127.0.0.1 -U ci -d erp_kayan_restore_check --no-owner "$DUMP" > /tmp/pg_restore.log 2>&1; then
             cat /tmp/pg_restore.log
@@ -218,6 +357,18 @@ jobs:
           done
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
+
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
@@ -277,6 +428,11 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3000
       NODE_ENV: test
+      # The PGlite suites import an ES module, which Jest can only do with the
+      # VM's dynamic import enabled. It belongs to the job because a step in
+      # this job proves it is set: a per-step value made that proof fail every
+      # time while the suites themselves ran.
+      NODE_OPTIONS: --experimental-vm-modules
     defaults:
       run:
         working-directory: backend
@@ -291,10 +447,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
       - name: Generate Prisma Client
         run: npx prisma generate
+      # See the note on the equivalent step above: the project applies its own
+      # migration files because Prisma's WASM schema engine mis-splits
+      # dollar-quoted function bodies.
       - name: Apply migrations to a freshly created database
-        run: npx prisma migrate deploy
+        run: node scripts/apply-migrations.mjs
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Verify quotation migrations are present in the runtime database
@@ -380,6 +541,49 @@ jobs:
           summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
+  backup-restore-17:
+    name: Complete backup and restore on PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # PostgreSQL 17, server and client of the same version: a dump carries
+      # its writer's version, and rehearsing a 17 dump with a 16 pg_restore
+      # would fail for a reason that has nothing to do with this program.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17
+          /usr/lib/postgresql/17/bin/postgres --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_restore --version
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      # The harness creates its own cluster, applies the real migrations, seeds
+      # a fixture and then exercises: complete backup, verification, tampered
+      # archive refused, restore, safety backup, automatic rollback of a
+      # restore that dies half way, journal-driven recovery after a simulated
+      # power cut, one-restore-at-a-time, uploaded files, and the licence file
+      # being left untouched.
+      - name: Prove the complete backup and restore on PostgreSQL 17
+        run: python ../scripts/ci-diagnose.py npx ts-node --transpile-only scripts/verify-system-backup.ts --pgbin /usr/lib/postgresql/17/bin
+
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest
@@ -397,6 +601,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Install Flutter dependencies
@@ -408,7 +616,13 @@ jobs:
       # These are screenshot generators: baselines are regenerated here, so
       # the normal test run below compares against this run's own render.
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        # Through ci-diagnose so a failure's own message reaches the run's
+        # annotations: the log host is not always reachable from a repair
+        # session, and "2 tests passed, 1 failed" names no test.
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
+      - name: Diagnose the design screenshots
+        if: failure()
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Upload design screenshots
         uses: actions/upload-artifact@v4
         with:
@@ -456,6 +670,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned like every other workflow in this repository. `stable`
+          # floats, and the SDK that arrived on it reclassifies
+          # `package:flutter/material.dart` as deprecated in every file.
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Enable Linux desktop
@@ -468,7 +686,7 @@ jobs:
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).
       - name: Render design screenshots
-        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop

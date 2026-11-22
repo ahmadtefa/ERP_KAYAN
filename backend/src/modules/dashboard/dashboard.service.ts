@@ -2,8 +2,53 @@ import { Injectable } from '@nestjs/common';
 import { CashVoucherKind, InvoiceStatus, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  dashboardSectionsFor,
+  filterDashboardMonthlyPayload,
+  filterDashboardSummaryPayload,
+} from './dashboard-permissions';
 
 const MONEY_SCALE = 4;
+
+/** Who is asking: company, branch scope and dashboard sections. */
+export interface DashboardUser {
+  companyId: string;
+  branchId?: string | null;
+  branchIds?: string[] | null;
+  isSuperAdmin?: boolean;
+  permissions?: string[] | null;
+  roles?: string[] | null;
+}
+
+/**
+ * The branches this caller may see figures for. `null` means company-wide.
+ * A caller assigned to branches is confined to them even when they ask for
+ * another branch by name: the requested branch is ignored, never honoured.
+ */
+function branchScopeOf(user: DashboardUser): string[] | null {
+  if (user.isSuperAdmin) return null;
+  const assigned = (user.branchIds ?? []).filter(
+    (id): id is string => typeof id === 'string' && id !== '',
+  );
+  if (assigned.length > 0) return assigned;
+  return user.branchId ? [user.branchId] : null;
+}
+
+/**
+ * The effective branch filter: the requested branch when the caller may see
+ * it, otherwise the caller's own scope. `null` means the whole company.
+ */
+export function effectiveBranches(
+  user: DashboardUser,
+  requestedBranchId?: string,
+): string[] | null {
+  const scope = branchScopeOf(user);
+  if (scope === null) return requestedBranchId ? [requestedBranchId] : null;
+  if (requestedBranchId && scope.includes(requestedBranchId)) {
+    return [requestedBranchId];
+  }
+  return scope;
+}
 
 /**
  * The dashboard: the numbers a manager looks at first, all of them read from
@@ -21,18 +66,21 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async summary(
-    companyId: string,
+    user: DashboardUser,
     query: { from?: string; to?: string; branchId?: string },
   ) {
+    const companyId = user.companyId;
+    const sections = dashboardSectionsFor(user);
+    const branches = effectiveBranches(user, query.branchId);
     const to = query.to ? new Date(`${query.to.slice(0, 10)}T23:59:59.999Z`) : new Date();
     const from = query.from
       ? new Date(`${query.from.slice(0, 10)}T00:00:00.000Z`)
       : new Date(Date.UTC(to.getUTCFullYear(), Math.floor(to.getUTCMonth() / 3) * 3, 1));
 
-    const branchFilter = query.branchId
-      ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid`
+    const branchFilter = branches
+      ? Prisma.sql`AND e."branchId" = ANY(${branches}::uuid[])`
       : Prisma.sql``;
-    const branchFilterDoc = query.branchId ? { branchId: query.branchId } : {};
+    const branchFilterDoc = branches ? { branchId: { in: branches } } : {};
 
     // ---------------------------------------------------------- trading
     const trading = await this.prisma.$queryRaw<
@@ -82,19 +130,6 @@ export class DashboardService {
       }),
     ]);
 
-    const returns = await this.prisma.salesInvoice.aggregate({
-      where: {
-        companyId,
-        deletedAt: null,
-        status: InvoiceStatus.POSTED,
-        documentType: { in: ['CREDIT_NOTE', 'DEBIT_NOTE'] },
-        invoiceDate: { gte: from, lte: to },
-        ...branchFilterDoc,
-      },
-      _sum: { totalAmount: true },
-      _count: { _all: true },
-    });
-
     // ---------------------------------------------------------- cash
     const cashRows = await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
       SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
@@ -105,6 +140,7 @@ export class DashboardService {
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" <= ${to}::date
          AND ca."deletedAt" IS NULL
+         ${branchFilter}
     `);
     const cashPosition = new Prisma.Decimal(cashRows[0]?.net ?? 0);
 
@@ -156,6 +192,7 @@ export class DashboardService {
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" <= ${to}::date
          AND ca."deletedAt" IS NULL
+         ${branchFilter}
        GROUP BY l."accountId"
     `);
     const balanceByAccount = new Map(
@@ -164,8 +201,8 @@ export class DashboardService {
 
     // ------------------------------------------------- receivables/payables
     const [receivables, payables] = await Promise.all([
-      this.openBalances(companyId, 'sales', to, query.branchId),
-      this.openBalances(companyId, 'purchases', to, query.branchId),
+      this.openBalances(companyId, 'sales', to, branches),
+      this.openBalances(companyId, 'purchases', to, branches),
     ]);
 
     // Unpaid invoices past their due date. This is the number that turns into
@@ -182,7 +219,7 @@ export class DashboardService {
          AND "dueDate" IS NOT NULL
          AND "dueDate" < ${to}::date
          AND ("totalAmount" - "paidAmount") > 0
-         ${query.branchId ? Prisma.sql`AND "branchId" = ${query.branchId}::uuid` : Prisma.sql``}
+         ${branches ? Prisma.sql`AND "branchId" = ANY(${branches}::uuid[])` : Prisma.sql``}
     `);
 
     // Due but not yet late: what is still open without a crisis attached.
@@ -196,26 +233,8 @@ export class DashboardService {
          AND "deletedAt" IS NULL
          AND status = 'POSTED'
          AND ("totalAmount" - "paidAmount") > 0
-         ${query.branchId ? Prisma.sql`AND "branchId" = ${query.branchId}::uuid` : Prisma.sql``}
+         ${branches ? Prisma.sql`AND "branchId" = ANY(${branches}::uuid[])` : Prisma.sql``}
     `);
-
-    // ---------------------------------------------------------- parties
-    const [customerCounts, supplierCounts] = await Promise.all([
-      this.prisma.customer.groupBy({
-        by: ['isActive'],
-        where: { companyId, deletedAt: null },
-        _count: { _all: true },
-      }),
-      this.prisma.supplier.groupBy({
-        by: ['isActive'],
-        where: { companyId, deletedAt: null },
-        _count: { _all: true },
-      }),
-    ]);
-    const countsOf = (rows: Array<{ isActive: boolean; _count: { _all: number } }>) => ({
-      count: rows.reduce((sum, row) => sum + row._count._all, 0),
-      active: rows.find((row) => row.isActive)?._count._all ?? 0,
-    });
 
     // ---------------------------------------------------------- stock
     const stockRows = await this.prisma.$queryRaw<
@@ -226,20 +245,7 @@ export class DashboardService {
              COUNT(*) FILTER (WHERE quantity < 0) AS negative
         FROM stock_balances
        WHERE "companyId" = ${companyId}::uuid
-       ${query.branchId ? Prisma.sql`AND "branchId" = ${query.branchId}::uuid` : Prisma.sql``}
-    `);
-
-    const reorderCount = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
-      SELECT COUNT(*) AS count
-        FROM items i
-       WHERE i."companyId" = ${companyId}::uuid
-         AND i."deletedAt" IS NULL
-         AND i."isActive" = true
-         AND i."isStockTracked" = true
-         AND i."reorderLevel" > 0
-         AND COALESCE((
-              SELECT SUM(sb.quantity) FROM stock_balances sb WHERE sb."itemId" = i.id
-         ), 0) <= i."reorderLevel"
+       ${branches ? Prisma.sql`AND "branchId" = ANY(${branches}::uuid[])` : Prisma.sql``}
     `);
 
     // ------------------------------------------------- period comparison
@@ -284,7 +290,7 @@ export class DashboardService {
          AND si."documentType" = 'INVOICE'
          AND si."invoiceDate" >= ${from}::date
          AND si."invoiceDate" <= ${to}::date
-         ${query.branchId ? Prisma.sql`AND si."branchId" = ${query.branchId}::uuid` : Prisma.sql``}
+         ${branches ? Prisma.sql`AND si."branchId" = ANY(${branches}::uuid[])` : Prisma.sql``}
        GROUP BY c.id, c."nameEn", c."nameAr"
        ORDER BY total DESC
        LIMIT 5
@@ -311,7 +317,7 @@ export class DashboardService {
          AND si."documentType" = 'INVOICE'
          AND si."invoiceDate" >= ${from}::date
          AND si."invoiceDate" <= ${to}::date
-         ${query.branchId ? Prisma.sql`AND si."branchId" = ${query.branchId}::uuid` : Prisma.sql``}
+         ${branches ? Prisma.sql`AND si."branchId" = ANY(${branches}::uuid[])` : Prisma.sql``}
        GROUP BY i.id, i."nameEn", i."nameAr"
        ORDER BY total DESC
        LIMIT 5
@@ -417,41 +423,61 @@ export class DashboardService {
     ]);
 
     const documentsInPeriod =
-      (sales._count?._all ?? 0) + (purchases._count?._all ?? 0) + (returns._count?._all ?? 0);
+      (sections.has('sales') ? sales._count?._all ?? 0 : 0) +
+      (sections.has('purchases') ? purchases._count?._all ?? 0 : 0);
 
-    return {
+    // Only the sections this caller holds are sent. A section the caller
+    // lacks is absent from the answer entirely — never a zero — so the
+    // client cannot mistake "not allowed" for "nothing happened", and no
+    // total, chart or derived figure can leak a number the caller may not
+    // see. `allowedSections` names what was sent so the client renders
+    // exactly that and nothing else.
+    const allowedSections = [...sections].sort();
+    const mayCountDocuments = sections.has('sales') || sections.has('purchases');
+    const result: Record<string, unknown> = {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
-      branchId: query.branchId ?? null,
+      branchId: branches && branches.length === 1 ? branches[0] : null,
+      allowedSections,
+    };
+    if (mayCountDocuments) {
       // Stated explicitly so the screen can say "there is nothing here yet"
       // instead of showing zeroes that look like a bad month.
-      hasData: documentsInPeriod > 0,
-      documentsInPeriod,
-      sales: {
+      result.hasData = documentsInPeriod > 0;
+      result.documentsInPeriod = documentsInPeriod;
+    }
+    if (sections.has('sales')) {
+      result.sales = {
         total: (sales._sum.totalAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
         invoices: sales._count?._all ?? 0,
-      },
-      purchases: {
+      };
+    }
+    if (sections.has('purchases')) {
+      result.purchases = {
         total: (purchases._sum.totalAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
         invoices: purchases._count?._all ?? 0,
-      },
-      returns: {
-        total: (returns._sum.totalAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
-        documents: returns._count?._all ?? 0,
-      },
-      revenue: revenue.toFixed(MONEY_SCALE),
-      expenses: expenses.toFixed(MONEY_SCALE),
-      grossResult: revenue.minus(expenses).toFixed(MONEY_SCALE),
-      receipts: {
+      };
+    }
+    if (sections.has('revenue')) {
+      result.revenue = revenue.toFixed(MONEY_SCALE);
+      result.expenses = expenses.toFixed(MONEY_SCALE);
+    }
+    if (sections.has('profit')) {
+      result.grossResult = revenue.minus(expenses).toFixed(MONEY_SCALE);
+    }
+    if (sections.has('movements')) {
+      result.receipts = {
         total: (receipts._sum.amount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
         vouchers: receipts._count?._all ?? 0,
-      },
-      payments: {
+      };
+      result.payments = {
         total: (payments._sum.amount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
         vouchers: payments._count?._all ?? 0,
-      },
-      cashPosition: cashPosition.toFixed(MONEY_SCALE),
-      cashAccounts: cashAccounts.map((account) => ({
+      };
+    }
+    if (sections.has('cash')) {
+      result.cashPosition = cashPosition.toFixed(MONEY_SCALE);
+      result.cashAccounts = cashAccounts.map((account) => ({
         id: account.id,
         code: account.code,
         nameEn: account.nameEn,
@@ -460,79 +486,84 @@ export class DashboardService {
         balance: (balanceByAccount.get(account.accountId) ?? new Prisma.Decimal(0)).toFixed(
           MONEY_SCALE,
         ),
-      })),
-      receivables: receivables.total,
-      payables: payables.total,
-      overdue: {
+      }));
+    }
+    if (sections.has('receivables')) {
+      result.receivables = receivables.total;
+      result.overdue = {
         total: new Prisma.Decimal(overdueRows[0]?.overdue ?? 0).toFixed(MONEY_SCALE),
         invoices: Number(overdueRows[0]?.count ?? 0),
-      },
-      outstanding: {
+      };
+      result.outstanding = {
         total: new Prisma.Decimal(outstandingRows[0]?.outstanding ?? 0).toFixed(MONEY_SCALE),
         invoices: Number(outstandingRows[0]?.count ?? 0),
-      },
-      parties: {
-        customers: countsOf(customerCounts),
-        suppliers: countsOf(supplierCounts),
-      },
-      stock: {
+      };
+    }
+    if (sections.has('payables')) {
+      result.payables = payables.total;
+    }
+    if (sections.has('stock')) {
+      result.stock = {
         value: new Prisma.Decimal(stockRows[0]?.value ?? 0).toFixed(MONEY_SCALE),
         itemsInStock: Number(stockRows[0]?.items ?? 0),
         negativeBalances: Number(stockRows[0]?.negative ?? 0),
-        needsReorder: Number(reorderCount[0]?.count ?? 0),
-      },
-      topCustomers: topCustomers.map((row) => ({
+      };
+    }
+    if (sections.has('top')) {
+      result.topCustomers = topCustomers.map((row) => ({
         id: row.id,
         nameEn: row.nameEn,
         nameAr: row.nameAr,
         total: row.total.toFixed(MONEY_SCALE),
         invoices: Number(row.invoices),
-      })),
-      topItems: topItems.map((row) => ({
+      }));
+      result.topItems = topItems.map((row) => ({
         id: row.id,
         nameEn: row.nameEn,
         nameAr: row.nameAr,
         quantity: row.quantity.toFixed(MONEY_SCALE),
         total: row.total.toFixed(MONEY_SCALE),
-      })),
-      recentDocuments,
-      quickActions: {
-        draftDocuments: draftSales + draftPurchases + draftVouchers + draftJournals,
-        draftSales,
-        draftPurchases,
-        draftVouchers,
-        draftJournals,
-        overdueInvoices: Number(overdueRows[0]?.count ?? 0),
-        itemsToReorder: Number(reorderCount[0]?.count ?? 0),
-      },
-      previousPeriod: {
+      }));
+    }
+    if (sections.has('recent')) {
+      result.recentDocuments = recentDocuments;
+    }
+    if (sections.has('charts') || sections.has('profit') || sections.has('revenue')) {
+      const previousPeriod: Record<string, string | null> = {
         from: previousFrom.toISOString().slice(0, 10),
         to: previousTo.toISOString().slice(0, 10),
-        revenue: previousRevenue.toFixed(MONEY_SCALE),
-        expenses: previousExpenses.toFixed(MONEY_SCALE),
-        result: previousRevenue.minus(previousExpenses).toFixed(MONEY_SCALE),
-        revenueChange: previousRevenue.isZero()
+      };
+      if (sections.has('revenue')) {
+        previousPeriod.revenue = previousRevenue.toFixed(MONEY_SCALE);
+        previousPeriod.expenses = previousExpenses.toFixed(MONEY_SCALE);
+        previousPeriod.revenueChange = previousRevenue.isZero()
           ? null
-          : revenue.minus(previousRevenue).div(previousRevenue).times(100).toFixed(2),
-      },
-      // Where each headline figure comes from, so it can be traced.
-      drillDown: {
-        trialBalance: `/reports/trial-balance?from=${from.toISOString().slice(0, 10)}&to=${to
-          .toISOString()
-          .slice(0, 10)}`,
-        profitAndLoss: `/reports/profit-and-loss?from=${from.toISOString().slice(0, 10)}&to=${to
-          .toISOString()
-          .slice(0, 10)}`,
-        balanceSheet: `/reports/balance-sheet?asOf=${to.toISOString().slice(0, 10)}`,
-        cashFlow: `/reports/cash-flow?from=${from.toISOString().slice(0, 10)}&to=${to
-          .toISOString()
-          .slice(0, 10)}`,
-        receivablesAging: `/reports/receivables-aging?asOf=${to.toISOString().slice(0, 10)}`,
-        payablesAging: `/reports/payables-aging?asOf=${to.toISOString().slice(0, 10)}`,
-        cashAccounts: '/cash/accounts/balances',
-        stockValuation: '/inventory/reports/valuation',
-      },
-    };
+          : revenue.minus(previousRevenue).div(previousRevenue).times(100).toFixed(2);
+      }
+      if (sections.has('profit')) {
+        previousPeriod.result = previousRevenue.minus(previousExpenses).toFixed(MONEY_SCALE);
+      }
+      result.previousPeriod = previousPeriod;
+    }
+    const drillDown: Record<string, string> = {};
+    const periodFrom = from.toISOString().slice(0, 10);
+    const periodTo = to.toISOString().slice(0, 10);
+    if (sections.has('revenue') || sections.has('profit')) {
+      drillDown.trialBalance = `/reports/trial-balance?from=${periodFrom}&to=${periodTo}`;
+      drillDown.profitAndLoss = `/reports/profit-and-loss?from=${periodFrom}&to=${periodTo}`;
+      drillDown.balanceSheet = `/reports/balance-sheet?asOf=${periodTo}`;
+      drillDown.cashFlow = `/reports/cash-flow?from=${periodFrom}&to=${periodTo}`;
+    }
+    if (sections.has('receivables')) {
+      drillDown.receivablesAging = `/reports/receivables-aging?asOf=${periodTo}`;
+    }
+    if (sections.has('payables')) {
+      drillDown.payablesAging = `/reports/payables-aging?asOf=${periodTo}`;
+    }
+    if (sections.has('cash')) drillDown.cashAccounts = '/cash/accounts/balances';
+    if (sections.has('stock')) drillDown.stockValuation = '/inventory/reports/valuation';
+    if (Object.keys(drillDown).length > 0) result.drillDown = drillDown;
+    return filterDashboardSummaryPayload(result, sections);
   }
 
   /**
@@ -540,23 +571,31 @@ export class DashboardService {
    * calendar months of sales, purchases, money in, money out, and the ledger
    * result. A month with no documents is a zero, not a gap.
    */
-  async monthly(companyId: string, query: { months?: number; branchId?: string }) {
+  async monthly(
+    user: DashboardUser,
+    query: { months?: number; branchId?: string },
+  ) {
+    const sections = dashboardSectionsFor(user);
+    const chartVisible = sections.has('charts');
+    if (!chartVisible) return { months: [], allowedSections: [...sections].sort() };
+    const companyId = user.companyId;
+    const branches = effectiveBranches(user, query.branchId);
     const months = Math.min(Math.max(query.months ?? 12, 3), 24);
     const now = new Date();
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
-    const branchFilter = query.branchId
-      ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid`
+    const branchFilter = branches
+      ? Prisma.sql`AND e."branchId" = ANY(${branches}::uuid[])`
       : Prisma.sql``;
-    const branchFilterDoc = query.branchId
-      ? Prisma.sql`AND si."branchId" = ${query.branchId}::uuid`
+    const branchFilterDoc = branches
+      ? Prisma.sql`AND si."branchId" = ANY(${branches}::uuid[])`
       : Prisma.sql``;
-    const branchFilterPurchase = query.branchId
-      ? Prisma.sql`AND pi."branchId" = ${query.branchId}::uuid`
+    const branchFilterPurchase = branches
+      ? Prisma.sql`AND pi."branchId" = ANY(${branches}::uuid[])`
       : Prisma.sql``;
-    const branchFilterVoucher = query.branchId
-      ? Prisma.sql`AND cv."branchId" = ${query.branchId}::uuid`
+    const branchFilterVoucher = branches
+      ? Prisma.sql`AND cv."branchId" = ANY(${branches}::uuid[])`
       : Prisma.sql``;
 
     const [salesRows, purchaseRows, voucherRows, ledgerRows] = await Promise.all([
@@ -684,21 +723,33 @@ export class DashboardService {
       }
     }
 
-    return {
+    const monthlyPayload = {
       from: start.toISOString().slice(0, 10),
-      months: [...byMonth.entries()].map(([month, slot]) => ({
-        month,
-        sales: slot.sales.toFixed(MONEY_SCALE),
-        salesCount: slot.salesCount,
-        purchases: slot.purchases.toFixed(MONEY_SCALE),
-        purchasesCount: slot.purchasesCount,
-        receipts: slot.receipts.toFixed(MONEY_SCALE),
-        payments: slot.payments.toFixed(MONEY_SCALE),
-        revenue: slot.revenue.toFixed(MONEY_SCALE),
-        expenses: slot.expenses.toFixed(MONEY_SCALE),
-        result: slot.revenue.minus(slot.expenses).toFixed(MONEY_SCALE),
-      })),
+      months: [...byMonth.entries()].map(([month, slot]) => {
+        const row: Record<string, string | number> = { month };
+        if (sections.has('sales')) {
+          row.sales = slot.sales.toFixed(MONEY_SCALE);
+          row.salesCount = slot.salesCount;
+        }
+        if (sections.has('purchases')) {
+          row.purchases = slot.purchases.toFixed(MONEY_SCALE);
+          row.purchasesCount = slot.purchasesCount;
+        }
+        if (sections.has('movements')) {
+          row.receipts = slot.receipts.toFixed(MONEY_SCALE);
+          row.payments = slot.payments.toFixed(MONEY_SCALE);
+        }
+        if (sections.has('revenue')) {
+          row.revenue = slot.revenue.toFixed(MONEY_SCALE);
+          row.expenses = slot.expenses.toFixed(MONEY_SCALE);
+        }
+        if (sections.has('profit')) {
+          row.result = slot.revenue.minus(slot.expenses).toFixed(MONEY_SCALE);
+        }
+        return row;
+      }),
     };
+    return filterDashboardMonthlyPayload(monthlyPayload, sections);
   }
 
   /// What is still owed on posted invoices, from the documents.
@@ -706,8 +757,9 @@ export class DashboardService {
     companyId: string,
     side: 'sales' | 'purchases',
     asOf: Date,
-    branchId?: string,
+    branches: string[] | null,
   ) {
+    const branchFilter = branches ? { branchId: { in: branches } } : {};
     const rows =
       side === 'sales'
         ? await this.prisma.salesInvoice.findMany({
@@ -716,7 +768,7 @@ export class DashboardService {
               deletedAt: null,
               status: InvoiceStatus.POSTED,
               invoiceDate: { lte: asOf },
-              ...(branchId ? { branchId } : {}),
+              ...branchFilter,
             },
             select: { totalAmount: true, paidAmount: true },
           })
@@ -726,7 +778,7 @@ export class DashboardService {
               deletedAt: null,
               status: InvoiceStatus.POSTED,
               invoiceDate: { lte: asOf },
-              ...(branchId ? { branchId } : {}),
+              ...branchFilter,
             },
             select: { totalAmount: true, paidAmount: true },
           });

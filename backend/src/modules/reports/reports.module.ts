@@ -3,6 +3,8 @@ import { Module } from '@nestjs/common';
 import { AccountingModule } from '../accounting/accounting.module';
 import { FixedAssetsModule } from '../fixed-assets/fixed-assets.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
+import { CompanyAggregateVisibilityInterceptor } from '../../common/auth/company-aggregate-visibility';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import { OperationsReportsService } from './operations-reports.service';
@@ -15,6 +17,8 @@ import { ReportsService } from './reports.service';
   imports: [PrismaModule, AccountingModule, FixedAssetsModule],
   controllers: [ReportsController],
   providers: [
+    CompanyAggregateVisibilityInterceptor,
+    BranchReportScopeGuard,
     ReportsService,
     FinancialStatementsService,
     AgingService,

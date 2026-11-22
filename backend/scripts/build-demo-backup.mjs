@@ -13,11 +13,12 @@
  *   2. the fictional demo company is built into it through the real schema,
  *      the real enums and balanced books;
  *   3. the API is started against that database and asked, over HTTP, to take
- *      a full backup — the same call the Backup screen makes;
- *   4. the archive is read back with `pg_restore --list`, the way the program
- *      itself checks an upload before it will trust one;
+ *      a complete backup — the same call the Backup screen makes;
+ *   4. the archive is verified by the program itself, and its database dump is
+ *      read back with `pg_restore --list`, the way an upload is checked before
+ *      it is trusted;
  *   5. a second clean database is created and the exact file from step 3 is
- *      restored into it, through the program's restore route;
+ *      restored into it, through the program's complete restore route;
  *   6. the restored books are counted and the accounting totals compared, and
  *      only then is the file copied out and named.
  *
@@ -35,7 +36,14 @@
  * databases are created and dropped, and both names are chosen here.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -290,7 +298,7 @@ async function main() {
       `login answered ${login.status}`,
     );
 
-    const capabilities = await fetch(`${demoBase}/backup/full/capabilities`, {
+    const capabilities = await fetch(`${demoBase}/backup/complete/capabilities`, {
       headers,
     }).then((response) => response.json());
     check(
@@ -299,39 +307,62 @@ async function main() {
       capabilities.version ? `pg_dump ${capabilities.version}` : capabilities.reason,
     );
 
-    const created = await fetch(`${demoBase}/backup/full`, {
+    const created = await fetch(`${demoBase}/backup/complete`, {
       method: 'POST',
       headers,
+      body: JSON.stringify({}),
     }).then((response) => response.json());
     name = created?.file?.name ?? '';
     check(
       'the program takes the backup through its own route',
-      /\.dump$/.test(name),
+      /\.kayanbackup$/.test(name),
       `${name} (${created?.file?.sizeBytes ?? 0} bytes)`,
     );
 
     // ── 4. the archive is read back the way an upload is checked ─────────
-    const archivePath = join(backupDir, name);
-    const listing = await run(PG_RESTORE, ['--list', archivePath], {
-      env: process.env,
-    });
-    const objects = (listing.stdout.match(/^\d+; /gm) ?? []).length;
+    const verified = await fetch(
+      `${demoBase}/backup/complete/${encodeURIComponent(name)}/verify`,
+      { method: 'POST', headers },
+    ).then((response) => response.json());
+    const checks = verified?.checks ?? [];
     check(
-      'the archive is read back with pg_restore before it is trusted',
-      objects > 0 && listing.stdout.includes('TABLE DATA'),
-      `${objects} objects listed`,
+      'the program verifies its own archive before it is trusted',
+      verified?.ok === true && checks.some((c) => c.name === 'database-dump' && c.ok),
+      checks.length
+        ? `${checks.length} checks: ${checks.map((c) => c.name).join(' → ')}`
+        : (verified?.failure ?? 'no verdict'),
     );
 
     const downloaded = await fetch(
-      `${demoBase}/backup/full/${encodeURIComponent(name)}/download`,
+      `${demoBase}/backup/complete/${encodeURIComponent(name)}/download`,
       { headers },
     );
     bytes = Buffer.from(await downloaded.arrayBuffer());
     check(
-      'the downloaded file is a PostgreSQL Custom archive',
+      'the downloaded file is a complete archive, not a bare dump',
       downloaded.status === 200 &&
-        bytes.subarray(0, 5).toString('latin1') === 'PGDMP',
+        bytes.length > 0 &&
+        bytes.subarray(257, 262).toString('latin1') === 'ustar' &&
+        bytes.subarray(0, 5).toString('latin1') !== 'PGDMP',
       `${bytes.length} bytes, HTTP ${downloaded.status}`,
+    );
+
+    // The dump inside it is still a real PostgreSQL Custom archive: it is
+    // pulled out of the tar here and handed to pg_restore, which is the check
+    // the program itself performs on every upload.
+    const dumpInside = extractFromArchive(bytes, 'database/database.dump');
+    const dumpPath = join(backupDir, 'database.dump');
+    writeFileSync(dumpPath, dumpInside);
+    const listing = await run(PG_RESTORE, ['--list', dumpPath], {
+      env: process.env,
+    });
+    const objects = (listing.stdout.match(/^\d+; /gm) ?? []).length;
+    check(
+      'the dump inside the archive is read back with pg_restore',
+      dumpInside.subarray(0, 5).toString('latin1') === 'PGDMP' &&
+        objects > 0 &&
+        listing.stdout.includes('TABLE DATA'),
+      `${dumpInside.length} bytes, ${objects} objects listed`,
     );
 
     // ── 5. the accounting totals the demo is supposed to hold ────────────
@@ -392,7 +423,7 @@ async function main() {
     // A source-database JWT is not authorization on a fresh installation:
     // the destination must have its own real administrator first. Exercise
     // public first-run setup and login, exactly as the installed client does.
-    const foreignToken = await fetch(`${restoreBase}/backup/full`, {
+    const foreignToken = await fetch(`${restoreBase}/backup/complete`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     check('a token from the source database is rejected on the fresh destination', foreignToken.status === 401, `HTTP ${foreignToken.status}`);
@@ -410,8 +441,10 @@ async function main() {
 
     const form = new FormData();
     form.append('confirm', 'true');
-    form.append('file', new Blob([bytes]), name || 'kayan-demo.dump');
-    const response = await fetch(`${restoreBase}/backup/full/restore`, {
+    form.append('confirmPhrase', 'RESTORE');
+    form.append('fileName', name || 'kayan-demo.kayanbackup');
+    form.append('file', new Blob([bytes]), name || 'kayan-demo.kayanbackup');
+    const response = await fetch(`${restoreBase}/backup/complete/restore`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${targetToken}` },
       body: form,
@@ -420,7 +453,7 @@ async function main() {
     check(
       'the exact file restores through the program’s own restore route',
       response.status === 201 && result?.restored === true,
-      `HTTP ${response.status}, checked=${result?.checked === true}, rehearsed in a scratch database=${result?.rehearsed === true}`,
+      `HTTP ${response.status}, rehearsed on a scratch database=${result?.rehearsed === true}, safety backup ${result?.safetyBackup ?? 'none'}`,
     );
 
     const signedIn = await loginAs(restoreBase);
@@ -544,7 +577,7 @@ async function main() {
   await recreateDatabase(BARE_URL);
   await run(
     PG_RESTORE,
-    ['--no-owner', '--no-privileges', '-d', psqlUrl(BARE_URL), join(backupDir, name)],
+    ['--no-owner', '--no-privileges', '-d', psqlUrl(BARE_URL), join(backupDir, 'database.dump')],
     { env: process.env },
   );
   const bare = await sql(
@@ -563,7 +596,7 @@ async function main() {
 
   // ── 8. the file is named and left where it can be collected ────────────
   const stamp = new Date().toISOString().slice(0, 10);
-  const finalName = `kayan-demo-backup-${stamp}.dump`;
+  const finalName = `kayan-demo-backup-${stamp}.kayanbackup`;
   const finalPath = join(OUT_DIR, finalName);
   renameSync(join(backupDir, name), finalPath);
   const size = statSync(finalPath).size;
@@ -573,7 +606,6 @@ async function main() {
   // Write out the company JSON backup file
   const jsonFinalName = `kayan-company-backup-${stamp}.json`;
   const jsonFinalPath = join(OUT_DIR, jsonFinalName);
-  const { writeFileSync } = await import('node:fs');
   writeFileSync(jsonFinalPath, jsonBytes);
   const jsonSize = statSync(jsonFinalPath).size;
   check(
@@ -591,6 +623,42 @@ async function main() {
         : ''),
   );
   return failed.length === 0;
+}
+
+/**
+ * One named file out of a ustar archive, read the way the program itself reads
+ * one: a 512-byte header, a size, then that many bytes, rounded up to the next
+ * 512-byte block. Only what this script needs -- no extraction to disk, no
+ * dependency, and it refuses an archive whose headers do not add up.
+ */
+function extractFromArchive(archive, wanted) {
+  let position = 0;
+  while (position + 512 <= archive.length) {
+    const header = archive.subarray(position, position + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const readText = (start, length) => {
+      const slice = header.subarray(start, start + length);
+      const end = slice.indexOf(0);
+      return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8');
+    };
+    const name = readText(0, 100);
+    const prefix = readText(345, 155);
+    const fullName = prefix ? `${prefix}/${name}` : name;
+    const sizeText = readText(124, 12).trim();
+    if (!/^[0-7]+$/.test(sizeText)) {
+      throw new Error(`the archive holds a bad size for "${fullName}"`);
+    }
+    const size = parseInt(sizeText, 8);
+    const start = position + 512;
+    if (fullName === wanted) {
+      if (start + size > archive.length) {
+        throw new Error(`the archive ends inside "${wanted}"`);
+      }
+      return archive.subarray(start, start + size);
+    }
+    position = start + Math.ceil(size / 512) * 512;
+  }
+  throw new Error(`the archive does not contain "${wanted}"`);
 }
 
 /// Signs in as the demo company's administrator.

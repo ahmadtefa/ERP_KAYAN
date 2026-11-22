@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+
 import { DOCUMENT_KINDS, DOCUMENT_SPECS, DocumentsService } from './documents.service';
 
 describe('document export catalogue', () => {
@@ -9,11 +11,47 @@ describe('document export catalogue', () => {
       'purchase-order',
       'sales-quotation',
       'cash-voucher',
+      'stock-voucher',
       'journal-entry',
     ]);
     for (const kind of DOCUMENT_KINDS) {
       expect(DOCUMENT_SPECS[kind].readPermission).toMatch(/\./);
       expect(DOCUMENT_SPECS[kind].exportPermission).toMatch(/\./);
+    }
+  });
+
+  it('requires inventory read and export permissions for stock vouchers', () => {
+    expect(DOCUMENT_SPECS['stock-voucher']).toEqual({
+      kind: 'stock-voucher',
+      readPermission: 'inventory.stock.read',
+      exportPermission: 'inventory.export',
+    });
+  });
+
+  it('scopes every individual document export to the callers assigned branches', async () => {
+    const delegates = [
+      ['sales-invoice', 'salesInvoice'],
+      ['purchase-invoice', 'purchaseInvoice'],
+      ['sales-order', 'salesOrder'],
+      ['purchase-order', 'purchaseOrder'],
+      ['sales-quotation', 'quotation'],
+      ['cash-voucher', 'cashVoucher'],
+      ['stock-voucher', 'stockDocument'],
+      ['journal-entry', 'journalEntry'],
+    ] as const;
+    const branchScope = ['branch-a', 'branch-b'];
+
+    for (const [kind, delegate] of delegates) {
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const service = new DocumentsService({ [delegate]: { findFirst } } as never);
+      await expect(
+        service.build(kind, 'company-1', 'document-1', 'en', branchScope),
+      ).rejects.toThrow(/not found/i);
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ branchId: { in: branchScope } }),
+        }),
+      );
     }
   });
 
@@ -30,7 +68,7 @@ describe('document export catalogue', () => {
 });
 
 describe('quotation spreadsheet export', () => {
-  const d = (value: string) => new (require('@prisma/client').Prisma.Decimal)(value);
+  const d = (value: string) => new Prisma.Decimal(value);
   const quotation = {
     id: 'quotation-1',
     quotationNumber: 'QT-000010',

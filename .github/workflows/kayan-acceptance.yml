@@ -1,0 +1,350 @@
+name: KAYAN comprehensive application tests (non-signing)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'backend/**'
+      - 'scripts/kayan-acceptance-*.mjs'
+      - '.github/workflows/kayan-acceptance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: backend
+      - name: Resolve locked Flutter packages
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Flutter
+        continue-on-error: true
+        run: |
+          mkdir -p build/acceptance
+          set +e
+          flutter analyze --no-pub > build/acceptance/flutter-analyze.log 2>&1
+          status=$?
+          cat build/acceptance/flutter-analyze.log
+          printf '%s\n' "$status" > build/acceptance/flutter-analyze.status
+          node - build/acceptance/flutter-analyze.log <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const text = fs.readFileSync(file, 'utf8');
+          for (const line of text.split(/\r?\n/)) {
+            const match = line.match(/^\s*(error|warning|info)\s+•\s+(.*?)\s+•\s+(.+?):(\d+):(\d+)\s+•\s+(\S+)/);
+            if (match) {
+              const [, level, message, path, row, column, code] = match;
+              const escaped = message.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+              console.log(`::${level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'notice'} file=${path},line=${row},col=${column},title=Dart ${code}::${escaped}`);
+            }
+          }
+          NODE
+          exit 0
+      - name: Run acceptance tests and capture real exit codes
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          set +e
+          npm --prefix backend test -- --runInBand src/common/filters/problem-details.filter.spec.ts > build/acceptance/backend.log 2>&1
+          backend_status=$?
+          flutter test test --reporter json > build/acceptance/flutter.jsonl 2> build/acceptance/flutter.stderr
+          flutter_status=$?
+          BACKEND_STATUS="$backend_status" FLUTTER_STATUS="$flutter_status" node scripts/kayan-acceptance-results.mjs build/acceptance/flutter.jsonl build/acceptance/results.json
+          node - build/acceptance/results.json <<'NODE'
+          const fs = require('node:fs');
+          const results = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const failure of results.flutter_full_suite?.failures ?? []) {
+            const text = `${failure.path}: ${failure.name}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+            console.log(`::error title=Flutter test failure::${text}`);
+          }
+          NODE
+          node scripts/kayan-acceptance-scan.mjs build/acceptance/screen-audit.json
+          node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          analyze_status=$(cat build/acceptance/flutter-analyze.status 2>/dev/null || echo 1)
+          if [ "$backend_status" -ne 0 ] || [ "$flutter_status" -ne 0 ] || [ "$analyze_status" -ne 0 ]; then
+            echo 'Acceptance tests failed; evidence was retained in build/acceptance.' >&2
+            exit 1
+          fi
+          node scripts/kayan-acceptance-gate.mjs build/acceptance/report.json
+      - name: Render updated dashboard golden for RTL review
+        if: always()
+        run: |
+          set +e
+          flutter test --no-pub --update-goldens test/screenshots/design_screenshots_test.dart --plain-name 'screenshot: dashboard inside the shell (Arabic RTL)'
+          render_status=$?
+          # The dedicated review render rewrites the golden only in this
+          # disposable checkout. Preserve the exact actual pixels as CI
+          # evidence; never commit this generated image as an approved baseline.
+          mkdir -p build/acceptance
+          if [ -s test/screenshots/goldens/dashboard_ar.png ]; then
+            cp test/screenshots/goldens/dashboard_ar.png build/acceptance/dashboard_ar.rendered.png
+          fi
+          exit "$render_status"
+      # The complete rendered PNG is also uploaded as acceptance evidence.
+      # Small, independent chunks remain available in check annotations when a
+      # download is blocked; keep each group in a separate step because GitHub
+      # limits how many notices it records per step.
+      - name: Dashboard RTL pixels (diagnostic chunks 1 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 0
+      - name: Dashboard RTL pixels (diagnostic chunks 2 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 1
+      - name: Dashboard RTL pixels (diagnostic chunks 3 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 2
+      - name: Dashboard RTL pixels (diagnostic chunks 4 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 3
+      - name: Dashboard RTL pixels (diagnostic chunks 5 of 5)
+        if: always() && hashFiles('build/acceptance/dashboard_ar.rendered.png') != ''
+        run: node scripts/emit-screenshot-lossless.cjs dashboard_ar.png 4
+      - name: Preserve a report when setup or test execution fails early
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/acceptance
+          if [ ! -s build/acceptance/report.json ]; then
+            node scripts/kayan-acceptance-report.mjs build/acceptance/results.json build/acceptance/report.json
+          fi
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-acceptance-${{ github.sha }}
+          path: build/acceptance/
+          if-no-files-found: error
+
+  postgres-acceptance:
+    name: PostgreSQL 16 (${{ matrix.suite }})
+    # Each business scenario has its own migrated database, API and rate limiter;
+    # a reset or an opening balance in one scenario cannot influence another.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [backend, warehouses-orders, accounting, accounting-reconciliation, system-backup]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_acceptance"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_acceptance?schema=public
+      NODE_OPTIONS: --experimental-vm-modules
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: '900'
+      JWT_REFRESH_TTL: '604800'
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: '3000'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install PostgreSQL 16 client for backup checks
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare Prisma adapter and client
+        run: |
+          node scripts/patch-adapter-pg-name-type.mjs
+          npx prisma generate
+          npx prisma validate
+      - name: Apply real migrations to isolated PostgreSQL
+        run: node scripts/apply-migrations.mjs
+      - name: Build API for real PostgreSQL service checks
+        run: npm run build
+      - name: Reconcile real PostgreSQL stock ledger and shelf balances
+        if: matrix.suite == 'backend'
+        shell: bash
+        run: |
+          mkdir -p ../build/acceptance-postgres
+          set -o pipefail
+          node scripts/pg-ledger-shelf-agreement.mjs 2>&1 | tee ../build/acceptance-postgres/real-postgres-stock.log
+      - name: Run stock and sales posting integration tests
+        if: matrix.suite == 'backend'
+        shell: bash
+        run: |
+          mkdir -p ../build/acceptance-postgres
+          set +e
+          npm test -- --runInBand src/modules/sales/sales-invoice-posting.integration.spec.ts src/modules/inventory/stock-documents.barcode-posting.spec.ts > ../build/acceptance-postgres/jest.log 2>&1
+          status=$?
+          cat ../build/acceptance-postgres/jest.log
+          exit "$status"
+      - name: Round-trip each independent master-data backup on PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_MASTER_DATA_BACKUP_PG: '1'
+        run: npm test -- --runInBand src/modules/master-data-backup/master-data-backup.postgres.spec.ts
+      - name: Run backend suite (except isolated licence signing and store tests)
+        if: matrix.suite == 'backend'
+        shell: bash
+        env:
+          NODE_OPTIONS: --experimental-vm-modules --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+          KAYAN_REAL_PG_TESTS: '1'
+          DATABASE_URL_KAYAN_ROUNDTRIP: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: |
+          # Exact suite names only. These unchanged tests exercise a private key,
+          # generator or HMAC-backed licence store; they belong on the approved VM.
+          isolated='/(installed-corrupt-state-safety|license-corruption-recovery|license-generator|license-key|license-proof|license-store|licensing-http-guard|licensing-key-replacement|licensing-keyring-integration|licensing-upgrade-model|licensing\.enforcement|licensing\.service)\.spec\.ts$'
+          node ../scripts/ci-workflow-safety.test.cjs
+          set +e
+          npm test -- --runInBand --testPathIgnorePatterns="/modules/licensing$isolated" --json --outputFile="$RUNNER_TEMP/jest.json"
+          status=$?
+          node - "$RUNNER_TEMP/jest.json" <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const suite of report.testResults ?? []) {
+            for (const test of suite.assertionResults ?? []) {
+              if (test.status !== 'failed') continue;
+              const message = `${suite.name}: ${test.fullName}\n${(test.failureMessages ?? []).join('\n')}`.slice(0, 3000)
+                .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+              console.log(`::error title=Backend test failure::${message}`);
+            }
+          }
+          if (!report.numPassedTests || report.numPendingTests || report.numTodoTests) {
+            console.log(`::error title=Backend suite incomplete::${report.numPassedTests} passed, ${report.numFailedTests} failed, ${report.numPendingTests} pending`);
+            process.exitCode = 1;
+          }
+          NODE
+          [ "$status" -eq 0 ]
+      - name: Seed isolated database
+        if: matrix.suite != 'backend'
+        run: npx ts-node prisma/seed.ts
+      - name: Run business scenario through the real API
+        if: matrix.suite != 'backend'
+        env:
+          SCENARIO: ${{ matrix.suite }}
+          # The accounting scenario asserts the operator-disabled API refuses
+          # restore. The system-backup scenario requires the same API to perform
+          # a real restore after ALL machine checks pass (no forced allow).
+          KAYAN_FULL_RESTORE_ENABLED: ${{ matrix.suite == 'accounting' && '0' || '' }}
+          ENABLE_DISPOSABLE_RESET: ${{ matrix.suite == 'accounting' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../build/acceptance-postgres
+          node dist/src/main.js > ../build/acceptance-postgres/api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > ../build/acceptance-postgres/health.json 2>/dev/null &&
+               node -e 'const h=require("../build/acceptance-postgres/health.json");process.exit(h.status==="ok"&&h.database==="up"&&!h.needsSetup?0:1)'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then cat ../build/acceptance-postgres/api.log; exit 1; fi
+          export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
+          log="../build/acceptance-postgres/$SCENARIO.log"
+          if ! node "scripts/scenario-$SCENARIO.mjs" http://127.0.0.1:3000/api/v1 2>&1 | tee "$log"; then
+            # Surface failed checks without dumping authentication responses.
+            awk '/^[[:space:]]*FAIL[[:space:]]/ {split($0,a," — "); print "::error::" a[1]}' "$log"
+            exit 1
+          fi
+      - name: Upload PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-postgres-acceptance-${{ matrix.suite }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/acceptance-postgres/
+          if-no-files-found: warn
+
+  backup-restore-17:
+    name: Complete backup and restore on PostgreSQL 17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      # PostgreSQL 17, server and client of the same version: a dump carries
+      # its writer's version, and rehearsing a 17 dump with a 16 pg_restore
+      # would fail for a reason that has nothing to do with this program.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17
+          /usr/lib/postgresql/17/bin/postgres --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_restore --version
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      # The harness creates its own cluster, applies the real migrations, seeds
+      # a fixture and then exercises: complete backup, verification, tampered
+      # archive refused, restore, safety backup, automatic rollback of a
+      # restore that dies half way, journal-driven recovery after a simulated
+      # power cut, one-restore-at-a-time, uploaded files, and the licence file
+      # being left untouched.
+      - name: Prove the complete backup and restore on PostgreSQL 17
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        run: python ../scripts/ci-diagnose.py npx ts-node --transpile-only scripts/verify-system-backup.ts --pgbin /usr/lib/postgresql/17/bin

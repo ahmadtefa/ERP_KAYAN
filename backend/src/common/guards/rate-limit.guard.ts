@@ -34,6 +34,7 @@ export class RateLimitGuard implements CanActivate {
   private static readonly sensitiveRoutes = [
     '/auth/login',
     '/auth/refresh',
+    '/auth/change-password',
   ];
 
   canActivate(context: ExecutionContext): boolean {

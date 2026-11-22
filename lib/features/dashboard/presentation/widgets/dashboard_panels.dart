@@ -17,11 +17,17 @@ class MonthlyBarsChart extends StatelessWidget {
     super.key,
     required this.months,
     required this.arabic,
+    this.showSales = true,
+    this.showPurchases = true,
+    this.showResult = true,
   });
 
   /// One entry per month: `{ month: '2026-04', sales, purchases, result }`.
   final List<Json> months;
   final bool arabic;
+  final bool showSales;
+  final bool showPurchases;
+  final bool showResult;
 
   @override
   Widget build(BuildContext context) {
@@ -33,9 +39,10 @@ class MonthlyBarsChart extends StatelessWidget {
     final purchaseColor = SectionAccents.purchases.of(theme.brightness);
     final resultColor = scheme.tertiary;
     final maxValue = months.fold<double>(0, (max, row) {
-      final double sales = asNum(row['sales'])?.toDouble() ?? 0.0;
-      final double purchases = asNum(row['purchases'])?.toDouble() ?? 0.0;
-      return math.max(max, math.max(sales, purchases));
+      final double sales = showSales ? asNum(row['sales'])?.toDouble() ?? 0.0 : 0.0;
+      final double purchases = showPurchases ? asNum(row['purchases'])?.toDouble() ?? 0.0 : 0.0;
+      final double result = showResult ? (asNum(row['result'])?.toDouble() ?? 0.0).abs() : 0.0;
+      return math.max(max, math.max(result, math.max(sales, purchases)));
     });
 
     return Column(
@@ -46,18 +53,21 @@ class MonthlyBarsChart extends StatelessWidget {
           spacing: AppSpacing.xl,
           runSpacing: AppSpacing.sm,
           children: [
-            _Legend(
-              color: salesColor,
-              label: arabic ? 'المبيعات' : 'Sales',
-            ),
-            _Legend(
-              color: purchaseColor,
-              label: arabic ? 'المشتريات' : 'Purchases',
-            ),
-            _Legend(
-              color: resultColor,
-              label: arabic ? 'النتيجة' : 'Net result',
-            ),
+            if (showSales)
+              _Legend(
+                color: salesColor,
+                label: arabic ? 'المبيعات' : 'Sales',
+              ),
+            if (showPurchases)
+              _Legend(
+                color: purchaseColor,
+                label: arabic ? 'المشتريات' : 'Purchases',
+              ),
+            if (showResult)
+              _Legend(
+                color: resultColor,
+                label: arabic ? 'صافي النتيجة' : 'Net result',
+              ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -82,6 +92,9 @@ class MonthlyBarsChart extends StatelessWidget {
                     salesColor: salesColor,
                     purchaseColor: purchaseColor,
                     resultColor: resultColor,
+                    showSales: showSales,
+                    showPurchases: showPurchases,
+                    showResult: showResult,
                     gridColor: scheme.outlineVariant.withValues(alpha: 0.6),
                     labelColor: scheme.onSurfaceVariant,
                   ),
@@ -99,6 +112,9 @@ class _MonthlyBarsPainter extends CustomPainter {
     required this.salesColor,
     required this.purchaseColor,
     required this.resultColor,
+    required this.showSales,
+    required this.showPurchases,
+    required this.showResult,
     required this.gridColor,
     required this.labelColor,
   });
@@ -108,6 +124,9 @@ class _MonthlyBarsPainter extends CustomPainter {
   final Color salesColor;
   final Color purchaseColor;
   final Color resultColor;
+  final bool showSales;
+  final bool showPurchases;
+  final bool showResult;
   final Color gridColor;
   final Color labelColor;
 
@@ -140,8 +159,8 @@ class _MonthlyBarsPainter extends CustomPainter {
       final row = months[i];
       final centerX = rect.left + slot * i + slot / 2;
 
-      final sales = (asNum(row['sales'])?.toDouble() ?? 0) / maxValue;
-      final purchases = (asNum(row['purchases'])?.toDouble() ?? 0) / maxValue;
+      final sales = showSales ? (asNum(row['sales'])?.toDouble() ?? 0) / maxValue : 0.0;
+      final purchases = showPurchases ? (asNum(row['purchases'])?.toDouble() ?? 0) / maxValue : 0.0;
 
       final salesRect = Rect.fromCenter(
         center: Offset(centerX - barWidth * 0.7, rect.bottom),
@@ -180,33 +199,36 @@ class _MonthlyBarsPainter extends CustomPainter {
       }
     }
 
-    // Net result as a smooth line across the months.
-    final points = <Offset>[];
-    for (var i = 0; i < count; i += 1) {
-      final result = (asNum(months[i]['result'])?.toDouble() ?? 0) / maxValue;
-      points.add(
-        Offset(
-          rect.left + slot * i + slot / 2,
-          rect.bottom - result.clamp(-1.0, 1.0) * rect.height,
-        ),
+    // Net result is an independent section and must not be drawn unless the
+    // server explicitly authorized it for the monthly response.
+    if (showResult) {
+      final points = <Offset>[];
+      for (var i = 0; i < count; i += 1) {
+        final result = (asNum(months[i]['result'])?.toDouble() ?? 0) / maxValue;
+        points.add(
+          Offset(
+            rect.left + slot * i + slot / 2,
+            rect.bottom - result.clamp(-1.0, 1.0) * rect.height,
+          ),
+        );
+      }
+      final path = Path()..moveTo(points.first.dx, points.first.dy);
+      for (var i = 1; i < points.length; i += 1) {
+        final previous = points[i - 1];
+        final current = points[i];
+        final mid = (previous.dx + current.dx) / 2;
+        path.cubicTo(mid, previous.dy, mid, current.dy, current.dx, current.dy);
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = resultColor
+          ..strokeWidth = 2.2
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
       );
     }
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 1; i < points.length; i += 1) {
-      final previous = points[i - 1];
-      final current = points[i];
-      final mid = (previous.dx + current.dx) / 2;
-      path.cubicTo(mid, previous.dy, mid, current.dy, current.dx, current.dy);
-    }
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = resultColor
-        ..strokeWidth = 2.2
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
   }
 
   @override
@@ -215,6 +237,9 @@ class _MonthlyBarsPainter extends CustomPainter {
       old.maxValue != maxValue ||
       old.salesColor != salesColor ||
       old.purchaseColor != purchaseColor ||
+      old.showSales != showSales ||
+      old.showPurchases != showPurchases ||
+      old.showResult != showResult ||
       old.gridColor != gridColor ||
       old.labelColor != labelColor;
 }

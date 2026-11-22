@@ -1,4 +1,9 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
+
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,28 +11,62 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../shared/barcode/barcode_scan.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../inventory/data/item_image_data_source.dart';
+import '../../../inventory/presentation/widgets/item_picture.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
+/// An automatic price may follow a changed unit; a price typed by the user
+/// (including an explicit zero) must not be silently replaced.
+bool maySuggestUnitPrice(
+  String current, {
+  required bool automatic,
+  required bool edited,
+}) =>
+    automatic || (!edited && (current.trim().isEmpty || current.trim() == '0'));
+
+Json? itemForInvoiceLine(List<Json> items, String? itemId) {
+  for (final item in items) {
+    if (text(item, 'id') == itemId) return item;
+  }
+  return null;
+}
+
+final _salesTaxPricingProvider = FutureProvider.autoDispose<bool>((ref) async {
+  final pricing = await ref
+      .read(apiClientProvider)
+      .getObject('/sales/invoices/tax-pricing');
+  return pricing['pricesIncludeTax'] == true;
+});
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
     String quantity = '1',
     String unitPrice = '0',
-    String taxRate = '0',
+    String taxRate = '',
     String discountValue = '',
   }) : quantity = TextEditingController(text: quantity),
-      unitPrice = TextEditingController(text: unitPrice),
-      taxRate = TextEditingController(text: taxRate),
-      discountValue = TextEditingController(text: discountValue);
+       unitPrice = TextEditingController(text: unitPrice),
+       taxRate = TextEditingController(text: taxRate),
+       discountValue = TextEditingController(text: discountValue);
 
   String? itemId;
+  String? description;
+
+  /// The measurement unit the quantity is expressed in. Null on a free line
+  /// without an item; the server treats a missing unit as the item's base unit
+  /// and keeps legacy documents untouched.
+  String? unitName;
 
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
@@ -35,6 +74,9 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+  bool taxRateEdited = false;
+  bool unitPriceAutomatic = false;
+  bool unitPriceEdited = false;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -42,10 +84,19 @@ class _LineDraft {
   final TextEditingController discountValue;
 
   /// The line's own arithmetic, for the summary under the inputs.
-  ({Decimal gross, ResolvedDiscount discount}) get pricing {
-    final quantityValue = Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
+  ({Decimal gross, ResolvedDiscount discount}) pricing({
+    bool pricesIncludeTax = false,
+  }) {
+    final quantityValue =
+        Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
     final price = Decimal.tryParse(unitPrice.text.trim()) ?? Decimal.zero;
-    final gross = quantityValue * price;
+    final typedTotal = (quantityValue * price).round(scale: moneyScale);
+    final rate = Decimal.tryParse(taxRate.text.trim()) ?? Decimal.zero;
+    final gross = pricesIncludeTax && rate > Decimal.zero
+        ? (typedTotal * Decimal.fromInt(100) / (Decimal.fromInt(100) + rate))
+              .toDecimal(scaleOnInfinitePrecision: 12)
+              .round(scale: moneyScale)
+        : typedTotal;
     return (
       gross: gross,
       discount: resolveDiscount(
@@ -65,17 +116,38 @@ class _LineDraft {
 }
 
 class _LandedCostDraft {
-  _LandedCostDraft({String description = '', String amount = '0'})
-      : description = TextEditingController(text: description),
-        amount = TextEditingController(text: amount);
+  _LandedCostDraft({
+    String description = '',
+    String amount = '0',
+    String taxRate = '',
+  }) : description = TextEditingController(text: description),
+       amount = TextEditingController(text: amount),
+       taxRate = TextEditingController(text: taxRate);
 
   final TextEditingController description;
   final TextEditingController amount;
+  final TextEditingController taxRate;
 
   void dispose() {
     description.dispose();
     amount.dispose();
+    taxRate.dispose();
   }
+}
+
+/// The routed invoice list owns the navigation guard; an imperative editor
+/// temporarily attaches its own confirmation while it is on top.
+class InvoiceDraftExitRelay {
+  Future<bool> Function()? _guard;
+  void attach(Future<bool> Function() guard) {
+    _guard = guard;
+  }
+
+  void detach(Future<bool> Function() guard) {
+    if (_guard == guard) _guard = null;
+  }
+
+  Future<bool> canLeave() => _guard?.call() ?? Future.value(true);
 }
 
 /// Creates a draft sales or purchase invoice.
@@ -83,10 +155,16 @@ class _LandedCostDraft {
 /// The screen only ever creates a draft. Posting is a separate, deliberate
 /// step from the list, because posting moves stock and writes to the ledger.
 class InvoiceEditorScreen extends ConsumerStatefulWidget {
-  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId});
+  const InvoiceEditorScreen({
+    super.key,
+    required this.kind,
+    this.invoiceId,
+    this.exitRelay,
+  });
 
   final InvoiceKind kind;
   final String? invoiceId;
+  final InvoiceDraftExitRelay? exitRelay;
 
   @override
   ConsumerState<InvoiceEditorScreen> createState() =>
@@ -95,6 +173,12 @@ class InvoiceEditorScreen extends ConsumerStatefulWidget {
 
 class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   final _lines = <_LineDraft>[];
+
+  /// Small pictures for the items this invoice can name, so a line shows the
+  /// same picture as the catalogue. Absent means "no picture".
+  Map<String, Uint8List> _itemPictures = const {};
+  String _itemPicturesKey = '';
+
   String? _partyId;
   String? _supplierReference;
   String? _notes;
@@ -104,6 +188,70 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
   bool _loadingExisting = false;
+  bool _loadFailed = false;
+  bool _confirmingExit = false;
+  late String _savedSnapshot;
+
+  /// The invoice-level scan box, and what the last accepted scan was.
+  ///
+  /// The guard lives on the document rather than on a line because a scan adds
+  /// a line: there is no line to hold the state until the scan has succeeded.
+  final _barcode = TextEditingController();
+  String? _lastScanCode;
+  DateTime? _lastScanAt;
+  bool _scanInFlight = false;
+
+  String _snapshot() => jsonEncode({
+    'party': _partyId,
+    'reference': _supplierReference,
+    'notes': _notes,
+    'date': _invoiceDate,
+    'discountKind': _documentDiscountKind.name,
+    'discount': _documentDiscount.text,
+    'costs': [
+      for (final cost in _landedCosts)
+        [cost.description.text, cost.amount.text, cost.taxRate.text],
+    ],
+    'lines': [
+      for (final line in _lines)
+        [
+          line.itemId,
+          line.unitName,
+          line.costCenterId,
+          line.quantity.text,
+          line.unitPrice.text,
+          line.taxRate.text,
+          line.taxRateEdited,
+          line.discountKind.name,
+          line.discountValue.text,
+        ],
+    ],
+  });
+
+  Future<bool> _confirmExit() async {
+    if (_saving || _loadingExisting || _confirmingExit) return false;
+    if (_snapshot() == _savedSnapshot) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      final leave = await confirmAction(
+        context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar
+            ? 'الخروج دون حفظ الفاتورة؟'
+            : 'Leave without saving the invoice?',
+        confirmLabel: ar ? 'خروج' : 'Discard',
+        destructive: true,
+      );
+      return leave && mounted;
+    } finally {
+      _confirmingExit = false;
+    }
+  }
+
+  Future<void> _close() async {
+    if (await _confirmExit() && mounted) Navigator.of(context).pop();
+  }
 
   @override
   void initState() {
@@ -114,6 +262,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    _savedSnapshot = _snapshot();
+    widget.exitRelay?.attach(_confirmExit);
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
@@ -127,8 +277,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .getObject('${widget.kind.basePath}/${widget.invoiceId}');
       if (!mounted) return;
       if (text(invoice, 'status').toLowerCase() != 'draft') {
-        showMessage(context, context.l10n.onlyDraftInvoiceCanBeEdited, error: true);
-        Navigator.of(context).pop();
+        await showAppError(context, context.l10n.onlyDraftInvoiceCanBeEdited);
+        if (mounted) Navigator.of(context).pop();
         return;
       }
       for (final line in _lines) {
@@ -140,28 +290,59 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       }
       _landedCosts.clear();
       for (final row in listOf(invoice['landedCostCharges'])) {
-        _landedCosts.add(_LandedCostDraft(
-          description: text(row, 'description'),
-          amount: text(row, 'amount', fallback: '0'),
-        ));
+        _landedCosts.add(
+          _LandedCostDraft(
+            description: text(row, 'description'),
+            amount: text(row, 'amount', fallback: '0'),
+            taxRate: text(row, 'taxRate'),
+          ),
+        );
       }
-      final legacyLandedCost = Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
+      final legacyLandedCost =
+          Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
       if (_landedCosts.isEmpty && legacyLandedCost > Decimal.zero) {
-        _landedCosts.add(_LandedCostDraft(
-          description: context.l10n.otherLandedCosts,
-          amount: legacyLandedCost.toString(),
-        ));
+        _landedCosts.add(
+          _LandedCostDraft(
+            description: context.l10n.otherLandedCosts,
+            amount: legacyLandedCost.toString(),
+          ),
+        );
       }
       for (final row in listOf(invoice['lines'])) {
-        final line = _LineDraft(
-          quantity: text(row, 'quantity', fallback: '1'),
-          unitPrice: text(row, 'unitPrice', fallback: '0'),
-          taxRate: text(row, 'taxRate', fallback: '0'),
-        )
-          ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
-          ..costCenterId = text(row, 'costCenterId').isEmpty
-              ? null
-              : text(row, 'costCenterId');
+        if (widget.kind.isSales && row['isAdditionalCharge'] == true) {
+          _landedCosts.add(
+            _LandedCostDraft(
+              description: text(row, 'description'),
+              amount: text(row, 'unitPrice'),
+              taxRate: text(row, 'taxRate'),
+            ),
+          );
+          continue;
+        }
+        // Reopen shows exactly what the user entered. A multi-unit line keeps
+        // the entered quantity and its unit; a legacy row has no snapshot, so
+        // it falls back to the stored base quantity with no unit selected.
+        final line =
+            _LineDraft(
+                quantity: text(
+                  row,
+                  'unitQuantity',
+                  fallback: text(row, 'quantity', fallback: '1'),
+                ),
+                unitPrice: text(row, 'unitPrice', fallback: '0'),
+                taxRate: text(row, 'taxRate', fallback: ''),
+              )
+              ..itemId = text(row, 'itemId').isEmpty
+                  ? null
+                  : text(row, 'itemId')
+              ..unitName = text(row, 'unitName').isEmpty
+                  ? null
+                  : text(row, 'unitName')
+              ..description = text(row, 'description')
+              ..unitPriceEdited = true
+              ..costCenterId = text(row, 'costCenterId').isEmpty
+                  ? null
+                  : text(row, 'costCenterId');
         final discountKind = discountKindOf(text(row, 'discountType'));
         if (discountKind == DiscountKind.percent) {
           line.discountValue.text = text(row, 'discountPercent', fallback: '');
@@ -174,8 +355,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _lines.add(line);
       }
       if (_lines.isEmpty) _lines.add(_LineDraft());
-      _documentDiscountKind =
-          discountKindOf(text(invoice, 'discountType'));
+      _documentDiscountKind = discountKindOf(text(invoice, 'discountType'));
       _documentDiscount.text = _documentDiscountKind == DiscountKind.percent
           ? text(invoice, 'discountPercent', fallback: '')
           : text(invoice, 'discountAmount', fallback: '');
@@ -183,7 +363,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       if (_documentDiscountKind == DiscountKind.none) _documentDiscount.clear();
       setState(() {
         _partyId = text(invoice, widget.kind.partyKey).isNotEmpty
-            ? text(Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map), 'id')
+            ? text(
+                Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map),
+                'id',
+              )
             : null;
         _supplierReference = text(invoice, 'supplierReference').isEmpty
             ? null
@@ -192,16 +375,21 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
       });
-    } on Failure catch (error) {
+      _savedSnapshot = _snapshot();
+    } catch (error) {
       if (mounted) {
-        setState(() => _loadingExisting = false);
-        showMessage(context, error.message, error: true);
+        setState(() {
+          _loadingExisting = false;
+          _loadFailed = true;
+        });
+        showAppError(context, error);
       }
     }
   }
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_confirmExit);
     for (final line in _lines) {
       line.dispose();
     }
@@ -209,6 +397,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       charge.dispose();
     }
     _documentDiscount.dispose();
+    _barcode.dispose();
     super.dispose();
   }
 
@@ -223,14 +412,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     Decimal tax,
     Decimal landedCost,
     Decimal total,
-  }) get _totals {
+  })
+  _totals({required bool pricesIncludeTax}) {
     final nets = <Decimal>[];
     final rates = <Decimal>[];
     var gross = Decimal.zero;
     var lineDiscount = Decimal.zero;
     for (final line in _lines) {
-      final pricing = line.pricing;
-      if (line.quantity.text.trim().isEmpty || line.unitPrice.text.trim().isEmpty) {
+      final pricing = line.pricing(pricesIncludeTax: pricesIncludeTax);
+      if (line.quantity.text.trim().isEmpty ||
+          line.unitPrice.text.trim().isEmpty) {
         continue;
       }
       gross += pricing.gross;
@@ -238,7 +429,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       nets.add(pricing.discount.net);
       rates.add(Decimal.tryParse(line.taxRate.text.trim()) ?? Decimal.zero);
     }
-    final netBeforeDocument = nets.fold(Decimal.zero, (sum, value) => sum + value);
+    final netBeforeDocument = nets.fold(
+      Decimal.zero,
+      (sum, value) => sum + value,
+    );
     final document = resolveDiscount(
       netBeforeDocument,
       _documentDiscountKind,
@@ -255,10 +449,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .round(scale: moneyScale);
     }
     var landedCost = Decimal.zero;
-    if (!widget.kind.isSales) {
-      for (final charge in _landedCosts) {
-        landedCost += Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
-      }
+    for (final charge in _landedCosts) {
+      final amount =
+          (Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero).round(
+            scale: moneyScale,
+          );
+      final rate =
+          (Decimal.tryParse(charge.taxRate.text.trim()) ?? Decimal.zero).round(
+            scale: moneyScale,
+          );
+      landedCost += amount;
+      tax += (amount * rate / Decimal.fromInt(100))
+          .toDecimal(scaleOnInfinitePrecision: 12)
+          .round(scale: moneyScale);
     }
     return (
       gross: gross,
@@ -271,19 +474,196 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     );
   }
 
-  void _applyItemDefaults(_LineDraft line, Json item) {
-    // An explicit rate the user typed is respected; only the empty case is
-    // filled in from the item.
-    if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
-      line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
+  /// Fetches the pictures for the items this invoice can name, once.
+  ///
+  /// The key is the sorted ids, so a rebuild, a keystroke or a row edit does
+  /// not re-request them. A failure leaves the pictures empty: an invoice must
+  /// still be written when a thumbnail cannot be fetched.
+  void _loadItemPictures(List<Json> items) {
+    final ids = [
+      for (final item in items)
+        if (text(item, 'id').isNotEmpty) text(item, 'id'),
+    ]..sort();
+    final key = ids.join(',');
+    if (key == _itemPicturesKey) return;
+    _itemPicturesKey = key;
+    if (ids.isEmpty) return;
+    ItemImageDataSource(ref.read(apiClientProvider))
+        .thumbnails(ids)
+        .then<void>(
+          (pictures) {
+            if (!mounted || _itemPicturesKey != key) return;
+            setState(() => _itemPictures = pictures);
+          },
+          onError: (Object _) {
+            // A thumbnail that cannot be fetched is not worth a dialog: the
+            // picker still lists every item, just without pictures.
+          },
+        );
+  }
+
+  /// Adds what a scanned label stands for to the invoice.
+  ///
+  /// The rules, in the order they matter:
+  ///   * one scan is ONE of the unit the label identifies - never its factor.
+  ///     A carton label whose factor is 24 adds one carton, and the quantity
+  ///     box reads 1; the server multiplies by 24 exactly once when the
+  ///     invoice is saved. Writing 24 here would store 576 pieces.
+  ///   * scanning the same item and unit again adds one more of it, so two
+  ///     scans of a carton give 2 cartons.
+  ///   * scanning a different item - or the same item in a different unit -
+  ///     starts a new line at 1 instead of overwriting the line above.
+  ///   * the unit the label names wins over the default sale/purchase unit,
+  ///     because the label is more specific than the catalogue default; when
+  ///     the label is the item's own barcode the default unit for this
+  ///     document decides.
+  ///   * a failed lookup changes nothing: no line is added, no quantity is
+  ///     touched, and the operator's other input stays exactly as typed.
+  Future<void> _scanInvoiceBarcode(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty || _saving || _loadingExisting) return;
+    if (isRepeatScan(
+      lastCode: _lastScanCode,
+      lastAt: _lastScanAt,
+      code: code,
+      inFlight: _scanInFlight,
+    )) {
+      // The scanner fired again for the same physical press. Clear the box so
+      // the next scan starts clean, but do not add a second carton.
+      _barcode.clear();
+      return;
     }
-    if (widget.kind.isSales &&
-        (line.unitPrice.text.trim().isEmpty ||
-            line.unitPrice.text.trim() == '0')) {
-      line.unitPrice.text = formatQuantity(
-        asString(item['salePrice']),
-        decimals: 2,
+    _scanInFlight = true;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    try {
+      final scanner = BarcodeScanner(
+        lookup: (value) => ref
+            .read(apiClientProvider)
+            .getObject(
+              '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
+            ),
       );
+      final match = await scanner.scan(
+        code,
+        arabic: arabic,
+        onMatch: (match) async {
+          if (!mounted) return;
+          setState(() {
+            _addScannedLine(match, isSales: widget.kind.isSales);
+            _barcode.clear();
+          });
+        },
+        // The wording of both failure sentences lives in the shared helper, so
+        // every screen says the same thing about the same label. It is shown
+        // as written because this screen composed it on purpose.
+        onFailure: (message) async {
+          if (!mounted) return;
+          await showAppPlainError(context, message);
+        },
+      );
+      if (match == null) return;
+      // Remembered only now: a failed lookup must stay retryable by scanning
+      // the same label again immediately.
+      _lastScanCode = code;
+      _lastScanAt = DateTime.now();
+    } finally {
+      _scanInFlight = false;
+    }
+  }
+
+  /// Puts one scanned [match] on the invoice: an existing line for the same
+  /// item and unit gains one, otherwise the empty line (or a new one) is used.
+  void _addScannedLine(BarcodeMatch match, {required bool isSales}) {
+    // Which unit this scan adds, decided once for every screen that scans.
+    final unit = defaultScannedUnit(match, isSales: isSales);
+    // A line the operator has not touched is reused rather than left behind as
+    // an empty first row: the invoice would otherwise start with a gap every
+    // time the first thing that happens is a scan.
+    var index = _lines.indexWhere(
+      (line) => line.itemId == match.itemId && line.unitName == unit,
+    );
+    // A line that already names this item in another unit is a scan of a
+    // different thing (six pieces on one line, two cartons on the next), so it
+    // is left alone. Only a line carrying nothing at all is reused.
+    if (index < 0) {
+      final blank = _lines.indexWhere((line) => _lineIsEmpty(line));
+      if (blank >= 0) {
+        index = blank;
+      } else {
+        _lines.add(_LineDraft());
+        index = _lines.length - 1;
+      }
+    }
+    final line = _lines[index];
+    final sameSelection = line.itemId == match.itemId && line.unitName == unit;
+    final current = sameSelection
+        ? Decimal.tryParse(line.quantity.text.trim())
+        : null;
+    // The item and unit are assigned before the quantity, so the price helper
+    // below prices the chosen unit rather than whatever the line held a moment
+    // ago. The box itself holds the CHOSEN unit: `quantityAfterScan` adds one
+    // to the number already there, and never multiplies by the factor.
+    line.itemId = match.itemId;
+    line.unitName = unit;
+    line.quantity.text = plainQuantity(
+      quantityAfterScan(current: current, sameSelection: sameSelection),
+    );
+    // The price follows the unit that was just selected, through the same
+    // helper the manual path uses: a scanned carton and a hand-typed carton
+    // must cost the same, and a price the operator typed themselves is never
+    // replaced. The unit is passed in already set, so the helper prices the
+    // scanned unit rather than falling back to the document default.
+    _applyItemDefaults(line, match.item);
+    // `_applyItemDefaults` honours a unit already on the line, so the scan's
+    // choice survives it. This restores it anyway if a future change there
+    // starts preferring the catalogue default: the scanned unit is the truth.
+    line.unitName = unit;
+  }
+
+  /// True when a line is still the untouched draft `_LineDraft()` builds: no
+  /// item, the default quantity of 1, no price of its own and no discount.
+  ///
+  /// A scan reuses such a line instead of leaving an empty row above the one it
+  /// just filled. Anything an operator typed disqualifies it, so a scan can
+  /// never take over a line somebody was working on.
+  bool _lineIsEmpty(_LineDraft line) {
+    if (line.itemId != null ||
+        line.unitPriceEdited ||
+        line.taxRateEdited ||
+        line.discountKind != DiscountKind.none ||
+        line.costCenterId != null) {
+      return false;
+    }
+    final quantity = line.quantity.text.trim();
+    final price = line.unitPrice.text.trim();
+    return (quantity.isEmpty || quantity == '1') &&
+        (price.isEmpty || price == '0');
+  }
+
+  void _applyItemDefaults(_LineDraft line, Json item) {
+    // The visible blank rate means zero, not an omitted server default.
+    // Never replace the entered or blank rate when selecting an item.
+    final units = lineUnitsOf(item);
+    final scannedUnit = text(item, '_scannedUnitName');
+    if (scannedUnit.isNotEmpty &&
+        units.any((unit) => text(unit, 'unit') == scannedUnit)) {
+      line.unitName = scannedUnit;
+    } else if ((line.unitName == null || line.unitName!.isEmpty) &&
+        units.isNotEmpty) {
+      line.unitName = defaultLineUnit(item, isSales: widget.kind.isSales);
+    }
+    if (maySuggestUnitPrice(
+      line.unitPrice.text,
+      automatic: line.unitPriceAutomatic,
+      edited: line.unitPriceEdited,
+    )) {
+      final price = unitListPrice(
+        item,
+        line.unitName ?? text(item, 'unit'),
+        isSales: widget.kind.isSales,
+      );
+      line.unitPrice.text = formatQuantity(price, decimals: 4);
+      line.unitPriceAutomatic = true;
     }
   }
 
@@ -300,37 +680,52 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
     final landedCostCharges = <Json>[];
     var landedCost = Decimal.zero;
-    if (!widget.kind.isSales) {
-      for (final charge in _landedCosts) {
-        final description = charge.description.text.trim();
-        final rawAmount = charge.amount.text.trim();
-        final amount = Decimal.tryParse(rawAmount);
-        if (description.isEmpty &&
-            (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
-          continue;
-        }
-        if (description.isEmpty) {
-          showMessage(context, l10n.landedCostDescriptionRequired, error: true);
-          return;
-        }
-        if (amount == null) {
-          showMessage(context, l10n.landedCostAmountInvalid, error: true);
-          return;
-        }
-        if (amount < Decimal.zero) {
-          showMessage(context, l10n.landedCostCannotBeNegative, error: true);
-          return;
-        }
-        landedCost += amount;
-        landedCostCharges.add({'description': description, 'amount': amount.toString()});
+    for (final charge in _landedCosts) {
+      final description = charge.description.text.trim();
+      final rawAmount = charge.amount.text.trim();
+      final amount = Decimal.tryParse(rawAmount);
+      if (description.isEmpty &&
+          (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
+        continue;
       }
+      if (description.isEmpty) {
+        showMessage(context, l10n.landedCostDescriptionRequired, error: true);
+        return;
+      }
+      if (amount == null) {
+        showMessage(context, l10n.landedCostAmountInvalid, error: true);
+        return;
+      }
+      if (amount < Decimal.zero) {
+        showMessage(context, l10n.landedCostCannotBeNegative, error: true);
+        return;
+      }
+      final rateText = charge.taxRate.text.trim();
+      final rate = rateText.isEmpty ? Decimal.zero : Decimal.tryParse(rateText);
+      if (rate == null || rate < Decimal.zero || rate > Decimal.fromInt(100)) {
+        showMessage(
+          context,
+          Localizations.localeOf(context).languageCode == 'ar'
+              ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
+              : 'Charge tax rate must be between 0 and 100',
+          error: true,
+        );
+        return;
+      }
+      final roundedAmount = amount.round(scale: moneyScale);
+      landedCost += roundedAmount;
+      landedCostCharges.add({
+        'description': description,
+        'amount': roundedAmount.toString(),
+        if (rate != Decimal.zero) 'taxRate': rate.toString(),
+      });
     }
 
     final lines = <Json>[];
     for (final line in _lines) {
       final quantity = line.quantity.text.trim();
       final price = line.unitPrice.text.trim();
-      if (quantity.isEmpty || price.isEmpty) continue;
+      if (quantity.isEmpty || price.isEmpty || _lineIsEmpty(line)) continue;
       final parsed = Decimal.tryParse(quantity);
       if (parsed == null || parsed <= Decimal.zero) {
         showMessage(context, l10n.mustBePositive, error: true);
@@ -339,17 +734,39 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.itemId == null && line.description?.isNotEmpty == true)
+          'description': line.description,
+        if (line.unitName != null && line.unitName!.trim().isNotEmpty)
+          'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        // The form always shows a tax field: blank or whitespace is an
+        // explicit zero, whereas omitting the API field has distinct meaning.
+        'taxRate': line.taxRate.text.trim().isEmpty
+            ? '0'
+            : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),
-        if (line.discountKind == DiscountKind.percent && discountText.isNotEmpty)
+        if (line.discountKind == DiscountKind.percent &&
+            discountText.isNotEmpty)
           'discountPercent': discountText,
         if (line.discountKind == DiscountKind.amount && discountText.isNotEmpty)
           'discountAmount': discountText,
       });
+    }
+    if (widget.kind.isSales) {
+      lines.addAll(
+        landedCostCharges.map(
+          (charge) => {
+            'isAdditionalCharge': true,
+            'description': charge['description'],
+            'quantity': '1',
+            'unitPrice': charge['amount'],
+            'taxRate': charge['taxRate'] ?? '0',
+          },
+        ),
+      );
     }
     if (lines.isEmpty) {
       showMessage(context, l10n.addLineFirst, error: true);
@@ -379,12 +796,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         'lines': lines,
       };
       if (widget.invoiceId != null) {
-        await ref.read(apiClientProvider).put(
-          '${widget.kind.basePath}/${widget.invoiceId}',
-          body: body,
-        );
+        await ref
+            .read(apiClientProvider)
+            .put('${widget.kind.basePath}/${widget.invoiceId}', body: body);
       } else {
-        await ref.read(apiClientProvider).post(widget.kind.basePath, body: body);
+        await ref
+            .read(apiClientProvider)
+            .post(widget.kind.basePath, body: body);
       }
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) {
@@ -392,7 +810,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.invoiceSaved);
       }
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -401,7 +821,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final salesTaxPricing = widget.kind.isSales
+        ? ref.watch(_salesTaxPricingProvider)
+        : const AsyncData(false);
     final itemsAsync = ref.watch(activeItemsProvider);
+    // Fetching the thumbnails here keeps it next to the watch that supplies
+    // the catalogue; the loader itself does nothing on a rebuild with the
+    // same items.
+    _loadItemPictures(itemsAsync.value ?? const []);
     final partiesAsync = ref.watch(
       widget.kind.isSales ? activeCustomersProvider : activeSuppliersProvider,
     );
@@ -411,129 +838,246 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.invoiceId != null
-              ? l10n.editDraftInvoice
-              : widget.kind.isSales
-                  ? l10n.newSalesInvoice
-                  : l10n.newPurchaseInvoice,
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 16),
-            child: FilledButton.icon(
-              onPressed: _saving || _loadingExisting ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(l10n.save),
-            ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.invoiceId != null
+                ? l10n.editDraftInvoice
+                : widget.kind.isSales
+                ? l10n.newSalesInvoice
+                : l10n.newPurchaseInvoice,
           ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _Header(
-            key: ValueKey('${widget.invoiceId ?? 'new'}-$_loadingExisting'),
-            kind: widget.kind,
-            invoiceDate: _invoiceDate,
-            onDateChanged: (value) => setState(() => _invoiceDate = value),
-            partyId: _partyId,
-            onPartyChanged: (value) => setState(() => _partyId = value),
-            supplierReference: _supplierReference,
-            onSupplierReferenceChanged: (value) =>
-                setState(() => _supplierReference = value),
-            notes: _notes,
-            onNotesChanged: (value) => setState(() => _notes = value),
-            discountKind: _documentDiscountKind,
-            discountController: _documentDiscount,
-            onDiscountKindChanged: (value) =>
-                setState(() => _documentDiscountKind = value),
-            onDiscountChanged: () => setState(() {}),
-            parties: partiesAsync.value ?? const [],
-          ),
-          if (!widget.kind.isSales) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
-                TextButton.icon(
-                  onPressed: () => setState(() => _landedCosts.add(_LandedCostDraft())),
-                  icon: const Icon(Icons.add),
-                  label: Text(l10n.addLandedCost),
-                ),
-              ],
-            ),
-            Text(l10n.landedCostAllocationHint, style: Theme.of(context).textTheme.bodySmall),
-            for (var index = 0; index < _landedCosts.length; index++) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      key: ValueKey('landed-cost-description-$index'),
-                      controller: _landedCosts[index].description,
-                      decoration: InputDecoration(
-                        labelText: l10n.description,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      key: ValueKey('landed-cost-amount-$index'),
-                      controller: _landedCosts[index].amount,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: l10n.amount,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: l10n.removeLandedCost,
-                    onPressed: () => setState(() => _landedCosts.removeAt(index).dispose()),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
+          actions: [
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 16),
+              child: FilledButton.icon(
+                onPressed: _saving || _loadingExisting || _loadFailed
+                    ? null
+                    : _save,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(l10n.save),
               ),
-            ],
+            ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text(l10n.invoiceLines, style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => setState(() => _lines.add(_LineDraft())),
-                icon: const Icon(Icons.add),
-                label: Text(l10n.addLine),
+        ),
+        body: _loadFailed
+            ? Center(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: Text(l10n.retry),
+                  onPressed: () {
+                    setState(() {
+                      _loadFailed = false;
+                      _loadingExisting = true;
+                    });
+                    _loadExisting();
+                  },
+                ),
+              )
+            : IgnorePointer(
+                ignoring: _loadingExisting || _saving,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _Header(
+                      key: ValueKey(
+                        '${widget.invoiceId ?? 'new'}-$_loadingExisting',
+                      ),
+                      kind: widget.kind,
+                      invoiceDate: _invoiceDate,
+                      onDateChanged: (value) =>
+                          setState(() => _invoiceDate = value),
+                      partyId: _partyId,
+                      onPartyChanged: (value) =>
+                          setState(() => _partyId = value),
+                      supplierReference: _supplierReference,
+                      onSupplierReferenceChanged: (value) =>
+                          setState(() => _supplierReference = value),
+                      notes: _notes,
+                      onNotesChanged: (value) => setState(() => _notes = value),
+                      discountKind: _documentDiscountKind,
+                      discountController: _documentDiscount,
+                      onDiscountKindChanged: (value) =>
+                          setState(() => _documentDiscountKind = value),
+                      onDiscountChanged: () => setState(() {}),
+                      parties: partiesAsync.value ?? const [],
+                    ),
+                    ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.kind.isSales
+                                  ? (language == 'ar'
+                                        ? 'المصاريف الإضافية'
+                                        : 'Additional charges')
+                                  : l10n.landedCosts,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => setState(
+                              () => _landedCosts.add(_LandedCostDraft()),
+                            ),
+                            icon: const Icon(Icons.add),
+                            label: Text(
+                              widget.kind.isSales
+                                  ? (language == 'ar'
+                                        ? 'إضافة مصروف'
+                                        : 'Add charge')
+                                  : l10n.addLandedCost,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        widget.kind.isSales
+                            ? (language == 'ar'
+                                  ? 'أدخل قيمة المصروف قبل الضريبة ونسبة الضريبة لكل سطر.'
+                                  : 'Enter each charge before tax and set its own tax rate.')
+                            : l10n.landedCostAllocationHint,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      for (
+                        var index = 0;
+                        index < _landedCosts.length;
+                        index++
+                      ) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                key: ValueKey('landed-cost-description-$index'),
+                                controller: _landedCosts[index].description,
+                                decoration: InputDecoration(
+                                  labelText: l10n.description,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2,
+                              child: TextField(
+                                key: ValueKey('landed-cost-amount-$index'),
+                                controller: _landedCosts[index].amount,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText: l10n.amount,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                key: ValueKey('landed-cost-tax-$index'),
+                                controller: _landedCosts[index].taxRate,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText:
+                                      Localizations.localeOf(context)
+                                              .languageCode ==
+                                          'ar'
+                                      ? 'الضريبة %'
+                                      : 'Tax %',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: l10n.removeLandedCost,
+                              onPressed: () => setState(
+                                () => _landedCosts.removeAt(index).dispose(),
+                              ),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text(
+                          l10n.invoiceLines,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _lines.add(_LineDraft())),
+                          icon: const Icon(Icons.add),
+                          label: Text(l10n.addLine),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // A scanner types into a field and presses Enter. The box
+                    // sits directly above the lines it adds, so what a scan did
+                    // is visible without looking anywhere else on the screen.
+                    SizedBox(
+                      width: 420,
+                      child: BarcodeScanField(
+                        key: const ValueKey('invoice-barcode'),
+                        controller: _barcode,
+                        arabic:
+                            Localizations.localeOf(context).languageCode ==
+                            'ar',
+                        label:
+                            Localizations.localeOf(context).languageCode == 'ar'
+                            ? 'امسح الباركود لإضافة صنف'
+                            : 'Scan a barcode to add an item',
+                        enabled: !_saving && !_loadingExisting,
+                        onSubmitted: _scanInvoiceBarcode,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _LinesTable(
+                      kind: widget.kind,
+                      pricesIncludeTax: salesTaxPricing.value ?? false,
+                      lines: _lines,
+                      items: itemsAsync.value ?? const [],
+                      pictures: _itemPictures,
+                      costCenters: costCenters,
+                      language: language,
+                      onChanged: () => setState(() {}),
+                      onAdd: () => setState(() => _lines.add(_LineDraft())),
+                      onRemove: (index) =>
+                          setState(() => _lines.removeAt(index).dispose()),
+                      onItemDefaults: _applyItemDefaults,
+                    ),
+                    const SizedBox(height: 16),
+                    if (salesTaxPricing.hasValue)
+                      _Totals(
+                        totals: _totals(
+                          pricesIncludeTax: salesTaxPricing.requireValue,
+                        ),
+                        isSales: widget.kind.isSales,
+                      ),
+                  ],
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _LinesTable(
-            kind: widget.kind,
-            lines: _lines,
-            items: itemsAsync.value ?? const [],
-            costCenters: costCenters,
-            language: language,
-            onChanged: () => setState(() {}),
-            onAdd: () => setState(() => _lines.add(_LineDraft())),
-            onRemove: (index) => setState(() => _lines.removeAt(index).dispose()),
-            onItemDefaults: _applyItemDefaults,
-          ),
-          const SizedBox(height: 16),
-          _Totals(totals: _totals, showLandedCost: !widget.kind.isSales),
-        ],
       ),
     );
   }
@@ -576,6 +1120,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -589,8 +1134,7 @@ class _Header extends StatelessWidget {
                       final now = DateTime.now();
                       final picked = await showDatePicker(
                         context: context,
-                        initialDate:
-                            DateTime.tryParse(invoiceDate) ?? now,
+                        initialDate: DateTime.tryParse(invoiceDate) ?? now,
                         firstDate: DateTime(now.year - 5),
                         lastDate: DateTime(now.year + 5),
                       );
@@ -622,11 +1166,25 @@ class _Header extends StatelessWidget {
                       border: const OutlineInputBorder(),
                     ),
                     items: [
+                      // Preserve an existing draft selection if a source refresh
+                      // deactivates/removes it. It remains visible but cannot be
+                      // newly selected; the server still validates on save/post.
+                      if (partyId != null &&
+                          !parties.any((party) => text(party, 'id') == partyId))
+                        DropdownMenuItem(
+                          value: partyId,
+                          enabled: false,
+                          child: Text(
+                            Localizations.localeOf(context).languageCode == 'ar'
+                                ? 'الطرف المحدد غير متاح'
+                                : 'Selected party unavailable',
+                          ),
+                        ),
                       for (final party in parties)
                         DropdownMenuItem(
                           value: text(party, 'id'),
                           child: Text(
-                            '${text(party, 'code')} — ${text(party, 'nameEn')}',
+                            '${text(party, 'code')} — ${localizedRecordName(party, arabic: arabic)}',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -729,8 +1287,10 @@ String? _costCenterChoice(List<Json> centres, String? id) {
 class _LinesTable extends StatelessWidget {
   const _LinesTable({
     required this.kind,
+    required this.pricesIncludeTax,
     required this.lines,
     required this.items,
+    required this.pictures,
     required this.costCenters,
     required this.language,
     required this.onChanged,
@@ -740,8 +1300,12 @@ class _LinesTable extends StatelessWidget {
   });
 
   final InvoiceKind kind;
+  final bool pricesIncludeTax;
   final List<_LineDraft> lines;
   final List<Json> items;
+
+  /// Small pictures by item id; an absent entry means the item has none.
+  final Map<String, Uint8List> pictures;
   final List<Json> costCenters;
   final String language;
   final VoidCallback onChanged;
@@ -767,240 +1331,412 @@ class _LinesTable extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Expanded(
-                      flex: 3,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                        key: ValueKey('item-choice-${lines[index].itemId}'),
-                        initialValue: lines[index].itemId,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: kind.isSales
-                              ? l10n.item
-                              : l10n.item,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        items: [
-                          for (final item in items)
-                            DropdownMenuItem(
-                              value: text(item, 'id'),
-                              child: Text(
-                                '${text(item, 'code')} — ${text(item, 'nameEn')}',
-                                overflow: TextOverflow.ellipsis,
+                        Expanded(
+                          flex: 3,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonFormField<String>(
+                                  key: ValueKey(
+                                    'item-choice-${lines[index].itemId}',
+                                  ),
+                                  initialValue: lines[index].itemId,
+                                  isExpanded: true,
+                                  decoration: InputDecoration(
+                                    labelText: kind.isSales
+                                        ? l10n.item
+                                        : l10n.item,
+                                    isDense: true,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  items: [
+                                    for (final item in items)
+                                      DropdownMenuItem(
+                                        value: text(item, 'id'),
+                                        // The field is expanded, so the item
+                                        // is laid out within its width. The
+                                        // fixed thumbnail and the gap are
+                                        // subtracted first and the name takes
+                                        // what is left, ellipsised - without a
+                                        // flexible child this row overflows.
+                                        child: Row(
+                                          children: [
+                                            ItemThumbnail(
+                                              bytes: pictures[text(item, 'id')],
+                                              size: 24,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Text(
+                                                '${text(item, 'code')} — ${localizedRecordName(item, arabic: language == 'ar')}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) {
+                                    if (lines[index].itemId != value) {
+                                      lines[index].unitName = null;
+                                    }
+                                    lines[index].itemId = value;
+                                    final item = items.firstWhere(
+                                      (element) => text(element, 'id') == value,
+                                      orElse: () => const {},
+                                    );
+                                    if (item.isNotEmpty) {
+                                      onItemDefaults(lines[index], item);
+                                    }
+                                    onChanged();
+                                  },
+                                ),
                               ),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          lines[index].itemId = value;
-                          final item = items.firstWhere(
-                            (element) => text(element, 'id') == value,
-                            orElse: () => const {},
-                          );
-                          if (item.isNotEmpty) {
-                            onItemDefaults(lines[index], item);
-                          }
-                          onChanged();
-                        },
+                              IconButton(
+                                tooltip: l10n.selectItem,
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.search, size: 18),
+                                onPressed: () async {
+                                  final picked = await showItemPicker(
+                                    context,
+                                    title: l10n.selectItem,
+                                  );
+                                  if (picked == null) return;
+                                  final itemId = text(picked, 'id');
+                                  if (lines[index].itemId != itemId) {
+                                    lines[index].unitName = null;
+                                  }
+                                  lines[index].itemId = itemId;
+                                  onItemDefaults(lines[index], picked);
+                                  onChanged();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (costCenters.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _costCenterChoice(
+                                costCenters,
+                                lines[index].costCenterId,
+                              ),
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: l10n.costCenter,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              items: [
+                                DropdownMenuItem(
+                                  value: '',
+                                  child: Text(
+                                    l10n.noAllocation,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final center in costCenters)
+                                  DropdownMenuItem(
+                                    value: text(center, 'id'),
+                                    child: Text(
+                                      flag(center, 'isActive', fallback: true)
+                                          ? costCenterLabel(center, language)
+                                          : '${costCenterLabel(center, language)} '
+                                                '(${l10n.inactive})',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                lines[index].costCenterId =
+                                    value == null || value.isEmpty
+                                    ? null
+                                    : value;
+                                onChanged();
+                              },
                             ),
                           ),
-                          IconButton(
-                            tooltip: l10n.selectItem,
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.search, size: 18),
-                            onPressed: () async {
-                              final picked = await showItemPicker(
-                                context,
-                                title: l10n.selectItem,
+                        ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: Builder(
+                            builder: (context) {
+                              Json? selected;
+                              for (final candidate in items) {
+                                if (text(candidate, 'id') ==
+                                    lines[index].itemId) {
+                                  selected = candidate;
+                                  break;
+                                }
+                              }
+                              final units = lineUnitsOf(selected);
+                              final names = units
+                                  .map((unit) => text(unit, 'unit'))
+                                  .toList();
+                              final chosen =
+                                  names.contains(lines[index].unitName)
+                                  ? lines[index].unitName
+                                  : (names.isNotEmpty
+                                        ? defaultLineUnit(
+                                            selected!,
+                                            isSales: kind.isSales,
+                                          )
+                                        : null);
+                              return DropdownButtonFormField<String>(
+                                key: ValueKey('line-unit-$index'),
+                                initialValue: chosen,
+                                isExpanded: true,
+                                isDense: true,
+                                decoration: InputDecoration(
+                                  labelText: l10n.unit,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                items: [
+                                  for (final unit in units)
+                                    DropdownMenuItem<String>(
+                                      value: text(unit, 'unit'),
+                                      child: Text(
+                                        flag(unit, 'isBase', fallback: false)
+                                            ? text(unit, 'unit')
+                                            : '${text(unit, 'unit')} '
+                                                  '×${formatQuantity(asString(unit['factor']), decimals: 6)}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: units.isEmpty
+                                    ? null
+                                    : (value) {
+                                        if (value == null) return;
+                                        lines[index].unitName = value;
+                                        final line = lines[index];
+                                        if (maySuggestUnitPrice(
+                                          line.unitPrice.text,
+                                          automatic: line.unitPriceAutomatic,
+                                          edited: line.unitPriceEdited,
+                                        )) {
+                                          final price = selected == null
+                                              ? ''
+                                              : unitListPrice(
+                                                  selected,
+                                                  value,
+                                                  isSales: kind.isSales,
+                                                );
+                                          line.unitPrice.text = formatQuantity(
+                                            price,
+                                            decimals: 4,
+                                          );
+                                          line.unitPriceAutomatic = true;
+                                        }
+                                        onChanged();
+                                      },
                               );
-                              if (picked == null) return;
-                              lines[index].itemId = text(picked, 'id');
-                              onItemDefaults(lines[index], picked);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-quantity-$index'),
+                            controller: lines[index].quantity,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.quantity,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) => onChanged(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // What the quantity above means in base units. Shown,
+                        // never posted: the server multiplies by the factor
+                        // once, and a second multiplication here would store a
+                        // carton of 24 as 576 pieces. The line is absent for a
+                        // base-unit line, where the two numbers are identical.
+                        SizedBox(
+                          width: 150,
+                          child: _LineBaseEquivalent(
+                            key: ValueKey('line-base-equivalent-$index'),
+                            item: itemForInvoiceLine(
+                              items,
+                              lines[index].itemId,
+                            ),
+                            unitName: lines[index].unitName,
+                            quantity: lines[index].quantity,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-price-$index'),
+                            controller: lines[index].unitPrice,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.unitPrice,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              lines[index].unitPriceAutomatic = false;
+                              lines[index].unitPriceEdited = true;
                               onChanged();
                             },
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            key: ValueKey('line-tax-rate-$index'),
+                            controller: lines[index].taxRate,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: l10n.taxRate,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              lines[index].taxRateEdited = true;
+                              onChanged();
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 120,
+                          child: _LineTotal(
+                            line: lines[index],
+                            pricesIncludeTax: pricesIncludeTax,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: l10n.removeLine,
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: lines.length == 1
+                              ? null
+                              : () => onRemove(index),
+                        ),
+                      ],
+                    ),
+                    // The item, unit and quantity in one sentence, under the
+                    // controls that hold them. A scanned label changes three
+                    // fields at once, and this is the line that says which
+                    // three, in the reader's own language.
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 12,
+                        top: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _LineScanSummary(
+                              key: ValueKey('line-scan-summary-$index'),
+                              item: itemForInvoiceLine(
+                                items,
+                                lines[index].itemId,
+                              ),
+                              unitName: lines[index].unitName,
+                              quantity: lines[index].quantity,
+                              language: language,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    if (costCenters.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 3,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _costCenterChoice(
-                            costCenters,
-                            lines[index].costCenterId,
-                          ),
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: l10n.costCenter,
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                          ),
-                          items: [
-                            DropdownMenuItem(
-                              value: '',
-                              child: Text(
-                                l10n.noAllocation,
-                                overflow: TextOverflow.ellipsis,
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 12,
+                        top: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 170,
+                            child: DropdownButtonFormField<DiscountKind>(
+                              key: ValueKey('line-discount-$index'),
+                              initialValue: lines[index].discountKind,
+                              isDense: true,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: l10n.lineDiscount,
+                                border: const OutlineInputBorder(),
                               ),
+                              items: [
+                                for (final kind in DiscountKind.values)
+                                  DropdownMenuItem(
+                                    value: kind,
+                                    child: Text(
+                                      discountKindLabel(context, kind),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                lines[index].discountKind = value;
+                                if (value == DiscountKind.none) {
+                                  lines[index].discountValue.clear();
+                                }
+                                onChanged();
+                              },
                             ),
-                            for (final center in costCenters)
-                              DropdownMenuItem(
-                                value: text(center, 'id'),
-                                child: Text(
-                                  flag(center, 'isActive', fallback: true)
-                                      ? costCenterLabel(center, language)
-                                      : '${costCenterLabel(center, language)} '
-                                            '(${l10n.inactive})',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 150,
+                            child: TextFormField(
+                              key: ValueKey('line-discount-value-$index'),
+                              controller: lines[index].discountValue,
+                              enabled:
+                                  lines[index].discountKind !=
+                                  DiscountKind.none,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                labelText:
+                                    lines[index].discountKind ==
+                                        DiscountKind.percent
+                                    ? l10n.discountPercentValue
+                                    : l10n.discountAmountValue,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
                               ),
-                          ],
-                          onChanged: (value) {
-                            lines[index].costCenterId =
-                                value == null || value.isEmpty ? null : value;
-                            onChanged();
-                          },
-                        ),
+                              onChanged: (_) => onChanged(),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${l10n.beforeDiscount}: '
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).gross.toString())}'
+                              '  −  ${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.amount.toString())}'
+                              '  =  ${l10n.netLine}: '
+                              '${formatAmount(lines[index].pricing(pricesIncludeTax: pricesIncludeTax).discount.net.toString())}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        key: ValueKey('line-quantity-$index'),
-                        controller: lines[index].quantity,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.quantity,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        key: ValueKey('line-price-$index'),
-                        controller: lines[index].unitPrice,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.unitPrice,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: lines[index].taxRate,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: l10n.taxRate,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => onChanged(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 120,
-                      child: _LineTotal(line: lines[index]),
-                    ),
-                    IconButton(
-                      tooltip: l10n.removeLine,
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: lines.length == 1 ? null : () => onRemove(index),
                     ),
                   ],
                 ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 170,
-                        child: DropdownButtonFormField<DiscountKind>(
-                          key: ValueKey('line-discount-$index'),
-                          initialValue: lines[index].discountKind,
-                          isDense: true,
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: l10n.lineDiscount,
-                            border: const OutlineInputBorder(),
-                          ),
-                          items: [
-                            for (final kind in DiscountKind.values)
-                              DropdownMenuItem(
-                                value: kind,
-                                child: Text(discountKindLabel(context, kind)),
-                              ),
-                          ],
-                          onChanged: (value) {
-                            if (value == null) return;
-                            lines[index].discountKind = value;
-                            if (value == DiscountKind.none) {
-                              lines[index].discountValue.clear();
-                            }
-                            onChanged();
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 150,
-                        child: TextFormField(
-                          key: ValueKey('line-discount-value-$index'),
-                          controller: lines[index].discountValue,
-                          enabled:
-                              lines[index].discountKind != DiscountKind.none,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: lines[index].discountKind ==
-                                    DiscountKind.percent
-                                ? l10n.discountPercentValue
-                                : l10n.discountAmountValue,
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                          ),
-                          onChanged: (_) => onChanged(),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '${l10n.beforeDiscount}: '
-                          '${formatAmount(lines[index].pricing.gross.toString())}'
-                          '  −  ${formatAmount(lines[index].pricing.discount.amount.toString())}'
-                          '  =  ${l10n.netLine}: '
-                          '${formatAmount(lines[index].pricing.discount.net.toString())}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
           ],
         ),
       ),
@@ -1008,10 +1744,108 @@ class _LinesTable extends StatelessWidget {
   }
 }
 
+/// "مياه — 1 كرتونة": the item, the unit and the quantity, in the reader's
+/// language, in one glance.
+///
+/// Built only from what the row already holds, so it can never disagree with
+/// the fields above it. It listens to the quantity box, so it follows typing as
+/// well as a scan.
+class _LineScanSummary extends StatelessWidget {
+  const _LineScanSummary({
+    super.key,
+    required this.item,
+    required this.unitName,
+    required this.quantity,
+    required this.language,
+  });
+
+  final Json? item;
+  final String? unitName;
+  final TextEditingController quantity;
+  final String language;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: quantity,
+      builder: (context, value, _) {
+        final current = item;
+        final qty = value.text.trim();
+        if (current == null || qty.isEmpty) return const SizedBox.shrink();
+        final arabic = language == 'ar';
+        final name = arabic
+            ? text(current, 'nameAr', fallback: text(current, 'nameEn'))
+            : text(current, 'nameEn', fallback: text(current, 'nameAr'));
+        final unit = (unitName == null || unitName!.isEmpty)
+            ? text(current, 'unit')
+            : unitName!;
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          // A single sentence, so an Arabic reader and an English one both read
+          // it in the direction their locale gives them. The base equivalent is
+          // its own line further along the row, so it is not repeated here.
+          child: Text(
+            '$name — $qty $unit',
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The base-unit equivalent of a line's quantity, next to the box that holds
+/// the chosen unit's figure.
+///
+/// It listens to the quantity controller, so typing 2 next to "carton x24"
+/// immediately reads "= 48 piece" without a rebuild of the whole table. An
+/// item or unit without a known factor shows nothing rather than a guess: a
+/// wrong equivalent is worse than none, because the operator would trust it.
+class _LineBaseEquivalent extends StatelessWidget {
+  const _LineBaseEquivalent({
+    super.key,
+    required this.item,
+    required this.unitName,
+    required this.quantity,
+  });
+
+  final Json? item;
+  final String? unitName;
+  final TextEditingController quantity;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: quantity,
+      builder: (context, value, _) {
+        final equivalent = baseEquivalentLabel(
+          item: item,
+          unitName: unitName,
+          quantityText: value.text,
+        );
+        if (equivalent == null) {
+          return const SizedBox.shrink();
+        }
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            '= $equivalent',
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _LineTotal extends StatelessWidget {
-  const _LineTotal({required this.line});
+  const _LineTotal({required this.line, required this.pricesIncludeTax});
 
   final _LineDraft line;
+  final bool pricesIncludeTax;
 
   @override
   Widget build(BuildContext context) {
@@ -1027,7 +1861,7 @@ class _LineTotal extends StatelessWidget {
         child: Text('—', textAlign: TextAlign.end),
       );
     }
-    final pricing = line.pricing;
+    final pricing = line.pricing(pricesIncludeTax: pricesIncludeTax);
     final hasDiscount = pricing.discount.amount > Decimal.zero;
     return InputDecorator(
       decoration: const InputDecoration(
@@ -1043,9 +1877,8 @@ class _LineTotal extends StatelessWidget {
             Text(
               formatAmount(pricing.gross.toString()),
               textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    decoration: TextDecoration.lineThrough,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(decoration: TextDecoration.lineThrough),
             ),
             Text(
               '− ${formatAmount(pricing.discount.amount.toString())}',
@@ -1066,7 +1899,7 @@ class _LineTotal extends StatelessWidget {
 }
 
 class _Totals extends StatelessWidget {
-  const _Totals({required this.totals, required this.showLandedCost});
+  const _Totals({required this.totals, required this.isSales});
 
   final ({
     Decimal gross,
@@ -1076,9 +1909,10 @@ class _Totals extends StatelessWidget {
     Decimal tax,
     Decimal landedCost,
     Decimal total,
-  }) totals;
+  })
+  totals;
 
-  final bool showLandedCost;
+  final bool isSales;
 
   @override
   Widget build(BuildContext context) {
@@ -1117,7 +1951,15 @@ class _Totals extends StatelessWidget {
               row(l10n.invoiceDiscount, totals.invoiceDiscount),
             row(l10n.subTotal, totals.subTotal),
             row(l10n.taxAmount, totals.tax),
-            if (showLandedCost) row(l10n.landedCosts, totals.landedCost),
+            if (!isSales || totals.landedCost != Decimal.zero)
+              row(
+                isSales
+                    ? (Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'المصاريف الإضافية'
+                          : 'Additional charges')
+                    : l10n.landedCosts,
+                totals.landedCost,
+              ),
             const Divider(),
             row(l10n.totalAmount, totals.total, strong: true),
           ],

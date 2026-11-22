@@ -101,6 +101,21 @@ void main() {
       expect(container.read(importControllerProvider).readyToCommit, isFalse);
     });
 
+    test('changing blank item tax policy invalidates preview and a new file defaults to zero', () {
+      final controller = container.read(importControllerProvider.notifier);
+      controller.chooseKind(ImportKind.items);
+      controller.chooseFile(file('items.xlsx'));
+      controller.chooseMode(ImportMode.upsert);
+      controller.succeeded(report());
+      controller.chooseBlankTaxPolicy(false);
+      expect(container.read(importControllerProvider).clearBlankTaxRates, isFalse);
+      expect(container.read(importControllerProvider).readyToCommit, isFalse);
+      controller.succeeded(report());
+      controller.chooseFile(file('another.xlsx'));
+      expect(container.read(importControllerProvider).clearBlankTaxRates, isTrue);
+      expect(container.read(importControllerProvider).readyToCommit, isFalse);
+    });
+
     test('cancelling the file dialogue is not an error', () {
       final controller = container.read(importControllerProvider.notifier);
       controller.chooseFile(file('customers.xlsx'));

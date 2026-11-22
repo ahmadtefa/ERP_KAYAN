@@ -18,6 +18,7 @@ class AppConfig {
     required this.receiveTimeout,
     this.enableLogging = false,
     this.useSeedData = false,
+    this.embeddedLocalServer = false,
   });
 
   final AppEnvironment environment;
@@ -25,6 +26,8 @@ class AppConfig {
   final Duration connectTimeout;
   final Duration receiveTimeout;
   final bool enableLogging;
+  /// True only when the desktop shell started this installation's backend.
+  final bool embeddedLocalServer;
 
   /// When true the client may fall back to locally generated seed records so
   /// the UI can be exercised before a backend is available.
@@ -67,6 +70,7 @@ class AppConfig {
         receiveTimeout: const Duration(seconds: 30),
         enableLogging: false,
         useSeedData: false,
+        embeddedLocalServer: true,
       );
 
   /// Builds the runtime configuration from compile-time dart-defines.

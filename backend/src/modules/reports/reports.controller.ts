@@ -1,10 +1,15 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 
 import {
   AuthUser,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { mayReadCompanyAggregates } from '../../common/auth/company-aggregate-visibility';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
+import { CompanyAggregateVisibilityInterceptor } from '../../common/auth/company-aggregate-visibility';
+import { redactPriceFields } from '../../common/auth/price-redaction';
 import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
@@ -22,6 +27,8 @@ import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
+@UseGuards(BranchReportScopeGuard)
+@UseInterceptors(CompanyAggregateVisibilityInterceptor)
 export class ReportsController {
   constructor(
     private readonly service: ReportsService,
@@ -34,45 +41,52 @@ export class ReportsController {
   ) {}
 
   @Get('reconciliation-center')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.reconciliation-center.read')
   reconciliationCenterReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.reconciliationCenter.center(user.companyId, {
       asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
     });
   }
 
   @Get('receivables-reconciliation')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.receivables-reconciliation.read')
   receivablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
-    return this.reconciliation.receivables(user.companyId, { asOf: query.asOf ?? query.to });
+    return this.reconciliation.receivables(user.companyId, {
+      asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
+    });
   }
 
   @Get('payables-reconciliation')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.payables-reconciliation.read')
   payablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
-    return this.reconciliation.payables(user.companyId, { asOf: query.asOf ?? query.to });
+    return this.reconciliation.payables(user.companyId, {
+      asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
+    });
   }
 
   @Get('trial-balance')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.trial-balance.read')
   trialBalance(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.service.trialBalance(user.companyId, query);
   }
 
   @Get('profit-and-loss')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.profit-and-loss.read')
   profitAndLoss(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.service.profitAndLoss(user.companyId, query);
   }
 
   @Get('customer-balances')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.customer-balances.read')
   customerBalances(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.service.customerBalances(user.companyId, query);
   }
 
   @Get('supplier-balances')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.supplier-balances.read')
   supplierBalances(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.service.supplierBalances(user.companyId, query);
   }
@@ -80,31 +94,31 @@ export class ReportsController {
   // ------------------------------------------------- financial statements
 
   @Get('general-journal')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.general-journal.read')
   generalJournal(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.generalJournal(user.companyId, query);
   }
 
   @Get('general-ledger')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.general-ledger.read')
   generalLedger(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.generalLedger(user.companyId, query);
   }
 
   @Get('balance-sheet')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.balance-sheet.read')
   balanceSheet(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.balanceSheet(user.companyId, query);
   }
 
   @Get('equity-changes')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.equity-changes.read')
   equityChanges(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.equityChanges(user.companyId, query);
   }
 
   @Get('cash-flow')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.cash-flow.read')
   cashFlow(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.cashFlow(user.companyId, query);
   }
@@ -139,11 +153,14 @@ export class ReportsController {
     @CurrentUser() user: AuthUser,
     @Query() query: BudgetReportQueryDto,
   ) {
+    if (!mayReadCompanyAggregates(user)) {
+      throw new ForbiddenException('Company-wide budget figures are restricted to company and finance managers.');
+    }
     return this.budgets.report(user.companyId, query);
   }
 
   @Get('receivables-aging')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.receivables-aging.read')
   receivablesAging(@CurrentUser() user: AuthUser, @Query() query: AgingQueryDto) {
     return this.aging.receivables(user.companyId, {
       asOf: query.to,
@@ -153,7 +170,7 @@ export class ReportsController {
   }
 
   @Get('payables-aging')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.payables-aging.read')
   payablesAging(@CurrentUser() user: AuthUser, @Query() query: AgingQueryDto) {
     return this.aging.payables(user.companyId, {
       asOf: query.to,
@@ -163,7 +180,7 @@ export class ReportsController {
   }
 
   @Get('account-ledger/:accountId')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.account-ledger.read')
   accountLedger(
     @CurrentUser() user: AuthUser,
     @Param('accountId') accountId: string,
@@ -175,43 +192,47 @@ export class ReportsController {
   // ------------------------------------------------- operational reports
 
   @Get('sales')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.sales.read')
   salesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
-    return this.operations.sales(user.companyId, query);
+    return this.operations.sales(user.companyId, query, canReadCost(user)).then((result) =>
+      redactPriceFields(result, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'sale'),
+    );
   }
 
   @Get('purchases')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.purchases.read')
   purchasesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
-    return this.operations.purchases(user.companyId, query);
+    return this.operations.purchases(user.companyId, query).then((result) =>
+      redactPriceFields(result, { sale: true, purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'purchase'),
+    );
   }
 
   @Get('expenses')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.expenses.read')
   expensesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.accountMovement(user.companyId, 'EXPENSE', query);
   }
 
   @Get('income')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.income.read')
   incomeReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.accountMovement(user.companyId, 'REVENUE', query);
   }
 
   @Get('payments')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.payments.read')
   paymentsReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.payments(user.companyId, query);
   }
 
   @Get('cash')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.cash.read')
   cashReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
     return this.operations.cash(user.companyId, query);
   }
 
   @Get('outstanding-invoices')
-  @RequirePermissions('reports.read')
+  @RequirePermissions('reports.outstanding-invoices.read')
   outstandingInvoices(
     @CurrentUser() user: AuthUser,
     @Query() query: OperationsQueryDto,

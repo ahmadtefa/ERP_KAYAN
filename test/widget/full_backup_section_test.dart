@@ -18,8 +18,11 @@ class _FakeFullBackupService extends FullBackupService {
   _FakeFullBackupService() : super(Dio());
 
   Object? capabilitiesError;
+  bool deletionProtected = false;
+  bool? fullRestoreSupported;
   Completer<Map<String, dynamic>>? createGate;
   Object? createError;
+  Map<String, dynamic>? createResult;
   List<Map<String, dynamic>> files = const [];
   List<Map<String, dynamic>> filesAfterCreate = const [];
   bool createCalled = false;
@@ -28,7 +31,8 @@ class _FakeFullBackupService extends FullBackupService {
   Future<Map<String, dynamic>> capabilities() async {
     final error = capabilitiesError;
     if (error != null) throw error;
-    return const {'available': true};
+    return {'available': true, 'deletionProtected': deletionProtected,
+      if (fullRestoreSupported != null) 'fullRestoreSupported': fullRestoreSupported};
   }
 
   @override
@@ -42,7 +46,7 @@ class _FakeFullBackupService extends FullBackupService {
     if (gate != null) return gate.future;
     final error = createError;
     if (error != null) throw error;
-    return const {
+    return createResult ?? const {
       'file': {'name': 'kayan-full-test.dump'},
     };
   }
@@ -55,11 +59,65 @@ class _FakeFullBackupService extends FullBackupService {
   }) async => const {};
 }
 
-Future<void> _pump(WidgetTester tester, _FakeFullBackupService service) {
+/// The complete-backup half of the section has its own service. Its answers
+/// are what decide whether a restore control exists at all, so each test says
+/// explicitly what this machine claims it can do.
+class _FakeSystemBackupService extends SystemBackupService {
+  _FakeSystemBackupService() : super(Dio());
+
+  bool fullRestoreSupported = false;
+  List<String> fullRestoreReasons = const [
+    'the safety gate is not exercised in this test',
+  ];
+  Object? capabilitiesError;
+  List<Map<String, dynamic>> files = const [];
+
+  @override
+  Future<Map<String, dynamic>> capabilities() async {
+    final error = capabilitiesError;
+    if (error != null) throw error;
+    return {
+      'available': true,
+      'fullRestoreSupported': fullRestoreSupported,
+      'fullRestoreReasons': fullRestoreReasons,
+      'backupDirectory': '/var/kayan/backups',
+    };
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> list() async => files;
+
+  @override
+  Future<Map<String, dynamic>> status() async => const {
+    'maintenance': false,
+    'journal': {'unfinished': false},
+  };
+
+  @override
+  Future<Map<String, dynamic>> restore({
+    PickedFile? file,
+    String? fileName,
+    required bool confirm,
+    String confirmPhrase = 'RESTORE',
+  }) async => const {};
+}
+
+Future<void> _pump(
+  WidgetTester tester,
+  _FakeFullBackupService service, {
+  _FakeSystemBackupService? system,
+  Locale locale = const Locale('en'),
+}) {
   return tester.pumpWidget(
     ProviderScope(
-      overrides: [fullBackupServiceProvider.overrideWithValue(service)],
+      overrides: [
+        fullBackupServiceProvider.overrideWithValue(service),
+        systemBackupServiceProvider.overrideWithValue(
+          system ?? _FakeSystemBackupService(),
+        ),
+      ],
       child: wrapWithApp(
+        locale: locale,
         child: const Scaffold(body: SingleChildScrollView(child: FullBackupSection())),
       ),
     ),
@@ -67,6 +125,50 @@ Future<void> _pump(WidgetTester tester, _FakeFullBackupService service) {
 }
 
 void main() {
+  for (final locale in [const Locale('en'), const Locale('ar')]) {
+    for (final supported in [false, null]) {
+      testWidgets('unverified restore options are hidden in ${locale.languageCode}, capability $supported', (tester) async {
+        final service = _FakeFullBackupService()
+          ..fullRestoreSupported = supported
+          ..files = const [{'name': 'previous.dump', 'kind': 'full', 'sizeBytes': 20}];
+        await _pump(tester, service, locale: locale);
+        await tester.pumpAndSettle();
+        expect(find.textContaining(locale.languageCode == 'ar'
+            ? 'الاستعادة الكاملة متوقفة' : 'Full restore is paused'), findsOneWidget);
+        expect(find.byIcon(Icons.restore, skipOffstage: false), findsNothing);
+        expect(find.byIcon(Icons.download_outlined, skipOffstage: false), findsOneWidget);
+        expect(find.byType(FilledButton), findsWidgets);
+      });
+    }
+  }
+
+  testWidgets('a gate that cannot be asked hides the restore it used to offer', (
+    tester,
+  ) async {
+    final service = _FakeFullBackupService()
+      ..files = const [{'name': 'previous.dump', 'kind': 'full', 'sizeBytes': 20}];
+    final system = _FakeSystemBackupService()
+      ..fullRestoreSupported = true
+      ..files = const [
+        {'name': 'kayan-2026-11-19.kayanbackup', 'kind': 'complete', 'sizeBytes': 4096},
+      ];
+    await _pump(tester, service, system: system);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.restore), findsWidgets);
+
+    // The machine stops answering the safety question: the restore control
+    // must disappear rather than stay as a button that cannot succeed.
+    system.capabilitiesError = DioException(
+      requestOptions: RequestOptions(path: '/backup/complete/capabilities'),
+      type: DioExceptionType.connectionError,
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Refresh status'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.restore, skipOffstage: false), findsNothing);
+    expect(find.textContaining('Full restore is paused'), findsOneWidget);
+  });
+
   testWidgets(
     'a failed load ends in an error and a retry button, not an endless bar',
     (tester) async {
@@ -85,7 +187,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(find.textContaining('program administrator'), findsOneWidget);
+      expect(find.text('You do not have permission to do this.'), findsOneWidget);
+      expect(find.textContaining('program administrator'), findsNothing);
       expect(find.widgetWithText(OutlinedButton, 'Refresh status'), findsOneWidget);
       // The reported bug: this state used to leave «Refresh status» as the
       // only button in the section. The create action itself must be on
@@ -146,8 +249,26 @@ void main() {
     expect(find.textContaining('kayan-full-test.dump'), findsWidgets);
   });
 
+  for (final locale in [const Locale('en'), const Locale('ar')]) {
+    testWidgets('database-only backup does not claim complete success in ${locale.languageCode}', (tester) async {
+      final service = _FakeFullBackupService()..filesAfterCreate = const [
+        {'name':'kayan-full-test.dump', 'kind':'full', 'sizeBytes':2048},
+      ];
+      await _pump(tester, service, locale: locale);
+      await tester.pumpAndSettle();
+      final label = locale.languageCode == 'ar' ? 'إنشاء نسخة احتياطية الآن' : 'Create backup now';
+      await tester.tap(find.widgetWithText(FilledButton,label));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(locale.languageCode == 'ar'
+        ? 'لم تُحفظ الملفات الخارجية والترخيص' : 'External files and the licence are not included'),findsOneWidget);
+      expect(find.textContaining(locale.languageCode == 'ar'
+        ? 'أرشيف قاعدة البيانات فقط' : 'Database archive only'),findsWidgets);
+      expect(find.textContaining(locale.languageCode == 'ar' ? 'تم الحفظ بنجاح' : 'Saved successfully'),findsNothing);
+    });
+  }
+
   testWidgets(
-    'a create request that errors after the server finished still reports the new file',
+    'a timeout does not claim a concurrently created file as this request',
     (tester) async {
       final service = _FakeFullBackupService()
         ..createError = DioException(
@@ -166,9 +287,37 @@ void main() {
 
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(find.textContaining('kayan-full-late.dump'), findsWidgets);
-      expect(find.textContaining('Saved successfully'), findsWidgets);
+      expect(find.textContaining('Saved successfully'), findsNothing);
+      expect(find.textContaining('outcome could not be confirmed'), findsOneWidget);
     },
   );
+
+  testWidgets('protected backups show why deletion is unavailable', (tester) async {
+    final service = _FakeFullBackupService()
+      ..deletionProtected = true
+      ..files = const [
+        {'name': 'old.dump', 'kind': 'full', 'sizeBytes': 1024},
+      ];
+    await _pump(tester, service);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('paused on this machine'), findsOneWidget);
+    final deleteButton = find.ancestor(
+      of: find.byIcon(Icons.delete_outline, skipOffstage: false),
+      matching: find.byType(IconButton, skipOffstage: false),
+    );
+    expect(deleteButton, findsOneWidget);
+    expect(tester.widget<IconButton>(deleteButton).onPressed, isNull);
+  });
+
+  testWidgets('a success response without a file is not reported as saved', (tester) async {
+    final service = _FakeFullBackupService()..createResult = {};
+    await _pump(tester, service);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Saved successfully'), findsNothing);
+    expect(find.textContaining('outcome could not be confirmed'), findsOneWidget);
+  });
 
   testWidgets('a create that truly fails ends busy with a visible error', (
     tester,
@@ -191,11 +340,43 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LinearProgressIndicator), findsNothing);
-    expect(find.textContaining('could not be created'), findsOneWidget);
+    expect(find.textContaining('The server failed while handling the request'), findsOneWidget);
+    expect(find.textContaining('The request outcome could not be confirmed'), findsOneWidget);
+    expect(find.textContaining('The backup could not be created'), findsNothing);
     // The button is usable again: busy was reset.
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Create backup now'),
     );
     expect(button.onPressed, isNotNull);
   });
+
+  testWidgets(
+    'the section warns that a restore replaces every company, in both languages',
+    (tester) async {
+      for (final locale in [const Locale('en'), const Locale('ar')]) {
+        await _pump(tester, _FakeFullBackupService(), locale: locale);
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining(
+            locale.languageCode == 'ar' ? 'جميع الشركات' : 'every company',
+          ),
+          findsWidgets,
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'the closure reasons are printed, not hidden behind a dead button',
+    (tester) async {
+      final system = _FakeSystemBackupService()
+        ..fullRestoreSupported = false
+        ..fullRestoreReasons = const ['postgresql-tools: pg_restore was not found'];
+      await _pump(tester, _FakeFullBackupService(), system: system);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('postgresql-tools'), findsOneWidget);
+      expect(find.byIcon(Icons.restore, skipOffstage: false), findsNothing);
+    },
+  );
 }

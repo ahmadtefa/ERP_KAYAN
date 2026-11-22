@@ -1,13 +1,24 @@
-import 'dart:async';
-
 import 'package:file_selector/file_selector.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'download_request.dart';
 import 'picked_file.dart';
 
 /// Opens a report, print view, or browser-served API file in the system browser.
-void openInNewTab(String url) {
-  unawaited(launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication));
+///
+/// Returns only once the launch has been answered, and throws when no browser
+/// started - the same contract as the desktop stub the build actually uses.
+Future<void> openInNewTab(String url) async {
+  final launched = await launchUrl(
+    Uri.parse(url),
+    mode: LaunchMode.externalApplication,
+  );
+  if (!launched) {
+    throw DownloadFailure(
+      'No web browser could be opened on this computer, so the page cannot '
+      'be shown. Install a browser, or open the address by hand.',
+    );
+  }
 }
 
 /// Uses the native file picker on Windows/macOS/Linux and reads only the file

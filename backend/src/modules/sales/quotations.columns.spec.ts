@@ -121,6 +121,47 @@ describe('QuotationsService subject and column layout', () => {
     ]);
   });
 
+  it('preserves the issued tax and exact totals in a new revision', async () => {
+    const { instance, tx, prisma } = service();
+    const source = {
+      id: 'issued-1', branchId: BRANCH_ID, status: 'SENT', quotationNumber: 'QT-OLD',
+      customerId: CUSTOMER_ID, currency: 'EGP', version: 1, validUntil: null,
+      notes: null, terms: null, subject: null, columns: null, design: {header: {color: '#123456'}},
+      discountType: null, discountPercent: new Prisma.Decimal(0), discountAmount: new Prisma.Decimal(0),
+      subTotal: new Prisma.Decimal(100), discountTotal: new Prisma.Decimal(0),
+      taxRate: new Prisma.Decimal(14), taxAmount: new Prisma.Decimal(14), totalAmount: new Prisma.Decimal(114),
+      managerName: null, responsibleName: null, responsiblePhone: null, showTaxId: true,
+      tables: [],
+    };
+    prisma.quotation.findFirst.mockResolvedValue(source);
+    await instance.revise(COMPANY_ID, BRANCH_ID, USER_ID, source.id);
+    const data = tx.quotation.create.mock.calls[0][0].data as Record<string, any>;
+    expect(data.design).toEqual(source.design);
+    expect(data.taxRate.toFixed(4)).toBe('14.0000');
+    expect(data.taxAmount.toFixed(4)).toBe('14.0000');
+    expect(data.totalAmount.toFixed(4)).toBe('114.0000');
+    expect(data.subTotal.plus(data.taxAmount).minus(data.discountTotal).toFixed(4))
+      .toBe(data.totalAmount.toFixed(4));
+  });
+
+  it.each([
+    ['NaN', '100'], ['Infinity', '100'], ['1', 'Infinity'], ['1', 'NaN'], ['0.00001', '100'],
+  ])('rejects non-finite or zero-after-rounding quantity/price (%s, %s)', async (quantity, unitPrice) => {
+    const {instance,tx} = service();
+    await expect(instance.create(COMPANY_ID, BRANCH_ID, USER_ID, baseDto({
+      tables:[{title:'Main', lines:[{description:'Line', quantity, unitPrice}]}],
+    }) as never)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.quotation.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts the smallest positive quantity representable by the quotation line', async () => {
+    const {instance,tx} = service();
+    await instance.create(COMPANY_ID, BRANCH_ID, USER_ID, baseDto({
+      tables:[{title:'Main', lines:[{description:'Line', quantity:'0.0001', unitPrice:'100'}]}],
+    }) as never);
+    expect(tx.quotation.create).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a layout that lists the same column twice', async () => {
     const { instance } = service();
     await expect(

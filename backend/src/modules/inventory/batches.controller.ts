@@ -1,0 +1,341 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+
+import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
+import {
+  assertTransferAccess,
+  assertWarehouseAccess,
+  grantsOf,
+} from '../../common/warehouse/warehouse-access';
+import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  BatchesService,
+  IssueInput,
+  ReceiveLotInput,
+  TransferInput,
+  WriteOffInput,
+} from './batches.service';
+
+/// Who may ask the expiry screen to scan again.
+///
+/// Reading alerts is `inventory.batches.read`; causing a scan is a management
+/// act, the same grant the notification centre already requires to run the
+/// scanner by hand. Nobody gets a new permission for a button.
+const EXPIRY_ALERT_SCAN_PERMISSION = 'notifications.manage';
+
+class ReceiveLotDto implements ReceiveLotInput {
+  @IsString() branchId!: string;
+  @IsString() warehouseId!: string;
+  @IsString() itemId!: string;
+  @IsOptional() @IsString() batchNumber?: string | null;
+  @IsOptional() @IsString() productionDate?: string | null;
+  @IsOptional() @IsString() expiryDate?: string | null;
+  @IsNumber() quantity!: number;
+  @IsNumber() @Min(0) unitCost!: number;
+  @IsOptional() @IsString() storageLocationId?: string | null;
+  @IsOptional() @IsString() sourceType?: string | null;
+  @IsOptional() @IsString() sourceId?: string | null;
+  @IsOptional() @IsString() sourceNumber?: string | null;
+  @IsOptional() @IsString() notes?: string | null;
+  @IsOptional() @IsString() documentDate?: string | null;
+}
+
+class IssueDto implements IssueInput {
+  @IsString() branchId!: string;
+  @IsString() warehouseId!: string;
+  @IsString() itemId!: string;
+  @IsNumber() quantity!: number;
+  @IsOptional() @IsString() batchId?: string | null;
+  /// Never trusted on its own. The controller recomputes the real approval
+  /// from the caller's permissions and overwrites whatever arrived here; a
+  /// body that sets it to true without the permission changes nothing.
+  @IsOptional() @IsBoolean() allowExpired?: boolean;
+  @IsOptional() @IsString() reason?: string | null;
+  @IsOptional() @IsString() storageLocationId?: string | null;
+  @IsOptional() @IsString() referenceType?: string;
+  @IsOptional() @IsString() referenceId?: string | null;
+  @IsOptional() @IsString() referenceNumber?: string | null;
+  @IsOptional() @IsString() documentDate?: string | null;
+}
+
+class WriteOffDto implements WriteOffInput {
+  @IsString() branchId!: string;
+  @IsString() warehouseId!: string;
+  @IsString() itemId!: string;
+  @IsString() batchId!: string;
+  @IsNumber() quantity!: number;
+  @IsString() reason!: string;
+  @IsOptional() @IsString() documentDate?: string | null;
+}
+
+class TransferDto implements TransferInput {
+  @IsString() branchId!: string;
+  @IsString() fromWarehouseId!: string;
+  @IsString() toWarehouseId!: string;
+  @IsString() itemId!: string;
+  @IsString() batchId!: string;
+  @IsNumber() quantity!: number;
+  @IsOptional() @IsString() reason?: string | null;
+  @IsOptional() @IsString() documentDate?: string | null;
+}
+
+/**
+ * Lots: the goods themselves, not the totals.
+ *
+ * A lot is what makes "which one expires first?" and "where did this batch
+ * come from?" answerable. Receiving and issuing are stock movements, so they
+ * are guarded by the same permissions that guard the stock card; writing off
+ * has its own permission because destroying goods is a decision, not a
+ * clerical act; moving a lot between warehouses is a transfer.
+ */
+@Controller('inventory/batches')
+export class BatchesController {
+  constructor(
+    private readonly service: BatchesService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  @Get()
+  @RequirePermissions('inventory.batches.read')
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query()
+    query: {
+      itemId?: string;
+      warehouseId?: string;
+      status?: string;
+      expiringInDays?: string;
+      includeEmpty?: string;
+      page?: string;
+      pageSize?: string;
+    },
+  ) {
+    return this.service.list(
+      user.companyId,
+      {
+        itemId: query.itemId,
+        warehouseId: query.warehouseId,
+        status: query.status,
+        expiringInDays:
+          query.expiringInDays === undefined ? undefined : Number(query.expiringInDays),
+        includeEmpty: query.includeEmpty === 'true',
+        page: query.page ? Number(query.page) : undefined,
+        pageSize: query.pageSize ? Number(query.pageSize) : undefined,
+      },
+      warehouseScopeOf(user),
+      // A person with warehouse grants sees the lots of their own shelves and
+      // no others - in the list, the expiry report and the trace alike.
+      grantsOf(user),
+    ).then((result) => this.redactBatchCosts(user, result));
+  }
+
+  @Get('expiry-report')
+  @RequirePermissions('inventory.batches.read')
+  expiryReport(
+    @CurrentUser() user: AuthUser,
+    @Query()
+    query: {
+      band?: string;
+      warehouseId?: string;
+      itemId?: string;
+      categoryId?: string;
+      asOf?: string;
+      days?: string;
+    },
+  ) {
+    const grants = grantsOf(user);
+    const visibleGrants = grants?.filter((grant) =>
+      query.warehouseId
+        ? grant.warehouseId === query.warehouseId && grant.canView
+        : grant.canView,
+    );
+    const mayReadCosts =
+      canReadCost(user) && (grants === null || (visibleGrants ?? []).every((grant) => grant.canSeeCost));
+    return this.service.expiryReport(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    ).then((report) => {
+      if (mayReadCosts) return report;
+      const hideCosts = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(hideCosts);
+        if (value === null || typeof value !== 'object') return value;
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => key !== 'unitCost' && key !== 'value' && key !== 'atRisk')
+            .map(([key, child]) => [key, hideCosts(child)]),
+        );
+      };
+      return hideCosts(report);
+    });
+  }
+
+  /// What the expiry-alert screen lists: the expired lots, the ones about to
+  /// expire and the ones that are still good, each with its shelf and the alert
+  /// standing against it.
+  ///
+  /// Registered before `:id` for the same reason `expiry-report` is: Nest
+  /// matches in declaration order, and `GET :id` would answer `alerts` as a lot
+  /// id. `state` asks the notification centre what was raised; `scan` asks the
+  /// scanner to look again, which needs the management grant and is how a
+  /// person presses "refresh" and sees a genuinely new answer.
+  @Get('alerts')
+  @RequirePermissions('inventory.batches.read')
+  async alerts(
+    @CurrentUser() user: AuthUser,
+    @Query()
+    query: {
+      warehouseId?: string;
+      itemId?: string;
+      asOf?: string;
+      days?: string;
+      scan?: string;
+    },
+  ) {
+    const mayScan = user.permissions?.includes(EXPIRY_ALERT_SCAN_PERMISSION) ?? false;
+    const shouldScan = query.scan === 'true' && mayScan;
+    if (shouldScan) {
+      // A manual scan must never turn a readable screen into an error page: if
+      // the scanner fails, the list below is still true and still useful.
+      try {
+        await this.notifications.scanStock(user.companyId);
+      } catch {
+        // Deliberately swallowed; the read that follows is the answer.
+      }
+    }
+
+    const grants = grantsOf(user);
+    const report = await this.service.expiryAlerts(
+      user.companyId,
+      query,
+      warehouseScopeOf(user),
+      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
+    const states = await this.service.expiryAlertStates(
+      user.companyId,
+      report.items.map((row) => row.id),
+    );
+
+    const withState = {
+      ...report,
+      items: report.items.map((row) => ({
+        ...row,
+        // `alert` is what the notification centre holds right now, not what
+        // this screen guessed from the dates: OPEN means it was raised and
+        // nobody has read it, null means this lot is not alerting at all.
+        alert: states.get(row.id) ?? null,
+      })),
+    };
+    return this.redactBatchCosts(user, withState);
+  }
+
+  @Get(':id/trace')
+  @RequirePermissions('inventory.batches.read')
+  trace(@CurrentUser() user: AuthUser, @Param('id') id: string) {    return this.service.trace(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    ).then((result) => this.redactBatchCosts(user, result));
+  }
+
+  @Get(':id')
+  @RequirePermissions('inventory.batches.read')
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.findOne(
+      user.companyId,
+      id,
+      warehouseScopeOf(user),
+      grantsOf(user),
+    ).then((result) => this.redactBatchCosts(user, result));
+  }
+
+  private redactBatchCosts(user: AuthUser, result: unknown): unknown {
+    const grants = grantsOf(user);
+    const mayRead = (warehouseId?: string): boolean =>
+      canReadCost(user) &&
+      (grants === null ||
+        Boolean(warehouseId && grants.some(
+          (grant) => grant.warehouseId === warehouseId && grant.canSeeCost,
+        )));
+    const hide = (value: unknown, inheritedAccess: boolean): unknown => {
+      if (Array.isArray(value)) return value.map((entry) => hide(entry, inheritedAccess));
+      if (value === null || typeof value !== 'object') return value;
+      const row = value as Record<string, unknown>;
+      const warehouse = row.warehouse as Record<string, unknown> | null | undefined;
+      const warehouseId =
+        typeof row.warehouseId === 'string'
+          ? row.warehouseId
+          : typeof warehouse?.id === 'string'
+            ? warehouse.id
+            : undefined;
+      const allowed = warehouseId ? mayRead(warehouseId) : inheritedAccess;
+      const costFields = new Set(['unitCost', 'totalCost', 'value', 'averageCost']);
+      return Object.fromEntries(
+        Object.entries(row)
+          .filter(([key]) => allowed || !costFields.has(key))
+          .map(([key, child]) => [key, hide(child, allowed)]),
+      );
+    };
+    return hide(result, grants === null && canReadCost(user));
+  }
+
+  @Post('receive')
+  @RequirePermissions('inventory.batches.receive')
+  receive(@CurrentUser() user: AuthUser, @Body() dto: ReceiveLotDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'receive');
+    return this.service.receive(user.companyId, user.userId, dto, warehouseScopeOf(user));
+  }
+
+  @Post('issue')
+  @RequirePermissions('inventory.batches.issue')
+  issue(@CurrentUser() user: AuthUser, @Body() dto: IssueDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'issue');
+    // The approval is built here, from the permission on the authenticated
+    // user - never from the request body. A caller without
+    // `inventory.batches.expired.issue` cannot obtain it by sending
+    // `allowExpired: true`; the flag is overwritten with what the token says.
+    const mayIssueExpired =
+      user.isSuperAdmin ||
+      (user.permissions ?? []).includes('inventory.batches.expired.issue');
+    const reason = (dto.reason ?? '').trim();
+    return this.service.issue(
+      user.companyId,
+      user.userId,
+      {
+        ...dto,
+        ...(mayIssueExpired
+          ? {
+              allowExpired: true,
+              expiredApproval: {
+                userId: user.userId,
+                reason:
+                  reason.length >= 3
+                    ? reason
+                    : 'Approved issue of expired stock (no reason supplied on the request)',
+              },
+            }
+          : { allowExpired: false, expiredApproval: undefined }),
+      },
+      warehouseScopeOf(user),
+    );
+  }
+
+  @Post('write-off')
+  @RequirePermissions('inventory.batches.writeoff')
+  writeOff(@CurrentUser() user: AuthUser, @Body() dto: WriteOffDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'issue');
+    return this.service.writeOff(user.companyId, user.userId, dto, warehouseScopeOf(user));
+  }
+
+  @Post('transfer')
+  @RequirePermissions('inventory.batches.transfer')
+  transfer(@CurrentUser() user: AuthUser, @Body() dto: TransferDto) {
+    assertTransferAccess(user, dto.fromWarehouseId, dto.toWarehouseId);
+    return this.service.transfer(user.companyId, user.userId, dto, warehouseScopeOf(user));
+  }
+}

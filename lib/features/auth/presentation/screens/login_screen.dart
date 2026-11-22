@@ -5,8 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/backend/company_setup_data.dart';
+import '../../../../core/backend/setup_state.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../core/json/json_utils.dart';
 import '../../../../core/storage/credentials_store.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/field_option.dart';
+import '../../../../shared/widgets/searchable_select_field.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
@@ -44,6 +49,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// can sign in. The setup screen answers that before the sign-in form can
   /// do anything useful.
   bool? _setupNeeded;
+  bool _setupRecoveryRequired = false;
   bool _setupBusy = false;
   String? _setupError;
 
@@ -58,7 +64,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final status = await ref.read(apiClientProvider).get('/setup/status');
       if (!mounted) return;
-      setState(() => _setupNeeded = status['needsSetup'] == true);
+      setState(() {
+        _setupRecoveryRequired = setupRequiresRecovery(
+          healthValue: status['recoveryRequired'],
+        );
+        _setupNeeded = !_setupRecoveryRequired && status['needsSetup'] == true;
+      });
     } catch (_) {
       // The server being unreachable is the sign-in form's own error to
       // report; from here, just behave as though setup is not needed.
@@ -152,6 +163,215 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _changePassword() async {
+    final List<Json> companyOptions;
+    try {
+      companyOptions = await ref.read(apiClientProvider).getList('/companies/options');
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
+    }
+    if (!mounted) return;
+    if (companyOptions.isEmpty) {
+      showAppPlainError(
+        context,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'لا توجد شركة نشطة للاختيار.'
+            : 'There are no active companies to choose from.',
+      );
+      return;
+    }
+
+    final username = TextEditingController(text: _username.text.trim());
+    String? selectedCompanyCode = companyOptions.length == 1
+        ? text(companyOptions.first, 'code')
+        : null;
+    final currentPassword = TextEditingController();
+    final newPassword = TextEditingController();
+    final confirmPassword = TextEditingController();
+    var showCurrent = false;
+    var showNew = false;
+    var showConfirm = false;
+    var saving = false;
+    String? error;
+
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final arabic = Localizations.localeOf(context).languageCode == 'ar';
+          return AlertDialog(
+            title: Text(context.l10n.changePassword),
+            content: SizedBox(
+              width: 460,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: username,
+                      enabled: !saving,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(labelText: context.l10n.username),
+                    ),
+                    SearchableSelectField(
+                      value: selectedCompanyCode,
+                      enabled: !saving,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'الشركة' : 'Company',
+                      ),
+                      options: [
+                        for (final company in companyOptions)
+                          FieldOption(
+                            text(company, 'code'),
+                            '${arabic ? text(company, 'nameAr') : text(company, 'nameEn')} · ${text(company, 'code')}',
+                          ),
+                      ],
+                      validator: (value) => value == null || value.isEmpty
+                          ? (arabic ? 'اختر الشركة.' : 'Choose a company.')
+                          : null,
+                      onChanged: (value) => setDialogState(
+                        () => selectedCompanyCode = value,
+                      ),
+                    ),
+                    TextField(
+                      controller: currentPassword,
+                      enabled: !saving,
+                      obscureText: !showCurrent,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'كلمة المرور الحالية' : 'Current password',
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showCurrent = !showCurrent),
+                          icon: Icon(showCurrent ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    TextField(
+                      controller: newPassword,
+                      enabled: !saving,
+                      obscureText: !showNew,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'كلمة المرور الجديدة' : 'New password',
+                        helperText: context.l10n.passwordHelper,
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showNew = !showNew),
+                          icon: Icon(showNew ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    TextField(
+                      controller: confirmPassword,
+                      enabled: !saving,
+                      obscureText: !showConfirm,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'تأكيد كلمة المرور الجديدة' : 'Confirm new password',
+                        suffixIcon: IconButton(
+                          tooltip: context.l10n.password,
+                          onPressed: saving ? null : () => setDialogState(() => showConfirm = !showConfirm),
+                          icon: Icon(showConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                        ),
+                      ),
+                    ),
+                    if (error != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _ErrorBanner(message: error!),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(dialogContext).pop(false),
+                child: Text(context.l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        final currentUser = username.text.trim();
+                        final company = selectedCompanyCode?.trim() ?? '';
+                        final current = currentPassword.text;
+                        final next = newPassword.text;
+                        if (currentUser.length < 3 || company.isEmpty || current.isEmpty) {
+                          setDialogState(() => error = arabic
+                              ? 'أكمل اسم المستخدم وكود الشركة وكلمة المرور الحالية.'
+                              : 'Enter the username, company code, and current password.');
+                          return;
+                        }
+                        if (next.length < 12 || next.length > 200) {
+                          setDialogState(() => error = context.l10n.passwordHelper);
+                          return;
+                        }
+                        if (next != confirmPassword.text) {
+                          setDialogState(() => error = arabic
+                              ? 'كلمتا المرور الجديدتان غير متطابقتين.'
+                              : 'The new passwords do not match.');
+                          return;
+                        }
+                        setDialogState(() {
+                          saving = true;
+                          error = null;
+                        });
+                        try {
+                          await ref.read(apiClientProvider).post(
+                            '/auth/change-password',
+                            body: {
+                              'username': currentUser,
+                              'companyCode': company,
+                              'currentPassword': current,
+                              'newPassword': next,
+                              'confirmPassword': confirmPassword.text,
+                            },
+                          );
+                          await ref.read(tokenStoreProvider).clear();
+                          if (_remember) {
+                            await _credentials.save(
+                              remember: true,
+                              username: currentUser,
+                              password: next,
+                            );
+                          } else {
+                            await _credentials.clear();
+                          }
+                          if (dialogContext.mounted) Navigator.of(dialogContext).pop(true);
+                        } catch (failure) {
+                          if (!dialogContext.mounted) return;
+                          setDialogState(() {
+                            saving = false;
+                            error = localizedError(context, failure);
+                          });
+                        }
+                      },
+                child: saving
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(context.l10n.changePassword),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    final changedUsername = changed == true ? username.text : null;
+    username.dispose();
+    currentPassword.dispose();
+    newPassword.dispose();
+    confirmPassword.dispose();
+
+    if (changedUsername != null && mounted) {
+      _username.text = changedUsername;
+      _password.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.passwordChanged)),
+      );
+    }
+  }
+
   Future<void> _submit() async {
     if (_busy) return;
     setState(() => _error = null);
@@ -201,6 +421,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+
+    if (_setupRecoveryRequired) {
+      final message = Localizations.localeOf(context).languageCode == 'ar'
+          ? setupRecoveryMessageAr
+          : setupRecoveryMessageEn;
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xxl),
+              child: Text(message, textAlign: TextAlign.center),
+            ),
+          ),
+        ),
+      );
+    }
 
     if (_setupNeeded == true) {
       // First run on this installation: the company is set up here, before
@@ -252,6 +488,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ? null
           : (value) => setState(() => _remember = value),
       onClearSaved: _busy ? null : _clearSaved,
+      onChangePassword: _busy ? null : _changePassword,
       onSubmit: _busy ? null : _submit,
     );
 
@@ -327,6 +564,7 @@ class _SignInForm extends StatelessWidget {
     required this.onToggleObscure,
     required this.onToggleRemember,
     required this.onClearSaved,
+    required this.onChangePassword,
     required this.onSubmit,
   });
 
@@ -340,6 +578,7 @@ class _SignInForm extends StatelessWidget {
   final VoidCallback onToggleObscure;
   final ValueChanged<bool>? onToggleRemember;
   final VoidCallback? onClearSaved;
+  final VoidCallback? onChangePassword;
   final VoidCallback? onSubmit;
 
   @override
@@ -443,6 +682,12 @@ class _SignInForm extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Text(l10n.signIn),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextButton.icon(
+            onPressed: onChangePassword,
+            icon: const Icon(Icons.lock_reset_outlined),
+            label: Text(l10n.changePassword),
           ),
         ],
       ),

@@ -7,11 +7,9 @@
  *   empty      - the schema is there and there is no company and no
  *                user yet: a database that has just been created.
  *                First-run setup has not happened.
- *   incomplete - exactly one of company / users exists without the
- *                other: first-run setup began (or data was partly
- *                removed) but never finished. It is NOT empty and
- *                must not be reported as such; completing setup is
- *                still safe because the seeding program upserts.
+ *   incomplete - no company exists, but users are present.
+ *   recovery_required - a company or its history exists but no active user
+ *                belongs to an active company. Preserve data and recover access.
  *   ready      - a company and at least one user exist: an ordinary
  *                installation. Never ask for first-run setup again.
  *   unknown    - the question could not be answered (the database did
@@ -20,17 +18,16 @@
  *                database is new because a query failed would invite
  *                a second first-run setup over somebody's data.
  *
- * This mirrors the API health payload's `needsSetup`
- * (companies === 0 || users === 0), so the shell (before the server
- * starts) and the server (once running) give the same answer about
- * the same database.
+ * This mirrors the API health payload's `needsSetup` and
+ * `recoveryRequired`, without treating existing data as a new installation.
  */
-export function classifyDatabaseState({ companies, users }) {
-  if (!Number.isInteger(companies) || !Number.isInteger(users)) {
+export function classifyDatabaseState({ companies, users, activeCompanyUsers = users }) {
+  if (!Number.isInteger(companies) || !Number.isInteger(users) || !Number.isInteger(activeCompanyUsers) || companies < 0 || users < 0 || activeCompanyUsers < 0) {
     return 'unknown';
   }
   if (companies === 0 && users === 0) return 'empty';
-  if (companies === 0 || users === 0) return 'incomplete';
+  if (companies > 0 && activeCompanyUsers === 0) return 'recovery_required';
+  if (companies === 0) return 'incomplete';
   return 'ready';
 }
 

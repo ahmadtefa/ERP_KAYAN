@@ -4,10 +4,12 @@
  * and checks what comes back.
  *
  * This is the check that says whether the program works - not whether it
- * compiles. It signs in, renews its session, takes a full backup, downloads
- * it, uploads it back, restores it, exports and prints a report, downloads
- * an import template and imports it, and then (only when it is told the
- * database is disposable) resets the company and sets it up again.
+ * compiles. It signs in, renews its session, confirms a complete backup is
+ * refused, creates and downloads a database archive, checks its gated
+ * database-only restore and licence-reconciliation semantics, exports and
+ * prints a report, downloads an import template and
+ * imports it, and then (only when told the database is disposable) resets the
+ * company and sets it up again.
  *
  *   node scripts/api-check.mjs [apiBaseUrl]
  *
@@ -78,21 +80,38 @@ async function main() {
   check('sign in as the administrator', Boolean(token), `status ${login.status}`);
   if (!token) return false;
 
+  const refusedFull = await call('/backup/full', { method: 'POST' });
+  check(
+    'complete backup is refused honestly',
+    refusedFull.status === 503 && refusedFull.data?.code === 'FULL_BACKUP_INCOMPLETE',
+    `status ${refusedFull.status}`,
+  );
+
   // ────────────────────────────────────── 2. what this machine can do
   const caps = await call('/backup/full/capabilities');
   check(
-    'the server reports the PostgreSQL tools it found',
-    caps.status === 200 && caps.data?.available === true,
-    caps.data?.version ?? caps.data?.reason ?? `status ${caps.status}`,
+    'the server reports the PostgreSQL tools it found and separates full-system restore from the gated database archive',
+    caps.status === 200 &&
+      caps.data?.available === true &&
+      caps.data?.fullBackupSupported === false &&
+      caps.data?.fullRestoreSupported === false &&
+      typeof caps.data?.databaseRestoreSupported === 'boolean',
+    `${caps.data?.version ?? caps.data?.reason ?? `status ${caps.status}`}; ` +
+      `full backup=${caps.data?.fullBackupSupported}, full restore=${caps.data?.fullRestoreSupported}, ` +
+      `database restore=${caps.data?.databaseRestoreSupported}`,
   );
   if (caps.data?.available !== true) return false;
 
-  // ──────────────────────────────────────────────────── 3. take a backup
-  const created = await call('/backup/full', { method: 'POST' });
+  // ───────────────────────────────────────────── 3. take a database archive
+  const created = await call('/backup/full/database-archive', { method: 'POST' });
   const name = created.data?.file?.name ?? '';
   check(
-    'taking a full backup returns a file that exists',
-    created.status === 201 && /\.dump$/.test(name),
+    'taking a database archive returns a file marked as partial',
+    created.status === 201 &&
+      created.data?.fullBackup === false &&
+      created.data?.includesExternalFiles === false &&
+      created.data?.includesLicence === false &&
+      /\.dump$/.test(name),
     `${name} (${created.data?.file?.sizeBytes ?? 0} bytes)`,
   );
   if (!name) return false;
@@ -171,15 +190,21 @@ async function main() {
     `status ${ticketAsBearer.status}`,
   );
 
-  // ───────────────────────────────────────────── 5. refuse a bad upload
+  // ────────────────────────────────────── 5. guarded database-only restore
+  // Invalid uploads and missing confirmation are rejected whether the
+  // machine gate is open or closed. When the gate is open, this endpoint may
+  // restore only the PostgreSQL archive; the complete-system route is separate.
+  const databaseRestoreSupported = caps.data?.databaseRestoreSupported === true;
   const form = new FormData();
   form.append('confirm', 'true');
   form.append('file', new Blob(['this is not a dump at all']), 'bogus.dump');
   const refused = await call('/backup/full/restore', { method: 'POST', body: form });
   check(
-    'a file that is not a dump is refused without touching the database',
-    refused.status === 400,
-    refused.data?.detail ?? `status ${refused.status}`,
+    'an invalid archive is rejected, or the machine gate refuses restore before parsing it',
+    databaseRestoreSupported
+      ? refused.status === 400 && /PostgreSQL|\.dump|أرشيف/i.test(refused.data?.detail ?? '')
+      : refused.status === 503 && refused.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${refused.status}: ${refused.data?.detail ?? refused.data?.code ?? ''}`,
   );
 
   const noConfirm = new FormData();
@@ -189,12 +214,13 @@ async function main() {
     body: noConfirm,
   });
   check(
-    'a restore without confirm=true is refused',
-    unconfirmed.status === 400,
-    unconfirmed.data?.detail ?? `status ${unconfirmed.status}`,
+    'a valid archive cannot be restored without explicit confirmation',
+    databaseRestoreSupported
+      ? unconfirmed.status === 400 && /confirm=true/i.test(unconfirmed.data?.detail ?? '')
+      : unconfirmed.status === 503 && unconfirmed.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${unconfirmed.status}: ${unconfirmed.data?.detail ?? unconfirmed.data?.code ?? ''}`,
   );
 
-  // ───────────────────────────────────────────────────────── 6. restore
   const upload = new FormData();
   upload.append('confirm', 'true');
   upload.append('file', new Blob([bytes]), 'restored.dump');
@@ -203,27 +229,24 @@ async function main() {
     body: upload,
   });
   check(
-    'uploading the dump back restores the database',
-    restored.status === 201 && restored.data?.restored === true,
-    `${restored.data?.source ?? ''} · safety ${restored.data?.safetyBackup ?? ''}${
-      restored.data ? ` · checked ${restored.data.checked}` : ''
-    }`,
-  );
-  check(
-    'the restore was rehearsed in a scratch database first',
-    restored.data?.rehearsed === true,
-    `rehearsed=${restored.data?.rehearsed}`,
+    'a permitted database-archive restore is rehearsed, safety-backed, and licence-reconciled without claiming a full restore',
+    databaseRestoreSupported
+      ? restored.status === 201 &&
+        restored.data?.restored === true &&
+        restored.data?.checked === true &&
+        restored.data?.rehearsed === true &&
+        restored.data?.fullRestore === false &&
+        restored.data?.includesExternalFiles === false &&
+        restored.data?.includesLicence === false &&
+        restored.data?.licenceReconciled === true &&
+        Boolean(restored.data?.safetyBackup)
+      : restored.status === 503 && restored.data?.code === 'FULL_RESTORE_UNAVAILABLE',
+    `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 240)}`,
   );
 
-  // The program still works after being put back.
+  // The program still answers after the attempted restore.
   const after = await call('/auth/me');
-  check('the program still answers after the restore', after.status === 200, `status ${after.status}`);
-
-  // A whole-database restore puts the audit trail back to what the archive
-  // holds, so there is deliberately no "the restore was logged" check here:
-  // the entry that recorded it does not survive the very thing it recorded.
-  // The reset below is a different matter — it clears audit logs and then
-  // writes its own entry, which is the one that has to be findable.
+  check('the program still answers after the database restore attempt', after.status === 200, `status ${after.status}`);
 
   // ─────────────────────────────────────── 4c. renewing the session
   //

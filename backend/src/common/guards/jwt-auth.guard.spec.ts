@@ -25,6 +25,8 @@ const activePrincipal = {
   userRoles: [
     {
       role: {
+        code: 'storekeeper',
+        isActive: true,
         rolePermissions: [
           { permission: { code: 'inventory.items.read' } },
           { permission: { code: 'reports.read' } },
@@ -115,6 +117,10 @@ describe('JwtAuthGuard account status and live authorization', () => {
           select: {
             role: {
               select: {
+                // The code as well as the permissions: the notification centre
+                // addresses an alert to a role, not to a permission.
+                code: true,
+                isActive: true,
                 rolePermissions: {
                   select: { permission: { select: { code: true } } },
                 },
@@ -133,8 +139,23 @@ describe('JwtAuthGuard account status and live authorization', () => {
           select: { branchId: true },
           orderBy: { branchId: 'asc' },
         },
+        // Loaded with the session so a shelf the person may not enter is
+        // refused by the API, not only hidden by a screen.
+        warehouseAccess: {
+          where: { warehouse: { companyId: payload.companyId, deletedAt: null } },
+          select: {
+            warehouseId: true,
+            canView: true,
+            canReceive: true,
+            canIssue: true,
+            canTransfer: true,
+            canCount: true,
+            canApprove: true,
+            canSeeCost: true,
+          },
+        },
         userPermissions: {
-          select: { permission: { select: { code: true } } },
+          select: { isDenied: true, permission: { select: { code: true } } },
         },
       },
     });
@@ -143,9 +164,28 @@ describe('JwtAuthGuard account status and live authorization', () => {
       username: 'employee',
       companyId: payload.companyId,
       branchId: 'branch-current',
+      // The whole assignment, so warehouse screens can narrow to it.
+      branchIds: ['branch-current'],
+      roles: ['storekeeper'],
+      warehouseAccess: [],
       isSuperAdmin: false,
       permissions: ['inventory.items.read', 'reports.read'],
     });
+  });
+
+  it('does not expose inactive role codes in the authenticated principal', async () => {
+    const principal = {
+      ...activePrincipal,
+      userRoles: [
+        ...activePrincipal.userRoles,
+        { role: { code: 'GENERAL_MANAGER', isActive: false, rolePermissions: [] } },
+      ],
+    } as never;
+    const { guard } = makeGuard({ principal });
+    const { context, request } = makeContext();
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({ roles: ['storekeeper'] });
   });
 
   it('preserves a selected branch only while it remains assigned and active', async () => {
@@ -181,9 +221,9 @@ describe('JwtAuthGuard account status and live authorization', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.user).toMatchObject({
       permissions: [
+        'cash.vouchers.create',
         'inventory.items.read',
         'reports.read',
-        'cash.vouchers.create',
       ],
     });
   });
@@ -191,7 +231,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
   it('honors a permission revocation before the access token expires', async () => {
     const principal = {
       ...activePrincipal,
-      userRoles: [{ role: { rolePermissions: [] } }],
+      userRoles: [{ role: { code: 'viewer', isActive: true, rolePermissions: [] } }],
     };
     const { guard } = makeGuard({ principal });
     const { context, request } = makeContext();
