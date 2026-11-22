@@ -22,6 +22,7 @@ class _LocationsApi extends ApiClient {
   bool failTree;
   bool noWarehouses;
   final locationQueries = <Map<String, dynamic>?>[];
+  final creations = <Map<String, dynamic>>[];
 
   @override
   Future<List<Map<String, dynamic>>> getList(
@@ -85,6 +86,19 @@ class _LocationsApi extends ApiClient {
       ];
     }
     return const [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Object? body,
+    String? idempotencyKey,
+  }) async {
+    if (path != '/inventory/locations') {
+      throw StateError('UNEXPECTED_POST $path');
+    }
+    creations.add(Map<String, dynamic>.from(body! as Map));
+    return const {};
   }
 
   @override
@@ -205,6 +219,35 @@ void main() {
     expect(find.text('New location'), findsOneWidget);
     expect(find.byTooltip('Edit'), findsNWidgets(2));
     expect(find.byTooltip('Delete'), findsNWidgets(2));
+  });
+
+  testWidgets('creating a location saves its warehouse, names and kind', (
+    tester,
+  ) async {
+    final api = _LocationsApi();
+    await pump(tester, api);
+    await tester.tap(find.widgetWithText(FilledButton, 'New location'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).at(0), 'NEW-BIN');
+    await tester.enterText(find.byType(TextFormField).at(1), 'New bin');
+    await tester.enterText(find.byType(TextFormField).at(2), 'خانة جديدة');
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bin').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.creations, hasLength(1));
+    expect(api.creations.single, {
+      'code': 'NEW-BIN',
+      'nameEn': 'New bin',
+      'nameAr': 'خانة جديدة',
+      'kind': 'BIN',
+      'warehouseId': 'wh-1',
+    });
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a read-only grant hides create, edit and delete', (
