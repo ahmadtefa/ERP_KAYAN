@@ -45,9 +45,51 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
         await purge.closeGuard(tx);
       }
       await tx.customer.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
+      await tx.supplier.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
       await tx.company.deleteMany({ where: { id: { in: [companyId, otherCompanyId] } } });
     });
     await prisma.$disconnect();
+  });
+
+  it('reads all tables from one snapshot while another transaction commits changes', async () => {
+    let signalRead!: () => void;
+    let resume!: () => void;
+    const customerRead = new Promise<void>((resolve) => { signalRead = resolve; });
+    const continueRead = new Promise<void>((resolve) => { resume = resolve; });
+    type ReadTable = (client: unknown, spec: { model: string }, company: string) => Promise<Array<Record<string, unknown>>>;
+    const internal = service as unknown as { readTable: ReadTable };
+    const original = internal.readTable.bind(service);
+    const spy = jest.spyOn(internal, 'readTable').mockImplementation(async (client, spec, company) => {
+      const rows = await original(client, spec, company);
+      if (spec.model === 'customer') {
+        signalRead();
+        await continueRead;
+      }
+      return rows;
+    });
+    const customer = randomUUID();
+    const supplier = randomUUID();
+    const pending = service.create(companyId);
+    try {
+      await customerRead;
+      await prisma.$transaction(async (tx) => {
+        await tx.customer.create({ data: { id: customer, companyId, code: 'CONCURRENT', nameEn: 'Concurrent', nameAr: 'متزامن' } });
+        await tx.supplier.create({ data: { id: supplier, companyId, code: 'CONCURRENT', nameEn: 'Concurrent', nameAr: 'متزامن' } });
+      });
+    } finally {
+      resume();
+    }
+    try {
+      const archive = await pending;
+      expect(archive.tables.customer.some((row) => row.id === customer)).toBe(false);
+      expect(archive.tables.supplier.some((row) => row.id === supplier)).toBe(false);
+      expect(await prisma.customer.findUnique({ where: { id: customer } })).not.toBeNull();
+      expect(await prisma.supplier.findUnique({ where: { id: supplier } })).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+      await prisma.customer.deleteMany({ where: { id: customer } });
+      await prisma.supplier.deleteMany({ where: { id: supplier } });
+    }
   });
 
   it('restores saved values instead of later changes, isolates other companies and rolls back invalid data', async () => {
@@ -59,6 +101,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
 
     const invalid = structuredClone(snapshot);
     invalid.tables.customer.push({ ...invalid.tables.customer[0] });
+    invalid.counts.customer = invalid.tables.customer.length;
     await expect(service.restore(invalid, companyId, { replace: true })).rejects.toThrow();
     expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Changed after backup');
     expect(await prisma.customer.findUnique({ where: { id: changedId } })).not.toBeNull();

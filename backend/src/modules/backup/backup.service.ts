@@ -88,6 +88,14 @@ export interface RestoreSummary {
 /// is neither the old one nor the new one.
 type RestoreClient = Prisma.TransactionClient | PrismaService;
 
+// Models are selected from TABLES at runtime; this is the shared subset of
+// their delegates rather than an unchecked `any` for the whole client.
+interface BackupModelDelegate {
+  findMany(args: unknown): Promise<Array<Record<string, unknown>>>;
+  deleteMany(args: unknown): Promise<unknown>;
+  createMany(args: unknown): Promise<unknown>;
+}
+
 /// One table in the backup.
 ///
 /// `company` tables carry a companyId of their own. `child` tables do not -
@@ -314,7 +322,18 @@ export class BackupService {
   /// ───────────────────────────────────────────────────────── taking one
 
   async create(companyId: string): Promise<BackupFile> {
-    const company = await this.prisma.company.findUnique({
+    // A company archive covers many tables. Reading each on a different
+    // snapshot can combine unrelated points in time and even leave children
+    // without their parents. PostgreSQL repeatable-read keeps the entire
+    // export on one consistent snapshot while normal business work continues.
+    return this.prisma.$transaction(
+      (tx) => this.createSnapshot(tx, companyId),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 300_000, maxWait: 30_000 },
+    );
+  }
+
+  private async createSnapshot(client: RestoreClient, companyId: string): Promise<BackupFile> {
+    const company = await client.company.findUnique({
       where: { id: companyId },
     });
     if (!company) throw new BadRequestException('Company not found');
@@ -327,7 +346,7 @@ export class BackupService {
     const counts: Record<string, number> = {};
 
     for (const spec of TABLES) {
-      const rows = await this.readTable(this.prisma, spec, companyId);
+      const rows = await this.readTable(client, spec, companyId);
       tables[spec.model] = rows;
       // A count of zero is noise on the screen and in the file.
       if (rows.length > 0) counts[spec.model] = rows.length;
@@ -416,10 +435,10 @@ export class BackupService {
   private delegate(
     client: RestoreClient,
     model: string,
-  ): Record<string, any> {
+  ): BackupModelDelegate {
     // Looked up by name so the whole backup is one table list rather than
     // twenty near-identical blocks. Every name in TABLES is a real model.
-    return (client as unknown as Record<string, Record<string, any>>)[model];
+    return (client as unknown as Record<string, BackupModelDelegate>)[model];
   }
 
   /// Bytes → base64 for the file. A backup that carried a Buffer raw came back
@@ -560,8 +579,8 @@ export class BackupService {
     }
 
     const actor = options.actorUserId &&
-      typeof (this.prisma as any).user?.findFirst === 'function'
-      ? await (this.prisma as any).user.findFirst({
+      typeof this.prisma.user?.findFirst === 'function'
+      ? await this.prisma.user.findFirst({
           where: { id: options.actorUserId, companyId: requesterCompanyId, deletedAt: null },
           select: { id: true, isSuperAdmin: true },
         })
@@ -828,6 +847,21 @@ export class BackupService {
         }
       }
     }
+    // Counts are a manifest, not merely a preview. If a file is edited or
+    // truncated into valid JSON, restoring fewer rows than its own manifest
+    // promises would silently discard the current data. Legacy archives may
+    // omit counts or zero-valued entries, but every declared count must agree.
+    if (file.counts !== undefined) {
+      if (!file.counts || typeof file.counts !== 'object' || Array.isArray(file.counts)) {
+        throw new BadRequestException('The backup row counts are invalid; nothing was changed.');
+      }
+      for (const [name, count] of Object.entries(file.counts)) {
+        if (!Number.isSafeInteger(count) || count < 0 ||
+            !Array.isArray(file.tables[name]) || file.tables[name].length !== count) {
+          throw new BadRequestException(`The backup row count for "${name}" does not match its data; nothing was changed.`);
+        }
+      }
+    }
     if (!file.companyId || !file.companyCode || !file.createdAt) {
       throw new BadRequestException('The backup is missing its company identity or creation date.');
     }
@@ -899,39 +933,39 @@ export class BackupService {
     if (!delegate?.deleteMany) return;
 
     if (spec.model === 'salesInvoiceLine') {
-      await (client as any).salesInvoiceLine.updateMany({
+      await client.salesInvoiceLine.updateMany({
         where: { invoice: { companyId } },
         data: { originalLineId: null },
       });
     } else if (spec.model === 'salesInvoice') {
-      await (client as any).salesInvoice.updateMany({
+      await client.salesInvoice.updateMany({
         where: { companyId },
         data: { originalInvoiceId: null },
       });
     } else if (spec.model === 'purchaseInvoiceLine') {
-      await (client as any).purchaseInvoiceLine.updateMany({
+      await client.purchaseInvoiceLine.updateMany({
         where: { invoice: { companyId } },
         data: { originalLineId: null },
       });
     } else if (spec.model === 'purchaseInvoice') {
-      await (client as any).purchaseInvoice.updateMany({
+      await client.purchaseInvoice.updateMany({
         where: { companyId },
         data: { originalInvoiceId: null },
       });
     } else if (spec.model === 'account') {
-      await (client as any).account.updateMany({
+      await client.account.updateMany({
         where: { companyId },
         data: { parentId: null },
       }).catch(() => {});
     } else if (spec.model === 'branch') {
-      await (client as any).branch.updateMany({
+      await client.branch.updateMany({
         where: { companyId },
         data: { parentBranchId: null },
       }).catch(() => {});
     } else if (spec.model === 'quotation') {
       // Revisions point at one another. Break the chain before deleting so
       // the delete cannot fail on its own foreign key.
-      await (client as any).quotation.updateMany({
+      await client.quotation.updateMany({
         where: { companyId },
         data: { revisionOfId: null },
       }).catch(() => {});
@@ -1006,9 +1040,9 @@ export class BackupService {
 
     if (
       (spec.model === 'rolePermission' || spec.model === 'userPermission') &&
-      typeof (client as any).permission?.findMany === 'function'
+      typeof client.permission?.findMany === 'function'
     ) {
-      const targetPerms = (await (client as any).permission.findMany({
+      const targetPerms = (await client.permission.findMany({
         select: { id: true, code: true },
       })) as Array<{ id: string; code: string }>;
       const targetById = new Set(targetPerms.map((permission) => permission.id));

@@ -145,7 +145,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     prismaMock.$executeRawUnsafe = jest.fn(async () => 0);
-    prismaMock.$transaction = jest.fn(async (callback: any) => callback(txMock));
+    prismaMock.$transaction = jest.fn(async (callback: any, options?: { isolationLevel?: string }) =>
+      callback(options?.isolationLevel === 'RepeatableRead' ? prismaMock : txMock));
 
     // A read of the permission catalogue happens on whichever client the
     // restore writes through.
@@ -266,6 +267,17 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       await expect(service.inspect(unsupported, COMPANY_ID)).rejects.toThrow(
         /unsupported table "paymentEvent"/i,
       );
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    test('rejects a JSON archive whose declared row counts differ from its content', async () => {
+      const damaged: BackupFile = {
+        format: 'kayan-backup', version: 1, createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID, companyCode: 'KAYAN', companyName: 'Test',
+        counts: { customer: 2 }, tables: { customer: [{ id: 'only-one' }] },
+      };
+      await expect(service.inspect(damaged, COMPANY_ID)).rejects.toThrow(/row count for "customer"/i);
+      await expect(service.restore(damaged, COMPANY_ID, { replace: true })).rejects.toThrow(/row count for "customer"/i);
       expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
 

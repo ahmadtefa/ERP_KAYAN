@@ -230,7 +230,29 @@ jobs:
         if: matrix.suite == 'backend'
         env:
           KAYAN_COMPANY_BACKUP_PG: '1'
-        run: npm test -- --runInBand src/modules/backup/company-backup.postgres.spec.ts
+        shell: bash
+        run: |
+          set +e
+          npm test -- --runInBand src/modules/backup/company-backup.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/company-backup.json"
+          status=$?
+          node - "$RUNNER_TEMP/company-backup.json" <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const suite of report.testResults ?? []) {
+            const failures = (suite.assertionResults ?? []).filter(test => test.status === 'failed');
+            for (const test of failures) {
+              const message = `${test.fullName}\n${(test.failureMessages ?? []).join('\n')}`.slice(0, 4000)
+                .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A');
+              console.log(`::error title=Company backup PostgreSQL test::${message}`);
+            }
+            if (suite.status === 'failed' && failures.length === 0) {
+              const message = String(suite.message ?? 'Suite failed').slice(0, 4000)
+                .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/:/g, '%3A');
+              console.log(`::error title=Company backup PostgreSQL suite::${message}`);
+            }
+          }
+          NODE
+          exit "$status"
       - name: Verify password-change concurrency on isolated PostgreSQL
         if: matrix.suite == 'backend'
         env:
