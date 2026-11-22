@@ -134,12 +134,32 @@ export class SystemRestoreService implements OnModuleInit {
       const journal = await this.journals.read();
       if (!journal || !isUnfinished(journal)) return;
       if (journal.phase === 'started' || journal.phase === 'validated' || journal.phase === 'rehearsed' || journal.phase === 'safety-taken') {
-        // Nothing destructive happened; the journal is a leftover.
-        this.logger.warn(
-          `Discarding a restore journal that stopped before anything was replaced (phase "${journal.phase}").`,
-        );
-        await this.journals.clear();
-        return;
+        // Another backend may be in the middle of a live restore. A second
+        // process starting up must never erase that process's recovery journal.
+        let lock: Client | null = null;
+        try {
+          lock = await this.holdAdvisoryLock();
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            this.logger.warn('Another process owns the restore journal; it was left untouched.');
+            return;
+          }
+          throw error;
+        }
+        try {
+          const current = await this.journals.read();
+          if (!current) return;
+          if (current.id === journal.id &&
+              ['started', 'validated', 'rehearsed', 'safety-taken'].includes(current.phase)) {
+            this.logger.warn(`Discarding an abandoned pre-destructive restore journal (phase "${current.phase}").`);
+            await this.journals.clear();
+            return;
+          }
+          // The journal changed before we acquired the lock; never assume the
+          // newly observed state is safe to clear.
+        } finally {
+          await lock?.end().catch(() => {});
+        }
       }
       this.logger.error(
         `An interrupted restore was found (phase "${journal.phase}"). The system stays in maintenance mode until it is recovered.`,
@@ -151,14 +171,20 @@ export class SystemRestoreService implements OnModuleInit {
           'changes are being accepted. Open the backup screen and run "resume recovery" ' +
           'to return to the safety backup.',
       );
-    } catch (error) {
-      this.logger.error(`Could not read the restore journal: ${(error as Error).message}`);
+    } catch {
+      this.logger.error('Could not verify the restore journal. Maintenance remains active.');
+      this.maintenance.begin(
+        'تعذر التحقق من سجل الاستعادة. النظام في وضع الصيانة حتى يفحص المسؤول النسخة والسجل. / ' +
+          'The restore journal cannot be verified. Maintenance remains active until it is investigated.',
+      );
     }
   }
 
   /// What the restore screen polls while it waits.
   async status() {
-    const journal = await this.journals.read().catch(() => null);
+    const journal = await this.journals.read().catch(() => {
+      throw new ServiceUnavailableException('The restore journal cannot be read. Investigate before resuming operations.');
+    });
     return {
       ...this.maintenance.status,
       running: this.running,
@@ -245,6 +271,7 @@ export class SystemRestoreService implements OnModuleInit {
     }
     this.running = true;
     let maintenanceOwned = false;
+    let destructiveStarted = false;
     try {
       // 3. Verify the archive before anything is believed about it.
       const report = await this.backups.verifyPath(sourcePath, label, Boolean(uploadedTemporary));
@@ -365,6 +392,9 @@ export class SystemRestoreService implements OnModuleInit {
       journal = await this.journals.advance(journal, 'safety-taken', { safetyBackup: safety.name });
 
       // 7. Replace the database, with business requests still blocked.
+      // Mark this conservatively before writing the phase: if writing the
+      // journal fails, never assume the system is safe to reopen.
+      destructiveStarted = true;
       journal = await this.journals.advance(journal, 'db-replacing');
 
       try {
@@ -481,7 +511,18 @@ export class SystemRestoreService implements OnModuleInit {
       // Anything that failed after the database was being replaced must be
       // rolled back here — the person is told what happened and what is now
       // on disk, never left to find out.
-      const journal = await this.journals.read().catch(() => null);
+      let journal: RestoreJournal | null;
+      try {
+        journal = await this.journals.read();
+      } catch {
+        this.maintenance.begin('The restore journal is unreadable. Maintenance remains active; investigate the safety backup before reopening.');
+        throw new ServiceUnavailableException('The restore journal cannot be verified. Maintenance remains active.');
+      }
+      if ((destructiveStarted && !journal) ||
+          (journal && DESTRUCTIVE_PHASES.includes(journal.phase) && !journal.safetyBackup)) {
+        this.maintenance.begin('The restore may have changed data but its safety journal is missing or incomplete. Maintenance remains active.');
+        throw new ServiceUnavailableException('The restore safety journal is missing or incomplete. Maintenance remains active.');
+      }
       if (journal && DESTRUCTIVE_PHASES.includes(journal.phase) && journal.safetyBackup) {
         const rollback = await this.rollback(journal, userId).catch((rollbackError) => ({
           recovered: false,

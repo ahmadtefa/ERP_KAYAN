@@ -18,6 +18,31 @@ describe('complete restore recovery maintenance', () => {
     return { service, maintenance, journals, internals };
   }
 
+  it('does not clear a journal owned by a restore in another process', async () => {
+    const { service, journals, internals } = setup({ id: 'active', phase: 'started' });
+    jest.mocked(internals.holdAdvisoryLock).mockRejectedValueOnce(new ConflictException());
+    await service.onModuleInit();
+    expect(journals.clear).not.toHaveBeenCalled();
+  });
+
+  it('rechecks an abandoned journal under the lock before clearing it', async () => {
+    const { service, journals } = setup({ id: 'abandoned', phase: 'started' });
+    journals.read.mockResolvedValueOnce({ id: 'abandoned', phase: 'started' })
+      .mockResolvedValueOnce({ id: 'abandoned', phase: 'db-replacing', safetyBackup: 'safety.kayanbackup' });
+    await service.onModuleInit();
+    expect(journals.clear).not.toHaveBeenCalled();
+    expect((await service.status()).maintenance).toBe(true);
+  });
+
+  it('holds maintenance at startup if the journal cannot be verified', async () => {
+    const { service, maintenance, journals } = setup(null);
+    journals.read.mockRejectedValue(new Error('damaged'));
+    await service.onModuleInit();
+    expect(maintenance.isActive).toBe(true);
+    expect(journals.clear).not.toHaveBeenCalled();
+    await expect(service.status()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('does not end an unrelated maintenance operation when there is no journal', async () => {
     const { service, maintenance } = setup(null);
     maintenance.begin('another operation');

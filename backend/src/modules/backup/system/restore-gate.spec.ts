@@ -87,6 +87,14 @@ describe('restore gate', () => {
     expect(report.reasons.join(' ')).toMatch(/older|unknown|tools/);
   });
 
+  it('blocks the gate if the restore journal is corrupt', async () => {
+    await writeFile(join(dir, 'restore-journal.json'), '{broken');
+    const report = await new RestoreGateService(maintenance, journal).probe(true);
+    expect(report.fullRestoreSupported).toBe(false);
+    expect(report.checks.find((check) => check.name === 'no-interrupted-restore'))
+      .toMatchObject({ ok: false, detail: expect.stringMatching(/cannot be read/i) });
+  });
+
   it('refuses while a restore is running', async () => {
     maintenance.begin('restoring');
     const gate = new RestoreGateService(maintenance, journal);

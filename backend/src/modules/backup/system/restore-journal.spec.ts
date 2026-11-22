@@ -53,7 +53,7 @@ describe('restore journal', () => {
     const store = new RestoreJournalStore(dir);
     let current = await store.write(journal());
     current = await store.advance(current, 'safety-taken', { safetyBackup: 'kayan-safety-1.kayanbackup' });
-    current = await store.advance(current, 'db-replacing', {
+    await store.advance(current, 'db-replacing', {
       checks: [{ name: 'archive', ok: true, detail: 'verified' }],
     });
     const read = await store.read();
@@ -93,9 +93,13 @@ describe('restore journal', () => {
     expect(described.phase).toBe('db-restored');
   });
 
-  it('treats a corrupt journal as no journal instead of crashing the start', async () => {
+  it('fails closed for a corrupt journal instead of treating it as absent', async () => {
     const store = new RestoreJournalStore(dir);
-    await (await import('node:fs/promises')).writeFile(join(dir, 'restore-journal.json'), '{not json');
-    expect(await store.read()).toBeNull();
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(join(dir, 'restore-journal.json'), '{not json');
+    await expect(store.read()).rejects.toThrow(/damaged or invalid/);
+    await fs.writeFile(join(dir, 'restore-journal.json'), JSON.stringify({ phase: 'unknown', id: 'x', checks: [] }));
+    await expect(store.read()).rejects.toThrow(/damaged or invalid/);
+    expect(await fs.readFile(join(dir, 'restore-journal.json'), 'utf8')).toContain('unknown');
   });
 });

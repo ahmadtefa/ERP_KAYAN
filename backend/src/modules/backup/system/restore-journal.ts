@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -98,16 +97,25 @@ export class RestoreJournalStore {
   }
 
   async read(): Promise<RestoreJournal | null> {
-    if (!existsSync(this.path)) return null;
+    let text: string;
     try {
-      const text = await readFile(this.path, 'utf8');
+      text = await readFile(this.path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new Error('The restore journal cannot be read; maintenance is required.');
+    }
+    try {
       const parsed = JSON.parse(text) as RestoreJournal;
-      if (!parsed || typeof parsed !== 'object' || typeof parsed.phase !== 'string') {
-        return null;
+      const phases: RestorePhase[] = [
+        'started', 'validated', 'rehearsed', 'safety-taken', ...DESTRUCTIVE_PHASES, ...FINISHED_PHASES,
+      ];
+      if (!parsed || typeof parsed !== 'object' || !phases.includes(parsed.phase) ||
+          typeof parsed.id !== 'string' || !parsed.id || !Array.isArray(parsed.checks)) {
+        throw new Error('invalid journal');
       }
       return parsed;
     } catch {
-      return null;
+      throw new Error('The restore journal is damaged or invalid; maintenance is required.');
     }
   }
 

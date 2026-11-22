@@ -128,12 +128,19 @@ export class RestoreGateService {
         : 'no restore is running',
     });
 
-    const journal = await this.journals.read();
+    let journal: Awaited<ReturnType<RestoreJournalStore['read']>> = null;
+    let journalUnreadable = false;
+    try {
+      journal = await this.journals.read();
+    } catch {
+      journalUnreadable = true;
+    }
     checks.push({
       name: 'no-interrupted-restore',
-      ok: journal === null,
-      detail:
-        journal === null
+      ok: journal === null && !journalUnreadable,
+      detail: journalUnreadable
+        ? 'the restore journal cannot be read; maintenance and manual investigation are required'
+        : journal === null
           ? 'no interrupted restore is waiting'
           : `an earlier restore stopped at "${journal.phase}" and must be resolved first ` +
             `(safety backup: ${journal.safetyBackup ?? 'none recorded'})`,
