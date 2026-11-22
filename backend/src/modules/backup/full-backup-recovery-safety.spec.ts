@@ -294,6 +294,21 @@ describe('full restore failure safety', () => {
     await expect(service.restore({ confirm: true, uploaded }, 'u')).resolves.toMatchObject({ restored: true });
   });
 
+  it('does not overwrite another maintenance operation that starts during rehearsal', async () => {
+    let release!: () => void;
+    internals.verifyUploaded.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ entries: 1, tables: 1, constraints: 1 });
+    }));
+    const restore = service.restore({ confirm: true, uploaded }, 'u');
+    while (!release) await new Promise((resolve) => setImmediate(resolve));
+    maintenance.begin('another restore');
+    release();
+    await expect(restore).rejects.toThrow(/another maintenance operation started/i);
+    expect(internals.createSafety).not.toHaveBeenCalled();
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+    expect(maintenance.status.detail).toBe('another restore');
+  });
+
   it('rejects another request even before the first reaches maintenance', async () => {
     let release!: () => void;
     internals.verifyUploaded.mockImplementationOnce(() => new Promise<number>((resolve) => { release = () => resolve(1); }));

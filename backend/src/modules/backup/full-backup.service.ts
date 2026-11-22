@@ -886,6 +886,11 @@ export class FullBackupService {
         }
       }
 
+      // Another operation may have entered maintenance while this archive was
+      // being rehearsed. Never replace its maintenance ownership or database.
+      if (this.maintenance.isActive) {
+        throw new ConflictException('Another maintenance operation started during restore rehearsal. The database was not changed.');
+      }
       // Block new HTTP requests and drain admitted handlers before the safety snapshot.
       this.maintenance.begin(
         `Restoring database from ${label}. The system will be back shortly.`,

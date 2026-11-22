@@ -245,6 +245,7 @@ export class SystemRestoreService implements OnModuleInit {
       throw new ConflictException('A restore or recovery is already running.');
     }
     this.running = true;
+    let maintenanceOwned = false;
     try {
       // 3. Verify the archive before anything is believed about it.
       const report = await this.backups.verifyPath(sourcePath, label, Boolean(uploadedTemporary));
@@ -343,9 +344,13 @@ export class SystemRestoreService implements OnModuleInit {
       // Stop and drain admitted requests before taking the safety snapshot.
       // Otherwise a successful write between the snapshot and replacement could
       // be lost on either restore or rollback.
+      if (this.maintenance.isActive) {
+        throw new ConflictException('Another maintenance operation started during restore rehearsal. The database was not changed.');
+      }
       this.maintenance.begin(
         `Restoring the system from ${label}. The program will be back shortly.`,
       );
+      maintenanceOwned = true;
       await this.maintenance.waitForBusinessRequests();
 
       // 6. The safety copy. No safety copy, no restore.
@@ -503,9 +508,9 @@ export class SystemRestoreService implements OnModuleInit {
         });
       }
 
-      // Nothing destructive happened: put the maintenance switch back and
-      // leave the journal clean.
-      this.maintenance.end();
+      // Nothing destructive happened. Do not release a different restore's
+      // maintenance switch if it began while this archive was rehearsing.
+      if (maintenanceOwned) this.maintenance.end();
       await this.journals.clear().catch(() => {});
       throw error;
     } finally {
