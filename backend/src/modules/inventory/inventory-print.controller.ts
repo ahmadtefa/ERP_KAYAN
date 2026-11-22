@@ -178,7 +178,9 @@ export class InventoryPrintController {
     id: string,
     query: PriceQuery,
   ): Promise<ReportTable> {
-    const access = this.reportAccess(user, query, 'valuation-by-warehouse');
+    // A stock document is not an inventory valuation report. Its routes have
+    // their own stock-read permission; retain warehouse and price restrictions.
+    const access = resolveInventoryReportAccess(user, query);
     const document = await this.documents.findOne(
       user.companyId, id, access.canReadCost, undefined, access.warehouseIds, warehouseScopeOf(user),
     );
@@ -194,7 +196,7 @@ export class InventoryPrintController {
   }
 
   private async valuationFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
-    const access = this.reportAccess(user, query, 'slow-moving');
+    const access = this.reportAccess(user, query, 'valuation-by-warehouse');
     const report = await this.reports.valuation(
       user.companyId,
       { branchId: this.reportBranch(user, query.branchId), categoryId: query.categoryId, warehouseIds: access.warehouseIds },

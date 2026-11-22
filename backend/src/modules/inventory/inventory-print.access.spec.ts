@@ -38,9 +38,13 @@ describe("inventory report print scope", () => {
       }),
     ),
   };
+  const documents = { findOne: jest.fn(async () => ({
+    kind: 'RECEIPT', documentNumber: 'R-1', documentDate: '2026-01-01',
+    toWarehouseId: warehouseId, lines: [],
+  })) };
   const controller = new InventoryPrintController(
     reports as unknown as InventoryReportsService,
-    {} as never,
+    documents as never,
     {} as never,
     printSettings as never,
     {} as never,
@@ -52,7 +56,7 @@ describe("inventory report print scope", () => {
     branchId,
     branchIds: [branchId],
     isSuperAdmin: false,
-    permissions: ["inventory.stock.read", "inventory.cost.read"],
+    permissions: ["inventory.stock.read", "inventory.cost.read", "inventory.reports.valuation-by-warehouse.read", "inventory.reports.print"],
     warehouseAccess: [
       {
         warehouseId,
@@ -67,6 +71,7 @@ describe("inventory report print scope", () => {
     ],
   };
   const privateController = controller as unknown as {
+    stockDocumentTableFor: (user: AuthUser, id: string, query: object) => Promise<unknown>;
     valuationFor: (
       user: AuthUser,
       query: { warehouseId?: string },
@@ -96,6 +101,20 @@ describe("inventory report print scope", () => {
       "averageCost",
     );
     expect(table.rows[0]).toHaveProperty("quantity", "3.0000");
+  });
+
+  it("does not require valuation-report permissions to print an authorized stock document", async () => {
+    const warehouseUser = { ...restrictedUser, permissions: ['inventory.stock.read'] };
+    await expect(privateController.stockDocumentTableFor(warehouseUser, 'doc-1', {})).resolves.toBeDefined();
+    expect(documents.findOne).toHaveBeenCalledWith('company-1', 'doc-1', false, undefined, [warehouseId], [branchId]);
+  });
+
+  it("requires valuation permission and print permission independently", async () => {
+    const slowOnly = { ...restrictedUser, permissions: ['inventory.reports.slow-moving.read', 'inventory.reports.print'] };
+    const noPrint = { ...restrictedUser, permissions: ['inventory.reports.valuation-by-warehouse.read'] };
+    await expect(privateController.valuationFor(slowOnly, {})).rejects.toThrow(ForbiddenException);
+    await expect(privateController.valuationFor(noPrint, {})).rejects.toThrow(ForbiddenException);
+    expect(reports.valuation).not.toHaveBeenCalled();
   });
 
   it("rejects a print request for an unassigned warehouse before reading report data", async () => {

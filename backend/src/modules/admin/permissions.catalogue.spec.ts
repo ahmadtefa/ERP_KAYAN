@@ -7,7 +7,7 @@ describe('permission catalogue', () => {
     const codes = PERMISSIONS.map((row) => row[0]);
     expect(new Set(codes).size).toBe(codes.length);
     for (const [code, nameEn, nameAr, module] of PERMISSIONS) {
-      expect(code).toMatch(/^[a-z]+\.[a-z.]+$/);
+      expect(code).toMatch(/^[a-z]+(?:\.[a-z]+(?:-[a-z]+)*)+$/);
       expect(nameEn.length).toBeGreaterThan(3);
       expect(nameAr.length).toBeGreaterThan(3);
       expect(module.length).toBeGreaterThan(2);
