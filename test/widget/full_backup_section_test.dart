@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:erp_kayan/core/platform/picked_file.dart';
+import 'package:erp_kayan/core/app/app_scope_restart.dart';
+import 'package:erp_kayan/core/storage/token_store.dart';
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart';
 import 'package:erp_kayan/features/data/presentation/widgets/full_backup_section.dart';
 import 'package:flutter/material.dart';
@@ -71,6 +74,8 @@ class _FakeSystemBackupService extends SystemBackupService {
   ];
   Object? capabilitiesError;
   List<Map<String, dynamic>> files = const [];
+  bool unfinished = false;
+  bool recovered = false;
 
   @override
   Future<Map<String, dynamic>> capabilities() async {
@@ -88,9 +93,15 @@ class _FakeSystemBackupService extends SystemBackupService {
   Future<List<Map<String, dynamic>>> list() async => files;
 
   @override
-  Future<Map<String, dynamic>> status() async => const {
-    'maintenance': false,
-    'journal': {'unfinished': false},
+  Future<Map<String, dynamic>> status() async => {
+    'maintenance': unfinished,
+    'journal': {'unfinished': unfinished, 'phase': 'db-replacing'},
+  };
+
+  @override
+  Future<Map<String, dynamic>> resumeRecovery() async => {
+    'recovered': recovered,
+    'detail': recovered ? 'Recovered' : 'Not recovered',
   };
 
   @override
@@ -102,16 +113,28 @@ class _FakeSystemBackupService extends SystemBackupService {
   }) async => const {};
 }
 
+class _MemoryTokens implements SecureTokenBackend {
+  final values = <String, String>{};
+  @override
+  Future<void> write(String key, String value) async { values[key] = value; }
+  @override
+  Future<String?> read(String key) async => values[key];
+  @override
+  Future<void> delete(String key) async { values.remove(key); }
+}
+
 Future<void> _pump(
   WidgetTester tester,
   _FakeFullBackupService service, {
   _FakeSystemBackupService? system,
+  TokenStore? tokenStore,
   Locale locale = const Locale('en'),
 }) {
   return tester.pumpWidget(
     ProviderScope(
       overrides: [
         fullBackupServiceProvider.overrideWithValue(service),
+        if (tokenStore != null) tokenStoreProvider.overrideWithValue(tokenStore),
         systemBackupServiceProvider.overrideWithValue(
           system ?? _FakeSystemBackupService(),
         ),
@@ -125,6 +148,24 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('successful interrupted recovery clears credentials and restarts cached app state', (tester) async {
+    final store = TokenStore(backend: _MemoryTokens());
+    await store.saveTokens(accessToken: 'old-access', refreshToken: 'old-refresh');
+    final system = _FakeSystemBackupService()..unfinished = true..recovered = true;
+    final before = appScopeEpoch.value;
+    await _pump(tester, _FakeFullBackupService(), system: system, tokenStore: store);
+    await tester.pumpAndSettle();
+    final button = find.text('Resume recovery from the safety backup');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start recovery'));
+    await tester.pumpAndSettle();
+    expect(await store.readAccessToken(), isNull);
+    expect(await store.readRefreshToken(), isNull);
+    expect(appScopeEpoch.value, before + 1);
+  });
+
   for (final locale in [const Locale('en'), const Locale('ar')]) {
     for (final supported in [false, null]) {
       testWidgets('unverified restore options are hidden in ${locale.languageCode}, capability $supported', (tester) async {

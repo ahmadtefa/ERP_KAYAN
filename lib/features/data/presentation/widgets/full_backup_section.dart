@@ -655,6 +655,17 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     try {
       final result = await ref.read(systemBackupServiceProvider).resumeRecovery();
       if (!mounted) return;
+      if (result['recovered'] == true) {
+        // Recovery replaces the database just like a successful restore.
+        // Cached lists and credentials from the interrupted state must not
+        // survive into the recovered installation.
+        try {
+          await ref.read(tokenStoreProvider).clear();
+        } finally {
+          restartAppScope();
+        }
+        return;
+      }
       setState(() {
         _notice = '${result['detail'] ?? ''}';
       });
