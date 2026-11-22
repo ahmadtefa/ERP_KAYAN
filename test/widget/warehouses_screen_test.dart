@@ -245,7 +245,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'New warehouse'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Branch'), findsOneWidget);
+    expect(find.byType(SearchableSelectField), findsOneWidget);
     expect(find.text('br-1'), findsNothing);
     await tester.tap(find.byType(SearchableSelectField));
     await tester.pumpAndSettle();
