@@ -21,6 +21,7 @@ class _AccessApi extends ApiClient {
 
   bool restricted;
   final puts = <(String, Object?)>[];
+  final userListQueries = <Map<String, dynamic>?>[];
 
   @override
   Future<List<Map<String, dynamic>>> getList(
@@ -28,6 +29,7 @@ class _AccessApi extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     if (path == '/admin/users') {
+      userListQueries.add(query);
       return [
         {
           'id': 'person-1',
@@ -144,10 +146,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('asks for a person before showing any rights', (tester) async {
-    await pump(tester, _AccessApi());
+  testWidgets('loads users with the real API query contract', (tester) async {
+    final api = _AccessApi();
+    await pump(tester, api);
+    expect(api.userListQueries, [null]);
     expect(find.text('Sara Ali'), findsOneWidget);
     expect(find.textContaining('Choose a person'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byTooltip('Retry'), findsNothing);
   });
 
   testWidgets('a restricted person is described as restricted', (

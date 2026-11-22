@@ -295,7 +295,12 @@ class ApiClient {
           // Sign-in and refresh themselves answer 401 for a wrong password
           // or a dead refresh token; that is not an expired session.
           final path = e.requestOptions.path;
-          if (path.endsWith('/auth/login') || path.endsWith('/auth/refresh')) {
+          if (path.endsWith('/auth/login') ||
+              path.endsWith('/auth/refresh') ||
+              path.endsWith('/auth/change-password')) {
+            // Password change is intentionally public so it works before
+            // sign-in. A wrong username/company/current password therefore
+            // means invalid credentials, never an expired session.
             return AuthFailure(message);
           }
           return SessionExpiredFailure(message);

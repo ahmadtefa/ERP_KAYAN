@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/app/app_scope_restart.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -501,6 +502,17 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       if (!mounted) return;
       final safety = '${result['safetyBackup'] ?? ''}';
       final filesRestored = result['filesRestored'];
+      final checks = result['checks'];
+      final verified = result['restored'] == true &&
+          (complete
+              ? checks is List && checks.isNotEmpty &&
+                  checks.every((check) => check is Map && check['ok'] == true)
+              : result['checked'] == true && result['rehearsed'] == true);
+      if (!verified) {
+        throw const FormatException(
+          'The restore endpoint did not return successful post-restore checks.',
+        );
+      }
       setState(() {
         _notice = [
           _t(context, 'تمت الاستعادة بنجاح.', 'The restore finished.'),
@@ -518,12 +530,13 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
             ),
         ].join('\n');
       });
-      await _load();
-      // The restore replaced the users table: the token this session holds
-      // belongs to an account that may no longer exist, so the honest next
-      // step is to sign in again with the restored credentials.
-      if (mounted) {
-        await ref.read(authControllerProvider.notifier).signOut();
+      // The database was replaced. Drop the current credentials and dispose
+      // every feature provider so no route can continue showing pre-restore
+      // values. The next app scope returns to sign-in against the restored DB.
+      try {
+        await ref.read(tokenStoreProvider).clear();
+      } finally {
+        restartAppScope();
       }
     } catch (error) {
       if (!mounted) return;

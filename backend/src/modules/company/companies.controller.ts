@@ -44,6 +44,12 @@ export class CompaniesController {
   constructor(private readonly companies: CompanyService) {}
 
   @Public()
+  @Get('options')
+  options() {
+    return this.companies.publicOptions();
+  }
+
+  @Public()
   @Get('branding')
   branding() {
     return this.companies.publicBranding();

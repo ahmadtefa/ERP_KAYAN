@@ -96,6 +96,19 @@ ApiClient _buildClient(_ScriptedAdapter adapter, TokenStore store) {
 }
 
 void main() {
+  test('a pre-login password change rejection is not reported as session expiry', () async {
+    final adapter = _ScriptedAdapter()..expireFirst = 1;
+    final store = TokenStore(backend: _RefusingBackend());
+    final client = _buildClient(adapter, store);
+
+    await expectLater(
+      client.post('/auth/change-password', body: const {'username': 'demo'}),
+      throwsA(isA<AuthFailure>()),
+    );
+    expect(adapter.paths, ['/auth/change-password']);
+    expect(adapter.paths, isNot(contains('/auth/refresh')));
+  });
+
   test('an expired token is renewed and the request is replayed', () async {
     final adapter = _ScriptedAdapter();
     final store = TokenStore(backend: _RefusingBackend());

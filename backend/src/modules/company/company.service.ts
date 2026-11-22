@@ -117,6 +117,18 @@ export class CompanyService {
     return this.getProfile(companyId);
   }
 
+  /// Minimal company choices for pre-authentication forms. Do not expose ids,
+  /// tax/contact details, or inactive tenants: the login/password-change picker
+  /// needs only an unambiguous display name and the code the API expects.
+  async publicOptions() {
+    return this.prisma.company.findMany({
+      where: { isActive: true, deletedAt: null },
+      select: { code: true, nameEn: true, nameAr: true },
+      orderBy: [{ nameAr: 'asc' }, { code: 'asc' }],
+      take: 100,
+    });
+  }
+
   /// Public branding (no sign-in): the first active company, or the defaults
   /// when the installation has no company yet.
   async publicBranding() {

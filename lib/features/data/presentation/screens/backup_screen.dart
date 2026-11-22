@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/config/app_config.dart';
 import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/app/app_scope_restart.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
@@ -242,21 +243,36 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       final result = await ref
           .read(dataServiceProvider)
           .restoreBackup(file, replace: true);
+      final written = result['written'];
+      final total = result['total'];
+      final committedRows = written is Map
+          ? written.values.fold<num>(
+              0,
+              (sum, count) => sum + (count is num ? count : 0),
+            )
+          : -1;
+      if (written is! Map ||
+          total is! num ||
+          written.values.any((count) => count is! num || count < 0) ||
+          committedRows != total) {
+        throw const FormatException(
+          'The server did not confirm the rows committed by the company restore.',
+        );
+      }
       setState(() {
         _restored = result;
         _busy = false;
         _preview = null;
       });
-      ref.invalidate(backupSummaryProvider);
-      // The restored rows are the ones the backup carried: its roles, its
-      // grants and, if the file had no super administrator, the promotion
-      // the restore performs. The signed-in session still holds the
-      // permissions it read before the restore, so every menu would be drawn
-      // from a company that no longer exists. Re-reading the session asks the
-      // server - which has just repaired the grants - who this person is now;
-      // if the restored company has no such account, the token is refused and
-      // the app goes back to the sign-in screen, which is the honest answer.
-      ref.invalidate(authControllerProvider);
+      // A successful 200 comes from the service's committed write transaction.
+      // Clear this session and dispose every cached list/report/detail provider;
+      // otherwise screens continue to show pre-restore values and look as if
+      // the restore did nothing. The next screen load starts from the database.
+      try {
+        await ref.read(tokenStoreProvider).clear();
+      } finally {
+        restartAppScope();
+      }
     } catch (error) {
       setState(() {
         _failure = describeApiError(error);

@@ -227,6 +227,24 @@ describe('CompanyService', () => {
     });
   });
 
+  describe('publicOptions', () => {
+    it('returns only active company names and codes for pre-login selection', async () => {
+      const options = [
+        { code: 'A', nameEn: 'Alpha', nameAr: 'ألفا' },
+        { code: 'B', nameEn: 'Beta', nameAr: 'بيتا' },
+      ];
+      (prisma.company.findMany as jest.Mock).mockResolvedValue(options);
+
+      await expect(service.publicOptions()).resolves.toEqual(options);
+      expect(prisma.company.findMany).toHaveBeenCalledWith({
+        where: { isActive: true, deletedAt: null },
+        select: { code: true, nameEn: true, nameAr: true },
+        orderBy: [{ nameAr: 'asc' }, { code: 'asc' }],
+        take: 100,
+      });
+    });
+  });
+
   describe('publicBranding', () => {
     it('returns default branding when no active company exists', async () => {
       (prisma.company.findFirst as jest.Mock).mockResolvedValue(null);

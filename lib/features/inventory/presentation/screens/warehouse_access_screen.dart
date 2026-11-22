@@ -15,9 +15,11 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 /// branches, which the screen says in words: an empty table would otherwise
 /// read as "this person can see nothing", the opposite of what it means.
 final _peopleProvider = FutureProvider<List<Json>>((ref) async {
-  return ref
-      .read(apiClientProvider)
-      .getList('/admin/users', query: const {'pageSize': 200, 'page': 1});
+  // UsersController accepts only `q` and `includeInactive`; passing generic
+  // pagination keys here is rejected by Nest's whitelist ValidationPipe and
+  // leaves this screen unable to load on a real API. The endpoint already
+  // returns the complete company-scoped list.
+  return ref.read(apiClientProvider).getList('/admin/users');
 });
 
 /// The person whose rights are being edited.
