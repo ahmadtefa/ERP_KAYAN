@@ -233,7 +233,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm test -- --runInBand src/modules/backup/company-backup.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/company-backup.json"
+          npm test -- --runInBand src/modules/backup/company-backup.postgres.spec.ts src/modules/backup/system/restore-multiprocess.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/company-backup.json"
           status=$?
           node - "$RUNNER_TEMP/company-backup.json" <<'NODE'
           const fs = require('node:fs');
