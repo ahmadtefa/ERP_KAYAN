@@ -7,7 +7,7 @@ describe('AuthController current principal', () => {
       id: 'user-1',
       fullNameEn: 'Employee',
       isActive: true,
-      userRoles: [{ role: { code: 'COMPANY_ACCOUNTANT' } }],
+      userRoles: [{ role: { code: 'DISABLED_MANAGER' } }],
     });
     const controller = new AuthController(
       {} as any,
@@ -19,6 +19,7 @@ describe('AuthController current principal', () => {
       companyId: 'company-1',
       branchId: 'branch-current',
       isSuperAdmin: false,
+      roles: ['COMPANY_ACCOUNTANT'],
       permissions: ['reports.read'],
     };
 
@@ -41,16 +42,6 @@ describe('AuthController current principal', () => {
         id: true,
         fullNameEn: true,
         isActive: true,
-        userRoles: {
-          where: {
-            companyId: 'company-1',
-            role: {
-              deletedAt: null,
-              OR: [{ companyId: 'company-1' }, { companyId: null }],
-            },
-          },
-          select: { role: { select: { code: true } } },
-        },
       },
     });
   });

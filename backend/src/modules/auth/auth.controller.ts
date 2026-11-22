@@ -75,20 +75,13 @@ export class AuthController {
         id: true,
         fullNameEn: true,
         isActive: true,
-        userRoles: {
-          where: {
-            companyId: user.companyId,
-            role: {
-              deletedAt: null,
-              OR: [{ companyId: user.companyId }, { companyId: null }],
-            },
-          },
-          select: { role: { select: { code: true } } },
-        },
       },
     });
 
-    const roles = [...new Set(record.userRoles.map((ur) => ur.role.code))];
+    // The guard has already resolved active, tenant-scoped roles. Re-reading
+    // assignments here used to include disabled roles and could make the UI
+    // show financial sections after a manager role was revoked.
+    const roles = [...new Set(user.roles ?? [])];
 
     return {
       user: {
