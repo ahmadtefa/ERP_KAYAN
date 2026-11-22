@@ -64,7 +64,7 @@ void main() {
       final verticalController = tester.widget<SingleChildScrollView>(vertical.first).controller!;
       expect(verticalController.position.maxScrollExtent, greaterThan(0));
       for (var i = 0; i < 10 && verticalController.offset < verticalController.position.maxScrollExtent; i++) {
-        await tester.drag(vertical.first, const Offset(0, -300));
+        await tester.dragFrom(tester.getCenter(find.byType(AlertDialog)), const Offset(0, -300));
         await tester.pumpAndSettle();
       }
       expect(verticalController.offset, verticalController.position.maxScrollExtent);
