@@ -140,6 +140,47 @@ async function main() {
   });
   if (!warehouseA || !warehouseB) { process.exitCode = 1; return; }
 
+  // ───────────────────────────────────────────── storage locations to SQL
+  const storageLocation = await must('a storage zone is created through the API', '/inventory/locations', {
+    method: 'POST',
+    json: {
+      warehouseId: warehouseA.id,
+      kind: 'ZONE',
+      nameEn: `North zone ${stamp}`,
+      nameAr: `المنطقة الشمالية ${stamp}`,
+    },
+  });
+  if (!storageLocation?.id) { process.exitCode = 1; return; }
+  check(
+    'the server generates the location code when the form leaves it blank',
+    /^LOC-[0-9a-f-]{36}$/i.test(storageLocation.code ?? ''),
+    `code ${storageLocation.code ?? 'missing'}`,
+  );
+  const locationDb = new pg.Client({ connectionString: DATABASE_URL });
+  await locationDb.connect();
+  try {
+    const stored = await locationDb.query(
+      `SELECT location."companyId", location."branchId", location."warehouseId",
+              location.kind, location.code, location."nameEn", location."nameAr",
+              branch."companyId" AS "branchCompanyId"
+         FROM storage_locations location
+         JOIN branches branch ON branch.id = location."branchId"
+        WHERE location.id = $1`,
+      [storageLocation.id],
+    );
+    const row = stored.rows[0];
+    check(
+      'the UI-compatible creation request is persisted with company, branch and warehouse links',
+      Boolean(row) && row['companyId'] === row['branchCompanyId'] && row['branchId'] === branch.id &&
+        row['warehouseId'] === warehouseA.id && row.kind === 'ZONE' &&
+        row.code === storageLocation.code && row['nameEn'] === `North zone ${stamp}` &&
+        row['nameAr'] === `المنطقة الشمالية ${stamp}`,
+      row ? `${row.code} → warehouse ${row['warehouseId']}, branch ${row['branchId']}` : 'row missing',
+    );
+  } finally {
+    await locationDb.end();
+  }
+
   check(
     'making one warehouse the default takes the flag off the other',
     warehouseA.isDefault === true && warehouseB.isDefault === false,

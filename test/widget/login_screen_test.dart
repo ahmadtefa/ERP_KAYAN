@@ -8,6 +8,7 @@ import 'package:erp_kayan/shared/widgets/searchable_select_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_harness.dart';
 
@@ -35,6 +36,37 @@ class _CompanyOptionsApi implements ApiClient {
           {'code': 'ACME', 'nameEn': 'Acme', 'nameAr': 'أكمي'},
         ]
       : const [];
+}
+
+class _PasswordChangeApi implements ApiClient {
+  final posts = <(String, Object?)>[];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => {'needsSetup': false, 'recoveryRequired': false};
+
+  @override
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => [
+    {'code': 'ACME', 'nameEn': 'Acme', 'nameAr': 'أكمي'},
+  ];
+
+  @override
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Object? body,
+    String? idempotencyKey,
+  }) async {
+    posts.add((path, body));
+    return {'changed': true};
+  }
 }
 
 void main() {
@@ -115,6 +147,44 @@ void main() {
     expect(find.text('Acme · ACME'), findsOneWidget);
     expect(find.byType(TextField), findsNWidgets(6));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
+  });
+
+  testWidgets('changes a password before login and clears the old session', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tokenStore.accessToken = 'expired-access';
+    tokenStore.refreshToken = 'expired-refresh';
+    final api = _PasswordChangeApi();
+    await pumpLogin(tester, apiClient: api);
+
+    await tester.enterText(find.byType(TextFormField).first, 'sara');
+    await tester.tap(find.widgetWithText(TextButton, 'Change password'));
+    await tester.pumpAndSettle();
+    expect(find.text('Acme · ACME'), findsOneWidget);
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(3), 'CurrentPassword!123');
+    await tester.enterText(fields.at(4), 'NewPassword!12345');
+    await tester.enterText(fields.at(5), 'NewPassword!12345');
+    await tester.tap(find.widgetWithText(FilledButton, 'Change password'));
+    await tester.pumpAndSettle();
+
+    expect(api.posts, hasLength(1));
+    expect(api.posts.single.$1, '/auth/change-password');
+    expect(api.posts.single.$2, {
+      'username': 'sara',
+      'companyCode': 'ACME',
+      'currentPassword': 'CurrentPassword!123',
+      'newPassword': 'NewPassword!12345',
+      'confirmPassword': 'NewPassword!12345',
+    });
+    expect(tokenStore.accessToken, isNull);
+    expect(tokenStore.refreshToken, isNull);
+    expect(
+      find.text('Password changed, and the old sessions were ended.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('blocks submission and reports both empty fields', (
