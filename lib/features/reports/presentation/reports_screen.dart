@@ -100,8 +100,10 @@ class ReportsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs;
+    with TickerProviderStateMixin {
+  late TabController _tabs;
+  List<int> _visibleTabs = const [];
+  bool _tabsInitialized = false;
 
   static const _tabSlugs = <String>[
     'trial-balance', 'profit-and-loss', 'balance-sheet', 'cash-flow',
@@ -115,12 +117,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   @override
   void initState() {
     super.initState();
-    final index = _tabSlugs.indexOf(widget.initialTab ?? '');
-    _tabs = TabController(
-      length: _tabSlugs.length,
-      initialIndex: index < 0 ? 0 : index,
-      vsync: this,
-    )..addListener(() => setState(() {}));
+    _tabs = TabController(length: 0, vsync: this);
   }
 
   @override
@@ -129,12 +126,41 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     super.dispose();
   }
 
+  void _updateVisibleTabs(AppUser? user) {
+    final visible = <int>[
+      for (var i = 0; i < _tabSlugs.length; i++)
+        if (_mayReadReport(user, _tabSlugs[i])) i,
+    ];
+    if (_tabsInitialized && visible.join(',') == _visibleTabs.join(',')) return;
+    final previous = _visibleTabs.isNotEmpty ? _visibleTabs[_tabs.index] : null;
+    final preferred = previous ?? _tabSlugs.indexOf(widget.initialTab ?? '');
+    final position = visible.indexOf(preferred);
+    _tabs.dispose();
+    _visibleTabs = visible;
+    _tabsInitialized = true;
+    _tabs = TabController(
+      length: visible.length,
+      initialIndex: position < 0 ? 0 : position,
+      vsync: this,
+    )..addListener(() {
+        if (mounted) setState(() {});
+      });
+  }
+
+  void _openOriginalTab(int originalIndex) {
+    final index = _visibleTabs.indexOf(originalIndex);
+    if (index >= 0) _tabs.animateTo(index);
+  }
+
+  int get _originalIndex => _visibleTabs.isEmpty ? -1 : _visibleTabs[_tabs.index];
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final period = ref.watch(periodProvider);
     final user = ref.watch(currentUserProvider);
-    final mayReadCurrentReport = _mayReadReport(user, _reportSlug);
+    _updateVisibleTabs(user);
+    final mayReadCurrentReport = _visibleTabs.isNotEmpty;
 
     return ModuleScaffold(
       title: l10n.reports,
@@ -158,7 +184,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
       ),
       body: Column(
         children: [
-          TabBar(
+          if (_visibleTabs.isNotEmpty) TabBar(
             controller: _tabs,
             isScrollable: true,
             tabs: [
@@ -196,7 +222,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.costCenterReport),
               Tab(text: l10n.budgetReport),
               Tab(text: _t(context, 'مركز التسويات', 'Reconciliation center')),
-            ],
+            ].asMap().entries
+                .where((entry) => _visibleTabs.contains(entry.key))
+                .map((entry) => entry.value)
+                .toList(growable: false),
           ),
           // Download and print always reflect the tab that is open and the
           // period on screen, because they are built from the same values.
@@ -207,13 +236,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               // The exported report catalogue does not include the two
               // cost-centre reports yet, so the button is not offered for a
               // report it would fail to produce.
-              child: _tabs.index >= 19 || !mayReadCurrentReport
+              child: _originalIndex >= 19 || !mayReadCurrentReport
                   ? const SizedBox.shrink()
                   : ReportExportActions(
                       report: _reportSlug,
                       from: period.from,
                       to: period.to,
-                      accountId: _tabs.index == 7
+                      accountId: _originalIndex == 7
                           ? ref.watch(ledgerAccountProvider)
                           : null,
                     ),
@@ -222,11 +251,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
           Expanded(
             child: !mayReadCurrentReport
                 ? Center(child: Text(_t(context, 'لا تملك صلاحية هذا التقرير', 'You are not allowed to view this report.')))
-                : switch (_tabs.index) {
+                : switch (_originalIndex) {
               0 => _TrialBalanceTab(
                 onOpenAccount: (accountId) {
                   ref.read(ledgerAccountProvider.notifier).choose(accountId);
-                  _tabs.animateTo(7);
+                  _openOriginalTab(7);
                 },
               ),
               1 => const _ProfitAndLossTab(),
@@ -256,7 +285,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               19 => const _CostCentersTab(),
               20 => const _BudgetReportTab(),
               _ => _ReconciliationCenterTab(
-                onOpenTab: (index) => _tabs.animateTo(index),
+                onOpenTab: _openOriginalTab,
               ),
             },
           ),
@@ -266,7 +295,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   }
 
   /// The report the open tab shows, in the name the API uses.
-  String get _reportSlug => switch (_tabs.index) {
+  String get _reportSlug => switch (_originalIndex) {
     0 => 'trial-balance',
     1 => 'profit-and-loss',
     2 => 'balance-sheet',

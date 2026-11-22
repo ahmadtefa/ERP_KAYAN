@@ -1105,7 +1105,7 @@ async function main() {
 
   // Exercise authorization over HTTP; setup failures must never silently skip
   // these assertions (DTOs accept permission codes and fullNameEn/fullNameAr).
-  const readOnlyCodes = ['reports.read', 'sales.invoices.read', 'parties.customers.read'];
+  const readOnlyCodes = ['reports.read', 'reports.trial-balance.read', 'sales.invoices.read', 'parties.customers.read'];
   const role = await must('create a read-only role', '/admin/roles', {
     method: 'POST',
     json: { code: `E2E-RO-${stamp}`, nameEn: `Reader ${stamp}`, nameAr: `قارئ ${stamp}`, permissions: readOnlyCodes },
@@ -1139,6 +1139,8 @@ async function main() {
     check('the read-only user cannot create an item', refused.status === 403, `status ${refused.status}`);
     const readable = await api(`/reports/trial-balance?from=${from}&to=${today}`);
     check('the read-only user can still read the reports they were granted', readable.status === 200, `status ${readable.status}`);
+    const ungranted = await api(`/reports/profit-and-loss?from=${from}&to=${today}`);
+    check('the broad reports permission does not grant an unassigned report', ungranted.status === 403, `status ${ungranted.status}`);
 
     token = adminToken;
     await must('grant tenant backup access without super-admin access', `/admin/roles/${role.id}/permissions`, {

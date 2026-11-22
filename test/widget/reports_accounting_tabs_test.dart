@@ -201,12 +201,20 @@ const _user = AppUser(
   fullName: 'Accountant',
   companyId: 'company-1',
   branchId: 'branch-1',
-  permissions: ['reports.read', 'accounting.fixedassets.read'],
+  permissions: [
+    'reports.trial-balance.read',
+    'reports.account-ledger.read',
+    'reports.cash-flow.read',
+    'reports.receivables-reconciliation.read',
+    'reports.reconciliation-center.read',
+    'accounting.fixedassets.read',
+  ],
 );
 
 Future<_FakeApiClient> _pump(
   WidgetTester tester, {
   Size size = const Size(1500, 950),
+  AppUser user = _user,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -218,7 +226,7 @@ Future<_FakeApiClient> _pump(
     ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(api),
-        currentUserProvider.overrideWithValue(_user),
+        currentUserProvider.overrideWithValue(user),
         chartOfAccountsProvider.overrideWith(() => _FakeChart()),
       ],
       child: const MaterialApp(
@@ -252,6 +260,19 @@ Future<void> _openTab(WidgetTester tester, String label) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('only authorized reports appear and the first allowed report loads', (tester) async {
+    const restricted = AppUser(
+      id: 'restricted', username: 'restricted', fullName: 'Reader',
+      companyId: 'company-1', permissions: ['reports.cash-flow.read'],
+    );
+    final api = await _pump(tester, user: restricted);
+    expect(find.text('Cash flow'), findsWidgets);
+    expect(find.text('Trial balance'), findsNothing);
+    expect(find.text('Reconciliation center'), findsNothing);
+    expect(api.requested.any((path) => path.startsWith('/reports/cash-flow')), isTrue);
+    expect(api.requested.any((path) => path.startsWith('/reports/trial-balance')), isFalse);
+  });
 
   testWidgets('a trial-balance row opens that account in the ledger', (
     tester,

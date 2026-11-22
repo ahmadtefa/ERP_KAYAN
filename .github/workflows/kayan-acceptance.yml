@@ -261,6 +261,25 @@ jobs:
       - name: Seed isolated database
         if: matrix.suite != 'backend'
         run: npx ts-node prisma/seed.ts
+      - name: Assign the isolated accounting operator a business-manager role
+        if: matrix.suite == 'accounting' || matrix.suite == 'accounting-reconciliation'
+        env:
+          PGPASSWORD: ci
+        run: |
+          psql -h 127.0.0.1 -U ci -d erp_kayan -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO user_roles ("userId", "roleId", "companyId")
+          SELECT u.id, r.id, u."companyId" FROM users u
+          JOIN roles r ON r."companyId" = u."companyId" AND r.code = 'GENERAL_MANAGER' AND r."deletedAt" IS NULL
+          WHERE u.username = 'ci-admin'
+          ON CONFLICT DO NOTHING;
+          DO $$ BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur."roleId"
+              JOIN users u ON u.id = ur."userId"
+              WHERE u.username = 'ci-admin' AND r.code = 'GENERAL_MANAGER'
+            ) THEN RAISE EXCEPTION 'CI business-manager role was not assigned'; END IF;
+          END $$;
+          SQL
       - name: Run business scenario through the real API
         if: matrix.suite != 'backend'
         env:

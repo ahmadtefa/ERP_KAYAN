@@ -295,7 +295,7 @@ void main() {
     expect(find.textContaining('see every warehouse'), findsWidgets);
   });
 
-  testWidgets('a supervisor without the user grant is told why, not shown blank', (
+  testWidgets('a supervisor with access-read can load users without user administration', (
     tester,
   ) async {
     await pump(
@@ -303,8 +303,8 @@ void main() {
       _AccessApi(),
       permissions: const ['inventory.warehouse.access.read'],
     );
-    expect(find.textContaining('admin.users.manage'), findsOneWidget);
-    expect(find.text('Sara Ali'), findsNothing);
+    expect(find.text('Sara Ali'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('without the read grant the screen says what is missing', (
