@@ -264,10 +264,20 @@ export class SystemRestoreService implements OnModuleInit {
     }
 
     // One restore at a time, across processes as well as inside this one.
-    const lock = await this.holdAdvisoryLock();
-    if (this.running) {
+    // Recheck the journal *after* locking: a different restore could have
+    // started and crashed after the earlier preflight read.
+    let lock: Client | null = null;
+    try {
+      lock = await this.holdAdvisoryLock();
+      if (this.running) throw new ConflictException('A restore or recovery is already running.');
+      const current = await this.journals.read();
+      if (isUnfinished(current)) {
+        throw new ServiceUnavailableException('An interrupted restore must be recovered before starting another.');
+      }
+    } catch (error) {
       await lock?.end().catch(() => {});
-      throw new ConflictException('A restore or recovery is already running.');
+      await removeIfExistsLater(uploadedTemporary);
+      throw error;
     }
     this.running = true;
     let maintenanceOwned = false;

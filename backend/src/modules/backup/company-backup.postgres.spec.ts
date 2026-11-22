@@ -26,6 +26,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
   const otherCustomerId = randomUUID();
   let prisma: PrismaService;
   let service: BackupService;
+  const maintenance = new MaintenanceService();
   let backupDir: string;
   const originalBackupDir = process.env.KAYAN_BACKUP_DIR;
   const purge = new AuditPurgeService();
@@ -51,7 +52,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
       { id: customerId, companyId, code: 'C-1', nameEn: 'Original customer', nameAr: 'العميل الأصلي' },
       { id: otherCustomerId, companyId: otherCompanyId, code: 'C-2', nameEn: 'Other customer', nameAr: 'عميل آخر' },
     ] });
-    service = new BackupService(prisma, new AuditService(prisma), purge, { reconcile: async () => {} } as never, new MaintenanceService());
+    service = new BackupService(prisma, new AuditService(prisma), purge, { reconcile: async () => {} } as never, maintenance);
   });
 
   afterAll(async () => {
@@ -72,6 +73,21 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     if (originalBackupDir === undefined) delete process.env.KAYAN_BACKUP_DIR;
     else process.env.KAYAN_BACKUP_DIR = originalBackupDir;
     if (backupDir) await rm(backupDir, { recursive: true, force: true });
+  });
+
+  it('refuses a company restore when a previous system restore needs recovery', async () => {
+    const snapshot = JSON.parse(JSON.stringify(await service.create(companyId))) as BackupFile;
+    const path = join(backupDir, 'restore-journal.json');
+    await writeFile(path, JSON.stringify({ id: 'interrupted', phase: 'db-replacing', safetyBackup: 'safe.kayanbackup', checks: [] }));
+    try {
+      await expect(service.restore(snapshot, companyId, { replace: true })).rejects.toThrow(/interrupted system restore/i);
+      expect(maintenance.isActive).toBe(true);
+      expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Original customer');
+      expect(await readFile(path, 'utf8')).toContain('interrupted');
+    } finally {
+      await rm(path, { force: true });
+      maintenance.end();
+    }
   });
 
   it('refuses JSON restore while another process holds the common restore lock', async () => {

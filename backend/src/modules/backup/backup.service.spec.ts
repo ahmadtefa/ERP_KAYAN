@@ -164,6 +164,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       .mockResolvedValue('kayan-company-safety-test.json');
     jest.spyOn(service as unknown as { holdAdvisoryLock(): Promise<{ end(): Promise<void> }> }, 'holdAdvisoryLock')
       .mockResolvedValue({ end: async () => {} });
+    jest.spyOn(service as unknown as { assertNoInterruptedSystemRestore(): Promise<void> }, 'assertNoInterruptedSystemRestore')
+      .mockResolvedValue(undefined);
     controller = new BackupController(service, auditMock);
   });
 

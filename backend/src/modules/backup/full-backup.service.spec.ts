@@ -573,7 +573,11 @@ describe('FullBackupService guards', () => {
         source: 'fixture.dump',
         sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
         safetyBackup: 'keep-me.dump',
-      } as never);
+        previousUploads: null,
+        stagingDir: null,
+        detail: null,
+        checks: [],
+      });
       await expect(service.remove('keep-me.dump', 'u1')).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'BACKUP_DELETE_IN_USE' }),
       });

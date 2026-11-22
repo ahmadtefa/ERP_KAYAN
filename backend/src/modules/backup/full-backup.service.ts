@@ -36,7 +36,7 @@ import {
   verifyRestoredShape,
 } from './system/pg-support';
 import { scratchDatabaseActor } from './system/restore-admin';
-import { RestoreJournalStore } from './system/restore-journal';
+import { isUnfinished, RestoreJournalStore } from './system/restore-journal';
 import { acquireRestoreLock } from './system/restore-lock';
 
 /**
@@ -756,6 +756,17 @@ export class FullBackupService {
     let lock: Awaited<ReturnType<typeof acquireRestoreLock>> | null = null;
     try {
       lock = await this.holdAdvisoryLock();
+      let journal;
+      try {
+        journal = await new RestoreJournalStore(backupDirectory()).read();
+      } catch {
+        this.maintenance.begin('The system restore journal cannot be verified. Maintenance remains active.');
+        throw new ServiceUnavailableException('The restore journal cannot be verified. Investigate before restoring.');
+      }
+      if (isUnfinished(journal)) {
+        this.maintenance.begin('A system restore requires recovery. Maintenance remains active.');
+        throw new ServiceUnavailableException('An interrupted system restore must be recovered before restoring a database archive.');
+      }
       return await this.performRestore(options, userId);
     } finally {
       await lock?.end().catch(() => {});

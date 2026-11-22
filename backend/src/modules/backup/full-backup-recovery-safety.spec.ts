@@ -1,6 +1,6 @@
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import * as childProcess from 'child_process';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
@@ -51,6 +51,21 @@ describe('full restore failure safety', () => {
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses a dump restore and retains maintenance when an interrupted system journal exists', async () => {
+    const previous = process.env.KAYAN_BACKUP_DIR;
+    process.env.KAYAN_BACKUP_DIR = dir;
+    writeFileSync(join(dir, 'restore-journal.json'), JSON.stringify({ id: 'stopped', phase: 'db-replacing', checks: [] }));
+    try {
+      await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/interrupted system restore/i);
+      expect(maintenance.isActive).toBe(true);
+      expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+      expect(internals.createSafety).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.KAYAN_BACKUP_DIR;
+      else process.env.KAYAN_BACKUP_DIR = previous;
+    }
   });
 
   it('does not touch the primary when the scratch database cannot be created', async () => {

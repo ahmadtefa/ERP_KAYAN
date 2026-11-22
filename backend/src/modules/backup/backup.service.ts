@@ -10,6 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { backupDirectory } from './system/pg-support';
 import { acquireRestoreLock } from './system/restore-lock';
+import { RestoreJournalStore, isUnfinished } from './system/restore-journal';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
 
@@ -610,18 +611,38 @@ export class BackupService {
     // jobs before reading the safety copy. This coordination is process-local.
     this.maintenance.begin('Restoring company data. Business work is temporarily paused.');
     let lock: Awaited<ReturnType<typeof acquireRestoreLock>> | null = null;
+    let journalUnsafe = false;
     try {
       lock = await this.holdAdvisoryLock();
+      try {
+        await this.assertNoInterruptedSystemRestore();
+      } catch (error) {
+        journalUnsafe = true;
+        this.maintenance.begin('The system restore journal requires recovery or investigation. Maintenance remains active.');
+        throw error;
+      }
       await this.maintenance.waitForBusinessRequests();
       return await this.performRestore(file, requesterCompanyId, options);
     } finally {
       await lock?.end().catch(() => {});
-      this.maintenance.end();
+      if (!journalUnsafe) this.maintenance.end();
     }
   }
 
   private async holdAdvisoryLock() {
     return acquireRestoreLock();
+  }
+
+  private async assertNoInterruptedSystemRestore(): Promise<void> {
+    let journal;
+    try {
+      journal = await new RestoreJournalStore(backupDirectory()).read();
+    } catch {
+      throw new ServiceUnavailableException('The restore journal cannot be verified. Resolve it before restoring company data.');
+    }
+    if (isUnfinished(journal)) {
+      throw new ServiceUnavailableException('An interrupted system restore must be recovered before restoring company data.');
+    }
   }
 
   private async performRestore(
