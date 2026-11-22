@@ -231,7 +231,10 @@ void main() {
 
     await tester.enterText(find.byType(TextFormField).at(0), 'North zone');
     await tester.enterText(find.byType(TextFormField).at(1), 'المنطقة الشمالية');
-    expect(find.text('Code'), findsNothing);
+    // The underlying records table still has a Code column header behind
+    // the modal. Assert the form itself has only its two name inputs; the
+    // identifier is not an editable field on creation.
+    expect(find.byType(TextFormField), findsNWidgets(2));
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
