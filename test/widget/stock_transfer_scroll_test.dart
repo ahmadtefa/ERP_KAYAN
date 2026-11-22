@@ -61,8 +61,13 @@ void main() {
       await tester.pumpAndSettle();
       final vertical = find.descendant(of: find.byType(AlertDialog), matching: find.byWidgetPredicate(
         (widget) => widget is SingleChildScrollView && widget.scrollDirection == Axis.vertical));
-      await tester.drag(vertical.first, const Offset(0, -1700));
-      await tester.pumpAndSettle();
+      final verticalController = tester.widget<SingleChildScrollView>(vertical.first).controller!;
+      expect(verticalController.position.maxScrollExtent, greaterThan(0));
+      for (var i = 0; i < 10 && verticalController.offset < verticalController.position.maxScrollExtent; i++) {
+        await tester.drag(vertical.first, const Offset(0, -300));
+        await tester.pumpAndSettle();
+      }
+      expect(verticalController.offset, verticalController.position.maxScrollExtent);
       final last = find.text(locale.languageCode == 'ar' ? 'صنف 29' : 'Item 29');
       expect(last, findsOneWidget);
       final dialog = tester.getRect(find.byType(AlertDialog));
