@@ -68,6 +68,7 @@ export class JwtAuthGuard implements CanActivate {
       companyId: string;
       branchId?: string | null;
       tokenVersion?: number;
+      sessionHash?: string;
       typ?: string;
     };
     try {
@@ -87,6 +88,18 @@ export class JwtAuthGuard implements CanActivate {
     if (!fromQueryCredential && payload.typ === DOWNLOAD_TICKET_TYPE) {
       throw new UnauthorizedException('A download ticket cannot be used as a bearer token');
     }
+
+    // Legacy access tokens without a session anchor are refreshed by the
+    // client. Requiring a surviving row prevents deleted/restored users from
+    // reviving previously issued access credentials with the same version.
+    if (typeof payload.sessionHash !== 'string' || !/^[a-f0-9]{64}$/.test(payload.sessionHash)) {
+      throw new UnauthorizedException('Session is unavailable; sign in again');
+    }
+    const session = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash: payload.sessionHash, userId: payload.sub },
+      select: { id: true },
+    });
+    if (!session) throw new UnauthorizedException('Session is unavailable; sign in again');
 
     // Authorization data is loaded from the database on every request so
     // revocations and account/branch changes take effect immediately.
@@ -202,6 +215,7 @@ export class JwtAuthGuard implements CanActivate {
       username: principal.username,
       companyId: principal.companyId,
       branchId,
+      sessionHash: payload.sessionHash,
       // The full assignment list, so a screen can show every branch the
       // person actually works in without a second round trip.
       branchIds: principal.branches.map((branch) => branch.branchId),

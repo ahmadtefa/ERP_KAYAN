@@ -14,6 +14,8 @@ export interface AuthUser {
   branchIds?: string[];
   isSuperAdmin: boolean;
   permissions: string[];
+  /// Hash of the persisted session row, never the refresh credential itself.
+  sessionHash?: string;
   /// Role codes held by the account (owner, storekeeper, accountant...). Used
   /// by the notification centre to address an alert to a role rather than to
   /// every person who happens to hold the permission.

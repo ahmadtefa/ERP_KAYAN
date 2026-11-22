@@ -147,6 +147,9 @@ export class AuthService {
     });
     const branchId = branches[0]?.branchId ?? null;
 
+    // Tying access to a persisted session prevents a restored user row with
+    // the same token version from reviving credentials that were deleted.
+    const refreshToken = await this.issueRefreshToken(user.id);
     const accessToken = await this.jwt.signAsync(
       {
         sub: user.id,
@@ -155,6 +158,7 @@ export class AuthService {
         branchId,
         isSuperAdmin: user.isSuperAdmin,
         tokenVersion: user.tokenVersion,
+        sessionHash: this.hashToken(refreshToken),
         permissions,
       },
       {
@@ -162,8 +166,6 @@ export class AuthService {
         expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900),
       },
     );
-
-    const refreshToken = await this.issueRefreshToken(user.id);
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -360,6 +362,7 @@ export class AuthService {
         .map((ub) => ub.branchId)
         .sort()[0] ?? null;
 
+    const refreshToken = await this.issueRefreshToken(user.id);
     const accessToken = await this.jwt.signAsync(
       {
         sub: user.id,
@@ -368,6 +371,7 @@ export class AuthService {
         branchId,
         isSuperAdmin: user.isSuperAdmin,
         tokenVersion: user.tokenVersion,
+        sessionHash: this.hashToken(refreshToken),
         permissions,
       },
       {
@@ -378,7 +382,7 @@ export class AuthService {
 
     return {
       accessToken,
-      refreshToken: await this.issueRefreshToken(user.id),
+      refreshToken,
       user: this.toSessionUser(user, roles, permissions, branchId),
     };
   }
@@ -397,8 +401,8 @@ export class AuthService {
       where: { id: user.userId },
       select: { tokenVersion: true, isActive: true, deletedAt: true },
     });
-    if (!record || !record.isActive || record.deletedAt !== null) {
-      throw new UnauthorizedException('Account is inactive or unavailable');
+    if (!record || !record.isActive || record.deletedAt !== null || !user.sessionHash) {
+      throw new UnauthorizedException('Account or session is inactive or unavailable');
     }
     const expiresIn = downloadTicketTtl();
     const ticket = await this.jwt.signAsync(
@@ -407,6 +411,7 @@ export class AuthService {
         companyId: user.companyId,
         branchId: user.branchId,
         tokenVersion: record.tokenVersion,
+        sessionHash: user.sessionHash,
         typ: DOWNLOAD_TICKET_TYPE,
       },
       {

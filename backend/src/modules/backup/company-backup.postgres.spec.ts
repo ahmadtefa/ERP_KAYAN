@@ -1,4 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { JwtService } from '@nestjs/jwt';
+import * as argon2 from 'argon2';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { AuthService } from '../auth/auth.service';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,12 +62,55 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
       }
       await tx.customer.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
       await tx.supplier.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
+      await tx.user.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
       await tx.company.deleteMany({ where: { id: { in: [companyId, otherCompanyId] } } });
     });
     await prisma.$disconnect();
     if (originalBackupDir === undefined) delete process.env.KAYAN_BACKUP_DIR;
     else process.env.KAYAN_BACKUP_DIR = originalBackupDir;
     if (backupDir) await rm(backupDir, { recursive: true, force: true });
+  });
+
+  it('invalidates all restored company sessions without changing the other company', async () => {
+    const originalSecret = process.env.JWT_ACCESS_SECRET;
+    process.env.JWT_ACCESS_SECRET = 'isolated-company-backup-test-secret';
+    const userId = randomUUID();
+    const otherUserId = randomUUID();
+    const password = 'Synthetic password 123!';
+    const passwordHash = await argon2.hash(password);
+    const username = `backup-${userId}`;
+    const otherUsername = `backup-${otherUserId}`;
+    await prisma.user.createMany({ data: [
+      { id: userId, companyId, username, fullNameEn: 'Restore user', fullNameAr: 'مستخدم', passwordHash },
+      { id: otherUserId, companyId: otherCompanyId, username: otherUsername, fullNameEn: 'Other user', fullNameAr: 'آخر', passwordHash },
+    ] });
+    const jwt = new JwtService();
+    const auth = new AuthService(prisma, jwt, { record: async () => {} } as never);
+    const guard = new JwtAuthGuard({ getAllAndOverride: () => false } as unknown as Reflector, jwt, prisma);
+    const check = (token: string) => guard.canActivate({
+      getHandler: () => () => {},
+      getClass: () => class {},
+      switchToHttp: () => ({ getRequest: () => ({ headers: { authorization: `Bearer ${token}` }, query: {} }) }),
+    } as unknown as ExecutionContext);
+    try {
+      const first = await auth.login(username, password);
+      const second = await auth.login(username, password);
+      const other = await auth.login(otherUsername, password);
+      const snapshot = JSON.parse(JSON.stringify(await service.create(companyId))) as BackupFile;
+      await expect(check(first.accessToken)).resolves.toBe(true);
+      await expect(check(second.accessToken)).resolves.toBe(true);
+      await expect(check(other.accessToken)).resolves.toBe(true);
+      await service.restore(snapshot, companyId, { replace: true });
+      await expect(check(first.accessToken)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(check(second.accessToken)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(auth.refresh(first.refreshToken)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(auth.refresh(second.refreshToken)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(check(other.accessToken)).resolves.toBe(true);
+      await expect(auth.refresh(other.refreshToken)).resolves.toHaveProperty('accessToken');
+    } finally {
+      if (originalSecret === undefined) delete process.env.JWT_ACCESS_SECRET;
+      else process.env.JWT_ACCESS_SECRET = originalSecret;
+    }
   });
 
   it('reads all tables from one snapshot while another transaction commits changes', async () => {

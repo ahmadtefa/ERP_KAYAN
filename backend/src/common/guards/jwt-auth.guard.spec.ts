@@ -12,6 +12,7 @@ const payload = {
   branchId: 'branch-old',
   isSuperAdmin: true,
   permissions: ['admin.users.manage', 'inventory.items.read', 'reports.read'],
+  sessionHash: 'a'.repeat(64),
 };
 
 const activePrincipal = {
@@ -86,6 +87,7 @@ function makeGuard(options?: {
         options && 'principal' in options ? options.principal : activePrincipal,
       ),
     },
+    refreshToken: { findFirst: jest.fn().mockResolvedValue({ id: 'session' }) },
   } as unknown as PrismaService;
   return { guard: new JwtAuthGuard(reflector, jwt, prisma), jwt, prisma };
 }
@@ -164,6 +166,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
       username: 'employee',
       companyId: payload.companyId,
       branchId: 'branch-current',
+      sessionHash: payload.sessionHash,
       // The whole assignment, so warehouse screens can narrow to it.
       branchIds: ['branch-current'],
       roles: ['storekeeper'],
@@ -281,6 +284,15 @@ describe('JwtAuthGuard account status and live authorization', () => {
     const { context } = makeContext('Bearer ticket-token');
 
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects a token after its persisted session was removed by restore', async () => {
+    const { guard, prisma } = makeGuard();
+    jest.mocked(prisma.refreshToken.findFirst).mockResolvedValueOnce(null);
+    await expect(guard.canActivate(makeContext().context)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
+      where: { tokenHash: payload.sessionHash, userId: payload.sub }, select: { id: true },
+    });
   });
 
   it('rejects access tokens revoked by reset', async () => {
