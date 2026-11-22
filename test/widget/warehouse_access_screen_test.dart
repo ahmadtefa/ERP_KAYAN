@@ -13,13 +13,14 @@ import 'test_harness.dart';
 /// Serves the people list and one person's grants, in the shape
 /// `WarehouseAccessService.forUser` returns.
 class _AccessApi extends ApiClient {
-  _AccessApi({this.restricted = true})
+  _AccessApi({this.restricted = true, this.failUsersList = false})
     : super(
         AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
         FakeTokenStore(),
       );
 
   bool restricted;
+  bool failUsersList;
   final puts = <(String, Object?)>[];
   final userListQueries = <Map<String, dynamic>?>[];
 
@@ -28,8 +29,9 @@ class _AccessApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path == '/admin/users') {
+    if (path == '/inventory/warehouse-access/users') {
       userListQueries.add(query);
+      if (failUsersList) throw StateError('WAREHOUSE_USER_LIST_FAILED');
       return [
         {
           'id': 'person-1',
@@ -102,7 +104,6 @@ class _AccessApi extends ApiClient {
 const _admin = [
   'inventory.warehouse.access.read',
   'inventory.warehouse.access.manage',
-  'admin.users.manage',
 ];
 
 void main() {
@@ -155,6 +156,27 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.byTooltip('Retry'), findsNothing);
   });
+
+  testWidgets(
+    'a people-list failure ends loading and exposes a retry',
+    (tester) async {
+      final api = _AccessApi(failUsersList: true);
+      await pump(
+        tester,
+        api,
+        permissions: const ['inventory.warehouse.access.read'],
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byTooltip('Retry'), findsNothing);
+      expect(find.text('Retry'), findsOneWidget);
+
+      api.failUsersList = false;
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sara Ali'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('a restricted person is described as restricted', (
     tester,

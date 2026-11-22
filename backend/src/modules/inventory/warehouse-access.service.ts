@@ -27,6 +27,37 @@ export class WarehouseAccessService {
     private readonly audit: AuditService,
   ) {}
 
+  /// Minimal people catalogue for the warehouse-rights screen. The screen is
+  /// authorized by warehouse-access permissions; it must not depend on the
+  /// unrelated admin.users.manage permission or remain stuck on a forbidden
+  /// /admin/users request. Branch-scoped managers see only people who work in
+  /// their branches plus company-wide people with no branch restriction.
+  async usersForAccess(companyId: string, scope: WarehouseScope = null) {
+    return this.prisma.user.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        isActive: true,
+        ...(scope !== null
+          ? {
+              OR: [
+                { branches: { some: { branch: { id: { in: scope }, companyId, deletedAt: null } } } },
+                { branches: { none: {} } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        username: true,
+        fullNameEn: true,
+        fullNameAr: true,
+        isActive: true,
+      },
+      orderBy: [{ username: 'asc' }, { id: 'asc' }],
+    });
+  }
+
   async forUser(companyId: string, userId: string, scope: WarehouseScope = null) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, companyId, deletedAt: null },

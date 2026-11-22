@@ -25,13 +25,14 @@ describe('warehouse access', () => {
         create: jest.fn(async ({ data }: { data: unknown }) => data),
       },
     };
-    const prisma: any = {
+    const prisma = {
       user: {
         findFirst: jest.fn(async () =>
           options.user === null
             ? null
             : { ...userRow, isSuperAdmin: false, ...options.user },
         ),
+        findMany: jest.fn(async () => [userRow]),
       },
       userWarehouseAccess: {
         findMany: jest.fn(async () => [] as unknown[]),
@@ -50,6 +51,52 @@ describe('warehouse access', () => {
     return { service, prisma, tx, audit };
   }
 
+  it('lists only the minimal company-scoped people needed by the warehouse editor', async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findMany.mockResolvedValueOnce([userRow]);
+
+    const users = await service.usersForAccess(COMPANY, ['branch-1']);
+
+    expect(users).toEqual([userRow]);
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: {
+        companyId: COMPANY,
+        deletedAt: null,
+        isActive: true,
+        OR: [
+          { branches: { some: { branch: { id: { in: ['branch-1'] }, companyId: COMPANY, deletedAt: null } } } },
+          { branches: { none: {} } },
+        ],
+      },
+      select: {
+        id: true,
+        username: true,
+        fullNameEn: true,
+        fullNameAr: true,
+        isActive: true,
+      },
+      orderBy: [{ username: 'asc' }, { id: 'asc' }],
+    });
+  });
+
+  it('lists active people company-wide when the caller has no branch assignment', async () => {
+    const { service, prisma } = makeService();
+
+    await service.usersForAccess(COMPANY, null);
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { companyId: COMPANY, deletedAt: null, isActive: true },
+      select: {
+        id: true,
+        username: true,
+        fullNameEn: true,
+        fullNameAr: true,
+        isActive: true,
+      },
+      orderBy: [{ username: 'asc' }, { id: 'asc' }],
+    });
+  });
+
   it('treats an empty grant set as unrestricted, and still lists the warehouses', async () => {
     const { service, prisma } = makeService();
 
@@ -57,10 +104,12 @@ describe('warehouse access', () => {
 
     expect(access.restricted).toBe(false);
     expect(access.grants).toEqual([]);
-    expect(access.warehouses.map((row: any) => row.code)).toEqual(['WH-A', 'WH-B']);
+    expect(access.warehouses.map((row) => row.code)).toEqual(['WH-A', 'WH-B']);
     // Reading another company's warehouses is not possible: the company is in
     // the filter, always.
-    expect((prisma.warehouse.findMany.mock.calls[0] as any[])[0].where.companyId).toBe(COMPANY);
+    expect(prisma.warehouse.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY }) }),
+    );
   });
 
   it('restricts the warehouse list to the branches the caller may see', async () => {
@@ -68,7 +117,11 @@ describe('warehouse access', () => {
 
     await service.forUser(COMPANY, USER, ['branch-1']);
 
-    expect((prisma.warehouse.findMany.mock.calls[0] as any[])[0].where.branchId).toEqual({ in: ['branch-1'] });
+    expect(prisma.warehouse.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ branchId: { in: ['branch-1'] } }),
+      }),
+    );
   });
 
   it('keeps the restricted flag when grants exist only outside the admin branch scope', async () => {
@@ -79,8 +132,13 @@ describe('warehouse access', () => {
 
     expect(access.restricted).toBe(true);
     expect(access.grants).toEqual([]);
-    expect((prisma.userWarehouseAccess.findMany.mock.calls[0] as any[])[0].where.warehouse.branchId)
-      .toEqual({ in: ['branch-1'] });
+    expect(prisma.userWarehouseAccess.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          warehouse: expect.objectContaining({ branchId: { in: ['branch-1'] } }),
+        }),
+      }),
+    );
   });
 
   it('reports every flag of a grant, not just the fact that one exists', async () => {
@@ -124,7 +182,7 @@ describe('warehouse access', () => {
     expect(tx.userWarehouseAccess.deleteMany).toHaveBeenCalledWith({
       where: { companyId: COMPANY, userId: USER },
     });
-    const created = tx.userWarehouseAccess.create.mock.calls.map((call: any) => call[0].data);
+    const created = tx.userWarehouseAccess.create.mock.calls.map((call) => call[0].data);
     expect(created).toHaveLength(2);
     // An omitted flag is off, except viewing: adding a warehouse to the screen
     // means that person can see it, and nothing more.
@@ -169,7 +227,9 @@ describe('warehouse access', () => {
   it('refuses a warehouse outside the caller\u2019s branches', async () => {
     const { service, tx, prisma } = makeService();
     // The verification query returns one row for two ids: one is not theirs.
-    prisma.warehouse.findMany.mockResolvedValueOnce([{ id: WH_A }]);
+    prisma.warehouse.findMany.mockResolvedValueOnce([
+      { id: WH_A, code: 'WH-A', nameEn: 'Store A', nameAr: 'مخزن أ', branchId: 'branch-1' },
+    ]);
 
     await expect(
       service.setForUser(COMPANY, ACTOR, USER, [{ warehouseId: WH_A }, { warehouseId: WH_B }]),

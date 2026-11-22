@@ -15,11 +15,12 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 /// branches, which the screen says in words: an empty table would otherwise
 /// read as "this person can see nothing", the opposite of what it means.
 final _peopleProvider = FutureProvider<List<Json>>((ref) async {
-  // UsersController accepts only `q` and `includeInactive`; passing generic
-  // pagination keys here is rejected by Nest's whitelist ValidationPipe and
-  // leaves this screen unable to load on a real API. The endpoint already
-  // returns the complete company-scoped list.
-  return ref.read(apiClientProvider).getList('/admin/users');
+  // The minimal people catalogue is authorized by warehouse-access read,
+  // matching the permissions that open this screen. It deliberately does not
+  // call /admin/users, which is guarded by the unrelated user-admin grant.
+  return ref
+      .read(apiClientProvider)
+      .getList('/inventory/warehouse-access/users');
 });
 
 /// The person whose rights are being edited.
@@ -64,11 +65,6 @@ class WarehouseAccessScreen extends ConsumerWidget {
             .watch(currentUserProvider)
             ?.can('inventory.warehouse.access.manage') ??
         false;
-    // The user list is behind admin.users.manage, so a warehouse supervisor
-    // without it is told why the picker is empty rather than shown a blank one.
-    final mayListUsers =
-        ref.watch(currentUserProvider)?.can('admin.users.manage') ?? false;
-
     if (!mayRead) {
       return ModuleScaffold(
         title: arabic ? 'صلاحيات المستودعات' : 'Warehouse access',
@@ -78,26 +74,6 @@ class WarehouseAccessScreen extends ConsumerWidget {
             arabic
                 ? 'تحتاج صلاحية عرض صلاحيات المستودعات.'
                 : 'You need the warehouse-access read grant.',
-          ),
-        ),
-      );
-    }
-
-    if (!mayListUsers) {
-      return ModuleScaffold(
-        title: arabic ? 'صلاحيات المستودعات' : 'Warehouse access',
-        eyebrow: arabic ? 'المخزون' : 'Inventory',
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              arabic
-                  ? 'قائمة المستخدمين تحتاج صلاحية إدارة المستخدمين (admin.users.manage).'
-                  : 'Listing the company\'s people needs admin.users.manage. '
-                        'Ask an administrator to grant it, or open the person '
-                        'from the user administration screen.',
-              textAlign: TextAlign.center,
-            ),
           ),
         ),
       );

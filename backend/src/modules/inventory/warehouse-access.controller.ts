@@ -42,6 +42,12 @@ class SetAccessDto {
 export class WarehouseAccessController {
   constructor(private readonly service: WarehouseAccessService) {}
 
+  @Get('users')
+  @RequirePermissions('inventory.warehouse.access.read')
+  usersForAccess(@CurrentUser() user: AuthUser) {
+    return this.service.usersForAccess(user.companyId, warehouseScopeOf(user));
+  }
+
   @Get(':userId')
   @RequirePermissions('inventory.warehouse.access.read')
   forUser(@CurrentUser() user: AuthUser, @Param('userId') userId: string) {
