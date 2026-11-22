@@ -26,7 +26,9 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     await prisma.$connect();
     await prisma.company.createMany({ data: [
       { id: companyId, code: `JSON-${companyId.slice(0, 8)}`, nameEn: 'Original company', nameAr: 'الشركة الأصلية' },
-      { id: otherCompanyId, code: `JSON-${otherCompanyId.slice(0, 8)}`, nameEn: 'Other company', nameAr: 'الشركة الأخرى' },
+      // The installation enforces one active company; an inactive second
+      // company still exercises tenant isolation without bypassing that rule.
+      { id: otherCompanyId, code: `JSON-${otherCompanyId.slice(0, 8)}`, nameEn: 'Other company', nameAr: 'الشركة الأخرى', isActive: false },
     ] });
     await prisma.customer.createMany({ data: [
       { id: customerId, companyId, code: 'C-1', nameEn: 'Original customer', nameAr: 'العميل الأصلي' },
