@@ -397,7 +397,7 @@ export class FullBackupService {
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
     const tools = this.requireTools();
     const dir = await this.ensureBackupDir();
-    const database = this.requireDatabase();
+    this.requireDatabase();
     const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
     const name = `kayan-${kind}-${stamp}-${randomUUID()}.dump`;
     const path = join(dir, name);

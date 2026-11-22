@@ -4,7 +4,6 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { canReadCost } from '../../common/auth/cost-visibility';
 import { assertTransferAccess, assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import type { WarehouseAction } from '../../common/warehouse/warehouse-access';
-import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers, counts and write-offs. Separate permissions for

@@ -28,7 +28,7 @@ export async function readXlsx(buffer: Buffer): Promise<Sheet> {
   const workbook = new Workbook();
   try {
     await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
-  } catch (error) {
+  } catch {
     throw new ImportFormatError(
       'The file could not be read as an Excel workbook. If it was saved as .xls, open it and save it as .xlsx first.',
     );

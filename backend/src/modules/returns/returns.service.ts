@@ -6,7 +6,6 @@ import {
 import {
   InvoiceDocumentType,
   InvoiceStatus,
-  JournalStatus,
   Prisma,
   StockDirection,
 } from '@prisma/client';
