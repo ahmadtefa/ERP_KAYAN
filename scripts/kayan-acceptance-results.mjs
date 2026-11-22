@@ -42,7 +42,7 @@ for (const line of bytes.toString(encoding).replace(/^\uFEFF/, '').split(/\r?\n/
     errors.set(event.testID, event.error.slice(0, 2000));
   }
   if (event.type === 'print' && typeof event.message === 'string' &&
-      /exception|expected:|actual:|══╡/i.test(event.message)) {
+      !printedErrors.has(event.testID) && /exception|expected:|actual:|══╡/i.test(event.message)) {
     printedErrors.set(event.testID, event.message.slice(0, 2000));
   }
   if (event.type !== 'testDone') continue;

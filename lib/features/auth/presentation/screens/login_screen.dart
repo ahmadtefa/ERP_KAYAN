@@ -199,7 +199,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     var saving = false;
     String? error;
 
-    final changed = await showDialog<bool>(
+    // A route's popped future resolves before its exit animation finishes.
+    // Keep the text controllers alive until the dialog is actually removed.
+    final route = DialogRoute<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
@@ -361,7 +363,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         },
       ),
     );
+    final changed = await Navigator.of(context, rootNavigator: true).push(route);
     final changedUsername = changed == true ? username.text : null;
+    await route.completed;
     username.dispose();
     currentPassword.dispose();
     newPassword.dispose();
