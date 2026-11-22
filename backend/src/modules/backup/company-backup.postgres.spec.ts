@@ -26,9 +26,9 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     await prisma.$connect();
     await prisma.company.createMany({ data: [
       { id: companyId, code: `JSON-${companyId.slice(0, 8)}`, nameEn: 'Original company', nameAr: 'الشركة الأصلية' },
-      // The installation enforces one active company; an inactive second
-      // company still exercises tenant isolation without bypassing that rule.
-      { id: otherCompanyId, code: `JSON-${otherCompanyId.slice(0, 8)}`, nameEn: 'Other company', nameAr: 'الشركة الأخرى', isActive: false },
+      // The installation permits only one non-deleted company. A historical
+      // soft-deleted company still exercises isolation of its existing rows.
+      { id: otherCompanyId, code: `JSON-${otherCompanyId.slice(0, 8)}`, nameEn: 'Other company', nameAr: 'الشركة الأخرى', isActive: false, deletedAt: new Date() },
     ] });
     await prisma.customer.createMany({ data: [
       { id: customerId, companyId, code: 'C-1', nameEn: 'Original customer', nameAr: 'العميل الأصلي' },
