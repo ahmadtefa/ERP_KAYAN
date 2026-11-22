@@ -301,6 +301,7 @@ export class BudgetsService {
       accountId?: string;
       includeInactive?: string | boolean;
       asOf?: string;
+      branchId?: string;
     } = {},
   ) {
     const includeInactive =
@@ -347,10 +348,13 @@ export class BudgetsService {
         rows: [],
         totals: this.emptyTotals(),
         basis:
-          'Each row compares its budget with posted ledger lines attributed to the same cost centre and account inside the budget own period.',
+          'Each row compares the company-level budget with posted ledger lines attributed to the same cost centre and account inside the budget own period. When a branch is selected, actuals are restricted to that branch; budgets themselves are not branch-assigned.',
       };
     }
 
+    const branchFilter = query.branchId
+      ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid`
+      : Prisma.sql``;
     const actuals = await this.prisma.$queryRaw<
       Array<{ budgetId: string; actual: Prisma.Decimal }>
     >(Prisma.sql`
@@ -369,6 +373,7 @@ export class BudgetsService {
           JOIN accounts a ON a.id = l."accountId"
          WHERE e."companyId" = ${companyId}::uuid
            AND e.status IN ('POSTED', 'REVERSED')
+           ${branchFilter}
 
         UNION ALL
 
@@ -384,6 +389,7 @@ export class BudgetsService {
           JOIN accounts a ON a.id = l."accountId"
          WHERE e."companyId" = ${companyId}::uuid
            AND e.status IN ('POSTED', 'REVERSED')
+           ${branchFilter}
            AND l."costCenterId" IS NOT NULL
            AND NOT EXISTS (
              SELECT 1 FROM journal_line_allocations al
@@ -453,7 +459,7 @@ export class BudgetsService {
       rows,
       totals: this.totals(rows),
       basis:
-        'Each row compares its budget with posted ledger lines attributed to the same cost centre and account inside the budget own period. Nothing is prorated or converted between currencies.',
+        'Each row compares the company-level budget with posted ledger lines attributed to the same cost centre and account inside the budget own period. When a branch is selected, actuals are restricted to that branch; budgets themselves are not branch-assigned. Nothing is prorated or converted between currencies.',
     };
   }
 

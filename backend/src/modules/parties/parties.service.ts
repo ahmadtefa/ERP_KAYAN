@@ -11,6 +11,32 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 const MONEY_SCALE = 4;
 export type PartyKind = 'customer' | 'supplier';
 
+type PartyRow = {
+  id: string;
+  paymentTermDays: number | null;
+  companyId: string;
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  phone: string | null;
+  email: string | null;
+  taxNumber: string | null;
+  address: string | null;
+  creditLimit?: Prisma.Decimal | null;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: Date;
+  deletedAt?: Date | null;
+};
+
+type PartyModel = {
+  findMany(args: { where: object; orderBy?: object; skip?: number; take?: number }): Prisma.PrismaPromise<PartyRow[]>;
+  count(args: { where: object }): Prisma.PrismaPromise<number>;
+  findFirst(args: { where: object; select?: object }): Prisma.PrismaPromise<PartyRow | null>;
+  create(args: { data: object }): Prisma.PrismaPromise<PartyRow>;
+  update(args: { where: object; data: object }): Prisma.PrismaPromise<PartyRow>;
+};
+
 /**
  * Customers and suppliers differ only in a credit limit, so they share one
  * service and are separated by which table is addressed. Keeping the two code
@@ -24,8 +50,9 @@ export class PartiesService {
     private readonly audit: AuditService,
   ) {}
 
-  private model(kind: PartyKind) {
-    return kind === 'customer' ? this.prisma.customer : this.prisma.supplier;
+  private model(kind: PartyKind): PartyModel {
+    const model = kind === 'customer' ? this.prisma.customer : this.prisma.supplier;
+    return model as unknown as PartyModel;
   }
 
   async findAll(
@@ -63,7 +90,7 @@ export class PartiesService {
           : 'code';
     const direction: 'asc' | 'desc' = query.dir === 'desc' ? 'desc' : 'asc';
 
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const [items, total] = await this.prisma.$transaction([
       model.findMany({
         where,
@@ -75,7 +102,7 @@ export class PartiesService {
     ]);
 
     return {
-      items: items.map((i: any) => this.toResponse(i)),
+      items: items.map((i) => this.toResponse(i)),
       total,
       page,
       pageSize,
@@ -83,7 +110,7 @@ export class PartiesService {
   }
 
   async findOne(companyId: string, kind: PartyKind, id: string) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
     return this.toResponse(row);
@@ -133,7 +160,12 @@ export class PartiesService {
     } as const;
   }
 
-  private async openingEntries(companyId: string, kind: PartyKind, id: string) {
+  private async openingEntries(
+    companyId: string,
+    kind: PartyKind,
+    id: string,
+    branchId?: string,
+  ) {
     return this.prisma.$queryRaw<Array<{
       id: string; number: string; date: Date; description: string | null;
       debit: Prisma.Decimal; credit: Prisma.Decimal; type: string;
@@ -150,6 +182,7 @@ export class PartiesService {
       WHERE document."companyId" = ${companyId}::uuid
         AND document."deletedAt" IS NULL
         AND document.status IN ('POSTED', 'REVERSED')
+        ${branchId ? Prisma.sql`AND document."branchId" = ${branchId}::uuid` : Prisma.sql``}
         AND ${kind === 'customer' ? Prisma.sql`line."customerId"` : Prisma.sql`line."supplierId"`} = ${id}::uuid
     `);
   }
@@ -159,7 +192,7 @@ export class PartiesService {
    * last documents - everything the list screen shows when a row is opened.
    */
   async summary(companyId: string, kind: PartyKind, id: string) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
 
@@ -380,9 +413,9 @@ export class PartiesService {
     companyId: string,
     kind: PartyKind,
     id: string,
-    query: { from?: string; to?: string },
+    query: { from?: string; to?: string; branchId?: string },
   ) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
 
@@ -395,6 +428,7 @@ export class PartiesService {
       companyId,
       deletedAt: null,
       status: 'POSTED',
+      ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
     } as const;
 
@@ -431,6 +465,7 @@ export class PartiesService {
           companyId,
           deletedAt: null,
           status: 'POSTED',
+          ...(query.branchId ? { branchId: query.branchId } : {}),
           ...this.voucherPartyWhere(kind, id),
         },
         select: {
@@ -463,7 +498,7 @@ export class PartiesService {
       /// the row so a printed sheet says so on its face.
       status: string;
     };
-    const openings = await this.openingEntries(companyId, kind, id);
+    const openings = await this.openingEntries(companyId, kind, id, query.branchId);
     const all: Entry[] = openings.map((row) => ({
       ...row, description: row.description ?? '', status: 'POSTED',
     }));
@@ -591,7 +626,7 @@ export class PartiesService {
     kind: PartyKind,
     body: object,
   ) {
-    const dto = body as Record<string, any>;
+    const dto = body as Record<string, unknown>;
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
 
@@ -599,7 +634,7 @@ export class PartiesService {
     const nameAr = String(dto.nameAr ?? '').trim();
     if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
 
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const existing = await model.findFirst({
       where: { companyId, code },
       select: { id: true, deletedAt: true },
@@ -647,8 +682,8 @@ export class PartiesService {
     id: string,
     body: object,
   ) {
-    const dto = body as Record<string, any>;
-    const model = this.model(kind) as any;
+    const dto = body as Record<string, unknown>;
+    const model = this.model(kind);
     const before = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!before) throw new NotFoundException(`${kind} not found`);
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
@@ -704,7 +739,7 @@ export class PartiesService {
     kind: PartyKind,
     id: string,
   ) {
-    const model = this.model(kind) as any;
+    const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
     if (!row.isActive) return this.toResponse(row);
@@ -748,7 +783,7 @@ export class PartiesService {
     }
   }
 
-  private toResponse(row: any) {
+  private toResponse(row: PartyRow) {
     return {
       id: row.id,
       paymentTermDays: row.paymentTermDays ?? 0,

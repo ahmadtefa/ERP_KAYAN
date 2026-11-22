@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 
 import {
   AuthUser,
@@ -6,6 +6,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
 import { CompanyAggregateVisibilityInterceptor } from '../../common/auth/company-aggregate-visibility';
 import { redactPriceFields } from '../../common/auth/price-redaction';
 import { BudgetsService } from '../accounting/budgets.service';
@@ -25,6 +26,7 @@ import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
+@UseGuards(BranchReportScopeGuard)
 @UseInterceptors(CompanyAggregateVisibilityInterceptor)
 export class ReportsController {
   constructor(
@@ -42,19 +44,26 @@ export class ReportsController {
   reconciliationCenterReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.reconciliationCenter.center(user.companyId, {
       asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
     });
   }
 
   @Get('receivables-reconciliation')
   @RequirePermissions('reports.read')
   receivablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
-    return this.reconciliation.receivables(user.companyId, { asOf: query.asOf ?? query.to });
+    return this.reconciliation.receivables(user.companyId, {
+      asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
+    });
   }
 
   @Get('payables-reconciliation')
   @RequirePermissions('reports.read')
   payablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
-    return this.reconciliation.payables(user.companyId, { asOf: query.asOf ?? query.to });
+    return this.reconciliation.payables(user.companyId, {
+      asOf: query.asOf ?? query.to,
+      branchId: query.branchId,
+    });
   }
 
   @Get('trial-balance')

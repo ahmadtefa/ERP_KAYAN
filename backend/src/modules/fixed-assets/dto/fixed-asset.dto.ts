@@ -118,4 +118,7 @@ export class ListFixedAssetsDto {
 export class ListDepreciationRunsDto {
   @IsOptional() @IsString() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/)
   period?: string;
+
+  @IsOptional() @IsUUID()
+  branchId?: string;
 }

@@ -8,10 +8,12 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
 import {
   ActivateFixedAssetDto,
   CreateFixedAssetDto,
@@ -36,15 +38,20 @@ export class FixedAssetsController {
   }
 
   @Get('depreciation-runs')
+  @UseGuards(BranchReportScopeGuard)
   @RequirePermissions('accounting.fixedassets.read')
   listRuns(@CurrentUser() user: AuthUser, @Query() query: ListDepreciationRunsDto) {
     return this.service.listRuns(user.companyId, query);
   }
 
   @Get('reports/summary')
+  @UseGuards(BranchReportScopeGuard)
   @RequirePermissions('accounting.fixedassets.read')
-  summary(@CurrentUser() user: AuthUser) {
-    return this.service.summary(user.companyId);
+  summary(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    return this.service.summary(
+      user.companyId,
+      user.isSuperAdmin ? undefined : branchId,
+    );
   }
 
   @Get('purchase-lines')

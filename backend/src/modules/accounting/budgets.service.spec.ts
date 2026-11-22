@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { AuditService } from '../../common/audit/audit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { BudgetsService } from './budgets.service';
 
 const center = {
@@ -55,21 +57,22 @@ function stored(overrides: Record<string, unknown> = {}) {
 
 function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
   let row = options.existing === undefined ? null : options.existing;
-  const prisma: any = {
+  let txTarget: unknown;
+  const prisma = {
     company: {
       findUnique: jest
         .fn()
         .mockResolvedValue({ currency: 'EGP' }),
     },
     costCenter: {
-      findFirst: jest.fn(async ({ where }: any) =>
+      findFirst: jest.fn(async ({ where }: { where: { id?: string } }) =>
         where.id === center.id || where.id === 'inactive'
           ? { ...center, id: where.id, isActive: where.id !== 'inactive' }
           : null,
       ),
     },
     account: {
-      findFirst: jest.fn(async ({ where }: any) => {
+      findFirst: jest.fn(async ({ where }: { where: { id?: string } }) => {
         if (where.id === expenseAccount.id) return expenseAccount;
         if (where.id === assetAccount.id) return assetAccount;
         return null;
@@ -78,24 +81,25 @@ function build(options: { existing?: ReturnType<typeof stored> | null } = {}) {
     budget: {
       findFirst: jest.fn(async () => row),
       findMany: jest.fn(async () => (row ? [row] : [])),
-      create: jest.fn(async ({ data }: any) => {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         row = stored({ ...data, costCenter: center, account: expenseAccount });
         return row;
       }),
-      update: jest.fn(async ({ data }: any) => {
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         row = { ...(row as ReturnType<typeof stored>), ...data };
         return row;
       }),
     },
-    $transaction: jest.fn(async (operations: Array<Promise<unknown>> | ((tx: any) => Promise<unknown>)) =>
-      typeof operations === 'function' ? operations(prisma) : Promise.all(operations),
+    $transaction: jest.fn(async (operations: unknown[] | ((tx: unknown) => Promise<unknown>)) =>
+      typeof operations === 'function' ? operations(txTarget) : Promise.all(operations),
     ),
     $queryRaw: jest.fn().mockResolvedValue([
       { budgetId: '44444444-4444-4444-8444-444444444444', actual: new Prisma.Decimal('1200.0000') },
     ]),
   };
+  txTarget = prisma;
   const audit = { recordRequired: jest.fn().mockResolvedValue(undefined) };
-  const service = new BudgetsService(prisma as any, audit as any);
+  const service = new BudgetsService(prisma as unknown as PrismaService, audit as unknown as AuditService);
   return { service, prisma, audit, get row() { return row; } };
 }
 
@@ -232,6 +236,16 @@ describe('BudgetsService', () => {
       variance: '200.0000',
       variancePercent: '20.00',
     });
+  });
+
+  it('restricts posted actuals to the selected branch', async () => {
+    const { service, prisma } = build({ existing: stored() });
+
+    await service.report('company', { branchId: 'branch-1' });
+
+    const query = prisma.$queryRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
+    expect(query.sql.match(/branchId/g)).toHaveLength(2);
+    expect(query.values).toContain('branch-1');
   });
 
   it('reports the period it compared, so nothing looks prorated', async () => {

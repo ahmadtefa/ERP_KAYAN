@@ -75,37 +75,53 @@ export class DocumentsService {
   spec(kind: string): DocumentSpec {
     if (!DOCUMENT_KINDS.includes(kind as DocumentKind)) {
       throw new BadRequestException(
-        `Unknown document \"${kind}\". Known: ${DOCUMENT_KINDS.join(', ')}.`,
+        `Unknown document "${kind}". Known: ${DOCUMENT_KINDS.join(', ')}.`,
       );
     }
     return DOCUMENT_SPECS[kind as DocumentKind];
   }
 
-  async build(kind: DocumentKind, companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
+  async build(
+    kind: DocumentKind,
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null = null,
+  ): Promise<ReportTable> {
     switch (kind) {
       case 'sales-invoice':
-        return this.salesInvoice(companyId, id, lang);
+        return this.salesInvoice(companyId, id, lang, branchScope);
       case 'purchase-invoice':
-        return this.purchaseInvoice(companyId, id, lang);
+        return this.purchaseInvoice(companyId, id, lang, branchScope);
       case 'sales-order':
-        return this.salesOrder(companyId, id);
+        return this.salesOrder(companyId, id, branchScope);
       case 'purchase-order':
-        return this.purchaseOrder(companyId, id);
+        return this.purchaseOrder(companyId, id, branchScope);
       case 'sales-quotation':
-        return this.salesQuotation(companyId, id, lang);
+        return this.salesQuotation(companyId, id, lang, branchScope);
       case 'cash-voucher':
-        return this.cashVoucher(companyId, id, lang);
+        return this.cashVoucher(companyId, id, lang, branchScope);
       case 'stock-voucher':
-        return this.stockVoucher(companyId, id, lang, voucherBranchId);
+        return this.stockVoucher(companyId, id, lang, branchScope);
       case 'journal-entry':
-        return this.journalEntry(companyId, id, lang);
+        return this.journalEntry(companyId, id, lang, branchScope);
     }
   }
 
-  private async stockVoucher(companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
-    if (voucherBranchId === null) throw new NotFoundException('Stock voucher not found');
+  private async stockVoucher(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const doc = await this.prisma.stockDocument.findFirst({
-      where: { id, companyId, deletedAt:null, voucherKind:{not:null}, ...(voucherBranchId !== undefined ? {branchId:voucherBranchId} : {}) },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        voucherKind: { not: null },
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: { toWarehouse:true, costCenter:true, branch:true,
         lines:{orderBy:{lineNumber:'asc'},include:{item:true}} },
     });
@@ -143,9 +159,19 @@ export class DocumentsService {
     };
   }
 
-  private async salesInvoice(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  private async salesInvoice(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const invoice = await this.prisma.salesInvoice.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         customer: { select: { code: true, nameEn: true, nameAr: true } },
         branch: { select: { code: true, nameEn: true, nameAr: true } },
@@ -174,7 +200,7 @@ export class DocumentsService {
         },
         { labelEn: 'Notes', labelAr: 'ملاحظات', value: invoice.notes ?? '' },
       ],
-      lines: invoice.lines.map((l: any) => ({
+      lines: invoice.lines.map((l) => ({
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
@@ -194,9 +220,19 @@ export class DocumentsService {
     });
   }
 
-  private async purchaseInvoice(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  private async purchaseInvoice(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         supplier: { select: { code: true, nameEn: true, nameAr: true } },
         branch: { select: { code: true, nameEn: true, nameAr: true } },
@@ -225,7 +261,7 @@ export class DocumentsService {
         },
         { labelEn: 'Notes', labelAr: 'ملاحظات', value: invoice.notes ?? '' },
       ],
-      lines: invoice.lines.map((l: any) => ({
+      lines: invoice.lines.map((l) => ({
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
@@ -244,9 +280,18 @@ export class DocumentsService {
     });
   }
 
-  private async salesOrder(companyId: string, id: string): Promise<ReportTable> {
+  private async salesOrder(
+    companyId: string,
+    id: string,
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const order = await this.prisma.salesOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         customer: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
@@ -270,7 +315,7 @@ export class DocumentsService {
           value: `${order.customer?.code ?? ''} ${order.customer?.nameEn ?? ''}`.trim(),
         },
       ],
-      lines: order.lines.map((l: any) => ({
+      lines: order.lines.map((l) => ({
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
@@ -284,9 +329,18 @@ export class DocumentsService {
     });
   }
 
-  private async purchaseOrder(companyId: string, id: string): Promise<ReportTable> {
+  private async purchaseOrder(
+    companyId: string,
+    id: string,
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const order = await this.prisma.purchaseOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         supplier: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
@@ -310,7 +364,7 @@ export class DocumentsService {
           value: `${order.supplier?.code ?? ''} ${order.supplier?.nameEn ?? ''}`.trim(),
         },
       ],
-      lines: order.lines.map((l: any) => ({
+      lines: order.lines.map((l) => ({
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
@@ -332,9 +386,15 @@ export class DocumentsService {
     companyId: string,
     id: string,
     lang: 'ar' | 'en',
+    branchScope: string[] | null,
   ): Promise<ReportTable> {
     const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         customer: { select: { code: true, nameEn: true, nameAr: true } },
         tables: {
@@ -447,9 +507,19 @@ export class DocumentsService {
     };
   }
 
-  private async cashVoucher(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  private async cashVoucher(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const voucher = await this.prisma.cashVoucher.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: {
+        id,
+        companyId,
+        deletedAt: null,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         cashAccount: { select: { code: true, nameEn: true, nameAr: true } },
         customer: { select: { code: true, nameEn: true, nameAr: true } },
@@ -493,7 +563,7 @@ export class DocumentsService {
       ],
       rows:
         voucher.allocations.length > 0
-          ? voucher.allocations.map((a: any) => ({
+          ? voucher.allocations.map((a) => ({
               document: a.salesInvoice?.invoiceNumber || a.purchaseInvoice?.invoiceNumber || '',
               amount: a.amount.toFixed(MONEY),
             }))
@@ -503,9 +573,18 @@ export class DocumentsService {
     };
   }
 
-  private async journalEntry(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  private async journalEntry(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+    branchScope: string[] | null,
+  ): Promise<ReportTable> {
     const entry = await this.prisma.journalEntry.findFirst({
-      where: { id, companyId },
+      where: {
+        id,
+        companyId,
+        ...(branchScope !== null ? { branchId: { in: branchScope } } : {}),
+      },
       include: {
         lines: {
           orderBy: { lineNumber: 'asc' },
@@ -531,7 +610,7 @@ export class DocumentsService {
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 16 },
         { key: 'memo', labelEn: 'Memo', labelAr: 'البيان', width: 28 },
       ],
-      rows: entry.lines.map((l: any) => ({
+      rows: entry.lines.map((l) => ({
         lineNumber: String(l.lineNumber),
         account: `${l.account.code} ${lang === 'ar' ? l.account.nameAr || l.account.nameEn : l.account.nameEn}`,
         debit: l.debit.toFixed(MONEY),

@@ -36,18 +36,19 @@ const money = (value: Prisma.Decimal) => value.toFixed(MONEY_SCALE);
 export class PartyReconciliationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  receivables(companyId: string, query: { asOf?: string }) {
-    return this.build(companyId, 'receivables', query.asOf);
+  receivables(companyId: string, query: { asOf?: string; branchId?: string }) {
+    return this.build(companyId, 'receivables', query.asOf, query.branchId);
   }
 
-  payables(companyId: string, query: { asOf?: string }) {
-    return this.build(companyId, 'payables', query.asOf);
+  payables(companyId: string, query: { asOf?: string; branchId?: string }) {
+    return this.build(companyId, 'payables', query.asOf, query.branchId);
   }
 
   private async build(
     companyId: string,
     side: 'receivables' | 'payables',
     asOfInput?: string,
+    branchId?: string,
   ) {
     const isReceivable = side === 'receivables';
     const asOf = asOfInput
@@ -70,6 +71,9 @@ export class PartyReconciliationService {
     // The ledger side, signed the way the balance reads: a receivable
     // is debit-positive, a payable credit-positive.
     const sign = isReceivable ? 1 : -1;
+    const branchFilter = branchId
+      ? Prisma.sql`AND e."branchId" = ${branchId}::uuid`
+      : Prisma.sql``;
     const lines = await this.prisma.$queryRaw<
       Array<{
         entryId: string;
@@ -89,6 +93,7 @@ export class PartyReconciliationService {
          AND l."accountId" = ${control.id}::uuid
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" <= ${asOf}::date
+         ${branchFilter}
        GROUP BY e.id, e."entryNumber", e."entryDate", e."sourceType", e."sourceNumber"
        ORDER BY e."entryDate", e."entryNumber"
     `);
@@ -107,6 +112,7 @@ export class PartyReconciliationService {
             companyId,
             deletedAt: null,
             status: InvoiceStatus.POSTED,
+            ...(branchId ? { branchId } : {}),
             invoiceDate: { lte: asOf },
           },
           select: { documentType: true, totalAmount: true, paidAmount: true },
@@ -116,6 +122,7 @@ export class PartyReconciliationService {
             companyId,
             deletedAt: null,
             status: InvoiceStatus.POSTED,
+            ...(branchId ? { branchId } : {}),
             invoiceDate: { lte: asOf },
           },
           select: { documentType: true, totalAmount: true, paidAmount: true },

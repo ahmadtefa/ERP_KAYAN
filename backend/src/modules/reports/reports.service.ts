@@ -251,7 +251,7 @@ export class ReportsService {
    * This is the document view, not the ledger view: it answers "which invoices
    * are unpaid", which is what a collections call needs.
    */
-  async customerBalances(companyId: string, query: { asOf?: string | null }) {
+  async customerBalances(companyId: string, query: { asOf?: string | null; branchId?: string }) {
     const asOf = query.asOf ? this.parseDate(query.asOf, 'asOf') : new Date();
 
     const customers = await this.prisma.customer.findMany({
@@ -276,6 +276,7 @@ export class ReportsService {
         // POSTED only: a reversed invoice keeps its number but no longer
         // carries a debt, and its journal has already been cancelled.
         status: InvoiceStatus.POSTED,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         invoiceDate: { lte: asOf },
       },
       select: {
@@ -299,6 +300,7 @@ export class ReportsService {
         deletedAt: null,
         status: InvoiceStatus.POSTED,
         voucherDate: { lte: asOf },
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         // Both directions: a receipt builds the credit, a refund uses it up.
         kind: { in: [CashVoucherKind.RECEIPT, CashVoucherKind.PAYMENT] },
       },
@@ -381,7 +383,7 @@ export class ReportsService {
   }
 
   /** The mirror image: what the company still owes each supplier. */
-  async supplierBalances(companyId: string, query: { asOf?: string | null }) {
+  async supplierBalances(companyId: string, query: { asOf?: string | null; branchId?: string }) {
     const asOf = query.asOf ? this.parseDate(query.asOf, 'asOf') : new Date();
 
     const suppliers = await this.prisma.supplier.findMany({
@@ -397,6 +399,7 @@ export class ReportsService {
         companyId,
         deletedAt: null,
         status: InvoiceStatus.POSTED,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         invoiceDate: { lte: asOf },
       },
       select: {
@@ -415,6 +418,7 @@ export class ReportsService {
         deletedAt: null,
         status: InvoiceStatus.POSTED,
         voucherDate: { lte: asOf },
+        ...(query.branchId ? { branchId: query.branchId } : {}),
         kind: { in: [CashVoucherKind.RECEIPT, CashVoucherKind.PAYMENT] },
       },
       select: {

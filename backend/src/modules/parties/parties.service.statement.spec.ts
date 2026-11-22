@@ -300,6 +300,23 @@ describe('PartiesService statement', () => {
     ]);
   });
 
+  it('restricts a branch statement, including its opening balances, invoices and vouchers', async () => {
+    const prisma = stub({ party: baseParty });
+    const service = new PartiesService(prisma as never, { record: jest.fn() } as never);
+
+    await service.statement('company-1', 'customer', 'c-1', {
+      from: '2026-02-01',
+      to: '2026-02-28',
+      branchId: 'branch-1',
+    });
+
+    expect((prisma.salesInvoice.findMany as jest.Mock).mock.calls[0][0].where.branchId).toBe('branch-1');
+    expect((prisma.cashVoucher.findMany as jest.Mock).mock.calls[0][0].where.branchId).toBe('branch-1');
+    const openingQuery = (prisma.$queryRaw as jest.Mock).mock.calls[0][0] as { sql: string; values: unknown[] };
+    expect(openingQuery.sql).toContain('branchId');
+    expect(openingQuery.values).toContain('branch-1');
+  });
+
   it('orders documents that share a date, so the statement never changes shape', async () => {
     const sameDay = new Date('2026-02-05');
     const prisma = stub({

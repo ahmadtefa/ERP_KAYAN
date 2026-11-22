@@ -6,12 +6,15 @@ import {
   Param,
   Query,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
+import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyService } from '../company/company.service';
 import { ExportQueryDto } from './dto/export-query.dto';
@@ -126,7 +129,7 @@ export class ExportController {
     // Spreadsheet downloads must obey the same server-side redaction as the
     // PDF/print routes: a hand-crafted download link cannot restore costs.
     const table = applyPriceVisibility(
-      await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null),
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
       this.visibility(user, query),
     );
     const header = await this.companyHeader(user.companyId, lang);
@@ -155,7 +158,10 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null), this.visibility(user, query));
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -177,7 +183,10 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null), this.visibility(user, query));
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang, this.branchScope(user)),
+      this.visibility(user, query),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
@@ -201,6 +210,7 @@ export class ExportController {
   /// A list as a file: .xlsx by default, .csv on request.
   @Get('lists/:list/download')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listFile(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -246,6 +256,7 @@ export class ExportController {
   /// A list as a PDF, downloaded straight away.
   @Get('lists/:list/pdf')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listPdf(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -270,6 +281,7 @@ export class ExportController {
   /// A list as a page to print.
   @Get('lists/:list/print')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async listPrint(
     @CurrentUser() user: AuthUser,
     @Param('list') list: string,
@@ -291,6 +303,12 @@ export class ExportController {
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.send(html);
+  }
+
+  /// A user's selected/assigned branches constrain single-document exports too;
+  /// passing only `branchId` missed users assigned to several branches.
+  private branchScope(user: AuthUser): string[] | null {
+    return user.isSuperAdmin ? null : warehouseScopeOf(user);
   }
 
   /// What this caller is allowed to see, whatever the URL asks for.
@@ -325,6 +343,7 @@ export class ExportController {
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
   @Get(':report/download')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async export(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
@@ -371,6 +390,7 @@ export class ExportController {
   /// and saved as a PDF. One click, no dialogue.
   @Get(':report/pdf')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   async pdfFile(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
@@ -402,6 +422,7 @@ export class ExportController {
   /// one click from the button in the app.
   @Get(':report/print')
   @AllowQueryToken()
+  @UseGuards(BranchReportScopeGuard)
   @RequirePermissions('reports.read')
   async print(
     @CurrentUser() user: AuthUser,
