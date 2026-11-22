@@ -797,6 +797,15 @@ Set<String> _dashboardSectionsFor(AppUser? user) {
     'top': 'dashboard.top',
     'recent': 'dashboard.recent',
   };
+  final isCompanyManager = user.roles.any(
+    (role) => const {'GENERAL_MANAGER', 'FINANCE_MANAGER'}
+        .contains(role.trim().toUpperCase()),
+  );
+  if (!isCompanyManager) {
+    return user.isSuperAdmin || user.can('dashboard.recent')
+        ? {'recent'}
+        : <String>{};
+  }
   if (user.isSuperAdmin) return permissions.keys.toSet();
   final allowed = <String>{
     for (final entry in permissions.entries)

@@ -30,10 +30,12 @@ describe('company-wide budget report access', () => {
   it('keeps company-wide budgets away from ordinary accountants and report users', () => {
     expect(() => controller.budgetReport(user(['ACCOUNTANT']), {} as never)).toThrow(ForbiddenException);
     expect(() => controller.budgetReport(user(['REPORT_USER']), {} as never)).toThrow(ForbiddenException);
+    expect(() => controller.budgetReport(user(['ADMIN']), {} as never)).toThrow(ForbiddenException);
+    expect(() => controller.budgetReport({ ...user([]), isSuperAdmin: true }, {} as never)).toThrow(ForbiddenException);
     expect(budgetService.report).not.toHaveBeenCalled();
   });
 
-  it.each(['ADMIN', 'GENERAL_MANAGER', 'FINANCE_MANAGER'])(
+  it.each(['GENERAL_MANAGER', 'FINANCE_MANAGER'])(
     'allows %s to read company-wide budgets',
     (role) => {
       expect(controller.budgetReport(user([role]), {} as never)).toEqual({ totals: { budget: '100' } });

@@ -294,8 +294,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   bool _mayReadReport(AppUser? user, String slug) {
     if (user == null) return false;
     if (slug == 'budgets' &&
-        !user.isSuperAdmin &&
-        !user.roles.any((role) => const {'ADMIN', 'GENERAL_MANAGER', 'FINANCE_MANAGER'}.contains(role.toUpperCase()))) {
+        !user.roles.any((role) => const {'GENERAL_MANAGER', 'FINANCE_MANAGER'}.contains(role.trim().toUpperCase()))) {
       return false;
     }
     final permission = switch (slug) {

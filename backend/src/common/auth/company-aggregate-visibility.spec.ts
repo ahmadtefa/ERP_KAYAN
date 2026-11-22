@@ -6,12 +6,14 @@ import {
 } from './company-aggregate-visibility';
 
 describe('company aggregate visibility', () => {
-  it('only grants company-wide aggregates to managers and super-admins', () => {
+  it('only grants company-wide aggregates to company and finance managers', () => {
     expect(mayReadCompanyAggregates({ roles: ['SALES_MANAGER'] })).toBe(false);
     expect(mayReadCompanyAggregates({ roles: ['ACCOUNTANT'] })).toBe(false);
     expect(mayReadCompanyAggregates({ roles: ['finance_manager'] })).toBe(true);
     expect(mayReadCompanyAggregates({ roles: ['GENERAL_MANAGER'] })).toBe(true);
-    expect(mayReadCompanyAggregates({ isSuperAdmin: true })).toBe(true);
+    expect(mayReadCompanyAggregates({ roles: ['ADMIN'] })).toBe(false);
+    expect(mayReadCompanyAggregates({ isSuperAdmin: true })).toBe(false);
+    expect(mayReadCompanyAggregates({ isSuperAdmin: true, roles: ['GENERAL_MANAGER'] })).toBe(true);
   });
 
   it('removes aggregate totals and statistics recursively, preserving permitted detail rows', () => {

@@ -67,14 +67,14 @@ export function dashboardSectionsFor(
 ): Set<DashboardSection> {
   const granted = new Set(user.permissions ?? []);
   const allowed = new Set<DashboardSection>();
-  if (user.isSuperAdmin) {
-    for (const section of DASHBOARD_SECTIONS) allowed.add(section);
-    return allowed;
-  }
   if (!mayReadCompanyAggregates(user)) {
     // The recent-document list is not an aggregate; its individual amounts
     // are independently stripped below according to document permissions.
-    if (granted.has('dashboard.recent')) allowed.add('recent');
+    if (user.isSuperAdmin || granted.has('dashboard.recent')) allowed.add('recent');
+    return allowed;
+  }
+  if (user.isSuperAdmin) {
+    for (const section of DASHBOARD_SECTIONS) allowed.add(section);
     return allowed;
   }
   const financial = granted.has('dashboard.financial');

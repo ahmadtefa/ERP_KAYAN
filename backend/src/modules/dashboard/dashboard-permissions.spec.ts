@@ -33,8 +33,10 @@ describe('dashboard section permissions', () => {
     })]).toEqual(expect.arrayContaining(['revenue', 'profit']));
   });
 
-  it('allows a Super Admin every section, while retaining the supplied companyId for service queries', () => {
-    expect([...dashboardSectionsFor({ isSuperAdmin: true })].sort()).toEqual(
+  it('does not grant company aggregates merely for technical administration', () => {
+    expect([...dashboardSectionsFor({ isSuperAdmin: true })]).toEqual(['recent']);
+    expect([...dashboardSectionsFor({ isSuperAdmin: true, roles: ['ADMIN'] })]).toEqual(['recent']);
+    expect([...dashboardSectionsFor({ isSuperAdmin: true, roles: ['GENERAL_MANAGER'] })].sort()).toEqual(
       [...DASHBOARD_SECTIONS].sort(),
     );
     expect(effectiveBranches({

@@ -8,9 +8,9 @@ export interface AggregateVisibilityPrincipal {
 
 /** The only ordinary company roles allowed to receive cross-record aggregates. */
 export function mayReadCompanyAggregates(user: AggregateVisibilityPrincipal): boolean {
-  if (user.isSuperAdmin) return true;
   const roles = new Set((user.roles ?? []).map((role) => role.trim().toUpperCase()));
-  return roles.has('ADMIN') || roles.has('GENERAL_MANAGER') || roles.has('FINANCE_MANAGER');
+  // Technical administration is not a financial role, even for a super admin.
+  return roles.has('GENERAL_MANAGER') || roles.has('FINANCE_MANAGER');
 }
 
 const AGGREGATE_KEYS = new Set([
