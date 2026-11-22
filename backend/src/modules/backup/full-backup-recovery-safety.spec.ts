@@ -27,6 +27,7 @@ describe('full restore failure safety', () => {
       licensing as unknown as ConstructorParameters<typeof FullBackupService>[3],
     );
     internals = service as unknown as { [key: string]: jest.Mock };
+    jest.spyOn(internals, 'holdAdvisoryLock').mockResolvedValue({ end: async () => {} });
     jest.spyOn(internals, 'requireTools').mockReturnValue({ pgDump: 'fake-dump', pgRestore: 'fake-restore' });
     jest.spyOn(internals, 'ensureBackupDir').mockResolvedValue(dir);
     jest.spyOn(internals, 'verifyUploaded').mockResolvedValue({ entries: 1, tables: 1, constraints: 1 });

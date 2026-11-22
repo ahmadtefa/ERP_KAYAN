@@ -1482,6 +1482,19 @@ async function main() {
         Number(jsonRestored.data?.total ?? 0) > 0,
       `status ${jsonRestored.status}, replaced ${jsonRestored.data?.replaced}, rows ${jsonRestored.data?.total ?? 0}`,
     );
+    // Company JSON restores deliberately invalidate every restored user's
+    // prior session, even when the archived tokenVersion is unchanged.
+    const oldSessionAfterRestore = await api('/auth/me');
+    check('company restore invalidates the earlier access token', oldSessionAfterRestore.status === 401,
+      `status ${oldSessionAfterRestore.status}`);
+    const loginAfterRestore = await api('/auth/login', {
+      method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true,
+    });
+    check('the restored administrator can sign in again',
+      loginAfterRestore.status === 201 && Boolean(loginAfterRestore.data?.accessToken),
+      `status ${loginAfterRestore.status}`);
+    token = loginAfterRestore.data?.accessToken ?? '';
+    refreshToken = loginAfterRestore.data?.refreshToken ?? '';
     const restoredSalesReturns = await api('/returns/sales');
     const restoredPurchaseReturns = await api('/returns/purchases');
     const salesReturnRows = restoredSalesReturns.data?.items ?? [];

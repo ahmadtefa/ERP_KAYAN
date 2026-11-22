@@ -9,6 +9,7 @@ import { basename, extname, join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { backupDirectory } from './system/pg-support';
+import { acquireRestoreLock } from './system/restore-lock';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
 
@@ -608,12 +609,19 @@ export class BackupService {
     // Claim before the first await and drain handlers and tracked background
     // jobs before reading the safety copy. This coordination is process-local.
     this.maintenance.begin('Restoring company data. Business work is temporarily paused.');
+    let lock: Awaited<ReturnType<typeof acquireRestoreLock>> | null = null;
     try {
+      lock = await this.holdAdvisoryLock();
       await this.maintenance.waitForBusinessRequests();
       return await this.performRestore(file, requesterCompanyId, options);
     } finally {
+      await lock?.end().catch(() => {});
       this.maintenance.end();
     }
+  }
+
+  private async holdAdvisoryLock() {
+    return acquireRestoreLock();
   }
 
   private async performRestore(

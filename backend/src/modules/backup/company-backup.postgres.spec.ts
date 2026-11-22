@@ -3,6 +3,9 @@ import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
+import { Client } from 'pg';
+import { cleanDatabaseUrl } from './system/pg-support';
+import { RESTORE_LOCK_KEY } from './system/restore-lock';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AuthService } from '../auth/auth.service';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -69,6 +72,21 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     if (originalBackupDir === undefined) delete process.env.KAYAN_BACKUP_DIR;
     else process.env.KAYAN_BACKUP_DIR = originalBackupDir;
     if (backupDir) await rm(backupDir, { recursive: true, force: true });
+  });
+
+  it('refuses JSON restore while another process holds the common restore lock', async () => {
+    const snapshot = JSON.parse(JSON.stringify(await service.create(companyId))) as BackupFile;
+    const holder = new Client({ connectionString: cleanDatabaseUrl(process.env.DATABASE_URL ?? '') });
+    await holder.connect();
+    try {
+      await holder.query('SELECT pg_advisory_lock($1)', [RESTORE_LOCK_KEY]);
+      await expect(service.restore(snapshot, companyId, { replace: true })).rejects.toThrow(/another process/i);
+      expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Original customer');
+    } finally {
+      await holder.end();
+    }
+    // Refusal must release the local maintenance claim too.
+    await expect(service.restore(snapshot, companyId, { replace: true })).resolves.toMatchObject({ companyId });
   });
 
   it('invalidates all restored company sessions without changing the other company', async () => {

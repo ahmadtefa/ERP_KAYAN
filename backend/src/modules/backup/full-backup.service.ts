@@ -37,6 +37,7 @@ import {
 } from './system/pg-support';
 import { scratchDatabaseActor } from './system/restore-admin';
 import { RestoreJournalStore } from './system/restore-journal';
+import { acquireRestoreLock } from './system/restore-lock';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -746,14 +747,24 @@ export class FullBackupService {
     if (this.activeBackups > 0) {
       throw new ServiceUnavailableException('A backup is running. The restore was not started.');
     }
+    if (!options.uploaded?.buffer?.length && !options.fileName) {
+      throw new BadRequestException('Choose a backup file to restore: either upload one or name one on this server.');
+    }
     // Claim synchronously, before the first await: another request in this
     // process must not clear this restore's maintenance flag or staging file.
     this.restoreInProgress = true;
+    let lock: Awaited<ReturnType<typeof acquireRestoreLock>> | null = null;
     try {
+      lock = await this.holdAdvisoryLock();
       return await this.performRestore(options, userId);
     } finally {
+      await lock?.end().catch(() => {});
       this.restoreInProgress = false;
     }
+  }
+
+  private async holdAdvisoryLock() {
+    return acquireRestoreLock();
   }
 
   private async performRestore(options: RestoreOptions, userId: string) {

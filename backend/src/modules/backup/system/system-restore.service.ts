@@ -24,11 +24,11 @@ import {
   type RestoreJournal,
 } from './restore-journal';
 import { RestoreGateService } from './restore-gate.service';
+import { acquireRestoreLock } from './restore-lock';
 import { ARCHIVE_PATHS, type SystemBackupManifest } from './manifest';
 import {
   MAX_UPLOAD_BYTES,
   backupDirectory,
-  cleanDatabaseUrl,
   createScratchDatabase,
   databaseNameFrom,
   dropDatabaseIfExists,
@@ -75,7 +75,6 @@ import { extractTar } from './tar';
 
 /// The advisory lock that makes "one restore at a time" true across processes,
 /// not just inside this one.
-const ADVISORY_LOCK_KEY = 918_273_645;
 
 export interface RestoreInput {
   uploaded?: { buffer: Buffer; originalName: string };
@@ -935,30 +934,7 @@ export class SystemRestoreService implements OnModuleInit {
   /// while this one holds it. Returns the client that holds it, so it is only
   /// released when that client is closed.
   private async holdAdvisoryLock(): Promise<Client | null> {
-    const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new ServiceUnavailableException('Cannot lock the restore: DATABASE_URL is not configured.');
-    }
-    const client = new Client({ connectionString: cleanDatabaseUrl(url) });
-    try {
-      await client.connect();
-      const result = await client.query<{ locked: boolean }>(
-        'SELECT pg_try_advisory_lock($1) AS locked',
-        [ADVISORY_LOCK_KEY],
-      );
-      if (!result.rows[0]?.locked) {
-        await client.end().catch(() => {});
-        throw new ConflictException('Another process is already restoring this database.');
-      }
-      return client;
-    } catch (error) {
-      await client.end().catch(() => {});
-      if (error instanceof ConflictException) throw error;
-      this.logger.warn('Could not take the restore advisory lock.');
-      throw new ServiceUnavailableException(
-        'Cannot safely lock the database for restore or recovery. No data was changed.',
-      );
-    }
+    return acquireRestoreLock();
   }
 
   /// A deliberate failure, used only by the test harness to prove that a
