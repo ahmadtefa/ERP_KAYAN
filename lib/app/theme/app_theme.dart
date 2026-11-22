@@ -441,15 +441,6 @@ abstract final class AppTheme {
       ),
 
       scrollbarTheme: ScrollbarThemeData(
-        // Windows operators need a discoverable, draggable affordance rather
-        // than a bar that only appears during a wheel gesture. The theme is
-        // inherited by explicit and desktop Material scrollbars throughout
-        // the application, including vertical and nested two-axis layouts.
-        thumbVisibility: const WidgetStatePropertyAll(true),
-        trackVisibility: const WidgetStatePropertyAll(true),
-        thickness: const WidgetStatePropertyAll(8),
-        radius: const Radius.circular(8),
-        crossAxisMargin: 2,
         thumbColor: WidgetStateProperty.resolveWith((states) {
           final base = isLight ? AppColors.borderStrong : AppColors.darkBorder;
           return states.contains(WidgetState.hovered)

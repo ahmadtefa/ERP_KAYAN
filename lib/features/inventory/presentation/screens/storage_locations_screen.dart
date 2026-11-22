@@ -353,10 +353,12 @@ class StorageLocationsScreen extends ConsumerWidget {
         }
         final api = ref.read(apiClientProvider);
         if (row == null) {
-          await api.post('/inventory/locations', body: {
+          final payload = <String, dynamic>{
             ...values,
             'warehouseId': warehouseId,
-          });
+          };
+          if (parentId == null) payload.remove('parentId');
+          await api.post('/inventory/locations', body: payload);
         } else {
           await api.patch('/inventory/locations/${text(row, 'id')}', body: values);
         }
