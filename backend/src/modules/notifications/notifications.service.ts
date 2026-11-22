@@ -684,7 +684,7 @@ export class NotificationsService {
     const dueForRepeat =
       existing !== null &&
       existing.status !== 'ARCHIVED' &&
-      (existing.lastRaisedAt === null ||
+      (existing.status === 'CLOSED' || existing.lastRaisedAt === null ||
         Date.now() - existing.lastRaisedAt.getTime() >= repeatAfterHours * 3_600_000);
 
     try {

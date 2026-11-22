@@ -62,7 +62,7 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
           raised.push(input);
           const dedupe=String(input.dedupe);
           const existing=storedNotifications.get(dedupe);
-          storedNotifications.set(dedupe,{...existing,...input,status:existing?.status??'OPEN'});
+          storedNotifications.set(dedupe,{...existing,...input,status:existing?.status==='CLOSED'?'OPEN':existing?.status??'OPEN'});
           return {id:`notification-${storedNotifications.size}`};
         },
         resolveEntity:async(_companyId:string,_entityType:string,entityId:string,activeTypes:readonly string[])=>{
@@ -129,6 +129,43 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     expect(storedRows.filter(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')).toHaveLength(1);
     expect(storedRows.every(event=>event.status==='CLOSED')).toBe(true);
     expect(JSON.stringify(storedRows)).not.toMatch(/unitCost|purchasePrice|costOfGoods|inventoryCostTotal/);
+  });
+
+  it('continues dispatching after an earlier partial shipment was received, with accurate outstanding tasks',async()=>{
+    const row=await service.create(COMPANY,USER_A,{sourceWarehouseId:FROM,destinationWarehouseId:TO,transferDate:'2026-11-21',reason:'Multiple shipments',idempotencyKey:'multi-create',lines:[{itemId:ITEM,quantity:'10'}]});
+    const lineId=row.lines[0].id;
+    await service.review(COMPANY,USER_B,row.id,'multi-review');
+    await service.approve(COMPANY,USER_C,row.id,'multi-approve');
+    await service.dispatch(COMPANY,USER_A,row.id,'multi-dispatch-1',[{lineId,quantity:'4'}]);
+    const first=await service.receive(COMPANY,USER_B,row.id,'multi-receive-1',[{lineId,quantity:'4'}]);
+    expect(first.status).toBe('PARTIALLY_RECEIVED');
+    expect([...storedNotifications.values()].find(event=>event.type==='STOCK_TRANSFER_DISPATCH_REQUIRED')?.status).toBe('OPEN');
+    expect([...storedNotifications.values()].find(event=>event.type==='STOCK_TRANSFER_RECEIPT_REQUIRED')?.status).toBe('CLOSED');
+    const second=await service.dispatch(COMPANY,USER_A,row.id,'multi-dispatch-2');
+    expect(second.lines[0].dispatchedQuantity.toString()).toBe('10');
+    expect(second.status).toBe('DISPATCHED');
+    const received=await service.receive(COMPANY,USER_B,row.id,'multi-receive-2',[{lineId,quantity:'6'}]);
+    expect(received.status).toBe('RECEIVED');
+    expect(received.lines[0].receivedQuantity.toString()).toBe('10');
+    await service.close(COMPANY,USER_C,row.id,'multi-close');
+    expect(posted).toHaveLength(4);
+  });
+
+  it('keeps a partially dispatched transfer open after all dispatched goods are reconciled',async()=>{
+    const row=await service.create(COMPANY,USER_A,{sourceWarehouseId:FROM,destinationWarehouseId:TO,transferDate:'2026-11-21',reason:'Partial shipment shortage',idempotencyKey:'partial-settle-create',lines:[{itemId:ITEM,quantity:'10'}]});
+    const lineId=row.lines[0].id;
+    await service.review(COMPANY,USER_B,row.id,'partial-settle-review');
+    await service.approve(COMPANY,USER_C,row.id,'partial-settle-approve');
+    await service.dispatch(COMPANY,USER_A,row.id,'partial-settle-dispatch',[{lineId,quantity:'4'}]);
+    await service.receive(COMPANY,USER_B,row.id,'partial-settle-receive',[{lineId,quantity:'3'}]);
+    const pending=await service.settle(COMPANY,USER_A,row.id,'partial-settle-writeoff',[{lineId,shortage:'1',reason:'Missing'}]);
+    expect(pending.status).toBe('SETTLEMENT_PENDING');
+    const settled=await service.approveSettlement(COMPANY,USER_B,row.id);
+    expect(settled.status).toBe('PARTIALLY_RECEIVED');
+    await expect(service.close(COMPANY,USER_C,row.id,'partial-settle-close')).rejects.toThrow();
+    expect([...storedNotifications.values()].find(event=>event.type==='STOCK_TRANSFER_DISPATCH_REQUIRED')?.status).toBe('OPEN');
+    const next=await service.dispatch(COMPANY,USER_A,row.id,'partial-settle-next');
+    expect(next.lines[0].dispatchedQuantity.toString()).toBe('10');
   });
 
   it('requires a different approver to post a missing/damaged quantity write-off',async()=>{

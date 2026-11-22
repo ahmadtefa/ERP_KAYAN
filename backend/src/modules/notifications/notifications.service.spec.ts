@@ -849,6 +849,18 @@ describe('notifications', () => {
     expect((await service.unreadCount(user({ userId: 'dismissed-it' }) as never)).unread).toBe(0);
   });
 
+  it('immediately reopens a resolved task when the underlying condition recurs', async () => {
+    const { service, state } = makeHarness({
+      notifications: [notification({ status: 'CLOSED', lastRaisedAt: new Date(), raisedCount: 1 })],
+      userStates: [{ notificationId: 'notification-1', userId: 'user-1', readAt: new Date(), dismissedAt: null }],
+    });
+    await service.raise({ companyId: COMPANY, type: STOCK_EXPIRED, titleEn: 'Expired again', titleAr: 'منتهية مجدداً', dedupe: 'STOCK_EXPIRED:lot-1' });
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0].status).toBe('OPEN');
+    expect(state.notifications[0].raisedCount).toBe(2);
+    expect(state.userStates[0].readAt).toBeNull();
+  });
+
   it('does not re-open an archived alert', async () => {
     const { service, state } = makeHarness({
       notifications: [

@@ -164,7 +164,7 @@ export class StockTransfersService {
         if (!current) throw new NotFoundException('Stock transfer not found');
         const currentAction = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
         if (currentAction) { if (currentAction.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different dispatch quantities'); return; }
-        if (!['APPROVED', 'PARTIALLY_DISPATCHED'].includes(current.status)) throw new ConflictException(`Cannot dispatch a transfer in ${current.status}`);
+        if (!['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot dispatch a transfer in ${current.status}`);
         quantities = this.stageQuantities(current.lines, lines, 'dispatch');
         await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: actionKey, requestHash: actionHash, action: 'DISPATCH', resultVersion: current.version + 1 } });
         await tx.stockTransfer.update({ where: { id }, data: { status: 'DISPATCHING', dispatchedBy: userId, dispatchedAt: new Date(), version: { increment: 1 } } });
@@ -181,7 +181,7 @@ export class StockTransfersService {
       }
     }
     if (!action) throw new ConflictException('Another dispatch is in progress; retry after it completes');
-    if (transfer.status !== 'DISPATCHING' && !['APPROVED','PARTIALLY_DISPATCHED'].includes(transfer.status)) throw new ConflictException(`Cannot dispatch a transfer in ${transfer.status}`);
+    if (transfer.status !== 'DISPATCHING' && !['APPROVED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED'].includes(transfer.status)) throw new ConflictException(`Cannot dispatch a transfer in ${transfer.status}`);
     const transit = await this.transitWarehouse(companyId, transfer.sourceBranchId, userId);
     const docKey = `transfer:${id}:dispatch:${createHash('sha256').update(effectiveKey).digest('hex').slice(0,24)}`;
     const doc = await this.documents.create(companyId, transfer.sourceBranchId, userId, {
@@ -358,7 +358,7 @@ export class StockTransfersService {
       for (const {line,shortage,damage,reason} of writeOffs) await tx.stockTransferLine.update({ where: { id: line.id }, data: { reportedShortage: { increment: shortage }, reportedDamage: { increment: damage }, differenceReason: reason } });
       if (returnDocumentId) await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: `RETURN:${this.key(key)}`, requestHash, action: 'RETURN', stockDocumentId: returnDocumentId, resultVersion: transfer.version + 1 } });
       const updatedLines = await tx.stockTransferLine.findMany({ where: { transferId: id } });
-      const unresolved = updatedLines.some(line => line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity).add(writeOffs.find(x=>x.line.id===line.id)?.quantity ?? new Prisma.Decimal(0))));
+      const unresolved = updatedLines.some(line => line.dispatchedQuantity.lt(line.requestedQuantity) || line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity).add(writeOffs.find(x=>x.line.id===line.id)?.quantity ?? new Prisma.Decimal(0))));
       const status = settlementDocumentId ? 'SETTLEMENT_PENDING' : unresolved ? 'PARTIALLY_RECEIVED' : 'SETTLED';
       await tx.stockTransfer.update({ where: { id }, data: { status, settlementDocumentId, settlementRequestedBy: settlementDocumentId ? userId : null, version: { increment: 1 } } });
       await tx.stockTransferAction.update({ where: { id: previous.id }, data: { stockDocumentId: settlementDocumentId, resultVersion: currentTransfer.version + 1 } });
@@ -389,7 +389,7 @@ export class StockTransfersService {
         if (remainingDifference.gt(0)) await tx.stockTransferLine.update({ where: { id: line.id }, data: { writtenOffQuantity: { increment: remainingDifference } } });
       }
       const finalLines = await tx.stockTransferLine.findMany({ where: { transferId: id } });
-      const unresolved = finalLines.some(line => line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity)));
+      const unresolved = finalLines.some(line => line.dispatchedQuantity.lt(line.requestedQuantity) || line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity)));
       await tx.stockTransfer.update({ where: { id }, data: { status: unresolved ? 'PARTIALLY_RECEIVED' : 'SETTLED', settlementApprovedBy: userId, settlementApprovedAt: new Date(), version: { increment: 1 } } });
     });
     await this.audit.record({ companyId, userId, action: 'APPROVE_TRANSFER_SETTLEMENT', entity: 'stock_transfers', entityId: id, after: { stockDocumentId: transfer.settlementDocumentId } });
@@ -489,9 +489,12 @@ export class StockTransfersService {
     const stages: string[] = [];
     if (transfer.status === 'DRAFT') stages.push(STOCK_TRANSFER_REVIEW_REQUIRED);
     if (transfer.status === 'REVIEWED') stages.push(STOCK_TRANSFER_APPROVAL_REQUIRED);
-    if (transfer.status === 'APPROVED') stages.push(STOCK_TRANSFER_DISPATCH_REQUIRED);
-    if (transfer.status === 'PARTIALLY_DISPATCHED') stages.push(STOCK_TRANSFER_DISPATCH_REQUIRED);
-    if (['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status)) {
+    if (['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status) &&
+        transfer.lines.some(line => line.dispatchedQuantity.lt(line.requestedQuantity))) {
+      stages.push(STOCK_TRANSFER_DISPATCH_REQUIRED);
+    }
+    if (['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status) &&
+        transfer.lines.some(line => line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity)))) {
       stages.push(STOCK_TRANSFER_RECEIPT_REQUIRED);
     }
     if (['PARTIALLY_RECEIVED', 'RECEIVED', 'SETTLED'].includes(transfer.status)) {
@@ -595,7 +598,10 @@ export class StockTransfersService {
     return this.documents.post(companyId, userId, id, true);
   }
   private stageQuantities(lines: Array<{ id: string; itemId: string; requestedQuantity: Prisma.Decimal; dispatchedQuantity: Prisma.Decimal; receivedQuantity: Prisma.Decimal; returnedQuantity: Prisma.Decimal; writtenOffQuantity: Prisma.Decimal; sourceBatchId: string | null; transitBatchId: string | null; unitName: string | null; unitCost: Prisma.Decimal; notes: string | null }>, input: StageLineInput[] | undefined, stage: 'dispatch'|'receive') {
-    const source = input?.length ? input : lines.filter(x => (stage==='dispatch'?x.requestedQuantity:x.dispatchedQuantity.sub(x.receivedQuantity).sub(x.returnedQuantity).sub(x.writtenOffQuantity)).gt(0)).map(x=>({ lineId:x.id, quantity:(stage==='dispatch'?x.requestedQuantity:x.dispatchedQuantity.sub(x.receivedQuantity).sub(x.returnedQuantity).sub(x.writtenOffQuantity)).toString() }));
+    const remaining = (line: typeof lines[number]) => stage === 'dispatch'
+      ? line.requestedQuantity.sub(line.dispatchedQuantity)
+      : line.dispatchedQuantity.sub(line.receivedQuantity).sub(line.returnedQuantity).sub(line.writtenOffQuantity);
+    const source = input?.length ? input : lines.filter(x => remaining(x).gt(0)).map(x => ({ lineId: x.id, quantity: remaining(x).toString() }));
     if (!source.length) throw new BadRequestException('No quantities are available for this action');
     const seen = new Set<string>();
     return source.map(x => {
