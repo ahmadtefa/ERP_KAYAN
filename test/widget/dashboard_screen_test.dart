@@ -14,6 +14,7 @@ const _dashboardUser = AppUser(
   username: 'manager',
   fullName: 'Dashboard test',
   companyId: 'company-1',
+  roles: ['GENERAL_MANAGER'],
   permissions: [
     'dashboard.view',
     'dashboard.sales', 'dashboard.purchases', 'dashboard.revenue',

@@ -276,7 +276,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('replaced entirely by what is shown'),
+      find.textContaining('displayed assignments within your scope will be saved'),
       findsOneWidget,
     );
   });

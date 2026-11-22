@@ -266,7 +266,7 @@ jobs:
         env:
           PGPASSWORD: ci
         run: |
-          psql -h 127.0.0.1 -U ci -d erp_kayan -v ON_ERROR_STOP=1 <<'SQL'
+          psql -h 127.0.0.1 -U ci -d erp_kayan_acceptance -v ON_ERROR_STOP=1 <<'SQL'
           INSERT INTO user_roles ("userId", "roleId", "companyId")
           SELECT u.id, r.id, u."companyId" FROM users u
           JOIN roles r ON r."companyId" = u."companyId" AND r.code = 'GENERAL_MANAGER' AND r."deletedAt" IS NULL
