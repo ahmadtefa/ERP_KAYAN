@@ -8,6 +8,7 @@ const whB = "warehouse-b";
 const whC = "warehouse-c";
 const branch = "branch-1";
 const branchOther = "branch-2";
+const reportPermissions = ["inventory.reports.item-card.read", "inventory.reports.item-movement.read", "inventory.reports.balance-by-warehouse.read", "inventory.reports.balance-by-branch.read", "inventory.reports.valuation-by-warehouse.read", "inventory.reports.below-minimum.read", "inventory.reports.above-maximum.read", "inventory.reports.slow-moving.read", "inventory.reports.dead-stock.read", "inventory.reports.zero-stock.read", "inventory.reports.lots.read", "inventory.reports.expiring.read", "inventory.reports.expired.read", "inventory.reports.value-at-risk.read", "inventory.reports.write-offs.read", "inventory.reports.transfers.read", "inventory.reports.count-variances.read", "inventory.reports.cost-by-warehouse.read", "inventory.reports.reconciliation.read", "inventory.reports.audit-trail.read"];
 const grant = (warehouseId: string, canSeeCost = false, canView = true) => ({
   warehouseId,
   canView,
@@ -55,11 +56,17 @@ describe("inventory report grants", () => {
     branchId: branch,
     branchIds: [branch],
     isSuperAdmin: false,
-    permissions: ["inventory.stock.read"],
+    permissions: ["inventory.stock.read", ...reportPermissions],
     warehouseAccess,
     ...overrides,
   });
   beforeEach(() => jest.clearAllMocks());
+
+  it("requires the independent permission for each inventory report", async () => {
+    expect(() => controller.run(user(undefined, { permissions: ["inventory.stock.read"] }), "item-movement", {})).toThrow(ForbiddenException);
+    await controller.run(user(undefined, { permissions: ["inventory.reports.item-movement.read"] }), "item-movement", {});
+    expect(service.run).toHaveBeenCalledTimes(1);
+  });
 
   it("allows one warehouse and automatically constrains every report to that grant", async () => {
     await controller.run(user(), "item-movement", {});
@@ -140,12 +147,12 @@ describe("inventory report grants", () => {
       quantity: "4.0000",
     });
     expect(report.opening).toEqual({ quantity: "4.0000" });
-    expect(report.totals).toEqual({});
+    expect(report.totals).toBeUndefined();
   });
 
   it("requires both the global cost permission and each selected warehouse cost grant", async () => {
     const withBoth = user([grant(whA, true)], {
-      permissions: ["inventory.stock.read", "inventory.cost.read"],
+      permissions: ["inventory.stock.read", "inventory.cost.read", ...reportPermissions],
     });
     const report = (await controller.run(
       withBoth,
@@ -156,9 +163,9 @@ describe("inventory report grants", () => {
       totals: Record<string, unknown>;
     };
     expect(report.rows[0].unitCost).toBe("6.2500");
-    expect(report.totals.value).toBe("25.0000");
+    expect(report.totals).toBeUndefined();
     const mixed = user([grant(whA, true), grant(whB, false)], {
-      permissions: ["inventory.stock.read", "inventory.cost.read"],
+      permissions: ["inventory.stock.read", "inventory.cost.read", ...reportPermissions],
     });
     const safe = (await controller.run(
       mixed,
@@ -187,7 +194,7 @@ describe("inventory report grants", () => {
   it("exports the same scoped, cost-redacted payload as the report API", async () => {
     const response = { setHeader: jest.fn(), send: jest.fn() };
     const exportUser = user(undefined, {
-      permissions: ["inventory.stock.read", "inventory.export"],
+      permissions: ["inventory.stock.read", "inventory.export", ...reportPermissions],
     });
     await controller.exportCsv(
       exportUser,

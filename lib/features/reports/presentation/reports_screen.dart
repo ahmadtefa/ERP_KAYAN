@@ -12,6 +12,7 @@ import '../../../shared/widgets/records_table.dart';
 import '../../../shared/widgets/status_pill.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
+import '../../auth/domain/entities/app_user.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../data/presentation/widgets/export_actions.dart';
@@ -132,6 +133,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final period = ref.watch(periodProvider);
+    final user = ref.watch(currentUserProvider);
+    final mayReadCurrentReport = _mayReadReport(user, _reportSlug);
 
     return ModuleScaffold(
       title: l10n.reports,
@@ -204,7 +207,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               // The exported report catalogue does not include the two
               // cost-centre reports yet, so the button is not offered for a
               // report it would fail to produce.
-              child: _tabs.index >= 19
+              child: _tabs.index >= 19 || !mayReadCurrentReport
                   ? const SizedBox.shrink()
                   : ReportExportActions(
                       report: _reportSlug,
@@ -217,7 +220,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             ),
           ),
           Expanded(
-            child: switch (_tabs.index) {
+            child: !mayReadCurrentReport
+                ? Center(child: Text(_t(context, 'لا تملك صلاحية هذا التقرير', 'You are not allowed to view this report.')))
+                : switch (_tabs.index) {
               0 => _TrialBalanceTab(
                 onOpenAccount: (accountId) {
                   ref.read(ledgerAccountProvider.notifier).choose(accountId);
@@ -282,8 +287,25 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     17 => 'payables-reconciliation',
     18 => 'fixed-assets',
     19 => 'cost-centers',
-    _ => 'budgets',
+    20 => 'budgets',
+    _ => 'reconciliation-center',
   };
+
+  bool _mayReadReport(AppUser? user, String slug) {
+    if (user == null) return false;
+    if (slug == 'budgets' &&
+        !user.isSuperAdmin &&
+        !user.roles.any((role) => const {'ADMIN', 'GENERAL_MANAGER', 'FINANCE_MANAGER'}.contains(role.toUpperCase()))) {
+      return false;
+    }
+    final permission = switch (slug) {
+      'cost-centers' => 'accounting.costcenters.read',
+      'budgets' => 'accounting.budgets.read',
+      'fixed-assets' => 'accounting.fixedassets.read',
+      _ => 'reports.$slug.read',
+    };
+    return user.can(permission);
+  }
 
   Future<void> _pickPeriod() async {
     final period = ref.read(periodProvider);

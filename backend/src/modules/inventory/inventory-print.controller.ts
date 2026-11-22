@@ -85,7 +85,6 @@ export class InventoryPrintController {
 
   @Get('reports/valuation/print')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async valuationPrint(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -97,7 +96,6 @@ export class InventoryPrintController {
 
   @Get('reports/valuation/pdf')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async valuationPdf(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -109,7 +107,6 @@ export class InventoryPrintController {
 
   @Get('reports/slow-moving/print')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async slowMovingPrint(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -121,7 +118,6 @@ export class InventoryPrintController {
 
   @Get('reports/slow-moving/pdf')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async slowMovingPdf(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -133,7 +129,6 @@ export class InventoryPrintController {
 
   @Get('reports/reorder/print')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async reorderPrint(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -145,7 +140,6 @@ export class InventoryPrintController {
 
   @Get('reports/reorder/pdf')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async reorderPdf(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -157,7 +151,6 @@ export class InventoryPrintController {
 
   @Get('reports/stock-take-variance/print')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async stockTakeVariancePrint(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -169,7 +162,6 @@ export class InventoryPrintController {
 
   @Get('reports/stock-take-variance/pdf')
   @AllowQueryToken()
-  @RequirePermissions('inventory.stock.read')
   async stockTakeVariancePdf(
     @CurrentUser() user: AuthUser,
     @Query() query: PriceQuery,
@@ -186,7 +178,7 @@ export class InventoryPrintController {
     id: string,
     query: PriceQuery,
   ): Promise<ReportTable> {
-    const access = this.reportAccess(user, query);
+    const access = this.reportAccess(user, query, 'valuation-by-warehouse');
     const document = await this.documents.findOne(
       user.companyId, id, access.canReadCost, undefined, access.warehouseIds, warehouseScopeOf(user),
     );
@@ -202,7 +194,7 @@ export class InventoryPrintController {
   }
 
   private async valuationFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
-    const access = this.reportAccess(user, query);
+    const access = this.reportAccess(user, query, 'slow-moving');
     const report = await this.reports.valuation(
       user.companyId,
       { branchId: this.reportBranch(user, query.branchId), categoryId: query.categoryId, warehouseIds: access.warehouseIds },
@@ -212,7 +204,7 @@ export class InventoryPrintController {
   }
 
   private async slowMovingFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
-    const access = this.reportAccess(user, query);
+    const access = this.reportAccess(user, query, 'slow-moving');
     const report = await this.reports.slowMoving(
       user.companyId,
       { days: query.days ? Number(query.days) : undefined, branchId: this.reportBranch(user, query.branchId), warehouseIds: access.warehouseIds },
@@ -222,7 +214,7 @@ export class InventoryPrintController {
   }
 
   private async reorderFor(user: AuthUser, query: PriceQuery): Promise<ReportTable> {
-    const access = this.reportAccess(user, query);
+    const access = this.reportAccess(user, query, 'below-minimum');
     const report = await this.reports.reorder(
       user.companyId,
       { branchId: this.reportBranch(user, query.branchId), warehouseIds: access.warehouseIds },
@@ -236,7 +228,7 @@ export class InventoryPrintController {
     user: AuthUser,
     query: PriceQuery,
   ): Promise<ReportTable> {
-    const access = this.reportAccess(user, query);
+    const access = this.reportAccess(user, query, 'count-variances');
     const report = await this.reports.stockTakeVariance(
       user.companyId,
       {
@@ -256,7 +248,13 @@ export class InventoryPrintController {
     );
   }
 
-  private reportAccess(user: AuthUser, query: PriceQuery): InventoryReportAccess {
+  private reportAccess(user: AuthUser, query: PriceQuery, slug: string): InventoryReportAccess {
+    if (!user.isSuperAdmin && !user.permissions.includes(`inventory.reports.${slug}.read`)) {
+      throw new ForbiddenException(`Missing permission: inventory.reports.${slug}.read`);
+    }
+    if (!user.isSuperAdmin && !user.permissions.includes('inventory.reports.print')) {
+      throw new ForbiddenException('Missing permission: inventory.reports.print');
+    }
     return resolveInventoryReportAccess(user, query);
   }
 

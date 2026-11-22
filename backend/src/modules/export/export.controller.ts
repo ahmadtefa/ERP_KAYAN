@@ -12,7 +12,6 @@ import type { Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -28,6 +27,7 @@ import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
 import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
 import { filterReportAggregates } from './aggregate-visibility';
+import { REPORT_READ_PERMISSION } from '../reports/report-permissions';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -340,6 +340,17 @@ export class ExportController {
     throw new ForbiddenException(`Missing permission: ${exportPermission}`);
   }
 
+  private assertReportRead(user: AuthUser, report: ExportableReport): void {
+    const permission = REPORT_READ_PERMISSION[report] ??
+      (report === 'fixed-assets' || report === 'depreciation'
+        ? 'accounting.fixedassets.read'
+        : report === 'party-statement'
+          ? 'reports.party-statement.read'
+          : undefined);
+    if (user.isSuperAdmin || (permission && user.permissions.includes(permission))) return;
+    throw new ForbiddenException(`Missing permission: ${permission ?? `reports.${report}.read`}`);
+  }
+
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
   @Get(':report/download')
   @AllowQueryToken()
@@ -350,8 +361,9 @@ export class ExportController {
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ) {
-    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    this.allowedExport(user, 'reports.export', 'reports.export');
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const wanted = (query as { format?: string }).format ?? 'xlsx';
 
@@ -397,8 +409,9 @@ export class ExportController {
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ): Promise<void> {
-    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    this.allowedExport(user, 'reports.export', 'reports.export');
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = applyPriceVisibility(
       filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
@@ -423,7 +436,6 @@ export class ExportController {
   @Get(':report/print')
   @AllowQueryToken()
   @UseGuards(BranchReportScopeGuard)
-  @RequirePermissions('reports.read')
   async print(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
@@ -431,6 +443,10 @@ export class ExportController {
     @Res() response: Response,
   ) {
     const slug = this.known(report);
+    this.assertReportRead(user, slug);
+    if (!user.isSuperAdmin && !user.permissions.includes('reports.print')) {
+      throw new ForbiddenException('Missing permission: reports.print');
+    }
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = applyPriceVisibility(
       filterReportAggregates(await this.tables.build(slug, user.companyId, query, lang), user),
