@@ -155,6 +155,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
   });
 
   it('restores saved values instead of later changes, isolates other companies and rolls back invalid data', async () => {
+    const existingRestoreAudits = await prisma.auditLog.count({ where: { companyId, entity: 'company_json_backup', action: 'RESTORE_REPLACE' } });
     const snapshot = JSON.parse(JSON.stringify(await service.create(companyId))) as BackupFile;
     await prisma.customer.update({ where: { id: customerId }, data: { nameEn: 'Changed after backup', nameAr: 'تغير بعد النسخ' } });
     await prisma.company.update({ where: { id: companyId }, data: { nameEn: 'Changed company' } });
@@ -187,7 +188,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     expect(await prisma.customer.findUnique({ where: { id: changedId } })).toBeNull();
     expect((await prisma.company.findUniqueOrThrow({ where: { id: companyId } })).nameEn).toBe('Original company');
     expect((await prisma.customer.findUniqueOrThrow({ where: { id: otherCustomerId } })).nameEn).toBe('Other customer');
-    expect(await prisma.auditLog.count({ where: { companyId, entity: 'company_json_backup', action: 'RESTORE_REPLACE' } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { companyId, entity: 'company_json_backup', action: 'RESTORE_REPLACE' } })).toBe(existingRestoreAudits + 1);
 
     // Recover the changed data from the automatically retained safety copy,
     // not the original input archive, and check both tenants again.
