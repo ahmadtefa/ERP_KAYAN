@@ -68,4 +68,42 @@ describe('UsersService extra permissions', () => {
       ),
     ).resolves.toEqual(['admin.backup']);
   });
+
+  it('returns bilingual names for each assigned branch', () => {
+    const { service } = build([]);
+    const user = {
+      id: 'user-1',
+      companyId: 'company-1',
+      username: 'operator',
+      email: null,
+      fullNameEn: 'Operator',
+      fullNameAr: 'مشغل',
+      isActive: true,
+      isSuperAdmin: false,
+      lastLoginAt: null,
+      lockedUntil: null,
+      userRoles: [],
+      userPermissions: [],
+      branches: [
+        {
+          branch: {
+            id: 'branch-1',
+            code: 'HQ',
+            nameEn: 'Head office',
+            nameAr: 'المركز الرئيسي',
+          },
+        },
+      ],
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    expect((service as any).toResponse(user).branches).toEqual([
+      {
+        id: 'branch-1',
+        code: 'HQ',
+        nameEn: 'Head office',
+        nameAr: 'المركز الرئيسي',
+      },
+    ]);
+  });
 });

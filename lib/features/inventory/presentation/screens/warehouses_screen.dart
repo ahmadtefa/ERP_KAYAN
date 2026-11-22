@@ -241,21 +241,52 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
   Future<void> _save({Json? existing}) async {
     final isEdit = existing != null;
     final arabic = _arabic;
-    // The branch the warehouse belongs to is required by the server and can
-    // never be guessed, so it is a text field rather than a hidden default:
-    // the same screen then works for a company with one branch and for one
-    // with twenty.
+    List<Json> branchRows;
+    try {
+      branchRows = await ref.read(apiClientProvider).getList('/company/branches');
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
+    }
+    final branchIds = [for (final branch in branchRows) text(branch, 'id')];
+    if (branchIds.any((id) => id.isEmpty) ||
+        branchIds.toSet().length != branchIds.length) {
+      if (mounted) showAppError(context, const FormatException());
+      return;
+    }
+    final branchOptions = [
+      for (final branch in branchRows)
+        FieldOption(
+          text(branch, 'id'),
+          '${text(branch, 'code')} — '
+          '${arabic ? text(branch, 'nameAr', fallback: text(branch, 'nameEn')) : text(branch, 'nameEn', fallback: text(branch, 'nameAr'))}',
+        ),
+    ];
+    final currentWarehouse = existing ?? const <String, dynamic>{};
+    final currentBranchId = text(currentWarehouse, 'branchId');
+    if (currentBranchId.isNotEmpty &&
+        !branchOptions.any((option) => option.value == currentBranchId)) {
+      branchOptions.add(
+        FieldOption(
+          currentBranchId,
+          '${text(currentWarehouse, 'branchCode')} — '
+          '${arabic ? text(currentWarehouse, 'branchNameAr', fallback: text(currentWarehouse, 'branchNameEn')) : text(currentWarehouse, 'branchNameEn', fallback: text(currentWarehouse, 'branchNameAr'))} '
+          '${arabic ? '(غير متاح)' : '(unavailable)'}',
+          enabled: false,
+        ),
+      );
+    }
     final fields = [
       if (!isEdit) FieldSpec('code', arabic ? 'الكود' : 'Code', required: true),
       FieldSpec('nameEn', 'Name (English)'),
       FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec(
         'branchId',
-        arabic ? 'معرّف الفرع' : 'Branch id',
+        arabic ? 'الفرع' : 'Branch',
+        kind: FieldKind.select,
         required: true,
-        helper: arabic
-            ? 'الفرع الذي يتبع له المستودع.'
-            : 'The branch this warehouse belongs to.',
+        searchable: true,
+        options: branchOptions,
       ),
       FieldSpec('address', arabic ? 'العنوان' : 'Address', maxLines: 2),
       FieldSpec(

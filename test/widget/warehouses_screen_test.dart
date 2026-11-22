@@ -4,6 +4,7 @@ import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/warehouses_screen.dart';
+import 'package:erp_kayan/shared/widgets/searchable_select_field.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +23,7 @@ class _WarehousesApi extends ApiClient {
   bool active;
   bool failList;
   final posts = <String>[];
+  final postBodies = <(String, Object?)>[];
   final patches = <(String, Object?)>[];
   final balanceRequests = <(String, Map<String, dynamic>?)>[];
 
@@ -79,6 +81,22 @@ class _WarehousesApi extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     if (failList) throw StateError('WAREHOUSE_LIST_FAILED');
+    if (path == '/company/branches') {
+      return [
+        {
+          'id': 'br-1',
+          'code': 'HQ',
+          'nameEn': 'Head office',
+          'nameAr': 'المركز الرئيسي',
+        },
+        {
+          'id': 'br-2',
+          'code': 'BR2',
+          'nameEn': 'Branch two',
+          'nameAr': 'الفرع الثاني',
+        },
+      ];
+    }
     return [
       {
         'id': 'wh-1',
@@ -116,6 +134,7 @@ class _WarehousesApi extends ApiClient {
     String? idempotencyKey,
   }) async {
     posts.add(path);
+    postBodies.add((path, body));
     if (path.endsWith('/deactivate')) active = false;
     if (path.endsWith('/reactivate')) active = true;
     return const {};
@@ -216,6 +235,33 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'New warehouse'), findsOneWidget);
     expect(find.byTooltip('Edit'), findsNWidgets(2));
     expect(find.byTooltip('Deactivate'), findsWidgets);
+  });
+
+  testWidgets('warehouse creation selects and submits a branch by name', (
+    tester,
+  ) async {
+    final api = _WarehousesApi();
+    await pump(tester, api);
+    await tester.tap(find.widgetWithText(FilledButton, 'New warehouse'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Branch'), findsOneWidget);
+    expect(find.text('br-1'), findsNothing);
+    await tester.tap(find.byType(SearchableSelectField));
+    await tester.pumpAndSettle();
+    expect(find.text('Head office · HQ'), findsOneWidget);
+    await tester.tap(find.text('Head office · HQ'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).first, 'NEW-WH');
+    await tester.enterText(find.byType(TextFormField).at(1), 'New warehouse');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.postBodies, hasLength(1));
+    final body = api.postBodies.single.$2 as Map<String, dynamic>;
+    expect(body['branchId'], 'br-1');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a read-only grant keeps balance viewing but hides management actions', (

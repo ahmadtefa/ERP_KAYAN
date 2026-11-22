@@ -707,6 +707,7 @@ export class UsersService {
         id: ub.branch.id,
         code: ub.branch.code,
         nameEn: ub.branch.nameEn,
+        nameAr: ub.branch.nameAr,
       })),
       createdAt: user.createdAt.toISOString(),
     };

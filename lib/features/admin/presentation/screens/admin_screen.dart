@@ -151,12 +151,32 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     ];
   }
 
+  Future<List<FieldOption>> _branchOptions() async {
+    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+    final branches = await ref.read(apiClientProvider).getList('/company/branches');
+    final ids = [for (final branch in branches) text(branch, 'id')];
+    if (ids.any((id) => id.isEmpty) || ids.toSet().length != ids.length) {
+      throw const FormatException();
+    }
+    return [
+      for (final branch in branches)
+        FieldOption(
+          text(branch, 'id'),
+          '${text(branch, 'code')} — '
+          '${isArabic ? text(branch, 'nameAr') : text(branch, 'nameEn')}',
+        ),
+    ];
+  }
+
   Future<void> _edit({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
     List<FieldOption> roles;
+    List<FieldOption> branches;
     try {
-      roles = await _roleOptions();
+      final result = await Future.wait([_roleOptions(), _branchOptions()]);
+      roles = result[0];
+      branches = result[1];
     } catch (error) {
       if (mounted) showAppError(context, error);
       return;
@@ -175,6 +195,32 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       return;
     }
     final roleIds = {for (final role in assigned) text(role, 'id')}.toList();
+    final rawBranches = existing?['branches'];
+    final assignedBranches = listOf(rawBranches);
+    if (isEdit &&
+        (rawBranches is! List ||
+            rawBranches.length != assignedBranches.length ||
+            assignedBranches.any((branch) => text(branch, 'id').isEmpty))) {
+      showAppError(context, const FormatException());
+      return;
+    }
+    final branchIds = {
+      for (final branch in assignedBranches) text(branch, 'id'),
+    }.toList();
+    for (final branch in assignedBranches) {
+      final id = text(branch, 'id');
+      if (id.isNotEmpty && !branches.any((option) => option.value == id)) {
+        branches.add(
+          FieldOption(
+            id,
+            '${text(branch, 'code')} — '
+            '${Localizations.localeOf(context).languageCode == 'ar' ? text(branch, 'nameAr') : text(branch, 'nameEn')} '
+            '${Localizations.localeOf(context).languageCode == 'ar' ? '(غير متاح)' : '(unavailable)'}',
+            enabled: false,
+          ),
+        );
+      }
+    }
     for (final role in assigned) {
       final id = text(role, 'id');
       if (id.isNotEmpty && !roles.any((option) => option.value == id)) {
@@ -214,6 +260,14 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         kind: FieldKind.multiSelect,
         options: roles,
       ),
+      FieldSpec(
+        'branchIds',
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الفروع المسموح بها'
+            : 'Assigned branches',
+        kind: FieldKind.multiSelect,
+        options: branches,
+      ),
       if (isEdit) FieldSpec('isActive', l10n.active, kind: FieldKind.toggle),
     ];
 
@@ -223,7 +277,11 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       exitRelay: widget.exitRelay,
       title: isEdit ? l10n.editUser : l10n.newUser,
       fields: fields,
-      initial: {...?existing, if (isEdit) 'roleIds': roleIds},
+      initial: {
+        ...?existing,
+        if (isEdit) 'roleIds': roleIds,
+        'branchIds': branchIds,
+      },
       onSubmit: (draft) async {
         try {
           final client = ref.read(apiClientProvider);
@@ -237,6 +295,13 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
             payload.remove('roleIds');
           } else if (isEdit) {
             payload['expectedRoleIds'] = roleIds;
+          }
+          final selectedBranches =
+              (payload['branchIds'] as List).cast<String>().toSet();
+          if (isEdit &&
+              selectedBranches.length == branchIds.length &&
+              selectedBranches.containsAll(branchIds)) {
+            payload.remove('branchIds');
           }
           if (isEdit && payload['isActive'] == existing['isActive']) {
             payload.remove('isActive');

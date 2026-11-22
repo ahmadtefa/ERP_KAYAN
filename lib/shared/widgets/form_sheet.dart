@@ -9,6 +9,10 @@ import '../../core/error/failure.dart';
 import '../extensions/l10n_extension.dart';
 import 'confirm_dialog.dart';
 import 'app_error_dialog.dart';
+import 'field_option.dart';
+import 'searchable_select_field.dart';
+
+export 'field_option.dart' show FieldOption;
 
 /// What kind of input a field collects.
 enum FieldKind {
@@ -20,17 +24,6 @@ enum FieldKind {
   toggle,
   select,
   multiSelect,
-}
-
-/// One choice in a [FieldKind.select] field.
-class FieldOption {
-  const FieldOption(this.value, this.label, {this.enabled = true});
-
-  final String value;
-  final String label;
-
-  /// An existing unavailable value can stay visible without becoming a new choice.
-  final bool enabled;
 }
 
 /// Declarative description of one input in a [showFormSheet].
@@ -45,6 +38,7 @@ class FieldSpec {
     this.required = false,
     this.helper,
     this.options = const [],
+    this.searchable = false,
     this.maxLines = 1,
     this.emptyValue,
     this.clearable = false,
@@ -57,6 +51,9 @@ class FieldSpec {
   final bool required;
   final String? helper;
   final List<FieldOption> options;
+
+  /// Use a searchable name picker instead of a dropdown for long reference lists.
+  final bool searchable;
   final int maxLines;
 
   /// Explicit payload when an optional field is blank; null keeps omission.
@@ -142,6 +139,7 @@ class _FormSheetState extends State<_FormSheet> {
   final _toggles = <String, bool>{};
   final _selections = <String, String?>{};
   final _multiSelections = <String, Set<String>>{};
+  final _multiSearch = <String, String>{};
   final _fieldErrors = <String, String>{};
   final _fieldKeys = <String, GlobalKey<FormFieldState>>{};
   final _focusNodes = <String, FocusNode>{};
@@ -464,14 +462,41 @@ class _FormSheetState extends State<_FormSheet> {
           ),
         );
       case FieldKind.select:
+        if (field.searchable) {
+          return Padding(
+            padding: padding,
+            child: SearchableSelectField(
+              fieldKey: _fieldKeys[field.key],
+              value: _selections[field.key],
+              options: field.options,
+              enabled: !widget.readOnly,
+              decoration: InputDecoration(
+                labelText: field.label,
+                helperText: field.helper,
+              ),
+              validator: (value) {
+                final serverError = _fieldErrors[field.key];
+                if (serverError != null) return serverError;
+                if (field.required && (value == null || value.isEmpty)) {
+                  return context.l10n.requiredField;
+                }
+                return null;
+              },
+              onChanged: (value) {
+                setState(() {
+                  _selections[field.key] = value;
+                  _fieldErrors.remove(field.key);
+                });
+                _fieldKeys[field.key]?.currentState?.validate();
+              },
+            ),
+          );
+        }
         return Padding(
           padding: padding,
           child: DropdownButtonFormField<String>(
             key: _fieldKeys[field.key],
             focusNode: _focusNodes[field.key],
-            // Expanded, or the button sizes to its widest option and
-            // a long label (an account, a purchase line) overflows
-            // the field instead of ellipsising inside it.
             isExpanded: true,
             initialValue: _selections[field.key],
             decoration: InputDecoration(
@@ -531,11 +556,26 @@ class _FormSheetState extends State<_FormSheet> {
                     ),
                   ),
                 const SizedBox(height: AppSpacing.sm),
+                if (field.options.length > 5)
+                  TextField(
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      hintText: MaterialLocalizations.of(context).searchFieldLabel,
+                    ),
+                    onChanged: (value) => setState(() {
+                      _multiSearch[field.key] = value.trim().toLowerCase();
+                    }),
+                  ),
                 Wrap(
                   spacing: AppSpacing.sm,
                   runSpacing: AppSpacing.xs,
                   children: [
-                    for (final option in field.options)
+                    for (final option in field.options.where((option) {
+                      final query = _multiSearch[field.key] ?? '';
+                      return query.isEmpty ||
+                          option.label.toLowerCase().contains(query);
+                    }))
                       FilterChip(
                         label: Text(option.label),
                         selected:

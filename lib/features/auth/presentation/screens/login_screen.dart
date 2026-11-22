@@ -10,6 +10,8 @@ import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/field_option.dart';
+import '../../../../shared/widgets/searchable_select_field.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
@@ -212,23 +214,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       textInputAction: TextInputAction.next,
                       decoration: InputDecoration(labelText: context.l10n.username),
                     ),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCompanyCode,
-                      isExpanded: true,
-                      decoration: InputDecoration(labelText: context.l10n.companyCode),
-                      items: [
+                    SearchableSelectField(
+                      value: selectedCompanyCode,
+                      enabled: !saving,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'الشركة' : 'Company',
+                      ),
+                      options: [
                         for (final company in companyOptions)
-                          DropdownMenuItem(
-                            value: text(company, 'code'),
-                            child: Text(
-                              '${arabic ? text(company, 'nameAr') : text(company, 'nameEn')} · ${text(company, 'code')}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                          FieldOption(
+                            text(company, 'code'),
+                            '${arabic ? text(company, 'nameAr') : text(company, 'nameEn')} · ${text(company, 'code')}',
                           ),
                       ],
-                      onChanged: saving
-                          ? null
-                          : (value) => setDialogState(() => selectedCompanyCode = value),
+                      validator: (value) => value == null || value.isEmpty
+                          ? (arabic ? 'اختر الشركة.' : 'Choose a company.')
+                          : null,
+                      onChanged: (value) => setDialogState(
+                        () => selectedCompanyCode = value,
+                      ),
                     ),
                     TextField(
                       controller: currentPassword,

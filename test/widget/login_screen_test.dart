@@ -4,6 +4,7 @@ import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/screens/login_screen.dart';
+import 'package:erp_kayan/shared/widgets/searchable_select_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -110,7 +111,7 @@ void main() {
     expect(find.text('Confirm new password'), findsOneWidget);
     // Company is selected from the public options endpoint, not typed as a
     // free-form code. The login form stays mounted behind the dialog.
-    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    expect(find.byType(SearchableSelectField), findsOneWidget);
     expect(find.text('Acme · ACME'), findsOneWidget);
     expect(find.byType(TextField), findsNWidgets(6));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
