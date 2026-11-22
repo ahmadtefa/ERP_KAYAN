@@ -176,7 +176,7 @@ export class SystemRestoreService implements OnModuleInit {
   async restore(input: RestoreInput, userId: string): Promise<RestoreResult> {
     const started = Date.now();
     // 1. Can this machine do it at all?
-    const gate = await this.gate.assertAllowed();
+    await this.gate.assertAllowed();
 
     // 2. The typed confirmation.
     if (!input.confirm) {
@@ -630,13 +630,9 @@ export class SystemRestoreService implements OnModuleInit {
       }
 
       // Then the files that belong to the database that is now in place.
-      const previous = journal.previousUploads;
-      if (previous && existsSync(previous)) {
-        const uploads = uploadsDirectory();
-        const current = `${uploads}.failed-restore-${Date.now()}`;
-        if (existsSync(uploads)) await rename(uploads, current).catch(() => {});
-        await rename(previous, uploads);
-      }
+      // If power failed between renaming uploads and journaling that rename,
+      // the verified safety archive is still a complete source of the files.
+      await this.restoreUploadsFromSafety(workDir, journal);
 
       if (journal.stagingDir) {
         await rm(journal.stagingDir, { recursive: true, force: true }).catch(() => {});
@@ -850,6 +846,22 @@ export class SystemRestoreService implements OnModuleInit {
    * current one aside rather than deleting it: the safety backup can put the
    * database back, and this folder is what makes that a complete recovery.
    */
+  private async restoreUploadsFromSafety(workDir: string, journal: RestoreJournal): Promise<void> {
+    const uploads = uploadsDirectory();
+    const previous = journal.previousUploads;
+    const safetyFiles = join(workDir, ARCHIVE_PATHS.filesRoot);
+    // A backup with no uploaded files need not contain a directory entry.
+    if (!previous || !existsSync(previous)) await mkdir(safetyFiles, { recursive: true });
+    const source = previous && existsSync(previous) ? previous : safetyFiles;
+    if (existsSync(uploads)) {
+      // Never swallow a failed rename: claiming recovery while keeping the
+      // wrong uploads would leave the database and its files inconsistent.
+      await rename(uploads, `${uploads}.failed-restore-${Date.now()}`);
+    }
+    await mkdir(join(uploads, '..'), { recursive: true });
+    await rename(source, uploads);
+  }
+
   private async swapUploadsFolder(
     stagingDir: string,
     journal: RestoreJournal,
@@ -864,10 +876,12 @@ export class SystemRestoreService implements OnModuleInit {
       filesRestored = (await listUserFiles(staged)).length;
     }
 
+    // Record the recovery location before the first destructive filesystem
+    // operation, so an interruption cannot orphan the original uploads.
+    await persist({ previousUploads: previous });
     if (existsSync(uploads)) {
       await rename(uploads, previous);
     }
-    await persist({ previousUploads: previous });
 
     if (existsSync(staged)) {
       await mkdir(join(uploads, '..'), { recursive: true });

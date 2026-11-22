@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -530,6 +530,11 @@ async function main(): Promise<void> {
 
     // ───────────────────────────────────── 5. a restore killed mid-replacement
     const crashSafety = await backups.createSafety('user-1');
+    // Simulate the old crash window: uploads were moved, but the journal was
+    // not updated with their location. Recovery must not delete them unseen.
+    const crashStaging = join(workDir, 'interrupted-upload-swap');
+    await mkdir(crashStaging, { recursive: true });
+    await rename(uploadsDir, join(crashStaging, 'previous-uploads'));
     await journals.write({
       id: 'simulated-crash',
       startedAt: new Date().toISOString(),
@@ -539,7 +544,7 @@ async function main(): Promise<void> {
       sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
       safetyBackup: crashSafety.name,
       previousUploads: null,
-      stagingDir: null,
+      stagingDir: crashStaging,
       detail: 'simulated power cut',
       checks: [],
     });
@@ -571,6 +576,12 @@ async function main(): Promise<void> {
       'resuming recovery puts the safety backup back',
       recovery.recovered === true && recovery.safetyBackup === crashSafety.name,
       recovery.detail.slice(0, 160),
+    );
+    check(
+      'a crash before the uploads journal update recovers the safety archive files',
+      existsSync(join(uploadsDir, 'logo-one.png')) &&
+        existsSync(join(uploadsDir, 'logo-two.png')) &&
+        readFileSync(join(uploadsDir, 'logo-one.png'), 'utf8') === 'PNG-FAKE-COMPANY-LOGO-ONE',
     );
     const afterRecovery = await counts();
     check(
