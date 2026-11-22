@@ -54,6 +54,30 @@ describe('legacy inventory reports branch scope', () => {
     );
   });
 
+  it('does not expose branch-level legacy reports to warehouse-restricted users', () => {
+    const { controller, service } = build();
+    const restricted = {
+      ...user([branchA]),
+      warehouseAccess: [
+        {
+          warehouseId: 'warehouse-a',
+          canView: true,
+          canReceive: false,
+          canIssue: false,
+          canTransfer: false,
+          canCount: false,
+          canApprove: false,
+          canSeeCost: false,
+        },
+      ],
+    };
+
+    expect(() => controller.valuation(restricted, branchA)).toThrow(
+      ForbiddenException,
+    );
+    expect(service.valuation).not.toHaveBeenCalled();
+  });
+
   it('uses the active branch for a multi-branch user unless another allowed branch is requested', () => {
     const { controller, service } = build();
 
