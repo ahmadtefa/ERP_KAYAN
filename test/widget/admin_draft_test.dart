@@ -45,6 +45,9 @@ class _AdminApi extends ApiClient {
         'extraPermissions':malformedPermissions ? null : ['sales.invoices.read'], 'branches':[], 'roles':malformedRoles ? null : [{'id':'role-a','code':'ACTIVE','nameEn':'Available role'},
           {'id':'role-b','code':'LEGACY','nameEn':'Unavailable role'}]}];
     }
+    if (path == '/company/branches') {
+      return [{'id':'branch-1','code':'HQ','nameEn':'Head office','nameAr':'المركز الرئيسي'}];
+    }
     return [];
   }
   @override
@@ -101,6 +104,36 @@ Future<void> _openEdit(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('user creation and edit save named branch assignments', (tester) async {
+    final createApi = _AdminApi();
+    await _screen(tester, createApi);
+    await tester.tap(find.widgetWithText(FilledButton,'New user'));
+    await tester.pumpAndSettle();
+    final branch = find.widgetWithText(FilterChip, 'HQ — Head office');
+    expect(branch, findsOneWidget);
+    await tester.tap(branch);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField,'Username'),'branch-operator');
+    await tester.enterText(find.widgetWithText(TextFormField,'Name in English'),'Branch operator');
+    await tester.enterText(find.widgetWithText(TextFormField,'Name in Arabic'),'مشغل فرع');
+    await tester.enterText(find.widgetWithText(TextFormField,'Password'),'StrongPass123!');
+    await tester.tap(find.widgetWithText(FilledButton,'Save'));
+    await tester.pumpAndSettle();
+    expect(createApi.submitted!['branchIds'], ['branch-1']);
+
+    final editApi = _AdminApi();
+    await _screen(tester, editApi);
+    await _openEdit(tester);
+    final editBranch = find.widgetWithText(FilterChip, 'HQ — Head office');
+    await tester.tap(editBranch);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Save'));
+    await tester.pumpAndSettle();
+    expect(editApi.submitted!['branchIds'], ['branch-1']);
+    expect(editApi.submitted!.containsKey('roleIds'), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('user edits preserve assigned and unavailable roles', (tester) async {
     final api=_AdminApi(); await _screen(tester,api); await _openEdit(tester);
     final available=find.widgetWithText(FilterChip,'ACTIVE — Available role');
