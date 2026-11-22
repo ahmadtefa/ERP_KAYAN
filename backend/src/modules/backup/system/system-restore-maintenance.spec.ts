@@ -43,6 +43,15 @@ describe('complete restore recovery maintenance', () => {
     await expect(service.status()).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
+  it('keeps maintenance active if journal deletion fails before reopening', async () => {
+    const { service, maintenance, journals } = setup(null);
+    maintenance.begin('restoring');
+    journals.clear.mockRejectedValueOnce(new Error('storage error'));
+    const internal = service as unknown as { clearJournalBeforeReopening(): Promise<void> };
+    await expect(internal.clearJournalBeforeReopening()).rejects.toThrow('storage error');
+    expect(maintenance.isActive).toBe(true);
+  });
+
   it('does not end an unrelated maintenance operation when there is no journal', async () => {
     const { service, maintenance } = setup(null);
     maintenance.begin('another operation');

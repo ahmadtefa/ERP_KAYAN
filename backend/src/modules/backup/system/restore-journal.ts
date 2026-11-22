@@ -1,4 +1,4 @@
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ensureDirectory } from './pg-support';
@@ -128,8 +128,27 @@ export class RestoreJournalStore {
       updatedAt: new Date().toISOString(),
     };
     const temporary = `${this.path}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    // Flush the new state before publishing it. A successful write without a
+    // flush can disappear on a crash after the database has been replaced.
+    const handle = await open(temporary, 'w', 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(temporary, this.path);
+    // POSIX needs the directory entry flushed too for the rename to survive a
+    // sudden power loss. Windows does not expose a portable directory fsync
+    // through Node; the installed-platform crash test remains necessary.
+    if (process.platform !== 'win32') {
+      const directory = await open(this.backupDir, 'r');
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    }
     return next;
   }
 
@@ -142,7 +161,20 @@ export class RestoreJournalStore {
   }
 
   async clear(): Promise<void> {
-    await unlink(this.path).catch(() => {});
+    try {
+      await unlink(this.path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw new Error('The restore journal could not be removed safely.');
+    }
+    if (process.platform !== 'win32') {
+      const directory = await open(this.backupDir, 'r');
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    }
   }
 
   /// A short, safe name for a staging folder belonging to this restore.

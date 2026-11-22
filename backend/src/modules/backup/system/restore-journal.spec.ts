@@ -70,6 +70,14 @@ describe('restore journal', () => {
     expect(await store.clear()).toBeUndefined();
   });
 
+  it('reports a failure to remove the journal rather than pretending it was cleared', async () => {
+    const store = new RestoreJournalStore(dir);
+    const fs = await import('node:fs/promises');
+    await fs.mkdir(join(dir, 'restore-journal.json'));
+    await expect(store.clear()).rejects.toThrow(/could not be removed safely/i);
+    expect((await fs.stat(join(dir, 'restore-journal.json'))).isDirectory()).toBe(true);
+  });
+
   it('knows which phases may have changed data', () => {
     expect(isDestructive({ phase: 'safety-taken' })).toBe(false);
     expect(isDestructive({ phase: 'rehearsed' })).toBe(false);

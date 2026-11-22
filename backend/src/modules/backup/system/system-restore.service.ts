@@ -478,8 +478,10 @@ export class SystemRestoreService implements OnModuleInit {
       }
 
       journal = await this.journals.advance(journal, 'verified', { checks: allChecks });
-      this.maintenance.end();
-      await this.journals.clear();
+      // Never admit business work until the recovery journal is durably
+      // cleared: otherwise a crash can replay an obsolete safety backup over
+      // writes that were accepted after this restore.
+      await this.clearJournalBeforeReopening();
       await this.gate.forget();
       await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
 
@@ -705,8 +707,7 @@ export class SystemRestoreService implements OnModuleInit {
         checks,
         detail: 'the safety backup was put back',
       });
-      await this.journals.clear();
-      this.maintenance.end();
+      await this.clearJournalBeforeReopening();
       await this.gate.forget();
       this.logger.log(`Rolled back to ${safetyName} and the data passed its checks`);
 
@@ -741,6 +742,11 @@ export class SystemRestoreService implements OnModuleInit {
   }
 
   /// ─────────────────────────────────────────────────────────────── helpers
+
+  private async clearJournalBeforeReopening(): Promise<void> {
+    await this.journals.clear();
+    this.maintenance.end();
+  }
 
   /**
    * The checks that decide whether a restored database is the database the
