@@ -240,7 +240,8 @@ class _InventoryReportsScreenState
   }
 
   Widget _warehouseFilter() {
-    final available = ref.watch(_warehouseOptionsProvider).valueOrNull ?? const <Json>[];
+    final available =
+        ref.watch(_warehouseOptionsProvider).asData?.value ?? const <Json>[];
     if (available.isEmpty) return const SizedBox.shrink();
     final filters = ref.watch(_reportFilterProvider);
     final selected = (asString(filters['warehouseIds']) ?? '')
