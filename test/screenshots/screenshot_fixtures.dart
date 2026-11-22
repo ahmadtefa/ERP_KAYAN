@@ -53,6 +53,6 @@ const screenshotAdmin = AppUser(
   fullName: 'مدير النظام',
   companyId: 'company-1',
   branchId: 'branch-1',
-  roles: ['ADMIN'],
+  roles: ['ADMIN', 'GENERAL_MANAGER'],
   isSuperAdmin: true,
 );

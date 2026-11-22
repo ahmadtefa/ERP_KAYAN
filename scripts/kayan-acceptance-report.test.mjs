@@ -55,6 +55,7 @@ test('a failure outside mapped widget groups fails full Flutter acceptance', () 
       { type: 'suite', suite: { id: 1, path: 'test/features/orders/order_flow_test.dart' } },
       { type: 'testStart', test: { id: 2, suiteID: 1, name: 'posting failure' } },
       { type: 'error', testID: 2, error: 'Expected one result, got none' },
+      { type: 'error', testID: 2, error: 'Test failed. See exception logs above.' },
       { type: 'testDone', testID: 2, result: 'failure', skipped: false },
     ].map(event => JSON.stringify(event)).join('\n'));
     const result = spawnSync(process.execPath, ['scripts/kayan-acceptance-results.mjs', log, output],

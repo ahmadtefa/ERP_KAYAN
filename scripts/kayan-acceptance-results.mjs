@@ -37,7 +37,7 @@ for (const line of bytes.toString(encoding).replace(/^\uFEFF/, '').split(/\r?\n/
   try { event = JSON.parse(line); } catch { continue; }
   if (event.type === 'suite') suites.set(event.suite.id, event.suite.path);
   if (event.type === 'testStart') tests.set(event.test.id, event.test);
-  if (event.type === 'error' && typeof event.error === 'string') {
+  if (event.type === 'error' && typeof event.error === 'string' && !errors.has(event.testID)) {
     errors.set(event.testID, event.error.slice(0, 2000));
   }
   if (event.type !== 'testDone') continue;
