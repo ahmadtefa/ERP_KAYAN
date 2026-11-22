@@ -350,6 +350,9 @@ export class UsersService {
         where: { id },
         data: {
           passwordHash,
+          // JWTs already issued before the reset must stop working as well as
+          // refresh tokens; the guard checks this version on every request.
+          tokenVersion: { increment: 1 },
           // A new password also clears a lockout: whoever was guessing no
           // longer has a target, and the real user is not stuck.
           failedLoginCount: 0,

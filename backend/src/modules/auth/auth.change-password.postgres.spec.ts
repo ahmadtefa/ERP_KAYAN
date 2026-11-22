@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthService } from './auth.service';
+import { UsersService } from '../admin/users.service';
 
 // Runs only on the isolated, freshly migrated CI database, before seeding.
 const run = process.env.KAYAN_AUTH_PASSWORD_PG === '1';
@@ -57,5 +58,15 @@ const run = process.env.KAYAN_AUTH_PASSWORD_PG === '1';
     expect(await prisma.refreshToken.count({ where: { userId, revokedAt: null } })).toBe(0);
     await expect(service.login(username, 'original-password-123')).rejects.toMatchObject({ status: 401 });
     await expect(service.login(username, winner)).resolves.toMatchObject({ user: { id: userId } });
+  });
+
+  it('revokes access and refresh sessions when an administrator resets the password', async () => {
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const admin = new UsersService(prisma, { record: async () => {} } as never, {} as never);
+    await admin.changePassword(companyId, userId, userId, 'admin-reset-password-123', false);
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(after.tokenVersion).toBe(before.tokenVersion + 1);
+    expect(await argon2.verify(after.passwordHash, 'admin-reset-password-123')).toBe(true);
+    expect(await prisma.refreshToken.count({ where: { userId, revokedAt: null } })).toBe(0);
   });
 });
