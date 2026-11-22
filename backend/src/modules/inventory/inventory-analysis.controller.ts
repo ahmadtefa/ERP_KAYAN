@@ -13,8 +13,11 @@ import {
   AuthUser,
   CurrentUser,
 } from "../../common/decorators/current-user.decorator";
-import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
 import { warehouseScopeOf } from "../../common/warehouse/warehouse.service";
+import {
+  mayReadCompanyAggregates,
+  redactCompanyAggregates,
+} from "../../common/auth/company-aggregate-visibility";
 import {
   InventoryAnalysisService,
   ReportFilter,
@@ -30,13 +33,13 @@ export class InventoryAnalysisController {
   constructor(private readonly service: InventoryAnalysisService) {}
 
   @Get()
-  @RequirePermissions("inventory.stock.read")
   catalogue(@CurrentUser() user: AuthUser) {
     const access = resolveInventoryReportAccess(user, {});
     const result = this.service.catalogue();
     return {
       ...result,
       reports: result.reports.filter((report) => {
+        if (!this.hasReportPermission(user, report.slug)) return false;
         try {
           assertWarehouseReportSupported(report.slug, access);
           return true;
@@ -49,13 +52,16 @@ export class InventoryAnalysisController {
 
   @Get(":slug/export")
   @AllowQueryToken()
-  @RequirePermissions("inventory.export")
   async exportCsv(
     @CurrentUser() user: AuthUser,
     @Param("slug") slug: string,
     @Query() query: InventoryReportQuery,
     @Res() response: Response,
   ) {
+    this.assertReportPermission(user, slug);
+    if (!user.isSuperAdmin && !user.permissions.includes('inventory.export')) {
+      throw new ForbiddenException('Missing permission: inventory.export');
+    }
     const report = await this.run(user, slug, query);
     const rows =
       (report as { rows?: Array<Record<string, unknown>> }).rows ?? [];
@@ -82,18 +88,12 @@ export class InventoryAnalysisController {
   }
 
   @Get(":slug")
-  @RequirePermissions("inventory.stock.read")
   run(
     @CurrentUser() user: AuthUser,
     @Param("slug") slug: string,
     @Query() query: InventoryReportQuery,
   ) {
-    if (
-      !user.isSuperAdmin &&
-      !user.permissions.includes("inventory.stock.read")
-    ) {
-      throw new ForbiddenException("Missing permission: inventory.stock.read");
-    }
+    this.assertReportPermission(user, slug);
     const access = resolveInventoryReportAccess(user, query);
     assertWarehouseReportSupported(slug, access);
     const filter: ReportFilter = {
@@ -151,7 +151,19 @@ export class InventoryAnalysisController {
         let safe: unknown = report;
         if (!access.canReadCost) safe = hide(safe, hideCosts);
         if (!access.canReadPurchasePrice) safe = hide(safe, hidePurchasePrices);
-        return safe;
+        return mayReadCompanyAggregates(user)
+          ? safe
+          : redactCompanyAggregates(safe);
       });
+  }
+
+  private hasReportPermission(user: AuthUser, slug: string): boolean {
+    return user.isSuperAdmin || user.permissions.includes(`inventory.reports.${slug}.read`);
+  }
+
+  private assertReportPermission(user: AuthUser, slug: string): void {
+    if (!this.hasReportPermission(user, slug)) {
+      throw new ForbiddenException(`Missing permission: inventory.reports.${slug}.read`);
+    }
   }
 }

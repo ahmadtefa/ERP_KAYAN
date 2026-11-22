@@ -42,6 +42,9 @@ class ReportExportActions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
+    final user = ref.watch(currentUserProvider);
+    final mayExport = user?.can('reports.export') ?? false;
+    final mayPrint = user?.can('reports.print') ?? false;
     final links = ref.read(reportLinkProvider);
     final ready = !_needsAccount || (accountId?.isNotEmpty ?? false);
 
@@ -58,9 +61,9 @@ class ReportExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.canReadCost ?? false,
-        canSeePurchasePrice: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
-        canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
+        canSeeCost: user?.canReadCost ?? false,
+        canSeePurchasePrice: user?.canReadPurchasePrice ?? false,
+        canSeeSalePrice: user?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await download(links.pdf(
@@ -79,9 +82,9 @@ class ReportExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.canReadCost ?? false,
-        canSeePurchasePrice: ref.watch(currentUserProvider)?.canReadPurchasePrice ?? false,
-        canSeeSalePrice: ref.watch(currentUserProvider)?.canReadSalePrice ?? false,
+        canSeeCost: user?.canReadCost ?? false,
+        canSeePurchasePrice: user?.canReadPurchasePrice ?? false,
+        canSeeSalePrice: user?.canReadSalePrice ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(context, links.print(
@@ -101,7 +104,8 @@ class ReportExportActions extends ConsumerWidget {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        OutlinedButton.icon(
+        if (mayExport)
+          OutlinedButton.icon(
           onPressed: ready
               ? () => download(
                     links.file(
@@ -117,7 +121,8 @@ class ReportExportActions extends ConsumerWidget {
           icon: const Icon(Icons.table_view_outlined, size: 18),
           label: Text(l10n.exportExcel),
         ),
-        OutlinedButton.icon(
+        if (mayExport)
+          OutlinedButton.icon(
           onPressed: ready
               ? () => download(
                     links.file(
@@ -133,13 +138,14 @@ class ReportExportActions extends ConsumerWidget {
           icon: const Icon(Icons.description_outlined, size: 18),
           label: Text(l10n.exportCsv),
         ),
-        if (pdfReady)
+        if (mayExport && pdfReady)
           FilledButton.tonalIcon(
             onPressed: ready ? downloadPdf : null,
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
             label: Text(l10n.exportPdf),
           ),
-        Tooltip(
+        if (mayPrint)
+          Tooltip(
           // Where the server cannot make a PDF, this button is the way to get
           // one, so the tooltip says which dialogue option saves the file.
           message: pdfReady ? l10n.printPdfHint : l10n.printHintWhenNoPdf,
