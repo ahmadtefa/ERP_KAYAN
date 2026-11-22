@@ -20,7 +20,9 @@ describe('warehouse access', () => {
 
   function makeService(options: { user?: Record<string, unknown> | null } = {}) {
     const tx = {
+      $queryRaw: jest.fn(async () => []),
       userWarehouseAccess: {
+        count: jest.fn(async () => 0),
         deleteMany: jest.fn(async () => ({ count: 0 })),
         create: jest.fn(async ({ data }: { data: unknown }) => data),
       },
@@ -246,6 +248,29 @@ describe('warehouse access', () => {
     expect(tx.userWarehouseAccess.deleteMany).toHaveBeenCalledWith({
       where: { companyId: COMPANY, userId: USER, warehouse: { branchId: { in: ['branch-1'] } } },
     });
+  });
+
+  it('refuses to turn the last scoped restriction into company-wide unrestricted access', async () => {
+    const { service, tx } = makeService();
+    tx.userWarehouseAccess.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    await expect(service.setForUser(COMPANY, ACTOR, USER, [], ['branch-1']))
+      .rejects.toThrow(/cannot remove the last warehouse restriction/i);
+    expect(tx.userWarehouseAccess.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps outside-branch restrictions when clearing a local slice', async () => {
+    const { service, tx } = makeService();
+    tx.userWarehouseAccess.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+    await service.setForUser(COMPANY, ACTOR, USER, [], ['branch-1']);
+    expect(tx.userWarehouseAccess.deleteMany).toHaveBeenCalled();
+  });
+
+  it('scopes direct subject lookup as well as the people catalogue', async () => {
+    const { service, prisma } = makeService();
+    await service.forUser(COMPANY, USER, ['branch-1']);
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ companyId: COMPANY, id: USER, OR: expect.any(Array) }),
+    }));
   });
 
   it('clears a person\u2019s restrictions when the admin saves an empty list', async () => {

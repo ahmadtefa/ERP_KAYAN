@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -60,7 +61,13 @@ export class WarehouseAccessService {
 
   async forUser(companyId: string, userId: string, scope: WarehouseScope = null) {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId, deletedAt: null },
+      where: {
+        id: userId, companyId, deletedAt: null,
+        ...(scope !== null ? { OR: [
+          { branches: { some: { branch: { id: { in: scope }, companyId, deletedAt: null } } } },
+          { branches: { none: {} } },
+        ] } : {}),
+      },
       select: { id: true, username: true, fullNameEn: true, fullNameAr: true },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -134,7 +141,13 @@ export class WarehouseAccessService {
     scope: WarehouseScope = null,
   ) {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId, deletedAt: null },
+      where: {
+        id: userId, companyId, deletedAt: null,
+        ...(scope !== null ? { OR: [
+          { branches: { some: { branch: { id: { in: scope }, companyId, deletedAt: null } } } },
+          { branches: { none: {} } },
+        ] } : {}),
+      },
       select: { id: true, isSuperAdmin: true },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -165,6 +178,19 @@ export class WarehouseAccessService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      // Serialise editors for the same subject. An empty grant set means
+      // unrestricted access, so deleting the last scoped grant must never
+      // silently grant access to every warehouse in every other branch.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM users WHERE id=${userId}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
+      if (scope !== null && cleaned.length === 0) {
+        const [total, outside] = await Promise.all([
+          tx.userWarehouseAccess.count({ where: { companyId, userId } }),
+          tx.userWarehouseAccess.count({ where: { companyId, userId, warehouse: { branchId: { notIn: scope } } } }),
+        ]);
+        if (total > 0 && outside === 0) {
+          throw new ForbiddenException('A branch-scoped manager cannot remove the last warehouse restriction. / لا يمكن لمسؤول الفرع إزالة آخر قيد للمستودعات.');
+        }
+      }
       await tx.userWarehouseAccess.deleteMany({
         where: {
           companyId,
