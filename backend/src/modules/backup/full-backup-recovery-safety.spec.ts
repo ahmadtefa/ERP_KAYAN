@@ -235,6 +235,15 @@ describe('full restore failure safety', () => {
     expect(maintenance.isActive).toBe(false);
   });
 
+  it('keeps maintenance active if old sessions cannot be removed after restore', async () => {
+    internals.execSql.mockImplementation(async (sql: string) => {
+      if (sql === 'DELETE FROM refresh_tokens') throw new Error('synthetic session purge failure');
+    });
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/maintenance remains active/i);
+    expect(maintenance.isActive).toBe(true);
+    expect(internals.reconcileRestoredCompanies).not.toHaveBeenCalled();
+  });
+
   it('holds maintenance and does not expose access-repair errors when repair fails', async () => {
     const marker = 'synthetic-private-marker';
     const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);

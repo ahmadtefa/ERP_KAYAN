@@ -67,6 +67,8 @@ const SERVER_URL = process.env.DATABASE_URL_KAYAN_ROUNDTRIP ?? '';
         customer_id INTEGER NOT NULL REFERENCES customers(id),
         total NUMERIC(12,2) NOT NULL
       );
+      CREATE TABLE refresh_tokens (id INTEGER PRIMARY KEY);
+      INSERT INTO refresh_tokens (id) VALUES (1);
       INSERT INTO customers (id, name) VALUES (1, 'أحمد'), (2, 'Sara');
       INSERT INTO invoices (id, customer_id, total) VALUES (10, 1, 150.75), (11, 2, 99.00);
     `);
@@ -135,6 +137,9 @@ const SERVER_URL = process.env.DATABASE_URL_KAYAN_ROUNDTRIP ?? '';
       includesLicence: false,
       licenceReconciled: true,
     });
+
+    // The archived session must not be resurrected by the DUMP restore.
+    expect(await query('SELECT count(*)::int AS n FROM refresh_tokens')).toEqual([{ n: 0 }]);
 
     // 4. Compare: tables, rows, relations.
     const customers = await query('SELECT id, name FROM customers ORDER BY id');

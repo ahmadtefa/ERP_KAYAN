@@ -231,6 +231,8 @@ BEGIN
          (u2, c2, 'it-second', 'Second Company User', 'مستخدم الشركة الثانية', 'argon2-hash-placeholder', true, false, 0, 0, now(), now());
 
   INSERT INTO user_roles ("userId", "roleId", "companyId") VALUES (u1, r1, c1), (u2, r2, c2);
+  INSERT INTO refresh_tokens (id, "userId", "tokenHash", "expiresAt", "createdAt")
+  VALUES (gen_random_uuid(), u1, 'archived-session-token-hash', now() + interval '7 days', now());
 END $$;
 COMMIT;
 `;
@@ -444,6 +446,8 @@ async function main(): Promise<void> {
       'user-1',
     );
     const after = await counts();
+    check('the restored archive does not revive old sessions',
+      psql(server?.pgbin ?? pgbin, port, database, 'SELECT count(*) FROM refresh_tokens') === '0');
     check(
       'the restore puts the data back exactly as the archive described it',
       after.customers === before.customers && after.stockBalances === before.stockBalances,
@@ -529,6 +533,8 @@ async function main(): Promise<void> {
     );
 
     // ───────────────────────────────────── 5. a restore killed mid-replacement
+    psql(server?.pgbin ?? pgbin, port, database,
+      `INSERT INTO refresh_tokens (id, "userId", "tokenHash", "expiresAt", "createdAt") VALUES (gen_random_uuid(), '11111111-1111-4111-8111-1111111111c1', 'crash-session-token-hash', now() + interval '7 days', now())`);
     const crashSafety = await backups.createSafety('user-1');
     // Simulate the old crash window: uploads were moved, but the journal was
     // not updated with their location. Recovery must not delete them unseen.
@@ -577,6 +583,8 @@ async function main(): Promise<void> {
       recovery.recovered === true && recovery.safetyBackup === crashSafety.name,
       recovery.detail.slice(0, 160),
     );
+    check('interrupted recovery does not revive safety-archive sessions',
+      psql(server?.pgbin ?? pgbin, port, database, 'SELECT count(*) FROM refresh_tokens') === '0');
     check(
       'a crash before the uploads journal update recovers the safety archive files',
       existsSync(join(uploadsDir, 'logo-one.png')) &&

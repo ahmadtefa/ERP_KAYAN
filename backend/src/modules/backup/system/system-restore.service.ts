@@ -392,6 +392,11 @@ export class SystemRestoreService implements OnModuleInit {
         );
       }
 
+      // The database archive includes historical refresh-token rows. Delete
+      // them before reopening so archived access and refresh tokens cannot
+      // come back to life. A failure enters the normal safety rollback path.
+      await executeSql('DELETE FROM refresh_tokens');
+
       // 9. Repair access: the archive was written by some version of the
       //    program, and this one may expect more. Additive only.
       const access = await this.reconcileAccess();
@@ -633,6 +638,10 @@ export class SystemRestoreService implements OnModuleInit {
             .join('; ')}`,
         );
       }
+
+      // A safety archive also carries old sessions. Recovery must not reopen
+      // with those credentials revived, even after an interrupted restore.
+      await executeSql('DELETE FROM refresh_tokens');
 
       // Then the files that belong to the database that is now in place.
       // If power failed between renaming uploads and journaling that rename,

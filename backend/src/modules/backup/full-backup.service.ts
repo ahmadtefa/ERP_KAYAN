@@ -948,6 +948,9 @@ export class FullBackupService {
       // not by itself protect against a restart or another backend process.
       let accessRepair: unknown;
       try {
+        // A full archive includes old refresh-token rows. Remove them before
+        // reopening: otherwise an old access/refresh credential can revive.
+        await this.execSql('DELETE FROM refresh_tokens');
         accessRepair = await this.reconcileRestoredCompanies();
       } catch (repairError) {
         this.logger.error(`Post-restore access repair failed (${safeBackupFailure(repairError)}).`);
@@ -1081,6 +1084,9 @@ export class FullBackupService {
       ]);
       const check = await this.postRestoreCheck();
       if (!check.ok) throw new Error('Recovery validation failed');
+      // The safety archive also contains session rows. Do not revive them
+      // when recovery returns the database to service.
+      await this.execSql('DELETE FROM refresh_tokens');
       await this.licensing.reconcile();
     } catch (error) {
       this.maintenance.begin(
