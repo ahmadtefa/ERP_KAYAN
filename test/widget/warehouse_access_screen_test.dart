@@ -13,7 +13,7 @@ import 'test_harness.dart';
 /// Serves the people list and one person's grants, in the shape
 /// `WarehouseAccessService.forUser` returns.
 class _AccessApi extends ApiClient {
-  _AccessApi({this.restricted = true, this.failUsersList = false})
+  _AccessApi({this.restricted = true, this.failUsersList = false, this.restrictedOutsideScope = false})
     : super(
         AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
         FakeTokenStore(),
@@ -21,6 +21,7 @@ class _AccessApi extends ApiClient {
 
   bool restricted;
   bool failUsersList;
+  bool restrictedOutsideScope;
   final puts = <(String, Object?)>[];
   final userListQueries = <Map<String, dynamic>?>[];
 
@@ -57,7 +58,8 @@ class _AccessApi extends ApiClient {
         'fullNameEn': 'Sara Ali',
         'fullNameAr': 'سارة علي',
       },
-      'restricted': restricted,
+      'restricted': restricted || restrictedOutsideScope,
+      'restrictedOutsideScope': restrictedOutsideScope,
       'grants': restricted
           ? [
               {
@@ -193,6 +195,14 @@ void main() {
     await pump(tester, _AccessApi(restricted: false));
     await choosePerson(tester);
     expect(find.textContaining('Unrestricted'), findsOneWidget);
+  });
+
+  testWidgets('grants outside the editor scope are not described as unrestricted', (tester) async {
+    await pump(tester, _AccessApi(restricted: false, restrictedOutsideScope: true));
+    await choosePerson(tester);
+    expect(find.textContaining('outside your scope'), findsOneWidget);
+    expect(find.textContaining('Unrestricted'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('each warehouse shows whether it is granted at all', (

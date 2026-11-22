@@ -131,6 +131,7 @@ describe('warehouse access', () => {
     const access = await service.forUser(COMPANY, USER, ['branch-1']);
 
     expect(access.restricted).toBe(true);
+    expect(access.restrictedOutsideScope).toBe(true);
     expect(access.grants).toEqual([]);
     expect(prisma.userWarehouseAccess.findMany).toHaveBeenCalledWith(
       expect.objectContaining({

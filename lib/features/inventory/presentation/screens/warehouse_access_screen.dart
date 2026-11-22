@@ -177,6 +177,7 @@ class _AccessEditorState extends ConsumerState<_AccessEditor> {
   Map<String, Map<String, dynamic>>? _draft;
   bool _dirty = false;
   bool _saving = false;
+  bool _restrictedOutsideScope = false;
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
@@ -213,7 +214,10 @@ class _AccessEditorState extends ConsumerState<_AccessEditor> {
       data: (data) {
         // Seed the draft from the server once; after that the draft is what the
         // person is looking at and editing.
-        _draft ??= _fromServer(data);
+        if (_draft == null) {
+          _draft = _fromServer(data);
+          _restrictedOutsideScope = data['restrictedOutsideScope'] == true;
+        }
         final draft = _draft!;
 
         final warehouses = (data['warehouses'] is List)
@@ -222,7 +226,7 @@ class _AccessEditorState extends ConsumerState<_AccessEditor> {
                   .map((row) => Map<String, dynamic>.from(row))
                   .toList(growable: false)
             : const <Json>[];
-        final restricted = draft.isNotEmpty;
+        final restricted = draft.isNotEmpty || _restrictedOutsideScope;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -234,9 +238,13 @@ class _AccessEditorState extends ConsumerState<_AccessEditor> {
                   Expanded(
                     child: Text(
                       restricted
-                          ? (arabic
-                                ? 'مقيَّد بالمستودعات المحددة أدناه.'
-                                : 'Restricted to the warehouses marked below.')
+                          ? (_restrictedOutsideScope
+                                ? (arabic
+                                    ? 'مقيَّد بمستودعات محددة، وقد توجد تخصيصات خارج نطاقك لا تظهر هنا.'
+                                    : 'Restricted to selected warehouses; some assignments may be outside your scope.')
+                                : (arabic
+                                    ? 'مقيَّد بالمستودعات المحددة أدناه.'
+                                    : 'Restricted to the warehouses marked below.'))
                           : (arabic
                                 ? 'غير مقيَّد: يرى كل مستودعات فروعه. اختر مستودعًا لتقييده.'
                                 : 'Unrestricted: sees every warehouse of their '
@@ -381,16 +389,17 @@ class _AccessEditorState extends ConsumerState<_AccessEditor> {
     final confirmed = await confirmAction(
       context,
       title: arabic ? 'حفظ الصلاحيات' : 'Save the rights',
-      message: grants.isEmpty
+      message: _restrictedOutsideScope
           ? (arabic
-                ? 'لن تبقى له صلاحيات خاصة، فيرى كل مستودعات فروعه.'
-                : 'They will have no specific rights and will see every '
-                      'warehouse of their branches.')
-          : (arabic
-                ? 'ستستبدل صلاحيات هذا المستخدم بالكامل بما هو معروض. المستودعات التي أُطفئت ستختفي من عرضه.'
-                : "This person's grants will be replaced entirely by what "
-                      'is shown. Warehouses switched off will disappear from '
-                      'their view.'),
+                ? 'ستُحفظ التخصيصات المعروضة ضمن نطاقك فقط، وتبقى التخصيصات خارج نطاقك دون تغيير.'
+                : 'Only assignments within your scope will be saved. Assignments outside your scope remain unchanged.')
+          : grants.isEmpty
+              ? (arabic
+                    ? 'لن تبقى له صلاحيات خاصة، فيرى كل مستودعات فروعه.'
+                    : 'They will have no specific rights and will see every warehouse of their branches.')
+              : (arabic
+                    ? 'ستُحفظ التخصيصات المعروضة ضمن نطاقك. المستودعات التي أُطفئت ستختفي من عرضه.'
+                    : 'The displayed assignments within your scope will be saved. Warehouses switched off will disappear from their view.'),
       confirmLabel: arabic ? 'حفظ' : 'Save',
     );
     if (!confirmed || !mounted) return;

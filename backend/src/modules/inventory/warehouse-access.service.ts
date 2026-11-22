@@ -102,6 +102,9 @@ export class WarehouseAccessService {
       // is still restricted in another branch. That must not read as global
       // unrestricted access or be cleared by saving the local slice.
       restricted: configuredGrantCount > 0,
+      // Do not reveal out-of-scope warehouses, but tell the editor that
+      // removing the visible grants will not make the user unrestricted.
+      restrictedOutsideScope: scope !== null && configuredGrantCount > grants.length,
       grants: grants.map((row) => ({
         warehouseId: row.warehouseId,
         warehouseCode: row.warehouse.code,
