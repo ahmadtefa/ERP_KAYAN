@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { BackupScheduleService } from './backup-schedule.service';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 
 describe('scheduled backup safety', () => {
   const company = { id: 'company', code: 'synthetic', nameEn: 'synthetic' };
@@ -19,11 +20,31 @@ describe('scheduled backup safety', () => {
       assertNoRestoreRunning: jest.fn().mockRejectedValue(new Error('retention paused')),
     };
     const settings = { get: jest.fn().mockResolvedValue({ backupIntervalHours: 1, backupRetentionCount: 1 }) };
-    const service = new BackupScheduleService(prisma as any, full as any, settings as any);
+    const maintenance = new MaintenanceService();
+    const service = new BackupScheduleService(prisma as never, full as never, settings as never, maintenance);
     const prune = jest.spyOn(service, 'pruneRetention').mockResolvedValue([]);
-    return { prisma, full, service, prune };
+    return { prisma, full, service, prune, maintenance };
   }
   afterEach(() => jest.restoreAllMocks());
+
+  it('drains an active timer tick and does not admit a new one during maintenance', async () => {
+    const { prisma, service, maintenance } = setup();
+    let finish!: (value: Array<typeof company>) => void;
+    prisma.company.findMany.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const tick = (service as unknown as { tick(): Promise<void> }).tick();
+    maintenance.begin('restore');
+    let drained = false;
+    const wait = maintenance.waitForBusinessRequests().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    await (service as unknown as { tick(): Promise<void> }).tick();
+    expect(prisma.company.findMany).toHaveBeenCalledTimes(1);
+    finish([]);
+    await tick;
+    await wait;
+    await (service as unknown as { tick(): Promise<void> }).tick();
+    expect(prisma.company.findMany).toHaveBeenCalledTimes(1);
+  });
 
   it('never prunes automatically when verification fails or records raw error details', async () => {
     const { service, full, prisma, prune } = setup();
@@ -76,7 +97,7 @@ describe('scheduled backup safety', () => {
   it('backs off after a failed or incomplete attempt, but an explicit retry still works', async () => {
     const { service, full, prisma } = setup();
     prisma.backupRun.findFirst.mockResolvedValue({createdAt:new Date(),status:'FAILED',fileName:'new.dump'});
-    await (service as any).tick();
+    await (service as unknown as { tick(): Promise<void> }).tick();
     expect(full.createFull).not.toHaveBeenCalled();
     const [result] = await service.runNow('company');
     expect(result.status).toBe('FAILED');
@@ -98,7 +119,7 @@ describe('scheduled backup safety', () => {
     const errorLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const warningLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     full.createFull.mockRejectedValueOnce(new Error(marker));
-    await (service as any).tick();
+    await (service as unknown as { tick(): Promise<void> }).tick();
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(marker);
     await service.runNow('company');
     expect(prune).not.toHaveBeenCalled();

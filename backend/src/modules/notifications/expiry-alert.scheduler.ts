@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { NotificationsService } from './notifications.service';
 
 /// How often the timer wakes up and asks every company to look at its shelves.
@@ -53,6 +54,7 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly maintenance: MaintenanceService,
   ) {}
 
   onModuleInit(): void {
@@ -131,12 +133,18 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
   async tick(
     now: Date = new Date(),
   ): Promise<{ companies: number; raised: number; closed: number; failed: number; skipped: boolean }> {
+    if (this.maintenance.isActive) {
+      return { companies: 0, raised: 0, closed: 0, failed: 0, skipped: true };
+    }
     if (this.running) {
       // A pass that outlasted its interval. Dropping the tick, not queueing it:
       // the facts have not changed and the next tick is half an hour away.
       this.logger.warn('An expiry scan is still running; this tick was skipped.');
       return { companies: 0, raised: 0, closed: 0, failed: 0, skipped: true };
     }
+    // Admission and tracking are synchronous, so maintenance either sees this
+    // pass and drains it, or starts first and makes this tick skip.
+    const release = this.maintenance.trackBusinessRequest();
     this.running = true;
     let companies = 0;
     let raised = 0;
@@ -179,6 +187,7 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.running = false;
       this.lastRun = { finishedAt: new Date(), companies, raised, closed, failed };
+      release();
     }
     return { companies, raised, closed, failed, skipped: false };
   }

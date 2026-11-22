@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { FullBackupService } from './full-backup.service';
 
@@ -35,6 +36,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly full: FullBackupService,
     private readonly settings: CompanySettingsService,
+    private readonly maintenance: MaintenanceService,
   ) {}
 
   onModuleInit(): void {
@@ -133,7 +135,8 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
   /// reached? Errors are recorded and swallowed - a backup failure must never
   /// bring down the API the rest of the company is using.
   private async tick(): Promise<void> {
-    if (this.running) return;
+    if (this.running || this.maintenance.isActive) return;
+    const release = this.maintenance.trackBusinessRequest();
     this.running = true;
     try {
       const companies = await this.prisma.company.findMany({
@@ -150,6 +153,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.running = false;
+      release();
     }
   }
 

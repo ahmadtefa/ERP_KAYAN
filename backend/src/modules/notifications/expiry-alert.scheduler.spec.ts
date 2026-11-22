@@ -1,4 +1,5 @@
 import { ExpiryAlertScheduler, SCHEDULER_OFF_FLAG } from './expiry-alert.scheduler';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 
 const COMPANY_A = '11111111-1111-4111-8111-111111111111';
 const COMPANY_B = '22222222-2222-4222-8222-222222222222';
@@ -35,11 +36,13 @@ describe('the expiry alert scheduler', () => {
     // The second pass (documents and money) finds nothing in these tests: the
     // scheduler's job is to run both and to survive either failing.
     const scanBusiness = jest.fn(async () => ({ raised: 0, closed: 0, types: 0 }));
+    const maintenance = new MaintenanceService();
     const scheduler = new ExpiryAlertScheduler(
       prisma as never,
       { scanStock, scanBusiness } as never,
+      maintenance,
     );
-    return { scheduler, prisma, scanStock, order };
+    return { scheduler, prisma, scanStock, order, maintenance };
   }
 
   const ok = async () => ({ raised: 1, closed: 0, types: 6 });
@@ -47,6 +50,25 @@ describe('the expiry alert scheduler', () => {
   afterEach(() => {
     delete process.env[SCHEDULER_OFF_FLAG];
     jest.useRealTimers();
+  });
+
+  it('drains an admitted scan and skips new scans during maintenance', async () => {
+    let finish!: (value: { raised: number; closed: number; types: number }) => void;
+    const gate = new Promise<{ raised: number; closed: number; types: number }>((resolve) => { finish = resolve; });
+    const { scheduler, maintenance } = makeHarness([() => gate]);
+    const scan = scheduler.tick();
+    await Promise.resolve();
+    maintenance.begin('restore');
+    let drained = false;
+    const wait = maintenance.waitForBusinessRequests().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    expect((await scheduler.tick()).skipped).toBe(true);
+    finish({ raised: 0, closed: 0, types: 0 });
+    await scan;
+    await wait;
+    expect(drained).toBe(true);
+    expect((await scheduler.tick()).skipped).toBe(true);
   });
 
   it('scans every live company and sums what each pass raised', async () => {
@@ -98,7 +120,7 @@ describe('the expiry alert scheduler', () => {
       company: { findMany: jest.fn(async () => Promise.reject(new Error('connection lost'))) },
     };
     const scanStock = jest.fn();
-    const scheduler = new ExpiryAlertScheduler(prisma as never, { scanStock } as never);
+    const scheduler = new ExpiryAlertScheduler(prisma as never, { scanStock } as never, new MaintenanceService());
 
     await expect(scheduler.tick()).resolves.toEqual({
       companies: 0,
