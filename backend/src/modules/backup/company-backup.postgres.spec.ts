@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { AuditService } from '../../common/audit/audit.service';
 import { AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -13,6 +17,8 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
   const otherCustomerId = randomUUID();
   let prisma: PrismaService;
   let service: BackupService;
+  let backupDir: string;
+  const originalBackupDir = process.env.KAYAN_BACKUP_DIR;
   const purge = new AuditPurgeService();
 
   beforeAll(async () => {
@@ -22,6 +28,8 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     if (database !== 'erp_kayan_acceptance' || process.env.NODE_ENV !== 'test') {
       throw new Error('Company backup test requires the isolated CI acceptance database');
     }
+    backupDir = await mkdtemp(join(tmpdir(), 'kayan-company-pg-'));
+    process.env.KAYAN_BACKUP_DIR = backupDir;
     prisma = new PrismaService();
     await prisma.$connect();
     await prisma.company.createMany({ data: [
@@ -34,7 +42,7 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
       { id: customerId, companyId, code: 'C-1', nameEn: 'Original customer', nameAr: 'العميل الأصلي' },
       { id: otherCustomerId, companyId: otherCompanyId, code: 'C-2', nameEn: 'Other customer', nameAr: 'عميل آخر' },
     ] });
-    service = new BackupService(prisma, new AuditService(prisma), purge, { reconcile: async () => {} } as never);
+    service = new BackupService(prisma, new AuditService(prisma), purge, { reconcile: async () => {} } as never, new MaintenanceService());
   });
 
   afterAll(async () => {
@@ -51,6 +59,9 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
       await tx.company.deleteMany({ where: { id: { in: [companyId, otherCompanyId] } } });
     });
     await prisma.$disconnect();
+    if (originalBackupDir === undefined) delete process.env.KAYAN_BACKUP_DIR;
+    else process.env.KAYAN_BACKUP_DIR = originalBackupDir;
+    if (backupDir) await rm(backupDir, { recursive: true, force: true });
   });
 
   it('reads all tables from one snapshot while another transaction commits changes', async () => {
@@ -101,6 +112,18 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     const changedId = randomUUID();
     await prisma.customer.create({ data: { id: changedId, companyId, code: 'NEW', nameEn: 'Created later', nameAr: 'أضيف لاحقاً' } });
 
+    // A non-directory backup location must fail closed before any deletes.
+    const unavailable = join(backupDir, 'not-a-directory');
+    await writeFile(unavailable, 'not a directory');
+    process.env.KAYAN_BACKUP_DIR = unavailable;
+    try {
+      await expect(service.restore(snapshot, companyId, { replace: true })).rejects.toThrow(/safety backup/i);
+      expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Changed after backup');
+      expect(await prisma.customer.findUnique({ where: { id: changedId } })).not.toBeNull();
+    } finally {
+      process.env.KAYAN_BACKUP_DIR = backupDir;
+    }
+
     const invalid = structuredClone(snapshot);
     invalid.tables.customer.push({ ...invalid.tables.customer[0] });
     invalid.counts.customer = invalid.tables.customer.length;
@@ -116,5 +139,15 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     expect((await prisma.company.findUniqueOrThrow({ where: { id: companyId } })).nameEn).toBe('Original company');
     expect((await prisma.customer.findUniqueOrThrow({ where: { id: otherCustomerId } })).nameEn).toBe('Other customer');
     expect(await prisma.auditLog.count({ where: { companyId, entity: 'company_json_backup', action: 'RESTORE_REPLACE' } })).toBe(1);
+
+    // Recover the changed data from the automatically retained safety copy,
+    // not the original input archive, and check both tenants again.
+    const safety = JSON.parse(await readFile(join(backupDir, result.safetyBackup), 'utf8')) as BackupFile;
+    expect(safety.tables.customer.some((row) => row.id === changedId)).toBe(true);
+    await service.restore(safety, companyId, { replace: true });
+    expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('Changed after backup');
+    expect(await prisma.customer.findUnique({ where: { id: changedId } })).not.toBeNull();
+    expect((await prisma.company.findUniqueOrThrow({ where: { id: companyId } })).nameEn).toBe('Changed company');
+    expect((await prisma.customer.findUniqueOrThrow({ where: { id: otherCustomerId } })).nameEn).toBe('Other customer');
   });
 });

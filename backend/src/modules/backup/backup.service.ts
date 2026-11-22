@@ -6,7 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { basename, extname, join } from 'node:path';
-import { lstat, readFile, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { backupDirectory } from './system/pg-support';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
 
@@ -17,6 +19,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { reconcileRestoredAccess } from './restore-access';
 import {
   LEGACY_LOGO_MIME,
@@ -76,6 +79,7 @@ export interface RestoreSummary {
   replaced: boolean;
   written: Record<string, number>;
   total: number;
+  safetyBackup: string;
 }
 
 /// The database client a restore writes through.
@@ -317,9 +321,51 @@ export class BackupService {
     /// The licence is installation-level state that a company file cannot
     /// carry; the restore asks it to re-assert its watermarks afterwards.
     private readonly licensing: LicensingService,
+    private readonly maintenance: MaintenanceService,
   ) {}
 
   /// ───────────────────────────────────────────────────────── taking one
+
+  /** Save and re-read a private, uniquely named company recovery file. A file
+   * that cannot be written or verified must prevent the destructive restore.
+   * This is a company backup, not a whole-system or licence backup. */
+  private async writeSafetyBackup(companyId: string): Promise<string> {
+    const snapshot = await this.create(companyId);
+    this.validate(snapshot);
+    const body = Buffer.from(JSON.stringify(snapshot, (_key, value: unknown) =>
+      typeof value === 'bigint' ? value.toString() : value), 'utf8');
+    // The recovery file must be usable by the same upload endpoint.
+    if (body.length > 64 * 1024 * 1024) {
+      throw new ServiceUnavailableException('The company safety backup exceeds the restore upload limit. The database was not changed.');
+    }
+    const directory = backupDirectory();
+    const name = `kayan-company-safety-${randomUUID()}.json`;
+    const path = join(directory, name);
+    let created = false;
+    try {
+      await mkdir(directory, { recursive: true });
+      const handle = await open(path, 'wx', 0o600);
+      created = true;
+      try {
+        await handle.writeFile(body);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      const saved = await readFile(path);
+      if (createHash('sha256').update(saved).digest('hex') !== createHash('sha256').update(body).digest('hex')) {
+        throw new Error('Safety file content mismatch');
+      }
+      const parsed = JSON.parse(saved.toString('utf8')) as BackupFile;
+      this.validate(parsed);
+      if (parsed.companyId !== companyId) throw new Error('Safety file company mismatch');
+      return name;
+    } catch {
+      if (created) await unlink(path).catch(() => {});
+      this.logger.error('The company safety backup could not be written or verified.');
+      throw new ServiceUnavailableException('Could not create and verify the company safety backup. The database was not changed.');
+    }
+  }
 
   async create(companyId: string): Promise<BackupFile> {
     // A company archive covers many tables. Reading each on a different
@@ -556,7 +602,25 @@ export class BackupService {
     options: RestoreOptions,
   ): Promise<RestoreSummary> {
     this.validate(file);
+    if (this.maintenance.isActive) {
+      throw new ServiceUnavailableException('Another maintenance operation is running. The database was not changed.');
+    }
+    // Claim before the first await and drain handlers and tracked background
+    // jobs before reading the safety copy. This coordination is process-local.
+    this.maintenance.begin('Restoring company data. Business work is temporarily paused.');
+    try {
+      await this.maintenance.waitForBusinessRequests();
+      return await this.performRestore(file, requesterCompanyId, options);
+    } finally {
+      this.maintenance.end();
+    }
+  }
 
+  private async performRestore(
+    file: BackupFile,
+    requesterCompanyId: string,
+    options: RestoreOptions,
+  ): Promise<RestoreSummary> {
     const company = await this.prisma.company.findUnique({
       where: { id: requesterCompanyId },
     });
@@ -606,6 +670,10 @@ export class BackupService {
       );
     }
 
+    // Keep this copy even if the transaction fails or a valid but unintended
+    // archive is chosen. Transaction rollback protects failed writes; the copy
+    // is for a later, deliberate recovery of a successfully replaced company.
+    const safetyBackup = await this.writeSafetyBackup(requesterCompanyId);
     const written: Record<string, number> = {};
     /// Rows the purge removed, reported by the record written at the end.
     let removedTrailRows = 0;
@@ -751,6 +819,7 @@ export class BackupService {
             afterJson: {
               fileCreatedAt: file.createdAt,
               companyCode: file.companyCode,
+              safetyBackup,
               written,
               accessReconciled: access,
             } as never,
@@ -781,6 +850,7 @@ export class BackupService {
       createdAt: file.createdAt,
       replaced: hasData,
       written,
+      safetyBackup,
       total: Object.values(written).reduce((sum, count) => sum + count, 0),
     };
   }

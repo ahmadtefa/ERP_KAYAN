@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
+import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { BackupController } from './backup.controller';
 import { BackupFile, BackupService, TABLES } from './backup.service';
 
@@ -158,7 +159,9 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub, new MaintenanceService());
+    jest.spyOn(service as unknown as { writeSafetyBackup(companyId: string): Promise<string> }, 'writeSafetyBackup')
+      .mockResolvedValue('kayan-company-safety-test.json');
     controller = new BackupController(service, auditMock);
   });
 
@@ -864,6 +867,14 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
           },
         ],
       },
+    });
+
+    test('aborts before deleting data if the safety copy fails', async () => {
+      const safety = service as unknown as { writeSafetyBackup(companyId: string): Promise<string> };
+      jest.mocked(safety.writeSafetyBackup).mockRejectedValueOnce(new Error('backup storage unavailable'));
+      await expect(service.restore(minimalBackup(), COMPANY_ID, { replace: true })).rejects.toThrow('backup storage unavailable');
+      expect(txMock.customer.deleteMany).not.toHaveBeenCalled();
+      expect(txMock.$queryRawUnsafe).not.toHaveBeenCalled();
     });
 
     test('switches the guard on, deletes, and switches it straight back off', async () => {

@@ -107,7 +107,7 @@ export class MaintenanceInterceptor implements NestInterceptor {
     // Any fresh attempt still goes through the service's own concurrency and
     // maintenance checks; admission here is not permission to mutate data.
     const isRestoreRequest = method === 'POST' && (
-      path === '/backup/full/restore' || path === '/backup/complete/restore' ||
+      path === '/backup/restore' || path === '/backup/full/restore' || path === '/backup/complete/restore' ||
       path === '/backup/complete/recovery/resume'
     );
     if ((isRead && (safeDiagnostic || safeBackup)) || isRestoreRequest) return next.handle();

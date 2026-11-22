@@ -18,7 +18,7 @@ describe('MaintenanceInterceptor', () => {
     const next = { handle: jest.fn(() => of('ok')) };
 
     expect(() =>
-      interceptor.intercept(context('POST', '/api/v1/backup/full'), next as any),
+      interceptor.intercept(context('POST', '/api/v1/backup/full'), next),
     ).toThrow(ServiceUnavailableException);
     expect(next.handle).not.toHaveBeenCalled();
   });
@@ -31,7 +31,7 @@ describe('MaintenanceInterceptor', () => {
     const next = { handle: jest.fn(() => stream) };
 
     expect(
-      interceptor.intercept(context('POST', '/api/v1/backup/full/restore'), next as any),
+      interceptor.intercept(context('POST', '/api/v1/backup/full/restore'), next),
     ).toBe(stream);
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
@@ -41,7 +41,7 @@ describe('MaintenanceInterceptor', () => {
     maintenance.begin('Restoring database');
     const interceptor = new MaintenanceInterceptor(maintenance);
     const next = { handle: jest.fn(() => of('ok')) };
-    expect(() => interceptor.intercept(context('GET', path), next as any)).toThrow(ServiceUnavailableException);
+    expect(() => interceptor.intercept(context('GET', path), next)).toThrow(ServiceUnavailableException);
     expect(next.handle).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,7 @@ describe('MaintenanceInterceptor', () => {
     maintenance.begin('Restoring database');
     const interceptor = new MaintenanceInterceptor(maintenance);
     const next = { handle: jest.fn(() => of('ok')) };
-    interceptor.intercept(context('GET', path), next as any);
+    interceptor.intercept(context('GET', path), next);
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
 
@@ -62,7 +62,7 @@ describe('MaintenanceInterceptor', () => {
     const next = { handle: jest.fn(() => stream) };
 
     expect(
-      interceptor.intercept(context('GET', '/api/v1/backup/full/status'), next as any),
+      interceptor.intercept(context('GET', '/api/v1/backup/full/status'), next),
     ).toBe(stream);
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
@@ -74,7 +74,7 @@ describe('MaintenanceInterceptor', () => {
     expect(next.handle).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['/backup/complete/restore', '/backup/complete/recovery/resume'])('does not count the controlled restore request %s as business work', async (path) => {
+  it.each(['/backup/restore', '/backup/complete/restore', '/backup/complete/recovery/resume'])('does not count the controlled restore request %s as business work', async (path) => {
     const maintenance = new MaintenanceService();
     const stream = new Subject<string>();
     const interceptor = new MaintenanceInterceptor(maintenance);
