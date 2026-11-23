@@ -78,6 +78,11 @@ describe('restore journal', () => {
     expect((await fs.stat(join(dir, 'restore-journal.json'))).isDirectory()).toBe(true);
   });
 
+  it('treats a committed restore as finished and never destructive', () => {
+    expect(isUnfinished(journal({ phase: 'committed' }))).toBe(false);
+    expect(isDestructive({ phase: 'committed' })).toBe(false);
+  });
+
   it('knows which phases may have changed data', () => {
     expect(isDestructive({ phase: 'safety-taken' })).toBe(false);
     expect(isDestructive({ phase: 'rehearsed' })).toBe(false);

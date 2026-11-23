@@ -3,6 +3,7 @@ import { Client } from 'pg';
 import { backupDirectory, cleanDatabaseUrl } from '../../modules/backup/system/pg-support';
 import { RestoreJournalStore } from '../../modules/backup/system/restore-journal';
 import { API_APPLICATION_NAME } from './process-identity';
+import { isRestorePending } from '../../modules/backup/system/restore-state';
 
 // Distinct from restore ownership: shared for the entire business handler,
 // exclusive for the entire restore, including validation and recovery.
@@ -30,6 +31,7 @@ export class DatabaseMaintenanceBarrier {
         'SELECT pg_try_advisory_lock_shared($1) AS locked', [BUSINESS_BARRIER_KEY],
       );
       if (!result.rows[0]?.locked) throw new Error('maintenance');
+      if (await isRestorePending(client)) throw new Error('persistent recovery required');
       // Read AFTER locking: a restore cannot begin between this check and the
       // handler. A dead owner releases PostgreSQL locks but not this journal.
       if (await new RestoreJournalStore(backupDirectory()).read()) throw new Error('recovery required');

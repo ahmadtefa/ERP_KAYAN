@@ -46,6 +46,14 @@ describe('abandoned DUMP recovery coordination', () => {
     expect(journals.clear).toHaveBeenCalledTimes(1);
     expect(maintenance.isActive).toBe(false);
   });
+  it('never replays a durably committed restore over later work', async () => {
+    const { worker, dumps, journals, maintenance } = setup('committed');
+    await worker.check();
+    expect(dumps.recoverDumpJournal).not.toHaveBeenCalled();
+    expect(journals.clear).toHaveBeenCalledTimes(1);
+    expect(maintenance.isActive).toBe(false);
+  });
+
   it('keeps an unreadable journal closed for investigation', async () => {
     const { worker, journals, dumps, maintenance } = setup();
     journals.read.mockRejectedValueOnce(new Error('damaged'));

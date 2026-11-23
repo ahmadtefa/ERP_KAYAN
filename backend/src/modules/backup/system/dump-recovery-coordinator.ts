@@ -5,6 +5,7 @@ import { acquireRestoreLock } from './restore-lock';
 import { MaintenanceService } from '../../../common/maintenance/maintenance';
 import { SystemRestoreService } from './system-restore.service';
 import { databaseFingerprint } from './database-identity';
+import { PersistentRestoreState } from './restore-state';
 
 /** Recover only the already-authorized safety copy, never a fresh user upload.
  * This local worker needs no surviving users/session tables and exposes no
@@ -19,7 +20,8 @@ export class DumpRecoveryCoordinator implements OnApplicationBootstrap, OnModule
 
   constructor(private readonly dumps: FullBackupService, private readonly journals: RestoreJournalStore,
     private readonly maintenance: MaintenanceService,
-    @Optional() private readonly complete?: SystemRestoreService) {}
+    @Optional() private readonly complete?: SystemRestoreService,
+    @Optional() private readonly state?: PersistentRestoreState) {}
 
   onApplicationBootstrap(): void {
     this.timer = setInterval(() => { void this.check(); }, 5000);
@@ -47,7 +49,7 @@ export class DumpRecoveryCoordinator implements OnApplicationBootstrap, OnModule
     if (candidate.databaseFingerprint !== databaseFingerprint()) return;
     if (candidate.kind !== undefined && candidate.kind !== 'dump' && candidate.kind !== 'complete') return;
     let lock;
-    try { lock = await acquireRestoreLock(); }
+    try { lock = await acquireRestoreLock({ recovery: true }); }
     catch (error) { if (error instanceof ConflictException) return; throw error; }
     try {
       const journal = await this.journals.read();
@@ -57,6 +59,7 @@ export class DumpRecoveryCoordinator implements OnApplicationBootstrap, OnModule
       if (!isDestructive(journal)) {
         // Includes a durably completed rollback: never replay an old safety
         // copy over subsequently accepted work.
+        await this.state?.finish(journal.id);
         await this.journals.clear();
         this.maintenance.end();
         return;

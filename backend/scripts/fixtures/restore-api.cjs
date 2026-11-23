@@ -12,6 +12,7 @@ const { RestoreJournalStore } = require('../../dist/src/modules/backup/system/re
 const { acquireRestoreLock } = require('../../dist/src/modules/backup/system/restore-lock');
 const { DumpRecoveryCoordinator } = require('../../dist/src/modules/backup/system/dump-recovery-coordinator');
 const { API_APPLICATION_NAME } = require('../../dist/src/common/maintenance/process-identity');
+const { PersistentRestoreState } = require('../../dist/src/modules/backup/system/restore-state');
 
 if (process.env.NODE_ENV !== 'test' || !new URL(process.env.DATABASE_URL).pathname.startsWith('/kayan_work_')) {
   throw new Error('Disposable test database required');
@@ -22,11 +23,12 @@ async function sql(text, values = []) {
   try { return await client.query(text, values); } finally { await client.end(); }
 }
 const maintenance = new MaintenanceService(new DatabaseMaintenanceBarrier());
+const state = new PersistentRestoreState();
 const prisma = {
   $executeRawUnsafe: async (text) => { await sql(text); return 0; },
   user: { count: async () => 0 },
 };
-const service = new FullBackupService(prisma, { record: async () => {}, recordRequired: async () => {} }, maintenance, { reconcile: async () => {}, status: async () => ({}) });
+const service = new FullBackupService(prisma, { record: async () => {}, recordRequired: async () => {} }, maintenance, { reconcile: async () => {}, status: async () => ({}) }, state);
 service.postRestoreCheck = async () => {
   const result = await sql('SELECT value FROM fixture WHERE id = 1');
   return { ok: result.rowCount === 1, detail: 'real fixture row checked' };
@@ -44,7 +46,7 @@ class FixtureController {
   }
   async restore(body) { return service.restore({ confirm: true, fileName: body.name }, 'fixture'); }
   async recover() {
-    const lock = await acquireRestoreLock();
+    const lock = await acquireRestoreLock({ recovery: true });
     try {
       const journal = await new RestoreJournalStore(process.env.KAYAN_BACKUP_DIR).read();
       if (!journal) throw new Error('Recovery journal missing');
@@ -63,7 +65,7 @@ Body()(FixtureController.prototype, 'restore', 0);
 class FixtureModule {}
 Module({ controllers: [FixtureController], providers: [
   { provide: MaintenanceService, useValue: maintenance },
-  { provide: DumpRecoveryCoordinator, useValue: new DumpRecoveryCoordinator(service, new RestoreJournalStore(process.env.KAYAN_BACKUP_DIR), maintenance) },
+  { provide: DumpRecoveryCoordinator, useValue: new DumpRecoveryCoordinator(service, new RestoreJournalStore(process.env.KAYAN_BACKUP_DIR), maintenance, undefined, state) },
   { provide: APP_GUARD, useClass: MaintenanceAdmissionGuard },
   { provide: APP_INTERCEPTOR, useClass: MaintenanceInterceptor },
 ] })(FixtureModule);

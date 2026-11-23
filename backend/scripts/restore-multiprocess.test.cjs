@@ -46,6 +46,7 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
   const url = new URL(server); url.pathname = `/${database}`;
   const db = url.toString();
   const dir = await mkdtemp(join(tmpdir(), 'kayan-work-pg-'));
+  const otherDir = await mkdtemp(join(tmpdir(), 'kayan-work-wrong-folder-'));
   const env = { ...process.env, DATABASE_URL: db, KAYAN_BACKUP_DIR: dir, NODE_ENV: 'test' };
   const children = [];
   try {
@@ -58,7 +59,9 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
     const archive = join(dir, 'source.dump');
     await execute(process.env.KAYAN_PG_DUMP || 'pg_dump', ['-Fc', '--file', archive, `--dbname=${db}`]);
     const a = startApi(env); const b = startApi(env); children.push(a.child, b.child);
-    const [apiA, apiB] = await Promise.all([a.ready, b.ready]);
+    const c = startApi({ ...env, KAYAN_BACKUP_DIR: otherDir }); children.push(c.child);
+    const [apiA, apiB, apiC] = await Promise.all([a.ready, b.ready, c.ready]);
+    assert.equal((await fetch(apiC + '/fixture')).status, 200);
 
     let writing;
     const started = new Promise((resolve) => { writing = (message) => { if (message.type === 'writing') resolve(); }; b.child.on('message', writing); });
@@ -79,6 +82,8 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
     a.child.kill('SIGKILL'); await killed; await restore;
     await until(async () => (await query(db, 'SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1', [originalTool])).rowCount === 0, 'orphan restore sessions to stop');
     assert.equal((await post(apiB, '/fixture', { value: 'still-forbidden' })).status, 503);
+    assert.equal((await post(apiC, '/fixture', { value: 'wrong-folder-write' })).status, 503);
+    assert.equal((await query(db, 'SELECT active FROM kayan_restore_control.state WHERE id = 1')).rows[0].active, true);
     const journal = JSON.parse(await readFile(join(dir, 'restore-journal.json'), 'utf8'));
     assert.equal(journal.kind, 'dump');
     assert.ok(journal.safetyBackup);
@@ -91,6 +96,8 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
       'automatic safety recovery without a surviving login', 60000);
     assert.deepEqual((await query(db, 'SELECT value FROM fixture WHERE id = 1')).rows, [{ value: 'B-after-admission' }]);
     assert.equal((await fetch(apiB + '/fixture')).status, 200);
+    assert.equal((await fetch(apiC + '/fixture')).status, 200);
+    assert.equal((await query(db, 'SELECT active FROM kayan_restore_control.state WHERE id = 1')).rows[0].active, false);
     assert.equal((await post(apiB, '/fixture', { value: 'C-after-recovery' })).status, 201);
     assert.deepEqual((await query(db, 'SELECT value FROM fixture')).rows, [{ value: 'C-after-recovery' }]);
     // Losing the barrier connection alone must stop the owning API, rather
@@ -99,6 +106,7 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
     const delayed = post(apiB, '/fixture', { value: 'must-not-run-without-lease', delay: 10000 }).catch(() => null);
     await entered;
     const exited = new Promise((resolve) => b.child.once('exit', resolve));
+    await until(async () => (await query(db, "SELECT pid FROM pg_stat_activity WHERE application_name LIKE 'kayan-api-%-barrier'")).rowCount === 1, 'completed read leases to close');
     const leases = await query(db, "SELECT pid FROM pg_stat_activity WHERE application_name LIKE 'kayan-api-%-barrier'");
     assert.equal(leases.rowCount, 1);
     await query(db, 'SELECT pg_terminate_backend($1)', [leases.rows[0].pid]);
@@ -114,5 +122,6 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
     }
     await query(server, `DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
     await rm(dir, { recursive: true, force: true });
+    await rm(otherDir, { recursive: true, force: true });
   }
 });

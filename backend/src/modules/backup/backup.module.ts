@@ -15,6 +15,7 @@ import { RestoreJournalStore } from './system/restore-journal';
 import { SystemRestoreService } from './system/system-restore.service';
 import { backupDirectory } from './system/pg-support';
 import { DumpRecoveryCoordinator } from './system/dump-recovery-coordinator';
+import { PersistentRestoreState } from './system/restore-state';
 
 /// Copying the books out, and putting a copy back.
 ///
@@ -42,6 +43,7 @@ import { DumpRecoveryCoordinator } from './system/dump-recovery-coordinator';
     CompleteBackupService,
     SystemRestoreService,
     DumpRecoveryCoordinator,
+    PersistentRestoreState,
     RestoreGateService,
     {
       provide: RestoreJournalStore,

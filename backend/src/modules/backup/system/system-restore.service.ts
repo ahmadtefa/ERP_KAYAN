@@ -31,6 +31,7 @@ import { RestoreGateService } from './restore-gate.service';
 import { acquireRestoreLock } from './restore-lock';
 import { moveRestoreDirectory } from './move-restore-directory';
 import { databaseFingerprint } from './database-identity';
+import { PersistentRestoreState } from './restore-state';
 import { ARCHIVE_PATHS, type SystemBackupManifest } from './manifest';
 import {
   MAX_UPLOAD_BYTES,
@@ -129,6 +130,7 @@ export class SystemRestoreService implements OnModuleInit {
     private readonly backups: CompleteBackupService,
     private readonly journals: RestoreJournalStore,
     @Optional() private readonly dumps?: FullBackupService,
+    @Optional() private readonly state?: PersistentRestoreState,
   ) {}
 
   /**
@@ -145,7 +147,7 @@ export class SystemRestoreService implements OnModuleInit {
         // process starting up must never erase that process's recovery journal.
         let lock: Client | null = null;
         try {
-          lock = await this.holdAdvisoryLock();
+          lock = await this.holdAdvisoryLock(true);
         } catch (error) {
           if (error instanceof ConflictException) {
             this.logger.warn('Another process owns the restore journal; it was left untouched.');
@@ -159,6 +161,7 @@ export class SystemRestoreService implements OnModuleInit {
           if (current.id === journal.id &&
               ['started', 'validated', 'rehearsed', 'safety-taken'].includes(current.phase)) {
             this.logger.warn(`Discarding an abandoned pre-destructive restore journal (phase "${current.phase}").`);
+            await this.state?.finish(current.id);
             await this.journals.clear();
             return;
           }
@@ -409,6 +412,7 @@ export class SystemRestoreService implements OnModuleInit {
         );
       }
       journal = await this.journals.advance(journal, 'safety-taken', { safetyBackup: safety.name });
+      await this.state?.start(journal);
 
       // 7. Replace the database, with business requests still blocked.
       // Mark this conservatively before writing the phase: if writing the
@@ -487,7 +491,8 @@ export class SystemRestoreService implements OnModuleInit {
         );
       }
 
-      journal = await this.journals.advance(journal, 'verified', { checks: allChecks });
+      journal = await this.journals.advance(journal, 'committed', { checks: allChecks });
+      await this.state?.finish(journal.id);
       // Never admit business work until the recovery journal is durably
       // cleared: otherwise a crash can replay an obsolete safety backup over
       // writes that were accepted after this restore.
@@ -577,8 +582,9 @@ export class SystemRestoreService implements OnModuleInit {
 
       // Nothing destructive happened. Do not release a different restore's
       // maintenance switch if it began while this archive was rehearsing.
+      if (journal) await this.state?.finish(journal.id);
+      await this.journals.clear();
       if (maintenanceOwned) this.maintenance.end();
-      await this.journals.clear().catch(() => {});
       throw error;
     } finally {
       this.running = false;
@@ -610,7 +616,7 @@ export class SystemRestoreService implements OnModuleInit {
     this.running = true;
     let lock: Client | null = null;
     try {
-      lock = await this.holdAdvisoryLock();
+      lock = await this.holdAdvisoryLock(true);
       const journal = await this.journals.read();
       if (!journal) {
         return {
@@ -626,7 +632,8 @@ export class SystemRestoreService implements OnModuleInit {
       // A crash can leave a completed rollback journal after its verified
       // safety copy has already been applied. Business work may have resumed
       // since then: applying that old copy a second time would erase it.
-      if (journal.phase === 'rolled-back') {
+      if (journal.phase === 'rolled-back' || journal.phase === 'committed') {
+        await this.state?.finish(journal.id);
         await this.journals.clear();
         return {
           recovered: false,
@@ -642,6 +649,7 @@ export class SystemRestoreService implements OnModuleInit {
           );
         }
         // Nothing was replaced, so there is nothing to put back.
+        await this.state?.finish(journal.id);
         await this.journals.clear();
         this.maintenance.end();
         return {
@@ -693,6 +701,7 @@ export class SystemRestoreService implements OnModuleInit {
     try {
       await this.maintenance.waitForBusinessRequests();
       await this.journals.advance(journal, 'rolling-back');
+      await this.state?.start(journal);
       await mkdir(workDir, { recursive: true });
       const safetyPath = this.backups.pathOf(safetyName);
       if (!existsSync(safetyPath)) {
@@ -740,6 +749,7 @@ export class SystemRestoreService implements OnModuleInit {
         checks,
         detail: 'the safety backup was put back',
       });
+      await this.state?.finish(journal.id);
       await this.clearJournalBeforeReopening();
       await this.gate.forget();
       this.logger.log(`Rolled back to ${safetyName} and the data passed its checks`);
@@ -1023,8 +1033,8 @@ export class SystemRestoreService implements OnModuleInit {
   /// The advisory lock that stops a second process from starting a restore
   /// while this one holds it. Returns the client that holds it, so it is only
   /// released when that client is closed.
-  private async holdAdvisoryLock(): Promise<Client | null> {
-    return acquireRestoreLock();
+  private async holdAdvisoryLock(recovery = false): Promise<Client | null> {
+    return acquireRestoreLock({ recovery });
   }
 
   /// A deliberate failure, used only by the test harness to prove that a

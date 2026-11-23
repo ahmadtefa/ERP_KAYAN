@@ -558,6 +558,7 @@ export async function pgDumpToFile(target: string): Promise<void> {
     tools.pgDump,
     [
       '--format=custom',
+      '--exclude-schema=kayan_restore_control',
       '--no-owner',
       '--no-privileges',
       '--no-password',

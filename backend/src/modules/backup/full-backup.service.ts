@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { execFile } from 'child_process';
@@ -41,6 +42,7 @@ import { acquireRestoreLock } from './system/restore-lock';
 import { runRestoreTool } from './system/restore-tool';
 import { assertRestoreAuthority } from './system/restore-authority';
 import { databaseFingerprint } from './system/database-identity';
+import { PersistentRestoreState, RESTORE_CONTROL_SCHEMA } from './system/restore-state';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
@@ -142,6 +144,7 @@ export class FullBackupService {
     private readonly audit: AuditService,
     private readonly maintenance: MaintenanceService,
     private readonly licensing: LicensingService,
+    @Optional() private readonly state?: PersistentRestoreState,
   ) {}
 
   /// ────────────────────────────────────────────────────────────── tools
@@ -419,6 +422,7 @@ export class FullBackupService {
       await handle.close();
       await run(tools.pgDump as string, [
         '--format=custom',
+        `--exclude-schema=${RESTORE_CONTROL_SCHEMA}`,
         '--no-owner',
         '--no-privileges',
         // Never prompt: a service has no console to answer on, and a tool
@@ -944,6 +948,7 @@ export class FullBackupService {
       // Once destruction starts, only a verified restore or recovery may
       // release the maintenance switch.
       safeToReleaseMaintenance = false;
+      await this.state?.start(dumpJournal);
       dumpJournal = await journals.advance(dumpJournal, 'db-replacing');
       let restored = false;
       try {
@@ -964,6 +969,7 @@ export class FullBackupService {
         dumpJournal = await journals.advance(dumpJournal, 'rolling-back');
         await this.recoverFrom(safety.name, tools.pgRestore as string);
         dumpJournal = await journals.advance(dumpJournal, 'rolled-back');
+        await this.state?.finish(dumpJournal.id);
         await journals.clear();
         safeToReleaseMaintenance = true;
         throw new ServiceUnavailableException(
@@ -981,6 +987,7 @@ export class FullBackupService {
           dumpJournal = await journals.advance(dumpJournal, 'rolling-back');
           await this.recoverFrom(safety.name, tools.pgRestore as string);
           dumpJournal = await journals.advance(dumpJournal, 'rolled-back');
+          await this.state?.finish(dumpJournal.id);
           await journals.clear();
           safeToReleaseMaintenance = true;
           throw new ServiceUnavailableException(
@@ -1063,7 +1070,8 @@ export class FullBackupService {
           'تعذر تسجيل تدقيق الاستعادة؛ يبقى النظام في وضع الصيانة. / Restore audit failed; maintenance remains active.',
         );
       }
-      await journals.advance(dumpJournal, 'verified');
+      await journals.advance(dumpJournal, 'committed');
+      await this.state?.finish(dumpJournal.id);
       await journals.clear();
       safeToReleaseMaintenance = true;
 
@@ -1102,6 +1110,7 @@ export class FullBackupService {
     // Verify the safety file before the first destructive statement.
     await this.verify(journal.safetyBackup);
     await journals.advance(journal, 'rolling-back');
+    await this.state?.start(journal);
     await this.recoverFrom(journal.safetyBackup, tools.pgRestore as string);
     // A restarted API deliberately deferred database-writing initialization
     // while this journal was pending. Initialize through the normal licence
@@ -1112,6 +1121,7 @@ export class FullBackupService {
       entityId: journal.id, after: { safetyBackup: journal.safetyBackup, checked: true }, userId: null,
     }, this.prisma);
     await journals.advance(journal, 'rolled-back');
+    await this.state?.finish(journal.id);
     await journals.clear();
     this.maintenance.end();
   }

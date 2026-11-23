@@ -1,6 +1,7 @@
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { Client } from 'pg';
 import { cleanDatabaseUrl } from './pg-support';
+import { isRestorePending } from './restore-state';
 import { BUSINESS_BARRIER_KEY, RESTORE_TOOL_LOCK_KEY } from '../../../common/maintenance/lock-keys';
 
 // Shared by JSON, DUMP and complete-system restores on this database. This
@@ -9,7 +10,7 @@ import { BUSINESS_BARRIER_KEY, RESTORE_TOOL_LOCK_KEY } from '../../../common/mai
 // that do not acquire the shared business lease are outside this contract.
 export const RESTORE_LOCK_KEY = 918_273_645;
 
-export async function acquireRestoreLock(): Promise<Client> {
+export async function acquireRestoreLock(options: { recovery?: boolean } = {}): Promise<Client> {
   const url = process.env.DATABASE_URL;
   if (!url) throw new ServiceUnavailableException('Cannot lock the restore: DATABASE_URL is not configured.');
   const client = new Client({ connectionString: cleanDatabaseUrl(url), connectionTimeoutMillis: 10_000 });
@@ -43,6 +44,9 @@ export async function acquireRestoreLock(): Promise<Client> {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     await client.query('SELECT pg_advisory_unlock($1)', [RESTORE_TOOL_LOCK_KEY]);
+    if (!options.recovery && await isRestorePending(client)) {
+      throw new ServiceUnavailableException('An interrupted restore requires recovery before another restore can begin.');
+    }
     return client;
   } catch (error) {
     await client.end().catch(() => {});

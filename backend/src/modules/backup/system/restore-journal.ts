@@ -29,6 +29,7 @@ export type RestorePhase =
   | 'files-replacing'
   | 'files-swapped'
   | 'verified'
+  | 'committed'
   | 'rolling-back'
   | 'rolled-back'
   | 'failed';
@@ -45,7 +46,7 @@ export const DESTRUCTIVE_PHASES: RestorePhase[] = [
   'failed',
 ];
 
-export const FINISHED_PHASES: RestorePhase[] = ['rolled-back'];
+export const FINISHED_PHASES: RestorePhase[] = ['rolled-back', 'committed'];
 
 export interface RestoreJournal {
   kind?: 'dump' | 'complete';
@@ -88,7 +89,7 @@ export function isDestructive(journal: Pick<RestoreJournal, 'phase'>): boolean {
 /// journal left in it would still be reported so the operator can read it.
 export function isUnfinished(journal: Pick<RestoreJournal, 'phase'> | null): boolean {
   if (!journal) return false;
-  return journal.phase !== 'rolled-back';
+  return !FINISHED_PHASES.includes(journal.phase);
 }
 
 export class RestoreJournalStore {
