@@ -72,6 +72,17 @@ describe('complete restore recovery maintenance', () => {
     expect(maintenance.isActive).toBe(true);
   });
 
+  it('does not replay a completed rollback if clearing its journal fails', async () => {
+    const { service, maintenance, journals } = setup({ phase: 'rolled-back', safetyBackup: 'old.kayanbackup' });
+    const internal = service as unknown as { rollback: () => Promise<unknown> };
+    const rollback = jest.spyOn(internal, 'rollback');
+    maintenance.begin('another operation');
+    journals.clear.mockRejectedValueOnce(new Error('storage error'));
+    await expect(service.resumeRecovery('user')).rejects.toThrow('storage error');
+    expect(rollback).not.toHaveBeenCalled();
+    expect(maintenance.isActive).toBe(true);
+  });
+
   it('does not clear a destructive journal with no safety backup', async () => {
     const { service, maintenance, journals } = setup({ phase: 'db-replacing', safetyBackup: null });
     maintenance.begin('interrupted');
