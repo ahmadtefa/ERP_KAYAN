@@ -71,7 +71,11 @@ export class StockTransfersService {
     const date = this.day(input.transferDate);
     const hash = this.hash({ ...input, idempotencyKey: key });
     const result = await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`stock-transfer-create:${companyId}:${key}`}, 0))`);
+      // The lock function returns void, which the typed query API cannot
+      // deserialize: every transfer creation answered 500 until this was run
+      // as a statement whose result is discarded. The lock itself is held
+      // until the transaction ends, which is the whole point of it.
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`stock-transfer-create:${companyId}:${key}`}, 0))`);
       const prior = await tx.stockTransfer.findFirst({ where: { companyId, idempotencyKey: key } });
       if (prior) {
         const recorded = await tx.stockTransferAction.findFirst({ where: { transferId: prior.id, requestKey: `CREATE:${key}` } });
