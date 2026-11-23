@@ -66,6 +66,7 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     category: 'MANAGEMENT',
     permissions: [
       'dashboard.',
+      'dashboard.view',
       'reports.',
       'notifications.',
       'inventory.cost.read',
@@ -93,7 +94,23 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
       'accounting.',
       'cash.',
       'reports.',
+      'dashboard.view',
       'dashboard.financial',
+      // A finance manager cannot run the business from a dashboard that shows
+      // cash movements but no sales, purchases or stock. The section grants
+      // below are the ones the dashboard needs to build those totals; each is
+      // still paired with the price permission in `dashboardSectionsFor`, so
+      // this widens what the role *sees*, not the price floor it must clear.
+      'dashboard.sales',
+      'dashboard.purchases',
+      'dashboard.stock',
+      'dashboard.receivables',
+      'dashboard.payables',
+      'dashboard.charts',
+      'dashboard.top',
+      'dashboard.recent',
+      'sales.price.read',
+      'purchases.price.read',
       'inventory.cost.read',
       'admin.audit.read',
       'notifications.',
