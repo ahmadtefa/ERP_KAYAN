@@ -348,6 +348,9 @@ jobs:
           if ! node "scripts/scenario-$SCENARIO.mjs" http://127.0.0.1:3000/api/v1 2>&1 | tee "$log"; then
             # Surface failed checks without dumping authentication responses.
             awk '/^[[:space:]]*FAIL[[:space:]]/ {split($0,a," — "); print "::error::" a[1]}' "$log"
+            # Only expose the numeric status of this synthetic restore, not
+            # response bodies or authentication information from the logs.
+            sed -nE 's/^FAIL  the company JSON backup restores into the disposable PostgreSQL company — status ([0-9]+),.*/::error title=Company restore HTTP status::\1/p' "$log"
             exit 1
           fi
       - name: Upload PostgreSQL evidence
