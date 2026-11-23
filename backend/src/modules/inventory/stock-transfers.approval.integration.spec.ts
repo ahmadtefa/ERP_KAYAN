@@ -366,6 +366,28 @@ const vmReady =
       expect(received.lines[0].receivedQuantity.toString()).toBe('10');
     });
 
+    it('tells the receiving warehouse that goods are waiting, not the sender', async () => {
+      await withChain();
+      const transfer = await openTransfer();
+      await service.submit(COMPANY, REQUESTER, transfer.id, 'submit-001');
+      await service.approve(COMPANY, MANAGER, transfer.id, 'approve-1', manager());
+      await service.approve(COMPANY, CHIEF, transfer.id, 'approve-2', chief());
+      const before = raised.length;
+      await service.dispatch(COMPANY, REQUESTER, transfer.id, 'dispatch-001', [
+        { lineId: transfer.lines[0].id, quantity: '10' },
+      ]);
+      const receipt = raised
+        .slice(before)
+        .filter((event) => event.type === 'STOCK_TRANSFER_RECEIPT_REQUIRED');
+      expect(receipt).toHaveLength(1);
+      // Addressed to the destination shelf, so it reaches the officer who can
+      // actually open the gate - the source manager already did their part.
+      expect(receipt[0].warehouseId).toBe(TO);
+      expect(String(receipt[0].bodyAr)).toContain('بالطريق');
+      // And the document is where the alert points.
+      expect(String(receipt[0].actionPath)).toContain(transfer.id);
+    });
+
     it('raises the level alert to the level permission and closes it once decided', async () => {
       await withChain();
       const transfer = await openTransfer();
