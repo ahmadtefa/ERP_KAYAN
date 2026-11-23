@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 
@@ -152,7 +151,7 @@ class _ApprovalPoliciesScreenState extends ConsumerState<ApprovalPoliciesScreen>
                     )
                   : ListView.separated(
                       itemCount: _policies.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, index) => _PolicyCard(
                         ar: _ar,
                         policy: _policies[index],
@@ -271,21 +270,21 @@ class _PolicyCard extends StatelessWidget {
       ..sort((a, b) => (a['level'] as num).compareTo(b['level'] as num));
     final conditions = <String>[];
     if (policy['branchId'] != null) {
-      conditions.add(t('الفرع: ', 'Branch: ') + (branchName('${policy['branchId']}') ?? ''));
+      conditions.add('${t('الفرع: ', 'Branch: ')}${branchName('${policy['branchId']}') ?? ''}');
     }
     if (policy['sourceWarehouseId'] != null) {
-      conditions.add(t('من مخزن: ', 'From: ') +
-          (warehouseName('${policy['sourceWarehouseId']}') ?? ''));
+      conditions.add(
+          '${t('من مخزن: ', 'From: ')}${warehouseName('${policy['sourceWarehouseId']}') ?? ''}');
     }
     if (policy['destinationWarehouseId'] != null) {
-      conditions.add(t('إلى مخزن: ', 'To: ') +
-          (warehouseName('${policy['destinationWarehouseId']}') ?? ''));
+      conditions.add(
+          '${t('إلى مخزن: ', 'To: ')}${warehouseName('${policy['destinationWarehouseId']}') ?? ''}');
     }
     if (policy['minimumAmount'] != null) {
-      conditions.add(t('قيمة ≥ ', 'Value ≥ ') + '${policy['minimumAmount']}');
+      conditions.add('${t('قيمة ≥ ', 'Value ≥ ')}${policy['minimumAmount']}');
     }
     if (policy['minimumQuantity'] != null) {
-      conditions.add(t('كمية ≥ ', 'Quantity ≥ ') + '${policy['minimumQuantity']}');
+      conditions.add('${t('كمية ≥ ', 'Quantity ≥ ')}${policy['minimumQuantity']}');
     }
     final active = policy['isActive'] != false;
     return Card(
