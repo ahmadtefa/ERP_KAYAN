@@ -46,7 +46,7 @@ class _Remote implements AuthRemoteDataSource {
   Future<Map<String, dynamic>> currentUser() async => payload ?? const {};
 
   @override
-  Future<void> logout() async {}
+  Future<void> logout({String? refreshToken}) async {}
 }
 
 const _goodPayload = <String, dynamic>{

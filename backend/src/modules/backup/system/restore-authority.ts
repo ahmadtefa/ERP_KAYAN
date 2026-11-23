@@ -12,7 +12,13 @@ export async function assertRestoreAuthority(prisma: PrismaService, actor: AuthU
     throw new UnauthorizedException('Session is unavailable; sign in again');
   }
   const session = await prisma.refreshToken.findFirst({
-    where: { userId: actor.userId, tokenHash: actor.sessionHash }, select: { id: true },
+    where: {
+      userId: actor.userId,
+      tokenHash: actor.sessionHash,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: { id: true },
   });
   if (!session) throw new UnauthorizedException('Session changed while waiting to restore; sign in again');
   const user = await prisma.user.findUnique({

@@ -47,7 +47,12 @@ for (const name of reviewed) {
   }
 }
 const restoreSafety = read('work-restore-safety.yml');
-assert.deepEqual(restoreSafety.on.push.branches, ['work/restore-recovery-20261123']);
+// Pinned: the workflow may run only for the Work delivery branch and the
+// Arena session branch that continues it. Each addition is a deliberate edit.
+assert.deepEqual(restoreSafety.on.push.branches, [
+  'work/restore-recovery-20261123',
+  'arena/98e79137-erp-kayan',
+]);
 assert.deepEqual(restoreSafety.permissions, { contents: 'read' });
 assert.deepEqual(Object.keys(restoreSafety.jobs).sort(), ['flutter', 'postgres-linux', 'postgres-windows']);
 for (const job of Object.values(restoreSafety.jobs)) {

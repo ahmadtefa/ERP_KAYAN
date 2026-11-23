@@ -291,7 +291,16 @@ describe('JwtAuthGuard account status and live authorization', () => {
     jest.mocked(prisma.refreshToken.findFirst).mockResolvedValueOnce(null);
     await expect(guard.canActivate(makeContext().context)).rejects.toBeInstanceOf(UnauthorizedException);
     expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
-      where: { tokenHash: payload.sessionHash, userId: payload.sub }, select: { id: true },
+      where: {
+        tokenHash: payload.sessionHash,
+        userId: payload.sub,
+        // A revoked or expired row is not a session: sign-out and refresh
+        // rotation stamp `revokedAt`, and the access token that outlives them
+        // must stop working with them.
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) },
+      },
+      select: { id: true },
     });
   });
 

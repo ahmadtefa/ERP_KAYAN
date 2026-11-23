@@ -214,16 +214,17 @@ class ApiClient {
     String path, {
     Object? body,
     String? idempotencyKey,
+    Map<String, String>? headers,
   }) async {
+    final extraHeaders = <String, String>{
+      if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
+      ...?headers,
+    };
     return _send(
       () => _dio.post<dynamic>(
         path,
         data: body,
-        options: Options(
-          headers: idempotencyKey == null
-              ? null
-              : {'Idempotency-Key': idempotencyKey},
-        ),
+        options: Options(headers: extraHeaders.isEmpty ? null : extraHeaders),
       ),
     );
   }

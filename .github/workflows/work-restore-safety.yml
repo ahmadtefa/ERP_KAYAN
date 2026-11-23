@@ -2,7 +2,7 @@ name: Work restore safety (no Installer)
 
 on:
   push:
-    branches: ['work/restore-recovery-20261123']
+    branches: ['work/restore-recovery-20261123', 'arena/98e79137-erp-kayan']
   workflow_dispatch:
 
 permissions:
@@ -66,6 +66,14 @@ jobs:
           KAYAN_COMPANY_BACKUP_PG: '1'
           KAYAN_REAL_PG_TESTS: '1'
         run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts modules/backup/system/restore-authority.postgres.spec.ts
+      - name: Sign-out, refresh rotation and password sessions on PostgreSQL
+        env:
+          KAYAN_AUTH_SESSION_PG: '1'
+        run: >-
+          npx jest --runInBand
+          modules/auth/auth.logout.postgres.spec.ts
+          modules/auth/auth.refresh-rotation.postgres.spec.ts
+          modules/auth/auth.password-sessions.postgres.spec.ts
       - name: Independent APIs and killed DUMP owner
         run: node --test scripts/restore-multiprocess.test.cjs
       - name: Complete archive through the production API

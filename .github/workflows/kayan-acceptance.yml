@@ -263,6 +263,15 @@ jobs:
         env:
           KAYAN_WAREHOUSE_ACCESS_PG: '1'
         run: npm test -- --runInBand src/modules/inventory/warehouse-access.postgres.spec.ts
+      - name: Verify sign-out, refresh rotation and password sessions on PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_AUTH_SESSION_PG: '1'
+        run: >-
+          npm test -- --runInBand
+          src/modules/auth/auth.logout.postgres.spec.ts
+          src/modules/auth/auth.refresh-rotation.postgres.spec.ts
+          src/modules/auth/auth.password-sessions.postgres.spec.ts
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash
