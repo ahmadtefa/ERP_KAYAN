@@ -1,4 +1,14 @@
-import { Controller, ForbiddenException, Get, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 
 import {
   AuthUser,
@@ -25,6 +35,10 @@ import { OperationsReportsService } from './operations-reports.service';
 import { PartyReconciliationService } from './party-reconciliation.service';
 import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
+
+/// What PostgreSQL accepts as a uuid. Checked here so a malformed id is a
+/// 400 rather than a driver error reported as a server failure.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Controller('reports')
 @UseGuards(BranchReportScopeGuard)
@@ -135,12 +149,20 @@ export class ReportsController {
   @RequirePermissions('accounting.costcenters.read')
   costCenterTransactions(
     @CurrentUser() user: AuthUser,
+    // `unallocated` is a real value of this route, so a pipe cannot do this
+    // check. Anything that is neither `unallocated` nor a UUID is a malformed
+    // request (400); passing it to PostgreSQL as a uuid would surface as a
+    // 500, which says "the server is broken" about a bad address.
     @Param('costCenterId') costCenterId: string,
     @Query() query: CostCenterTransactionsQueryDto,
   ) {
+    const unallocated = costCenterId === 'unallocated';
+    if (!unallocated && !UUID_PATTERN.test(costCenterId)) {
+      throw new BadRequestException('costCenterId must be a UUID or "unallocated"');
+    }
     return this.statements.costCenterTransactions(
       user.companyId,
-      costCenterId === 'unallocated' ? null : costCenterId,
+      unallocated ? null : costCenterId,
       query,
     );
   }
@@ -183,7 +205,7 @@ export class ReportsController {
   @RequirePermissions('reports.account-ledger.read')
   accountLedger(
     @CurrentUser() user: AuthUser,
-    @Param('accountId') accountId: string,
+    @Param('accountId', ParseUUIDPipe) accountId: string,
     @Query() query: PeriodQueryDto,
   ) {
     return this.service.accountLedger(user.companyId, accountId, query);

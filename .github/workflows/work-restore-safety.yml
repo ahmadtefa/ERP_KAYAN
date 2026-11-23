@@ -103,6 +103,11 @@ jobs:
           done
           if [ "$ready" != true ]; then cat "$RUNNER_TEMP/kayan-full-http-api.log"; exit 1; fi
           node scripts/scenario-system-backup.mjs http://127.0.0.1:3001/api/v1
+          # Prices, cost and warehouse scope, through the same production API.
+          # Only synthetic data: the scenario creates its own branch, shelves
+          # and account and removes them afterwards.
+          ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 \
+            node scripts/scenario-price-isolation.mjs http://127.0.0.1:3001/api/v1
 
   postgres-windows:
     runs-on: windows-2025
