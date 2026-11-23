@@ -132,6 +132,12 @@ moves the task rather than adding a second one.
 Real-PostgreSQL specs run with `KAYAN_APPROVALS_PG=1`; the acceptance database
 specs keep their existing `erp_kayan_acceptance` requirement.
 
+On CI, `PostgreSQL 16 (accounting)` is red — but it is red on the base commit
+too, with the same 17 checks, all in the reset / dashboard / report paths that
+this work deliberately left alone. Running the scenario against both commits
+showed this branch fails a strict subset: no new failure, one fixed. It is
+recorded here so nobody later reads that red job as evidence about approvals.
+
 ## 9. Where the code is
 
 | Concern | File |

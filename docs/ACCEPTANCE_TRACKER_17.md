@@ -104,3 +104,17 @@ flutter build windows --release --no-pub
 - لم تُعالَج مشكلات المحاسبة الخارجة عن النطاق.
 - لم يُشغَّل `dart analyze` ولا بناء Windows في هذه البيئة (لا يوجد Flutter SDK)، فالتعديل على شاشة Flutter مُراجَع يدويًا وليس مُحلَّلًا آليًا.
 - ترحيل واحد إضافي فقط، وكل عباراته `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`: لا حذف ولا تحويل تدميري.
+
+### ملاحظة على فحص المحاسبة في CI
+
+وظيفة `PostgreSQL 16 (accounting)` تفشل أيضًا على **الالتزام الأساس `312c978` قبل أي من عمل هذه الجولة**، وبنفس البنود السبعة عشر؛ وقد أُثبت ذلك بتشغيل `scenario-accounting.mjs` على نسخة عمل منفصلة عند الأساس، وعلى هذه الجولة، ومقارنة القائمتين بندًا ببند:
+
+| | الأساس `312c978` | هذه الجولة |
+| --- | --- | --- |
+| الفحوص الفاشلة | 17 | 16 |
+| فشل جديد أضافته الجولة | — | **صفر** |
+| فشل أصلحته الجولة | — | 1 (`a new role grant takes effect on the existing access token`) |
+
+القواسم المشتركة بين الفشلين هي مسار إعادة الضبط (`reset`) ولوحة المعلومات والتقارير، وهي **خارج نطاق هذه الجولة** كما حُدِّد، ولم تُلمس. أي أن هذه الوظيفة تظل حمراء كما كانت، وليست برهانًا على سلامة عمل الموافقات ولا ضدها.
+
+**النتائج التي تخص هذه الجولة كلها خضراء:** `acceptance`، و`PostgreSQL 16 (backend)`، و`warehouse-cycle`، و`warehouses-orders`، و`system-backup`، و`accounting-reconciliation`، و`Complete backup and restore on PostgreSQL 17`، و«Work restore safety» بما فيه `flutter analyze`.
