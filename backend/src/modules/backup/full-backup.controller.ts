@@ -190,6 +190,7 @@ export class FullBackupController {
         confirm,
       },
       user.userId,
+      user,
     );
   }
 }

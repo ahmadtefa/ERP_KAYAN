@@ -72,11 +72,12 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
       catch { return false; }
     }, 'durable destructive DUMP phase');
     await until(async () => (await query(db, "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND application_name LIKE 'kayan-restore-%' AND wait_event = 'PgSleep'")).rowCount > 0, 'live supervised pg_restore');
+    const originalTool = (await query(db, "SELECT application_name FROM pg_stat_activity WHERE datname = current_database() AND application_name LIKE 'kayan-restore-%' AND wait_event = 'PgSleep'")).rows[0].application_name;
     assert.equal((await post(apiB, '/fixture', { value: 'forbidden' })).status, 503);
     assert.equal((await fetch(apiB + '/fixture')).status, 503);
     const killed = new Promise((resolve) => a.child.once('exit', resolve));
     a.child.kill('SIGKILL'); await killed; await restore;
-    await until(async () => (await query(db, "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND application_name LIKE 'kayan-restore-%'")).rowCount === 0, 'orphan restore sessions to stop');
+    await until(async () => (await query(db, 'SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1', [originalTool])).rowCount === 0, 'orphan restore sessions to stop');
     assert.equal((await post(apiB, '/fixture', { value: 'still-forbidden' })).status, 503);
     const journal = JSON.parse(await readFile(join(dir, 'restore-journal.json'), 'utf8'));
     assert.equal(journal.kind, 'dump');
@@ -84,11 +85,26 @@ test('two independent APIs drain writes, reject maintenance requests, recover af
     // Safety archives also contain the delay view. Remove its delay from the
     // source DB is irrelevant: recovering an archive invokes the old function.
     // The supervisor should complete normally here; allow its 30s rehearsal.
-    const recovery = await post(apiB, '/backup/complete/recovery/resume', {});
-    assert.equal(recovery.status, 201, await recovery.text());
+    // No session table or authenticated recovery endpoint is required: the
+    // local worker only replays the safety copy of the authorized restore.
+    await until(async () => (await fetch(apiB + '/fixture')).status === 200,
+      'automatic safety recovery without a surviving login', 60000);
     assert.deepEqual((await query(db, 'SELECT value FROM fixture WHERE id = 1')).rows, [{ value: 'B-after-admission' }]);
     assert.equal((await fetch(apiB + '/fixture')).status, 200);
     assert.equal((await post(apiB, '/fixture', { value: 'C-after-recovery' })).status, 201);
+    assert.deepEqual((await query(db, 'SELECT value FROM fixture')).rows, [{ value: 'C-after-recovery' }]);
+    // Losing the barrier connection alone must stop the owning API, rather
+    // than leave a delayed business handler running without its shared lock.
+    const entered = new Promise((resolve) => b.child.once('message', resolve));
+    const delayed = post(apiB, '/fixture', { value: 'must-not-run-without-lease', delay: 10000 }).catch(() => null);
+    await entered;
+    const exited = new Promise((resolve) => b.child.once('exit', resolve));
+    const leases = await query(db, "SELECT pid FROM pg_stat_activity WHERE application_name LIKE 'kayan-api-%-barrier'");
+    assert.equal(leases.rowCount, 1);
+    await query(db, 'SELECT pg_terminate_backend($1)', [leases.rows[0].pid]);
+    const exitCode = await exited;
+    assert.equal(exitCode, 1);
+    assert.equal(await delayed, null);
     assert.deepEqual((await query(db, 'SELECT value FROM fixture')).rows, [{ value: 'C-after-recovery' }]);
   } finally {
     for (const child of children) {

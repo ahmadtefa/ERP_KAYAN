@@ -58,14 +58,14 @@ jobs:
       - name: Workflow safety inventory
         run: node ../scripts/ci-workflow-safety.test.cjs
       - name: Changed production files lint
-        run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
+        run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/main.ts src/common/prisma/prisma.service.ts src/modules/backup/backup.service.ts src/modules/backup/backup.controller.ts src/modules/backup/full-backup.controller.ts src/modules/backup/system/complete-backup.controller.ts src/modules/backup/system/restore-authority.ts src/modules/backup/system/dump-recovery-coordinator.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
       - name: Focused regression tests
-        run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
+        run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/system/dump-recovery-coordinator.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
       - name: JSON and DUMP real PostgreSQL regression
         env:
           KAYAN_COMPANY_BACKUP_PG: '1'
           KAYAN_REAL_PG_TESTS: '1'
-        run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts
+        run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts modules/backup/system/restore-authority.postgres.spec.ts
       - name: Independent APIs and killed DUMP owner
         run: node --test scripts/restore-multiprocess.test.cjs
 

@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { API_APPLICATION_NAME } from '../maintenance/process-identity';
 
 /**
  * Builds the PostgreSQL driver adapter the client runs on.
@@ -21,7 +22,7 @@ export function createPgAdapter(): PrismaPg {
         'postgresql://user:password@localhost:5432/kayan',
     );
   }
-  return new PrismaPg({ connectionString });
+  return new PrismaPg({ connectionString, application_name: API_APPLICATION_NAME });
 }
 
 @Injectable()

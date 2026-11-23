@@ -142,8 +142,8 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('An expiry scan is still running; this tick was skipped.');
       return { companies: 0, raised: 0, closed: 0, failed: 0, skipped: true };
     }
-    // Admission and tracking are synchronous, so maintenance either sees this
-    // pass and drains it, or starts first and makes this tick skip.
+    // Claim this pass before asynchronous admission. Maintenance either drains
+    // its shared lease or acquires the exclusive side first and rejects it.
     this.running = true;
     const release = this.maintenance.coordinatesProcesses
       ? await this.maintenance.admitBusinessRequest().catch(() => null)

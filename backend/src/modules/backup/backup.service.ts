@@ -10,6 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { backupDirectory } from './system/pg-support';
 import { acquireRestoreLock } from './system/restore-lock';
+import { assertRestoreAuthority } from './system/restore-authority';
 import { RestoreJournalStore, isUnfinished } from './system/restore-journal';
 
 import { PeriodStatus, Prisma } from '@prisma/client';
@@ -68,6 +69,7 @@ export interface BackupFile {
 /// Who asked for the restore and what they agreed to. The identity travels
 /// into the transaction so the audit trail names a person, not an event.
 export interface RestoreOptions {
+  authority?: import('../../common/decorators/current-user.decorator').AuthUser;
   replace: boolean;
   actorUserId?: string | null;
   ipAddress?: string | null;
@@ -614,6 +616,7 @@ export class BackupService {
     let journalUnsafe = false;
     try {
       lock = await this.holdAdvisoryLock();
+      if (options.authority) await assertRestoreAuthority(this.prisma, options.authority, false);
       try {
         await this.assertNoInterruptedSystemRestore();
       } catch (error) {

@@ -10,12 +10,14 @@ const { DatabaseMaintenanceBarrier } = require('../../dist/src/common/maintenanc
 const { FullBackupService } = require('../../dist/src/modules/backup/full-backup.service');
 const { RestoreJournalStore } = require('../../dist/src/modules/backup/system/restore-journal');
 const { acquireRestoreLock } = require('../../dist/src/modules/backup/system/restore-lock');
+const { DumpRecoveryCoordinator } = require('../../dist/src/modules/backup/system/dump-recovery-coordinator');
+const { API_APPLICATION_NAME } = require('../../dist/src/common/maintenance/process-identity');
 
 if (process.env.NODE_ENV !== 'test' || !new URL(process.env.DATABASE_URL).pathname.startsWith('/kayan_work_')) {
   throw new Error('Disposable test database required');
 }
 async function sql(text, values = []) {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client({ connectionString: process.env.DATABASE_URL, application_name: API_APPLICATION_NAME });
   await client.connect();
   try { return await client.query(text, values); } finally { await client.end(); }
 }
@@ -24,7 +26,7 @@ const prisma = {
   $executeRawUnsafe: async (text) => { await sql(text); return 0; },
   user: { count: async () => 0 },
 };
-const service = new FullBackupService(prisma, { record: async () => {}, recordRequired: async () => {} }, maintenance, { reconcile: async () => {} });
+const service = new FullBackupService(prisma, { record: async () => {}, recordRequired: async () => {} }, maintenance, { reconcile: async () => {}, status: async () => ({}) });
 service.postRestoreCheck = async () => {
   const result = await sql('SELECT value FROM fixture WHERE id = 1');
   return { ok: result.rowCount === 1, detail: 'real fixture row checked' };
@@ -61,6 +63,7 @@ Body()(FixtureController.prototype, 'restore', 0);
 class FixtureModule {}
 Module({ controllers: [FixtureController], providers: [
   { provide: MaintenanceService, useValue: maintenance },
+  { provide: DumpRecoveryCoordinator, useValue: new DumpRecoveryCoordinator(service, new RestoreJournalStore(process.env.KAYAN_BACKUP_DIR), maintenance) },
   { provide: APP_GUARD, useClass: MaintenanceAdmissionGuard },
   { provide: APP_INTERCEPTOR, useClass: MaintenanceInterceptor },
 ] })(FixtureModule);

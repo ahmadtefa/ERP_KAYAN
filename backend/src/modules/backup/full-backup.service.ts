@@ -39,6 +39,8 @@ import { scratchDatabaseActor } from './system/restore-admin';
 import { isUnfinished, RestoreJournalStore, type RestoreJournal } from './system/restore-journal';
 import { acquireRestoreLock } from './system/restore-lock';
 import { runRestoreTool } from './system/restore-tool';
+import { assertRestoreAuthority } from './system/restore-authority';
+import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -54,9 +56,9 @@ import { runRestoreTool } from './system/restore-tool';
  * the screen asks what this machine can do and only offers the buttons that
  * work. Where the tools are missing the reason is shown, not hidden.
  *
- * Restore currently drains HTTP handlers within this process. Maintenance
- * and crash recovery still do not extend across processes or restarts.
- * It must not be considered safe for production until those gaps are closed.
+ * Cooperating API processes share a PostgreSQL business barrier and one
+ * recovery journal directory. DUMP replacement and rollback are supervised.
+ * Installed-platform acceptance remains required before production use.
  * Its present checks include:
  *
  *  1. the header and table of contents are checked, then pg_restore reads the
@@ -66,9 +68,9 @@ import { runRestoreTool } from './system/restore-tool';
  *     complete never touches production;
  *  3. the current database is dumped to a safety file; if that fails, the
  *     restore stops right there;
- *  4. maintenance is enabled in this process and the real restore is run;
+ *  4. shared maintenance drains business work before the live restore runs;
  *  5. afterwards limited checks and a safety restore are attempted on failure.
- *     Maintenance does not yet survive restart or coordinate other processes.
+ *     a durable journal keeps admission closed until recovery is verified.
  */
 
 /// `PGDMP` — the first five bytes of every Custom-format archive.
@@ -734,7 +736,7 @@ export class FullBackupService {
    * Puts a full backup back. Read the class comment for the dance this does
    * before production data is touched — every step of it is deliberate.
    */
-  async restore(options: RestoreOptions, userId: string) {
+  async restore(options: RestoreOptions, userId: string, authority?: AuthUser) {
     if (!options.confirm) {
       throw new BadRequestException(
         'A full restore replaces the whole database. Send confirm=true to say you understand that.',
@@ -757,6 +759,7 @@ export class FullBackupService {
     let lock: Awaited<ReturnType<typeof acquireRestoreLock>> | null = null;
     try {
       lock = await this.holdAdvisoryLock();
+      if (authority) await assertRestoreAuthority(this.prisma, authority, true);
       let journal;
       try {
         journal = await new RestoreJournalStore(backupDirectory()).read();
@@ -987,8 +990,8 @@ export class FullBackupService {
 
       // 6. Access repair can commit per company and fail part-way through.
       // Never report success or reopen business requests with an unknown mix
-      // of access policies. This maintenance flag is process-local and does
-      // not by itself protect against a restart or another backend process.
+      // of access policies. The durable journal and shared restore ownership
+      // also keep other processes closed until repair or recovery succeeds.
       let accessRepair: unknown;
       try {
         // A full archive includes old refresh-token rows. Remove them before
@@ -1031,8 +1034,8 @@ export class FullBackupService {
       }
       // A successful DB-only restoration must not be recorded as complete
       // before licence reconciliation, or silently succeed if audit fails.
-      // This is still a legacy engine: required audit is not a cross-resource
-      // transaction and the maintenance flag remains local to this process.
+      // Required audit is not a cross-resource transaction; the durable journal
+      // keeps all cooperating API processes closed if that audit fails.
       try {
         const actorExists = userId
           ? (await this.prisma.user.count({ where: { id: userId } })) > 0
@@ -1095,6 +1098,15 @@ export class FullBackupService {
     await this.verify(journal.safetyBackup);
     await journals.advance(journal, 'rolling-back');
     await this.recoverFrom(journal.safetyBackup, tools.pgRestore as string);
+    // A restarted API deliberately deferred database-writing initialization
+    // while this journal was pending. Initialize through the normal licence
+    // API now that the safety database is back, before declaring recovery safe.
+    await this.licensing.status();
+    await this.licensing.reconcile();
+    await this.audit.recordRequired({
+      action: 'RECOVER_DATABASE_ARCHIVE', entity: 'backup_database_archive',
+      entityId: journal.id, after: { safetyBackup: journal.safetyBackup, checked: true }, userId: null,
+    }, this.prisma);
     await journals.advance(journal, 'rolled-back');
     await journals.clear();
     this.maintenance.end();

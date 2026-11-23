@@ -17,12 +17,19 @@ export function runRestoreTool(input: ToolInput): Promise<void> {
       env: input.env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
     let done = false;
-    const fail = () => { if (!done) { done = true; reject(new Error('The supervised restore tool did not complete safely.')); } };
+    let heartbeat: NodeJS.Timeout | undefined;
+    const fail = () => { clearInterval(heartbeat); if (!done) { done = true; reject(new Error('The supervised restore tool did not complete safely.')); } };
     supervisor.on('error', fail);
     supervisor.on('exit', fail);
     supervisor.on('message', (message: ToolMessage) => {
-      if (message.type === 'ready' && supervisor.connected) supervisor.send({ type: 'start', input });
+      if (message.type === 'ready' && supervisor.connected) {
+        supervisor.send({ type: 'start', input });
+        heartbeat = setInterval(() => {
+          if (supervisor.connected) supervisor.send({ type: 'heartbeat' }, () => {});
+        }, 250);
+      }
       if (message.type === 'done' && !done) {
+        clearInterval(heartbeat);
         done = true;
         if (message.ok) resolve(); else reject(new Error('The supervised restore tool failed.'));
         if (supervisor.connected) supervisor.disconnect();
@@ -41,6 +48,8 @@ async function supervise(): Promise<void> {
   let disconnected = false;
   let controlLost = false;
   let timer: NodeJS.Timeout | undefined;
+  let watchdog: NodeJS.Timeout | undefined;
+  let lastHeartbeat = performance.now();
   process.once('disconnect', () => {
     disconnected = true;
     tool?.kill('SIGKILL');
@@ -61,7 +70,20 @@ async function supervise(): Promise<void> {
       process.once('disconnect', () => { clearTimeout(deadline); resolve(null); });
       process.send?.({ type: 'ready' });
     });
-    if (!input || disconnected) return;
+    if (!input || disconnected || controlLost) return;
+    lastHeartbeat = performance.now();
+    process.on('message', (message: { type: string }) => {
+      if (message.type === 'heartbeat') lastHeartbeat = performance.now();
+    });
+    // Windows IPC disconnect delivery is not a lifetime guarantee. The owner
+    // must continue proving it is alive; lack of heartbeats is a failure, never
+    // permission to let an orphan replacement continue.
+    watchdog = setInterval(() => {
+      if (performance.now() - lastHeartbeat > 2500) {
+        disconnected = true;
+        tool?.kill('SIGKILL');
+      }
+    }, 250);
     const appName = `kayan-restore-${randomUUID()}`;
     let timedOut = false;
     const ok = await new Promise<boolean>((resolve) => {
@@ -73,6 +95,7 @@ async function supervise(): Promise<void> {
       tool.once('close', (code) => resolve(code === 0));
     });
     clearTimeout(timer);
+    clearInterval(watchdog);
     // Killing the client does not itself prove a long PostgreSQL statement
     // has stopped. Terminate only sessions tagged by this invocation and wait
     // for their removal before releasing the coordination lock.
@@ -89,6 +112,7 @@ async function supervise(): Promise<void> {
     if (process.connected) process.send?.({ type: 'done', ok: ok && !timedOut && !disconnected && !controlLost });
   } finally {
     clearTimeout(timer);
+    clearInterval(watchdog);
     await client.end().catch(() => {});
   }
 }

@@ -122,6 +122,7 @@ describe('complete backup and restore HTTP safety', () => {
     expect(restore).toHaveBeenCalledWith(
       expect.objectContaining({ confirm: true, fileName: 'named.dump' }),
       'operator',
+      expect.objectContaining({ userId: 'operator', isSuperAdmin: true }),
     );
   });
 

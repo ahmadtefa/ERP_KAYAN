@@ -4,9 +4,9 @@ import { cleanDatabaseUrl } from './pg-support';
 import { BUSINESS_BARRIER_KEY, RESTORE_TOOL_LOCK_KEY } from '../../../common/maintenance/lock-keys';
 
 // Shared by JSON, DUMP and complete-system restores on this database. This
-// serializes cooperating restores across processes; it is NOT a business-write
-// barrier, so callers still need maintenance/draining and must not advertise
-// it as protection from other API processes or arbitrary SQL writers.
+// serializes cooperating restores across processes and takes the exclusive
+// side of the shared business barrier. Arbitrary SQL clients and older APIs
+// that do not acquire the shared business lease are outside this contract.
 export const RESTORE_LOCK_KEY = 918_273_645;
 
 export async function acquireRestoreLock(): Promise<Client> {
@@ -33,7 +33,9 @@ export async function acquireRestoreLock(): Promise<Client> {
     const deadline = Date.now() + 30_000;
     while (true) {
       const active = await client.query<{ pid: number }>(
-        "SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND application_name LIKE 'kayan-restore-%'",
+        `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()
+         AND (application_name LIKE 'kayan-restore-%'
+           OR (application_name LIKE 'kayan-api-%' AND state <> 'idle'))`,
       );
       if (!active.rowCount) break;
       for (const row of active.rows) await client.query('SELECT pg_terminate_backend($1)', [row.pid]);

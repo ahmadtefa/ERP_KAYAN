@@ -17,8 +17,8 @@ import { DatabaseMaintenanceBarrier } from './database-barrier';
  * switch rejects business requests while data may be incomplete; only
  * diagnostics and access to already-created backup files remain available.
  *
- * The switch drains admitted HTTP business handlers in this process. Other
- * processes, background work and crash recovery require separate coordination.
+ * The local counter drains handlers in this process; the injected PostgreSQL
+ * barrier coordinates production API processes, tracked jobs and startup work.
  */
 @Injectable()
 export class MaintenanceService {

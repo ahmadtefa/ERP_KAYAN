@@ -151,6 +151,7 @@ export class BackupController {
     return this.service.restore(parsed, user.companyId, {
       replace: query.replace === 'true' || body?.replace === true,
       actorUserId: user.userId,
+      authority: user,
       ipAddress: request.ip ?? null,
       userAgent: request.headers['user-agent'] ?? null,
     });

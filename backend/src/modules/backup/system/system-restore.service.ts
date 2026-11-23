@@ -18,6 +18,8 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from '../restore-access';
 import { CompleteBackupService } from './complete-backup.service';
 import { FullBackupService } from '../full-backup.service';
+import { assertRestoreAuthority } from './restore-authority';
+import type { AuthUser } from '../../../common/decorators/current-user.decorator';
 import {
   DESTRUCTIVE_PHASES,
   RestoreJournalStore,
@@ -201,7 +203,7 @@ export class SystemRestoreService implements OnModuleInit {
 
   /// ───────────────────────────────────────────────────────────── restoring
 
-  async restore(input: RestoreInput, userId: string): Promise<RestoreResult> {
+  async restore(input: RestoreInput, userId: string, authority?: AuthUser): Promise<RestoreResult> {
     const started = Date.now();
     // 1. Can this machine do it at all?
     await this.gate.assertAllowed();
@@ -272,6 +274,7 @@ export class SystemRestoreService implements OnModuleInit {
     let lock: Client | null = null;
     try {
       lock = await this.holdAdvisoryLock();
+      if (authority) await assertRestoreAuthority(this.prisma, authority, true);
       if (this.running) throw new ConflictException('A restore or recovery is already running.');
       const current = await this.journals.read();
       if (isUnfinished(current)) {

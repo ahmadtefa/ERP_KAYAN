@@ -164,6 +164,7 @@ export class CompleteBackupController {
         confirmPhrase: body?.confirmPhrase ?? query?.confirmPhrase,
       },
       user.userId,
+      user,
     );
   }
 
