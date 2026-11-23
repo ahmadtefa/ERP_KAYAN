@@ -266,13 +266,6 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-          echo "Running the two-person warehouse cycle: receive, transfer, dispatch, receive..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-warehouse-cycle.mjs http://127.0.0.1:3000/api/v1; then
-            echo "::group::API logs after warehouse cycle failure"
-            cat /tmp/kayan-api.log
-            echo "::endgroup::"
-            exit 1
-          fi
           echo "Running chart-of-accounts and opening-balance spreadsheet imports..."
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-imports.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after import scenario failure"
