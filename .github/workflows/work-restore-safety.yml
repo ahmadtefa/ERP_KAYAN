@@ -58,9 +58,9 @@ jobs:
       - name: Workflow safety inventory
         run: node ../scripts/ci-workflow-safety.test.cjs
       - name: Changed production files lint
-        run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/main.ts src/common/prisma/prisma.service.ts src/modules/backup/backup.service.ts src/modules/backup/backup.controller.ts src/modules/backup/full-backup.controller.ts src/modules/backup/system/complete-backup.controller.ts src/modules/backup/system/restore-authority.ts src/modules/backup/system/dump-recovery-coordinator.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
+        run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/main.ts src/common/prisma/prisma.service.ts src/modules/backup/backup.service.ts src/modules/backup/backup.controller.ts src/modules/backup/full-backup.controller.ts src/modules/backup/system/complete-backup.controller.ts src/modules/backup/system/restore-authority.ts src/modules/backup/system/database-identity.ts src/modules/backup/system/move-restore-directory.ts src/modules/backup/system/dump-recovery-coordinator.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
       - name: Focused regression tests
-        run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/system/dump-recovery-coordinator.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
+        run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/system/dump-recovery-coordinator.spec.ts modules/backup/system/move-restore-directory.spec.ts modules/backup/system/system-restore-files.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
       - name: JSON and DUMP real PostgreSQL regression
         env:
           KAYAN_COMPANY_BACKUP_PG: '1'
@@ -68,6 +68,33 @@ jobs:
         run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts modules/backup/system/restore-authority.postgres.spec.ts
       - name: Independent APIs and killed DUMP owner
         run: node --test scripts/restore-multiprocess.test.cjs
+      - name: Complete archive through the production API
+        env:
+          KAYAN_ADMIN_USERNAME: ci-admin
+          KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+          JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+          JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+          HOST: 127.0.0.1
+          PORT: '3001'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KAYAN_BACKUP_DIR="$RUNNER_TEMP/kayan-full-http/backups"
+          export KAYAN_UPLOAD_DIR="$GITHUB_WORKSPACE/build/restore-test-uploads"
+          export LICENSE_STATE_DIR="$RUNNER_TEMP/kayan-full-http/licence"
+          mkdir -p "$KAYAN_UPLOAD_DIR"
+          printf 'synthetic upload sentinel' > "$KAYAN_UPLOAD_DIR/sentinel.txt"
+          npx ts-node prisma/seed.ts
+          node dist/src/main.js > "$RUNNER_TEMP/kayan-full-http-api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid"' EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then cat "$RUNNER_TEMP/kayan-full-http-api.log"; exit 1; fi
+          node scripts/scenario-system-backup.mjs http://127.0.0.1:3001/api/v1
 
   postgres-windows:
     runs-on: windows-2025
@@ -89,6 +116,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx prisma generate
       - run: npm run build
+      - name: Atomic directory moves and copy failures on Windows
+        run: npx jest --runInBand modules/backup/system/move-restore-directory.spec.ts modules/backup/system/system-restore-files.spec.ts
       - name: Disposable PostgreSQL and killed restore owner on Windows
         run: |
           $ErrorActionPreference = 'Stop'

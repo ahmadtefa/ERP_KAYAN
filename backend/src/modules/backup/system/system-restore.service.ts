@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { Client } from 'pg';
 import { existsSync } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { AuditService } from '../../../common/audit/audit.service';
@@ -29,6 +29,8 @@ import {
 } from './restore-journal';
 import { RestoreGateService } from './restore-gate.service';
 import { acquireRestoreLock } from './restore-lock';
+import { moveRestoreDirectory } from './move-restore-directory';
+import { databaseFingerprint } from './database-identity';
 import { ARCHIVE_PATHS, type SystemBackupManifest } from './manifest';
 import {
   MAX_UPLOAD_BYTES,
@@ -305,6 +307,7 @@ export class SystemRestoreService implements OnModuleInit {
       await mkdir(stagingDir, { recursive: true });
 
       let journal: RestoreJournal = await this.journals.write({
+        kind: 'complete', databaseFingerprint: databaseFingerprint(),
         id: stagingId,
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -473,6 +476,7 @@ export class SystemRestoreService implements OnModuleInit {
         },
       ];
       const finalChecks = await this.checkRestoredData(manifest);
+      await this.dumps?.reconcileAfterRecovery();
       const allChecks = [...journal.checks, ...accessChecks, ...finalChecks];
       const failures = allChecks.filter((check) => !check.ok);
       if (failures.length > 0) {
@@ -594,7 +598,7 @@ export class SystemRestoreService implements OnModuleInit {
    * a journal left on disk. This is the action the operator is told to take,
    * and the only one that is safe after a crash mid-replacement.
    */
-  async resumeRecovery(userId: string): Promise<{
+  async resumeRecovery(userId: string | null): Promise<{
     recovered: boolean;
     phase: string | null;
     safetyBackup: string | null;
@@ -615,6 +619,9 @@ export class SystemRestoreService implements OnModuleInit {
           safetyBackup: null,
           detail: 'There is no interrupted restore to recover from.',
         };
+      }
+      if (journal.databaseFingerprint && journal.databaseFingerprint !== databaseFingerprint()) {
+        throw new ServiceUnavailableException('The recovery journal belongs to a different database. No data was changed.');
       }
       // A crash can leave a completed rollback journal after its verified
       // safety copy has already been applied. Business work may have resumed
@@ -674,7 +681,7 @@ export class SystemRestoreService implements OnModuleInit {
    */
   private async rollback(
     journal: RestoreJournal,
-    userId: string,
+    userId: string | null,
   ): Promise<{ recovered: boolean; detail: string }> {
     const safetyName = journal.safetyBackup;
     if (!safetyName) return { recovered: false, detail: 'no safety backup was recorded' };
@@ -724,6 +731,7 @@ export class SystemRestoreService implements OnModuleInit {
       // If power failed between renaming uploads and journaling that rename,
       // the verified safety archive is still a complete source of the files.
       await this.restoreUploadsFromSafety(workDir, journal);
+      await this.dumps?.reconcileAfterRecovery();
 
       if (journal.stagingDir) {
         await rm(journal.stagingDir, { recursive: true, force: true }).catch(() => {});
@@ -951,10 +959,10 @@ export class SystemRestoreService implements OnModuleInit {
     if (existsSync(uploads)) {
       // Never swallow a failed rename: claiming recovery while keeping the
       // wrong uploads would leave the database and its files inconsistent.
-      await rename(uploads, `${uploads}.failed-restore-${Date.now()}`);
+      await moveRestoreDirectory(uploads, `${uploads}.failed-restore-${Date.now()}`);
     }
     await mkdir(join(uploads, '..'), { recursive: true });
-    await rename(source, uploads);
+    await moveRestoreDirectory(source, uploads);
   }
 
   private async swapUploadsFolder(
@@ -975,12 +983,12 @@ export class SystemRestoreService implements OnModuleInit {
     // operation, so an interruption cannot orphan the original uploads.
     await persist({ previousUploads: previous });
     if (existsSync(uploads)) {
-      await rename(uploads, previous);
+      await moveRestoreDirectory(uploads, previous);
     }
 
     if (existsSync(staged)) {
       await mkdir(join(uploads, '..'), { recursive: true });
-      await rename(staged, uploads);
+      await moveRestoreDirectory(staged, uploads);
     } else {
       await mkdir(uploads, { recursive: true });
     }

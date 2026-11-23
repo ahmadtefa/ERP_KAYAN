@@ -40,6 +40,7 @@ import { isUnfinished, RestoreJournalStore, type RestoreJournal } from './system
 import { acquireRestoreLock } from './system/restore-lock';
 import { runRestoreTool } from './system/restore-tool';
 import { assertRestoreAuthority } from './system/restore-authority';
+import { databaseFingerprint } from './system/database-identity';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
@@ -933,6 +934,7 @@ export class FullBackupService {
       // this journal while admitting business work, including after a crash.
       dumpJournal = await journals.write({
         kind: 'dump', id: randomUUID(), phase: 'safety-taken', source: label,
+        databaseFingerprint: databaseFingerprint(),
         startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
         safetyBackup: safety.name, previousUploads: null, stagingDir: null,
@@ -1087,6 +1089,9 @@ export class FullBackupService {
 
   /** Called only while the shared restore ownership/barrier is held. */
   async recoverDumpJournal(journal: RestoreJournal): Promise<void> {
+    if (journal.databaseFingerprint && journal.databaseFingerprint !== databaseFingerprint()) {
+      throw new ServiceUnavailableException('The recovery journal belongs to a different database. No data was changed.');
+    }
     if (journal.kind !== 'dump' || !journal.safetyBackup) {
       throw new ServiceUnavailableException('The DUMP recovery journal has no safety backup.');
     }
@@ -1101,8 +1106,7 @@ export class FullBackupService {
     // A restarted API deliberately deferred database-writing initialization
     // while this journal was pending. Initialize through the normal licence
     // API now that the safety database is back, before declaring recovery safe.
-    await this.licensing.status();
-    await this.licensing.reconcile();
+    await this.reconcileAfterRecovery();
     await this.audit.recordRequired({
       action: 'RECOVER_DATABASE_ARCHIVE', entity: 'backup_database_archive',
       entityId: journal.id, after: { safetyBackup: journal.safetyBackup, checked: true }, userId: null,
@@ -1110,6 +1114,11 @@ export class FullBackupService {
     await journals.advance(journal, 'rolled-back');
     await journals.clear();
     this.maintenance.end();
+  }
+
+  async reconcileAfterRecovery(): Promise<void> {
+    await this.licensing.status();
+    await this.licensing.reconcile();
   }
 
   /**

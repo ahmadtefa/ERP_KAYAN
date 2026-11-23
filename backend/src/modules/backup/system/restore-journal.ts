@@ -49,6 +49,7 @@ export const FINISHED_PHASES: RestorePhase[] = ['rolled-back'];
 
 export interface RestoreJournal {
   kind?: 'dump' | 'complete';
+  databaseFingerprint?: string;
   id: string;
   startedAt: string;
   updatedAt: string;
