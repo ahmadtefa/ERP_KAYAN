@@ -64,6 +64,13 @@ jobs:
           npx jest --runInBand
           common/auth/price-redaction.spec.ts
           modules/inventory/inventory-analysis.controller.spec.ts
+      # Company, branch and warehouse isolation against the real database:
+      # a branch id typed by a client must not read another branch's stock,
+      # ledger or documents.
+      - name: Company, branch and warehouse isolation on PostgreSQL
+        env:
+          KAYAN_WAREHOUSE_ACCESS_PG: '1'
+        run: npx jest --runInBand modules/inventory/isolation.postgres.spec.ts
       - name: Focused regression tests
         run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/system/dump-recovery-coordinator.spec.ts modules/backup/system/move-restore-directory.spec.ts modules/backup/system/system-restore-files.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
       - name: JSON and DUMP real PostgreSQL regression

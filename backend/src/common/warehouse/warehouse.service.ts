@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { grantsOf } from './warehouse-access';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { composeQuantity, trimZeros } from '../units/unit-math';
@@ -781,4 +782,57 @@ export class WarehouseService {
       branchNameAr: row.branch?.nameAr ?? null,
     };
   }
+}
+
+/**
+ * Narrows a requested branch id to the branches the caller is assigned to.
+ *
+ * The inventory read routes take a `branchId` filter. Passing it to the query
+ * unchanged lets an account assigned to one branch read another branch of the
+ * same company by typing its id, which is not an access rule a customer would
+ * recognise. Reports already narrow this way; the list, ledger and document
+ * routes must do it too, and they must do it in one place so a new route
+ * cannot quietly forget.
+ *
+ * `undefined` means "every branch I am allowed to see":
+ *   - a company-wide account has no scope, so the filter stays as asked;
+ *   - an account with exactly one assigned branch is pinned to it;
+ *   - an account with several is asked to choose, rather than being given a
+ *     merged total that belongs to no single branch.
+ */
+export function scopedBranchId(
+  user: { branchId?: string | null; branchIds?: string[] | null },
+  requested?: string | null,
+): string | undefined {
+  const scope = warehouseScopeOf(user);
+  if (scope === null) return requested ?? undefined;
+  if (requested) {
+    if (!scope.includes(requested)) {
+      throw new ForbiddenException(
+        'This branch is outside your assignment. / هذا الفرع خارج نطاق صلاحيتك.',
+      );
+    }
+    return requested;
+  }
+  if (scope.length === 1) return scope[0];
+  if (scope.length === 0) {
+    throw new ForbiddenException(
+      'No branch is assigned to this account. / لا يوجد فرع مسند لهذا الحساب.',
+    );
+  }
+  throw new BadRequestException(
+    'Select one of your assigned branches. / اختر أحد الفروع المسندة إليك.',
+  );
+}
+
+/** Which warehouses the caller may read; `undefined` means all of them. */
+export function visibleWarehouseIds(user: {
+  isSuperAdmin?: boolean;
+  warehouseAccess?: Array<{ warehouseId: string; canView: boolean }> | null;
+}): string[] | undefined {
+  // `grantsOf` only reads warehouseId/isSuperAdmin for this purpose; the full
+  // grant shape is asserted by the entity that loads it.
+  const grants = grantsOf(user as Parameters<typeof grantsOf>[0]);
+  if (grants === null) return undefined;
+  return grants.filter((grant) => grant.canView).map((grant) => grant.warehouseId);
 }

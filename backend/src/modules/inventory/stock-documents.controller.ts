@@ -4,6 +4,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { canReadCost } from '../../common/auth/cost-visibility';
 import { assertTransferAccess, assertWarehouseAccess, grantsOf } from '../../common/warehouse/warehouse-access';
 import type { WarehouseAction } from '../../common/warehouse/warehouse-access';
+import { scopedBranchId } from '../../common/warehouse/warehouse.service';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers, counts and write-offs. Separate permissions for
@@ -26,7 +27,10 @@ export class StockDocumentsController {
       kind: query.kind,
       q: query.q,
       voucherOnly: query.voucherOnly === 'true',
-      branchId: query.branchId,
+      // The list is branch-confined like every other reading route: a
+      // `branchId` the client types is checked against the assignment, and a
+      // single-branch account does not get the whole company by omitting it.
+      branchId: scopedBranchId(user, query.branchId),
       from: query.from,
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
