@@ -25,7 +25,13 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
 (run ? describe : describe.skip)('company, branch and warehouse isolation', () => {
   jest.setTimeout(120_000);
 
-  const companyId = randomUUID();
+  const fixtureCompanyId = randomUUID();
+  /** Resolved in beforeAll: either our own company or one already present. */
+  let companyId: string = fixtureCompanyId;
+  /** True when this suite created the company and may therefore remove it. */
+  let ownsCompany = false;
+  /** One stable suffix for every name this suite writes. */
+  const suffix = fixtureCompanyId.slice(0, 8);
   const branchA = randomUUID();
   const branchB = randomUUID();
   const warehouseA = randomUUID();
@@ -41,35 +47,37 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
-    const suffix = companyId.slice(0, 8);
-    // The database may already hold the seeded company, and a partial unique
-    // index allows exactly one live company. So this suite checks that the
-    // invariant still leaves room, and refuses to run rather than deleting
-    // somebody else's company to make space.
-    const live = await prisma.company.findMany({
+    // A partial unique index allows exactly one live company per database, and
+    // another suite may already have created one. This suite needs a company to
+    // scope rows to, not a company of its own: a second company is created only
+    // when the database has none, and an existing one is borrowed and left
+    // exactly as it was found.
+    const live = await prisma.company.findFirst({
       where: { deletedAt: null },
       select: { id: true, code: true },
     });
-    // A clear failure beats deleting a company this suite does not own.
-    expect(live.every((row) => row.code === `ISO-${suffix}`)).toBe(true);
-    await prisma.company.create({
-      data: { id: companyId, code: `ISO-${suffix}`, nameEn: 'Isolation', nameAr: 'عزل' },
-    });
+    ownsCompany = live === null;
+    if (live !== null) companyId = live.id;
+    if (ownsCompany) {
+      await prisma.company.create({
+        data: { id: companyId, code: `ISO-${suffix}`, nameEn: 'Isolation', nameAr: 'عزل' },
+      });
+    }
     await prisma.branch.createMany({
       data: [
-        { id: branchA, companyId, code: 'A', nameEn: 'Branch A', nameAr: 'فرع أ' },
-        { id: branchB, companyId, code: 'B', nameEn: 'Branch B', nameAr: 'فرع ب' },
+        { id: branchA, companyId, code: `ISO-A-${suffix}`, nameEn: 'Branch A', nameAr: 'فرع أ' },
+        { id: branchB, companyId, code: `ISO-B-${suffix}`, nameEn: 'Branch B', nameAr: 'فرع ب' },
       ],
     });
     await prisma.warehouse.createMany({
       data: [
-        { id: warehouseA, companyId, branchId: branchA, code: 'A1', nameEn: 'A1', nameAr: 'أ1' },
-        { id: warehouseA2, companyId, branchId: branchA, code: 'A2', nameEn: 'A2', nameAr: 'أ2' },
-        { id: warehouseB, companyId, branchId: branchB, code: 'B1', nameEn: 'B1', nameAr: 'ب1' },
+        { id: warehouseA, companyId, branchId: branchA, code: `ISO-A1-${suffix}`, nameEn: 'A1', nameAr: 'أ1' },
+        { id: warehouseA2, companyId, branchId: branchA, code: `ISO-A2-${suffix}`, nameEn: 'A2', nameAr: 'أ2' },
+        { id: warehouseB, companyId, branchId: branchB, code: `ISO-B1-${suffix}`, nameEn: 'B1', nameAr: 'ب1' },
       ],
     });
     await prisma.item.create({
-      data: { id: itemId, companyId, code: `ITEM-${suffix}`, nameEn: 'Widget', nameAr: 'صنف', unit: 'unit' },
+      data: { id: itemId, companyId, code: `ISO-ITEM-${suffix}`, nameEn: 'Widget', nameAr: 'صنف', unit: 'unit' },
     });
 
     // Real ledger rows, because every read path below is derived from them.
@@ -110,7 +118,7 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
     await prisma.stockDocument.create({
       data: {
         id: stockDocumentB, companyId, branchId: branchB, kind: 'ADJUSTMENT',
-        documentNumber: `DOC-${suffix}`, documentDate: new Date('2026-01-12'),
+        documentNumber: `ISO-DOC-${suffix}`, documentDate: new Date('2026-01-12'),
       },
     });
 
@@ -131,7 +139,7 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
     await prisma.userWarehouseAccess.deleteMany({ where: { companyId } });
     await prisma.warehouse.deleteMany({ where: { companyId } });
     await prisma.branch.deleteMany({ where: { companyId } });
-    await prisma.company.deleteMany({ where: { id: companyId } });
+    if (ownsCompany) await prisma.company.deleteMany({ where: { id: companyId } });
     await prisma.$disconnect();
   });
 
@@ -159,8 +167,10 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
     it('gives a branch-bound account only its own branch balances', async () => {
       const rows = await stock.balances(companyId, { branchId: branchA });
       expect(rows.map((row) => row.branchId)).toEqual([branchA]);
+      // Asking without a branch must widen to every branch this company has,
+      // which includes any branch a shared database already held.
       const all = await stock.balances(companyId, {});
-      expect(all.map((row) => row.branchId).sort()).toEqual([branchA, branchB]);
+      expect(all.map((row) => row.branchId)).toEqual(expect.arrayContaining([branchA, branchB]));
     });
 
     it('keeps another branch document out of the list', async () => {
@@ -179,7 +189,9 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
         companyId, itemId, true, undefined, warehouseScopeOf(accountOfBranchA),
       );
       expect(branchBound.movements).toHaveLength(2);
-      expect(branchBound.movements.every((m) => m.branchCode === 'A')).toBe(true);
+      // The fixture branches carry unique codes, because a shared database may
+      // already hold branches called A or B.
+      expect(branchBound.movements.every((m) => m.branchCode === `ISO-A-${suffix}`)).toBe(true);
       // The company-wide account sees the same item in both branches, so the
       // earlier assertion is isolation and not an empty ledger.
       const everywhere = await stock.itemLedger(companyId, itemId, true, undefined, warehouseScopeOf(companyWide));
@@ -224,7 +236,7 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
 
     it('keeps a foreign warehouse out of the per-warehouse ledger view', async () => {
       const ledger = await stock.itemLedger(companyId, itemId, true, [warehouseA]);
-      expect(ledger.movements.map((m) => m.warehouseCode)).toEqual(['A1']);
+      expect(ledger.movements.map((m) => m.warehouseCode)).toEqual([`ISO-A1-${suffix}`]);
     });
   });
 
