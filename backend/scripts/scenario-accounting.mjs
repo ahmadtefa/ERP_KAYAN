@@ -1549,6 +1549,25 @@ async function main() {
   // a dedicated disposable database) opts in explicitly. Never let a routine
   // scenario run reset a real or developer database by accident.
   if (process.env.ENABLE_DISPOSABLE_RESET === 'true') {
+    // Section 14 logged this run's session out on purpose, and the fresh token
+    // it takes afterwards is only issued inside the backup/restore block above.
+    // When that block is skipped - which happens wherever pg_dump is absent -
+    // the token in hand is the one that was just logged out, so every request
+    // below answered 401 and the reset checks failed for a reason that had
+    // nothing to do with reset. Sign in again rather than inherit that state.
+    const resetLogin = await api('/auth/login', {
+      method: 'POST', noAuth: true,
+      json: { username: USERNAME, password: PASSWORD },
+    });
+    check(
+      'the operator can sign in again before exercising reset',
+      resetLogin.status === 201 && Boolean(resetLogin.data?.accessToken),
+      `status ${resetLogin.status}`,
+    );
+    if (resetLogin.data?.accessToken) {
+      token = resetLogin.data.accessToken;
+      refreshToken = resetLogin.data.refreshToken ?? refreshToken;
+    }
     const setupBeforeReset = await api('/setup/status', { noAuth: true });
     check(
       'reset scenario is running against a fully set-up disposable database',
