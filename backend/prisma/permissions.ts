@@ -23,6 +23,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
+  ['admin.approvals.read', 'View approval policies and decision history', 'عرض قواعد الموافقات وسجل القرارات', 'admin'],
+  ['admin.approvals.manage', 'Configure approval policies and levels', 'إعداد قواعد الموافقات ومستوياتها', 'admin'],
   ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
   ['admin.company.manage', 'Manage company profile and branches', 'إدارة بيانات الشركة والفروع', 'admin'],
 

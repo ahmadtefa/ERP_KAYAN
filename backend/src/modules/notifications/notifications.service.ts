@@ -70,6 +70,11 @@ export interface RaiseInput {
   actionPath?: string | null;
   dedupe: string;
   dueAt?: Date | null;
+  /// Overrides the catalogue's permission for this row. Used where the
+  /// permission that may act depends on configuration rather than on the kind
+  /// — an approval level carries its own permission, and an alert about that
+  /// level must be visible to exactly the people who can close it.
+  permission?: string | null;
 }
 
 interface SettingRow {
@@ -711,7 +716,7 @@ export class NotificationsService {
           entityId: input.entityId ?? null,
           entityRef: input.entityRef ?? null,
           actionPath: input.actionPath ?? null,
-          permission: kind?.permission ?? null,
+          permission: input.permission ?? kind?.permission ?? null,
           dedupeKey: input.dedupe,
           dueAt: input.dueAt ?? null,
         },

@@ -77,6 +77,7 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
       'accounting.journal.approve',
       'accounting.periods.close',
       'admin.audit.read',
+      'admin.approvals.read',
       '.read',
     ],
     seeded: true,

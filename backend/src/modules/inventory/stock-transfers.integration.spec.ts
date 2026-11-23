@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { pglitePrisma } from '../../testing/pglite-adapter';
 import { StockTransfersService } from './stock-transfers.service';
+import { ApprovalsService } from '../../common/approvals/approvals.service';
 
 const COMPANY='11111111-1111-4111-8111-111111111111';
 const BRANCH_A='22222222-2222-4222-8222-222222222222';
@@ -74,6 +75,7 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
           return {closed:0};
         },
       } as never,
+      new ApprovalsService(prisma as never, {record:async()=>undefined} as never),
     );
   });
   afterEach(async()=>db.close());

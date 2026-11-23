@@ -34,6 +34,8 @@ export const STOCK_TRANSFER_RECEIPT_REQUIRED = 'STOCK_TRANSFER_RECEIPT_REQUIRED'
 export const STOCK_TRANSFER_RECEIVED = 'STOCK_TRANSFER_RECEIVED';
 export const STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED = 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED';
 export const STOCK_TRANSFER_CLOSE_REQUIRED = 'STOCK_TRANSFER_CLOSE_REQUIRED';
+export const STOCK_TRANSFER_LEVEL_PENDING = 'STOCK_TRANSFER_LEVEL_PENDING';
+export const STOCK_TRANSFER_RETURNED = 'STOCK_TRANSFER_RETURNED';
 /// A journal entry waiting for approval.
 export const JOURNAL_PENDING_APPROVAL = 'JOURNAL_PENDING_APPROVAL';
 /// A posted customer invoice whose due date has passed and is not fully paid.
@@ -152,6 +154,26 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     module: 'inventory',
     severity: 'INFO',
     permission: 'inventory.transfer.close',
+    entityType: 'StockTransfer',
+  },
+  {
+    // Somebody's turn on a configured approval chain. Addressed to the level's
+    // own permission, so the alert appears for the people who can actually
+    // close it and for nobody else.
+    type: STOCK_TRANSFER_LEVEL_PENDING,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.transfer.approve',
+    entityType: 'StockTransfer',
+  },
+  {
+    // The requester's own news: their request was sent back to be amended.
+    // A return is not a rejection, so it gets its own kind rather than being
+    // filed under the rejection alert a manager reads.
+    type: STOCK_TRANSFER_RETURNED,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.transfer.create',
     entityType: 'StockTransfer',
   },
   {

@@ -99,7 +99,7 @@ describe('the company reset covers every table that belongs to a company', () =>
       'stockTakeLine',
       'notification',
       'notificationSetting',
-      'printPriceSetting',
+      'printPriceSetting',      'approvalDecision',      'approvalPolicy',
       'budget',
       'quotationTermTemplate',
       'quotationColumnTemplate',
