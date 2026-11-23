@@ -41,13 +41,14 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
 
   @override
   Future<void> logout({String? refreshToken}) async {
-    // The header is how the API names the session to end. It carries a
-    // credential, so it is sent as a header and never as a query parameter.
+    // The token names the session to end. It is sent in the body of a POST -
+    // never in the address, which ends up in history and logs - and it is
+    // omitted when absent so the API ends every session of the account.
     await _client.post(
       _logout,
-      headers: refreshToken == null || refreshToken.isEmpty
+      body: refreshToken == null || refreshToken.isEmpty
           ? null
-          : {'x-refresh-token': refreshToken},
+          : {'refreshToken': refreshToken},
     );
   }
 }

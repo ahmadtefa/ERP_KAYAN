@@ -19,6 +19,7 @@ class _RecordingAdapter implements HttpClientAdapter {
 
   final List<String> paths = [];
   final List<Map<String, dynamic>> headers = [];
+  final List<Object?> bodies = [];
   int loginStatus = 401;
   int logoutStatus = 204;
 
@@ -34,6 +35,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   ) async {
     paths.add(options.path);
     headers.add(Map<String, dynamic>.from(options.headers));
+    bodies.add(options.data);
     if (options.path == '/auth/login') {
       if (loginStatus != 200) {
         return ResponseBody.fromString(
@@ -115,7 +117,8 @@ void main() {
     await repository.signOut();
 
     expect(adapter.paths, ['/auth/login', '/auth/logout']);
-    expect(adapter.headers.last['x-refresh-token'], 'refresh-1');
+    // Sent in the body of a POST, never in the address.
+    expect(adapter.bodies.last, {'refreshToken': 'refresh-1'});
     expect(await store.readRefreshToken(), isNull);
     expect(await store.readAccessToken(), isNull);
   });
