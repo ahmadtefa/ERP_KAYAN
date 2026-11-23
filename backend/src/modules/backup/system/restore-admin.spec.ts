@@ -89,9 +89,12 @@ describe('restore-admin: the limited-privilege restore account', () => {
         expect(status.usable).toBe(false);
         expect(status.reason).toMatch(/readable by other users/);
       } else {
-        // On Windows the file is accepted, and the credential still never
-        // leaves the process - which the next test proves directly.
-        expect(status.path).toBe('restore-admin');
+        // On Windows the credential is read rather than refused for its mode
+        // bits. Whether it is *usable* still depends on the runtime server
+        // check that follows, so the honest assertion is that the refusal is
+        // no longer the permission one - and that nothing secret is returned.
+        expect(status.reason ?? '').not.toMatch(/readable by other users/);
+        expect(JSON.stringify(status)).not.toContain('pw@');
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
