@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,43 @@ import { SystemRestoreService } from './system-restore.service';
 const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
 (run ? describe : describe.skip)('restore journal across PostgreSQL processes', () => {
   jest.setTimeout(60_000);
+
+  it('does not replay an already completed rollback over newer PostgreSQL data', async () => {
+    const url = process.env.DATABASE_URL ?? '';
+    if (new URL(url).pathname !== '/erp_kayan_acceptance' || process.env.NODE_ENV !== 'test') {
+      throw new Error('This test requires the isolated CI acceptance database.');
+    }
+    const dir = await mkdtemp(join(tmpdir(), 'kayan-finished-recovery-'));
+    const journals = new RestoreJournalStore(dir);
+    const database = new Client({ connectionString: cleanDatabaseUrl(url) });
+    // A unique test-only table in the disposable CI database models work
+    // accepted after rollback. Unlike a TEMP table it would be lost by the
+    // public-schema replacement performed by an erroneous second rollback.
+    const table = `recovery_fixture_${randomUUID().replace(/-/g, '')}`;
+    try {
+      await database.connect();
+      await database.query(`CREATE TABLE "${table}" (value text NOT NULL)`);
+      await database.query(`INSERT INTO "${table}" VALUES ($1)`, ['after-rollback']);
+      await journals.write({
+        id: 'completed-fixture', phase: 'rolled-back', source: 'synthetic.kayanbackup',
+        startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
+        safetyBackup: 'old-safety.kayanbackup', previousUploads: null, stagingDir: null,
+        detail: 'verified rollback completed', checks: [],
+      });
+      const maintenance = new MaintenanceService();
+      const service = new SystemRestoreService({} as never, {} as never, maintenance, {} as never, {} as never, journals);
+      await service.onModuleInit();
+      const result = await service.resumeRecovery('synthetic-user');
+      expect(result).toMatchObject({ recovered: false, phase: 'rolled-back' });
+      expect((await database.query(`SELECT value FROM "${table}"`)).rows).toEqual([{ value: 'after-rollback' }]);
+      expect(await journals.read()).toBeNull();
+    } finally {
+      await database.query(`DROP TABLE IF EXISTS "${table}"`).catch(() => {});
+      await database.end().catch(() => {});
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 
   it('preserves another process journal, and clears an abandoned pre-destructive journal after its owner dies', async () => {
     const url = process.env.DATABASE_URL ?? '';

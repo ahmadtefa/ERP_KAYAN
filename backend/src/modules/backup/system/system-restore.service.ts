@@ -610,6 +610,18 @@ export class SystemRestoreService implements OnModuleInit {
           detail: 'There is no interrupted restore to recover from.',
         };
       }
+      // A crash can leave a completed rollback journal after its verified
+      // safety copy has already been applied. Business work may have resumed
+      // since then: applying that old copy a second time would erase it.
+      if (journal.phase === 'rolled-back') {
+        await this.journals.clear();
+        return {
+          recovered: false,
+          phase: journal.phase,
+          safetyBackup: journal.safetyBackup,
+          detail: 'The earlier recovery was already completed; its safety backup was not replayed.',
+        };
+      }
       if (!journal.safetyBackup) {
         if (DESTRUCTIVE_PHASES.includes(journal.phase)) {
           throw new ServiceUnavailableException(
