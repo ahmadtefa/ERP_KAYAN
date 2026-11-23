@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -203,7 +204,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog>{
     super.dispose();
   }
   Json? row;bool loading=true,busy=false;bool get ar=>widget.ar;String t(String a,String e)=>ar?a:e;@override void initState(){super.initState();_load();}Json? approvalPath;Future<void> _load()async{try{final api=ref.read(apiClientProvider);final x=await api.getObject('/inventory/stock-transfers/${widget.id}');Json? p;try{p=await api.getObject('/inventory/stock-transfers/${widget.id}/approvals');}catch(_){p=null;}if(mounted)setState((){row=x;approvalPath=p;});}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}finally{if(mounted)setState(()=>loading=false);}}
-  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · $status'),const SizedBox(height:10),_approvalPath(),Flexible(child:Scrollbar(controller:_horizontalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_horizontalScroll,scrollDirection:Axis.horizontal,child:Scrollbar(controller:_verticalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_verticalScroll,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList()))))))])),actions:_actions(user,status,lines)]);}
+  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · $status'),const SizedBox(height:10),_approvalPath(),Flexible(child:Scrollbar(controller:_horizontalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_horizontalScroll,scrollDirection:Axis.horizontal,child:Scrollbar(controller:_verticalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_verticalScroll,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList()))))))])),actions:_actions(user,status,lines));}
   /// The buttons, derived from the document's own state and the caller's
   /// permissions.
   ///
@@ -211,12 +212,15 @@ class _TransferDialogState extends ConsumerState<_TransferDialog>{
   /// only when the pending level names a permission this person holds. The
   /// backend enforces the same rules; hiding a button is courtesy, not the
   /// control.
-  List<Widget> _actions(Json? user,String status,List<Json> lines){
-    final can=(String permission)=>user?.can(permission)??false;
+  List<Widget> _actions(AppUser? user,String status,List<Json> lines){
+    bool can(String permission)=>user?.can(permission)??false;
     final configured=approvalPath?['source']=='POLICY';
     final levels=(approvalPath?['levels'] as List? ?? const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
-    final pending=levels.isEmpty?null:levels.cast<Map<String,dynamic>?>().firstWhere((l)=>l?['state']=='PENDING',orElse:()=>null);
-    final mayDecide=pending==null?false:(can('${pending['permission']}')&&(pending['roleCode']==null||(user?.hasRole('${pending['roleCode']}')??false)));
+    Map<String,dynamic>? pending;
+    for(final level in levels){if(level['state']=='PENDING'){pending=level;break;}}
+    final pendingPermission=pending?['permission'] as String?;
+    final pendingRole=pending?['roleCode'] as String?;
+    final mayDecide=pending!=null&&pendingPermission!=null&&can(pendingPermission)&&(pendingRole==null||(user?.hasRole(pendingRole)??false));
     return [
       if(status=='DRAFT'&&!configured&&can('inventory.transfer.review'))_action('review',t('مراجعة','Review')),
       if(status=='DRAFT'&&can('inventory.transfer.create'))_action('submit',t('إرسال للاعتماد','Submit for approval')),
