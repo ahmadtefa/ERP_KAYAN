@@ -151,6 +151,97 @@ jobs:
             & "$bin\pg_ctl.exe" -D $data -m immediate -w stop
           }
 
+  # The handover recorded that the Windows delivery path was never proven for
+  # this head: the only Windows evidence was a Backend build, and the workflow
+  # named "build only" actually builds the whole Setup. This job builds the
+  # Flutter desktop application alone, from this exact commit, and records what
+  # it produced. It is not an installer, not an installed-product test and not
+  # release evidence.
+  windows-app:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify checkout is the exact source head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw 'Checkout does not match the event source head.' }
+          Write-Host "Source commit: $actual"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      # Syntax first: every bundled script must at least parse on the same
+      # Windows PowerShell host Inno Setup invokes. The Work branch is the
+      # source the installer is built from, so this has to hold here too.
+      - name: Parse every bundled Windows PowerShell script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -LiteralPath 'distribution/windows' -Filter '*.ps1' -File -Recurse)
+          if ($files.Count -eq 0) { throw 'No Windows PowerShell runtime scripts were found.' }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $detail = ($errors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join '; '
+              throw "PowerShell syntax error in $($file.FullName): $detail"
+            }
+          }
+          Write-Host "PowerShell parser passed for $($files.Count) bundled scripts."
+      - name: Build Windows application (not Setup)
+        run: flutter build windows --release --no-pub
+      - name: Verify output exists and record its hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'build/windows/x64/runner/Release/erp_kayan.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows executable not found.' }
+          $file = Get-Item -LiteralPath $exe
+          if ($file.Length -eq 0) { throw 'Windows executable is empty.' }
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Application executable bytes: $($file.Length)"
+          Write-Host "Application executable SHA256: $hash"
+          Write-Host "::notice title=Windows application build::erp_kayan.exe built from $env:GITHUB_SHA ($($file.Length) bytes, SHA256 $hash)"
+          Write-Host 'Not an installer, not an installed-product test, and not release evidence.'
+      # The documented packaging command the installer script depends on did
+      # not exist, so the Windows build failed before producing an artifact.
+      # This runs it on Windows, in the same order build-installer.ps1 does.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies for the packaging command
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+      - name: Clean backend build (the packaging precondition)
+        working-directory: backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # A stale file from an earlier commit must not survive into a package.
+          [void](New-Item -ItemType Directory -Force -Path 'dist')
+          Set-Content -LiteralPath 'dist/stale-from-an-earlier-commit.js' -Value 'stale'
+          npm run build:clean
+          if ($LASTEXITCODE -ne 0) { throw 'The packaging command npm run build:clean failed.' }
+          if (-not (Test-Path -LiteralPath 'dist/src/main.js' -PathType Leaf)) { throw 'build:clean did not produce dist/src/main.js.' }
+          if (Test-Path -LiteralPath 'dist/stale-from-an-earlier-commit.js') { throw 'build:clean left a stale file in dist.' }
+          Write-Host 'build:clean removed the stale file and produced a clean compile.'
+
   flutter:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
