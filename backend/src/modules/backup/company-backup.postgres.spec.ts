@@ -147,6 +147,56 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
     }
   });
 
+  it('waits for an existing PostgreSQL writer and blocks a new writer through the JSON safety snapshot and transaction', async () => {
+    const snapshot = JSON.parse(JSON.stringify(await service.create(companyId))) as BackupFile;
+    const writer = new Client({ connectionString: cleanDatabaseUrl(process.env.DATABASE_URL ?? '') });
+    await writer.connect();
+    let releaseSafety!: () => void;
+    let safetyReady!: () => void;
+    const continueRestore = new Promise<void>((resolve) => { releaseSafety = resolve; });
+    const safetyReached = new Promise<void>((resolve) => { safetyReady = resolve; });
+    const internal = service as unknown as {
+      writeSafetyBackup(company: string, client: unknown): Promise<string>;
+    };
+    const original = internal.writeSafetyBackup.bind(service);
+    const spy = jest.spyOn(internal, 'writeSafetyBackup').mockImplementation(async (company, client) => {
+      const name = await original(company, client);
+      safetyReady();
+      await continueRestore;
+      return name;
+    });
+    let pending: Promise<unknown> | undefined;
+    try {
+      await writer.query('BEGIN');
+      await writer.query('UPDATE customers SET "nameEn" = $1 WHERE id = $2', ['Before safety', customerId]);
+      const restoring = service.restore(snapshot, companyId, { replace: true });
+      // The existing transaction holds a conflicting table lock. A snapshot
+      // must not be taken until that transaction has committed.
+      const earlySafety = await Promise.race([safetyReached.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250))]);
+      expect(earlySafety).toBe(false);
+      await writer.query('COMMIT');
+      await safetyReached;
+      let secondCompleted = false;
+      pending = prisma.customer.update({ where: { id: customerId }, data: { nameEn: 'After restore' } })
+        .then(() => { secondCompleted = true; });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(secondCompleted).toBe(false);
+      releaseSafety();
+      const result = await restoring;
+      await pending;
+      const safety = JSON.parse(await readFile(join(backupDir, result.safetyBackup), 'utf8')) as BackupFile;
+      expect(safety.tables.customer.find((row) => row.id === customerId)?.nameEn).toBe('Before safety');
+      expect((await prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).nameEn).toBe('After restore');
+    } finally {
+      releaseSafety();
+      await writer.query('ROLLBACK').catch(() => {});
+      await writer.end();
+      await pending?.catch(() => {});
+      spy.mockRestore();
+      await prisma.customer.update({ where: { id: customerId }, data: { nameEn: 'Original customer' } });
+    }
+  });
+
   it('reads all tables from one snapshot while another transaction commits changes', async () => {
     let signalRead!: () => void;
     let resume!: () => void;

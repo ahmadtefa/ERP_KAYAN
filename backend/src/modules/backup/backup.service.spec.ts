@@ -166,6 +166,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       .mockResolvedValue({ end: async () => {} });
     jest.spyOn(service as unknown as { assertNoInterruptedSystemRestore(): Promise<void> }, 'assertNoInterruptedSystemRestore')
       .mockResolvedValue(undefined);
+    jest.spyOn(service as unknown as { lockBusinessTables(client: unknown): Promise<void> }, 'lockBusinessTables')
+      .mockResolvedValue(undefined);
     controller = new BackupController(service, auditMock);
   });
 
@@ -531,7 +533,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
 
     test('refuses an older backup that omits a table containing live company data', async () => {
-      prismaMock.cashAccount.findMany.mockResolvedValueOnce([
+      txMock.cashAccount.findMany.mockResolvedValueOnce([
         { id: 'cash-account-live', companyId: COMPANY_ID, accountId: 'account-live' },
       ]);
 
@@ -547,13 +549,15 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
         tables: { account: [] },
       }, COMPANY_ID, { replace: true })).rejects.toThrow(/missing tables.*cashAccount/i);
 
-      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).toHaveBeenCalled();
+      expect(txMock.cashAccount.deleteMany).not.toHaveBeenCalled();
+      expect(txMock.$queryRawUnsafe).not.toHaveBeenCalled();
     });
 
     test('deletes cash and banking dependants before deleting their ledger accounts', async () => {
       // A child-table delete is scoped through the parent rows. Give the mock
       // one voucher so the allocation delete is exercised rather than skipped.
-      txMock.cashVoucher.findMany.mockResolvedValueOnce([{ id: 'voucher-demo' }]);
+      txMock.cashVoucher.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'voucher-demo' }]);
       await service.restore({
         format: 'kayan-backup',
         version: 1,
@@ -775,7 +779,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
         { id: 'p-sales-read', code: 'sales.invoices.read', module: 'sales' },
         { id: 'p-cash', code: 'cash.vouchers.read', module: 'cash' },
       ]);
-      txMock.role.findMany.mockResolvedValue([
+      txMock.role.findMany.mockResolvedValueOnce([]).mockResolvedValue([
         { id: 'role-admin', code: 'ADMIN' },
         { id: 'role-accountant', code: 'ACCOUNTANT' },
         { id: 'role-custom', code: 'SALES' },
@@ -812,7 +816,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
 
     test('promotes the restored ADMIN account only when no super administrator remains', async () => {
       txMock.permission.findMany.mockResolvedValue([]);
-      txMock.role.findMany.mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
+      txMock.role.findMany.mockResolvedValueOnce([]).mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
       txMock.user.count.mockResolvedValue(0);
       txMock.userRole.findFirst.mockResolvedValue({
         user: { id: 'user-admin', username: 'admin' },
@@ -830,7 +834,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
 
     test('never promotes anyone while a super administrator still exists', async () => {
       txMock.permission.findMany.mockResolvedValue([]);
-      txMock.role.findMany.mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
+      txMock.role.findMany.mockResolvedValueOnce([]).mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
       txMock.user.count.mockResolvedValue(2);
 
       await service.restore(emptyBackup(), COMPANY_ID, { replace: true });

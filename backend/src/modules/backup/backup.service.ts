@@ -331,8 +331,8 @@ export class BackupService {
   /** Save and re-read a private, uniquely named company recovery file. A file
    * that cannot be written or verified must prevent the destructive restore.
    * This is a company backup, not a whole-system or licence backup. */
-  private async writeSafetyBackup(companyId: string): Promise<string> {
-    const snapshot = await this.create(companyId);
+  private async writeSafetyBackup(companyId: string, client: RestoreClient): Promise<string> {
+    const snapshot = await this.createSnapshot(client, companyId);
     this.validate(snapshot);
     const body = Buffer.from(JSON.stringify(snapshot, (_key, value: unknown) =>
       typeof value === 'bigint' ? value.toString() : value), 'utf8');
@@ -678,31 +678,8 @@ export class BackupService {
           select: { id: true, isSuperAdmin: true },
         })
       : null;
-    const existing = await this.countExisting(requesterCompanyId);
-    const hasData = Object.values(existing).some((count) => count > 0);
-
-    // A backup made by an older app may not contain newer tables. Never
-    // interpret a missing table as an instruction to erase live data from it.
-    // A complete backup produced by this version includes every TABLES key.
-    const missingTablesWithLiveData = Object.entries(existing)
-      .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
-      .map(([model]) => model);
-    if (missingTablesWithLiveData.length > 0) {
-      throw new BadRequestException(
-        `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.`,
-      );
-    }
-
-    if (hasData && !options.replace) {
-      throw new BadRequestException(
-        `This company already holds data (${describe(existing)}). Confirm that you want to replace it to restore over it.`,
-      );
-    }
-
-    // Keep this copy even if the transaction fails or a valid but unintended
-    // archive is chosen. Transaction rollback protects failed writes; the copy
-    // is for a later, deliberate recovery of a successfully replaced company.
-    const safetyBackup = await this.writeSafetyBackup(requesterCompanyId);
+    let hasData = false;
+    let safetyBackup = '';
     const written: Record<string, number> = {};
     /// Rows the purge removed, reported by the record written at the end.
     let removedTrailRows = 0;
@@ -711,6 +688,28 @@ export class BackupService {
     // is neither the old one nor the new one.
     await this.prisma.$transaction(
       async (tx) => {
+        // PostgreSQL holds these locks until the transaction commits or rolls
+        // back, including if this process dies. They wait for current writers
+        // and prevent other database connections from writing while the
+        // safety snapshot is taken and the company is replaced.
+        await this.lockBusinessTables(tx);
+        const existing = await this.countExisting(requesterCompanyId, tx);
+        hasData = Object.values(existing).some((count) => count > 0);
+        const missingTablesWithLiveData = Object.entries(existing)
+          .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
+          .map(([model]) => model);
+        if (missingTablesWithLiveData.length > 0) {
+          throw new BadRequestException(
+            `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.`,
+          );
+        }
+        if (hasData && !options.replace) {
+          throw new BadRequestException(
+            `This company already holds data (${describe(existing)}). Confirm that you want to replace it to restore over it.`,
+          );
+        }
+        safetyBackup = await this.writeSafetyBackup(requesterCompanyId, tx);
+
         // Everything is cleared first, children before parents. An empty
         // company has nothing to clear and the same code runs anyway, so the
         // two paths are the same path.
@@ -1013,10 +1012,25 @@ export class BackupService {
     }
   }
 
-  private async countExisting(companyId: string): Promise<Record<string, number>> {
+  private async lockBusinessTables(tx: Prisma.TransactionClient): Promise<void> {
+    // Table names come from PostgreSQL itself, then are quoted as identifiers;
+    // no request or archive content is interpolated into this statement.
+    const tables = await tx.$queryRaw<Array<{ name: string }>>`
+      SELECT c.relname AS name
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+      ORDER BY c.relname
+    `;
+    if (tables.length === 0) throw new ServiceUnavailableException('Cannot lock the company database; no business tables were found.');
+    const names = tables.map(({ name }) => `"public"."${name.replace(/"/g, '""')}"`).join(', ');
+    await tx.$executeRawUnsafe(`LOCK TABLE ${names} IN SHARE ROW EXCLUSIVE MODE`);
+  }
+
+  private async countExisting(companyId: string, client: RestoreClient = this.prisma): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
     for (const spec of TABLES) {
-      const rows = await this.readTable(this.prisma, spec, companyId);
+      const rows = await this.readTable(client, spec, companyId);
       if (rows.length > 0) counts[spec.model] = rows.length;
     }
     return counts;
