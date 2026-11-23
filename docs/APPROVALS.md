@@ -148,3 +148,30 @@ recorded here so nobody later reads that red job as evidence about approvals.
 | Transfer integration | `backend/src/modules/inventory/stock-transfers.{service,controller}.ts` |
 | Schema | `backend/prisma/migrations/20261123170000_approval_policies/` |
 | Screen | `lib/features/inventory/presentation/screens/stock_transfers_screen.dart` |
+
+## 10. Prices a storekeeper must not see
+
+The price fix in section 5 has a second half. A transfer is *valued* using the
+item's purchase price, so if that price is readable by anyone who can move
+stock, the approval thresholds are readable too — and so is every supplier's
+margin. The two requirements are the same requirement.
+
+Verified over HTTP against a real server, with two real accounts:
+
+```
+ADMIN  182 permissions (inventory.cost.read, purchases.price.read, sales.price.read)
+       items[0] -> purchasePrice 100.0000, salePrice 150.0000
+
+STOREKEEPER  6 permissions, none of them a price permission
+       items[0] -> purchasePrice (absent), salePrice (absent)
+       keys: barcode, categoryId, code, companyId, ... reorderLevel, taxRate, unit, units
+```
+
+The keys are removed, not nulled: a field that is present-but-null invites a
+client to guess it holds a value, and the screen would then render a price
+column for somebody who is not allowed to read one. Without `inventory.items.read`
+the same request is refused outright with 403, and without a token with 401.
+
+Re-running the same two accounts is the regression test: if a price
+permission ever leaks into a stock-only role, or a redaction path is skipped,
+this payload changes.
