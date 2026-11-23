@@ -160,5 +160,16 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
-      - run: flutter analyze
+      - name: Analyze
+        run: |
+          set +e
+          flutter analyze > "$RUNNER_TEMP/analyze.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/analyze.log"
+          # Surface each diagnostic as an annotation so a failure is readable
+          # without downloading the raw log.
+          grep -E '^\s*(error|warning|info)\s+•' "$RUNNER_TEMP/analyze.log" | while IFS= read -r line; do
+            echo "::error title=flutter analyze::$line"
+          done
+          exit "$status"
       - run: flutter test
