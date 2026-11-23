@@ -300,18 +300,33 @@ export class StockTransfersService {
     if (needsItemPrice) {
       const items = await this.prisma.item.findMany({
         where: { companyId, id: { in: [...new Set(row.lines.map((line) => line.itemId))] } },
-        select: { id: true, purchasePrice: true, salePrice: true },
+        select: { id: true, purchasePrice: true },
       });
       for (const item of items) {
-        const price = item.purchasePrice ?? item.salePrice ?? new Prisma.Decimal(0);
-        itemPrices.set(item.id, new Prisma.Decimal(price));
+        // Only a purchase price is a cost. The selling price is what we hope to
+        // get for the goods, not what they are worth on the shelf, and using it
+        // would let a cheap-to-buy/expensive-to-sell item be valued upward into
+        // an approval rule it should never have needed - or, for a loss leader,
+        // downward out of one it should.
+        if (item.purchasePrice !== null) {
+          itemPrices.set(item.id, new Prisma.Decimal(item.purchasePrice));
+        }
       }
     }
+    // A line we cannot price is not a line worth zero: zero is a claim, and it
+    // is the claim that makes an amount threshold quietly stop applying.
+    let amountUnderstated = false;
     const amount = row.lines.reduce((sum, line) => {
       const recordedCost = line.unitCost ?? new Prisma.Decimal(0);
-      const unit = recordedCost.isZero()
-        ? (itemPrices.get(line.itemId) ?? recordedCost)
-        : recordedCost;
+      let unit = recordedCost;
+      if (recordedCost.isZero()) {
+        const known = itemPrices.get(line.itemId);
+        if (known === undefined) {
+          amountUnderstated = true;
+          return sum;
+        }
+        unit = known;
+      }
       return sum.add(line.requestedQuantity.mul(unit));
     }, new Prisma.Decimal(0));
     return this.approvals.chainFor(companyId, 'STOCK_TRANSFER', {
@@ -319,6 +334,7 @@ export class StockTransfersService {
       sourceWarehouseId: row.sourceWarehouseId,
       destinationWarehouseId: row.destinationWarehouseId,
       amount: amount.toFixed(4),
+      amountUnderstated,
       quantity: quantity.toString(),
     });
   }

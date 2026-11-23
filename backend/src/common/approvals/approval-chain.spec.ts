@@ -81,6 +81,35 @@ describe('approval chain resolution', () => {
     expect(policyMatches(policy({ minimumAmount: '1' }), subject({ amount: null }))).toBe(false);
   });
 
+  it('never lets an unpriceable document escape a money rule', () => {
+    // The dangerous case: a company guards moves over 10,000, and an item has
+    // no cost on file. Valuing it at zero would silently pass the rule, which
+    // is the guard deciding its own applicability. An understated amount is
+    // therefore treated as at or above every money threshold.
+    const expensive = policy({ id: 'big', priority: 1, minimumAmount: '10000' });
+    expect(policyMatches(expensive, subject({ amount: '0.0000' }))).toBe(false);
+    expect(
+      policyMatches(expensive, subject({ amount: '0.0000', amountUnderstated: true })),
+    ).toBe(true);
+    // It escalates to the guard, it does not replace it: the resolved chain is
+    // the same rule that a genuinely expensive move would face.
+    const chain = resolveChain([expensive], subject({ amount: '0.0000', amountUnderstated: true }));
+    expect(chain.source).toBe('POLICY');
+    expect(chain.policyId).toBe('big');
+  });
+
+  it('keeps the cheaper rule first when a document cannot be valued', () => {
+    // Understating must not reorder the company's rules - it only widens
+    // whether each money condition is met.
+    const small = policy({ id: 'small', priority: 10, minimumAmount: '5' });
+    const large = policy({ id: 'large', priority: 20, minimumAmount: '999999' });
+    const chain = resolveChain(
+      [large, small],
+      subject({ amount: '0.0000', amountUnderstated: true }),
+    );
+    expect(chain.policyId).toBe('small');
+  });
+
   it('picks the lowest priority and breaks a tie stably', () => {
     const low = policy({ id: 'b', priority: 10 });
     const high = policy({ id: 'a', priority: 20 });

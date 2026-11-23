@@ -44,6 +44,12 @@ export interface ApprovalSubject {
   destinationWarehouseId: string | null;
   amount: string | null;
   quantity: string | null;
+  /// True when at least one line had no cost we could trust, so `amount`
+  /// understates the move. A policy written against a money threshold cannot
+  /// be allowed to decide whether its own guard applies, so the document is
+  /// treated as *at or above every* amount threshold. The real cost still has
+  /// to be filled in before the goods leave; see `stock-transfers.service.ts`.
+  amountUnderstated?: boolean;
 }
 
 export interface RecordedDecision {
@@ -107,7 +113,10 @@ export function policyMatches(policy: ApprovalPolicyRule, subject: ApprovalSubje
   if (policy.branchId && !subject.branchIds.includes(policy.branchId)) return false;
   if (policy.sourceWarehouseId && policy.sourceWarehouseId !== subject.sourceWarehouseId) return false;
   if (policy.destinationWarehouseId && policy.destinationWarehouseId !== subject.destinationWarehouseId) return false;
-  if (!atLeast(subject.amount, policy.minimumAmount)) return false;
+  // An understated amount never disqualifies a money rule: the guard's whole
+  // job is to catch the expensive move, and "we could not price it" is not
+  // evidence that it was cheap.
+  if (!subject.amountUnderstated && !atLeast(subject.amount, policy.minimumAmount)) return false;
   if (!atLeast(subject.quantity, policy.minimumQuantity)) return false;
   return true;
 }
