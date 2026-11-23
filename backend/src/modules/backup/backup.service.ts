@@ -1016,7 +1016,7 @@ export class BackupService {
     // Table names come from PostgreSQL itself, then are quoted as identifiers;
     // no request or archive content is interpolated into this statement.
     const tables = await tx.$queryRaw<Array<{ name: string }>>`
-      SELECT c.relname AS name
+      SELECT c.relname::text AS name
       FROM pg_catalog.pg_class c
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
