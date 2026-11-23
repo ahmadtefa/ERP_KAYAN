@@ -35,12 +35,27 @@ const reviewed = [
   // 3.47.6, the version every other workflow here uses.
   'barcode-quantity-focused.yml',
   'kayan-acceptance.yml', 'windows-evaluation-setup.yml',
+  // Work-only tests: disposable PostgreSQL on Linux/Windows and Flutter;
+  // no signing, packaging, install, deployment, production secrets or writes.
+  'work-restore-safety.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
   const triggers = read(name).on;
   for (const event of ['pull_request_target', 'release', 'workflow_run', 'schedule']) {
     assert.equal(Object.hasOwn(triggers, event), false, `${name}: unreviewed ${event} trigger`);
+  }
+}
+const restoreSafety = read('work-restore-safety.yml');
+assert.deepEqual(restoreSafety.on.push.branches, ['work/restore-recovery-20261123']);
+assert.deepEqual(restoreSafety.permissions, { contents: 'read' });
+assert.deepEqual(Object.keys(restoreSafety.jobs).sort(), ['flutter', 'postgres-linux', 'postgres-windows']);
+for (const job of Object.values(restoreSafety.jobs)) {
+  assert.equal(job.environment, undefined);
+  assert.equal(job['continue-on-error'], undefined);
+  for (const step of job.steps) {
+    assert.equal(step['continue-on-error'], undefined);
+    assert.doesNotMatch(String(step.run ?? ''), /secrets\.|build-installer|ISCC|gh release|supabase|license-generator|publish-verified/);
   }
 }
 // Application acceptance can run independently of every Windows/issuer job.

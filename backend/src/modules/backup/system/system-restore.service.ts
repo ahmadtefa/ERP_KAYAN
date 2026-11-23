@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Client } from 'pg';
@@ -16,6 +17,7 @@ import { MaintenanceService } from '../../../common/maintenance/maintenance';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from '../restore-access';
 import { CompleteBackupService } from './complete-backup.service';
+import { FullBackupService } from '../full-backup.service';
 import {
   DESTRUCTIVE_PHASES,
   RestoreJournalStore,
@@ -122,6 +124,7 @@ export class SystemRestoreService implements OnModuleInit {
     private readonly gate: RestoreGateService,
     private readonly backups: CompleteBackupService,
     private readonly journals: RestoreJournalStore,
+    @Optional() private readonly dumps?: FullBackupService,
   ) {}
 
   /**
@@ -639,6 +642,13 @@ export class SystemRestoreService implements OnModuleInit {
             'The interrupted restore stopped before any data was replaced, so there was nothing ' +
             'to recover. The journal was cleared.',
         };
+      }
+      if (journal.kind === 'dump') {
+        if (!this.dumps) throw new ServiceUnavailableException('DUMP recovery is unavailable. Maintenance remains active.');
+        await this.dumps.recoverDumpJournal(journal);
+        this.gate.forget();
+        return { recovered: true, phase: journal.phase, safetyBackup: journal.safetyBackup,
+          detail: 'The interrupted DUMP restore was recovered from its verified safety backup.' };
       }
       const result = await this.rollback(journal, userId);
       await this.gate.forget();

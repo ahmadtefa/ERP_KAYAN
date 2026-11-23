@@ -9,6 +9,7 @@ import { AuditModule } from './common/audit/audit.module';
 import { LicensingModule } from './modules/licensing/licensing.module';
 import { LicenseGuard } from './modules/licensing/license.guard';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
+import { MaintenanceAdmissionGuard } from './common/maintenance/maintenance';
 import { WarehouseModule } from './common/warehouse/warehouse.module';
 import { PrintSettingsModule } from './common/print/print-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -73,6 +74,7 @@ import { SearchModule } from './modules/search/search.module';
     HealthModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: MaintenanceAdmissionGuard },
     // Order matters. The rate limit runs before authentication, so a flood of
     // password guesses is turned away before any hashing work happens.
     { provide: APP_GUARD, useClass: RateLimitGuard },

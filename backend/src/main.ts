@@ -6,6 +6,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { coordinateBusinessStartup } from './common/maintenance/startup-coordination';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { isCorsOriginAllowed } from './common/security/cors-origin';
 import {
@@ -21,6 +22,7 @@ async function bootstrap() {
     bodyParser: false,
   });
   const logger = new Logger('Bootstrap');
+  coordinateBusinessStartup(app);
 
   // The first-run form can carry a resized company logo as base64 JSON. Keep
   // the parser bounded (not Express's 100 KB default, and not unlimited).

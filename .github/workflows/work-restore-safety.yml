@@ -1,0 +1,127 @@
+name: Work restore safety (no Installer)
+
+on:
+  push:
+    branches: ['work/restore-recovery-20261123']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_acceptance
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_acceptance"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_acceptance
+      KAYAN_TEST_PG_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+      DATABASE_URL_KAYAN_ROUNDTRIP: postgresql://ci:ci@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: PostgreSQL 17 tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/patch-adapter-pg-name-type.mjs
+      - run: npx prisma generate
+      - run: node scripts/apply-migrations.mjs
+      - run: npm run build
+      - name: Workflow safety inventory
+        run: node ../scripts/ci-workflow-safety.test.cjs
+      - name: Changed production files lint
+        run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
+      - name: Focused regression tests
+        run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
+      - name: JSON and DUMP real PostgreSQL regression
+        env:
+          KAYAN_COMPANY_BACKUP_PG: '1'
+          KAYAN_REAL_PG_TESTS: '1'
+        run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts
+      - name: Independent APIs and killed DUMP owner
+        run: node --test scripts/restore-multiprocess.test.cjs
+
+  postgres-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npm run build
+      - name: Disposable PostgreSQL and killed restore owner on Windows
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pg = Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object { [int]$_.Name } -Descending | Select-Object -First 1
+          if (-not $pg) { throw 'PostgreSQL tools are required; this test must not be skipped.' }
+          $bin = Join-Path $pg.FullName 'bin'
+          $env:PATH = "$bin;$env:PATH"
+          $data = Join-Path $env:RUNNER_TEMP 'kayan-restore-pg'
+          & "$bin\initdb.exe" -D $data -U ci -A trust --no-locale -E UTF8
+          if ($LASTEXITCODE -ne 0) { throw 'initdb failed' }
+          & "$bin\pg_ctl.exe" -D $data -l "$env:RUNNER_TEMP\kayan-restore-pg.log" -o '-p 55432' -w start
+          if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL did not start' }
+          try {
+            $env:KAYAN_TEST_PG_URL = 'postgresql://ci@127.0.0.1:55432/postgres'
+            node --test scripts/restore-multiprocess.test.cjs
+            if ($LASTEXITCODE -ne 0) { throw 'Windows restore safety test failed' }
+          } finally {
+            & "$bin\pg_ctl.exe" -D $data -m immediate -w stop
+          }
+
+  flutter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze
+      - run: flutter test

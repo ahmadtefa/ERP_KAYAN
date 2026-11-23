@@ -144,8 +144,14 @@ export class ExpiryAlertScheduler implements OnModuleInit, OnModuleDestroy {
     }
     // Admission and tracking are synchronous, so maintenance either sees this
     // pass and drains it, or starts first and makes this tick skip.
-    const release = this.maintenance.trackBusinessRequest();
     this.running = true;
+    const release = this.maintenance.coordinatesProcesses
+      ? await this.maintenance.admitBusinessRequest().catch(() => null)
+      : this.maintenance.trackBusinessRequest();
+    if (!release) {
+      this.running = false;
+      return { companies: 0, raised: 0, closed: 0, failed: 0, skipped: true };
+    }
     let companies = 0;
     let raised = 0;
     let closed = 0;

@@ -1,11 +1,14 @@
 import {
   CallHandler,
+  CanActivate,
   ExecutionContext,
   Injectable,
+  Optional,
   NestInterceptor,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { finalize, Observable } from 'rxjs';
+import { defer, finalize, Observable, switchMap } from 'rxjs';
+import { DatabaseMaintenanceBarrier } from './database-barrier';
 
 /**
  * The maintenance switch.
@@ -19,6 +22,25 @@ import { finalize, Observable } from 'rxjs';
  */
 @Injectable()
 export class MaintenanceService {
+  constructor(@Optional() private readonly barrier?: DatabaseMaintenanceBarrier) {}
+
+  get coordinatesProcesses(): boolean { return Boolean(this.barrier); }
+
+  async admitBusinessRequest(): Promise<() => void> {
+    if (this.active) throw new ServiceUnavailableException('The database is in maintenance mode.');
+    const releaseDatabase = await this.barrier?.admit();
+    if (this.active) {
+      await releaseDatabase?.();
+      throw new ServiceUnavailableException('The database is in maintenance mode.');
+    }
+    const releaseLocal = this.trackBusinessRequest();
+    return () => {
+      // Keep the distributed lease until the handler has finished, including
+      // errors; releasing it is independent of the HTTP client's connection.
+      releaseLocal();
+      void releaseDatabase?.().catch(() => {});
+    };
+  }
   private active = false;
   private detail: string | null = null;
   private since: Date | null = null;
@@ -81,6 +103,45 @@ export class MaintenanceService {
   }
 }
 
+interface MaintenanceRequest {
+  method: string;
+  path: string;
+  maintenanceLease?: () => void;
+  maintenanceHandlerStarted?: boolean;
+}
+
+function bypassMaintenance(request: MaintenanceRequest): boolean {
+  const method = request.method.toUpperCase();
+  const path = request.path.replace(/^\/api\/v1(?=\/|$)/, '').replace(/\/+$/, '') || '/';
+  if (method === 'POST' && [
+    '/backup/restore', '/backup/full/restore', '/backup/complete/restore', '/backup/complete/recovery/resume',
+  ].includes(path)) return true;
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return path === '/health' || path.startsWith('/health/') || [
+    '/backup/full', '/backup/full/status', '/backup/full/capabilities',
+    '/backup/complete/status', '/backup/complete/recovery',
+  ].includes(path) || /^\/backup\/full\/[^/]+\/download\/?$/.test(path);
+}
+
+/** Runs before authentication so a principal cannot be read before a restore
+ * and then admitted with stale session/permission data after it finishes. */
+@Injectable()
+export class MaintenanceAdmissionGuard implements CanActivate {
+  constructor(private readonly maintenance: MaintenanceService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<MaintenanceRequest>();
+    if (bypassMaintenance(request)) return true;
+    const release = await this.maintenance.admitBusinessRequest();
+    request.maintenanceLease = release;
+    // A later guard can reject before the interceptor starts. Finish is safe
+    // then; a mere client disconnect is deliberately not a drain signal.
+    const response = context.switchToHttp().getResponse<{ once: (name: string, callback: () => void) => void }>();
+    response.once('finish', () => { if (!request.maintenanceHandlerStarted) release(); });
+    return true;
+  }
+}
+
 /**
  * Blocks business reads and writes while maintenance is on. Reporting an
  * incomplete database as real books is unsafe even when no row is changed.
@@ -91,6 +152,11 @@ export class MaintenanceInterceptor implements NestInterceptor {
   constructor(private readonly maintenance: MaintenanceService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const admitted = context.switchToHttp().getRequest<MaintenanceRequest>();
+    if (admitted.maintenanceLease) {
+      admitted.maintenanceHandlerStarted = true;
+      return defer(() => next.handle()).pipe(finalize(admitted.maintenanceLease));
+    }
     const request = context.switchToHttp().getRequest<{
       method: string;
       path: string;
@@ -112,6 +178,11 @@ export class MaintenanceInterceptor implements NestInterceptor {
     );
     if ((isRead && (safeDiagnostic || safeBackup)) || isRestoreRequest) return next.handle();
     if (!this.maintenance.isActive) {
+      if (this.maintenance.coordinatesProcesses) {
+        return defer(() => this.maintenance.admitBusinessRequest()).pipe(
+          switchMap((release) => defer(() => next.handle()).pipe(finalize(release))),
+        );
+      }
       const release = this.maintenance.trackBusinessRequest();
       try {
         return next.handle().pipe(finalize(release));

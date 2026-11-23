@@ -136,8 +136,11 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
   /// bring down the API the rest of the company is using.
   private async tick(): Promise<void> {
     if (this.running || this.maintenance.isActive) return;
-    const release = this.maintenance.trackBusinessRequest();
     this.running = true;
+    const release = this.maintenance.coordinatesProcesses
+      ? await this.maintenance.admitBusinessRequest().catch(() => null)
+      : this.maintenance.trackBusinessRequest();
+    if (!release) { this.running = false; return; }
     try {
       const companies = await this.prisma.company.findMany({
         where: { deletedAt: null },

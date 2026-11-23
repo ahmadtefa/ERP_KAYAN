@@ -5,8 +5,19 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { FullBackupService } from './full-backup.service';
+import { RestoreJournalStore } from './system/restore-journal';
 
 jest.mock('child_process', () => ({ ...jest.requireActual('child_process'), execFile: jest.fn() }));
+// Keep tool outcomes under the existing per-test execFile fault injector;
+// supervisor/owner death is exercised separately with real PostgreSQL.
+jest.mock('./system/restore-tool', () => ({
+  runRestoreTool: (input: { command: string; args: string[]; timeout: number; env: NodeJS.ProcessEnv }) =>
+    new Promise<void>((resolve, reject) => {
+      childProcess.execFile(input.command, input.args, { timeout: input.timeout, env: input.env }, (error) => {
+        if (error) reject(error); else resolve();
+      });
+    }),
+}));
 
 describe('full restore failure safety', () => {
   let dir: string;
@@ -15,9 +26,11 @@ describe('full restore failure safety', () => {
   let internals: { [key: string]: jest.Mock };
   let licensing: { reconcile: jest.Mock };
   const originalDatabaseUrl = process.env.DATABASE_URL;
+  const originalBackupDir = process.env.KAYAN_BACKUP_DIR;
   const uploaded = { buffer: Buffer.from('PGDMP synthetic archive'), originalName: 'test.dump' };
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'kayan-restore-test-'));
+    process.env.KAYAN_BACKUP_DIR = dir;
     maintenance = new MaintenanceService();
     licensing = { reconcile: jest.fn().mockResolvedValue(undefined) };
     service = new FullBackupService(
@@ -50,6 +63,8 @@ describe('full restore failure safety', () => {
     jest.mocked(childProcess.execFile).mockReset();
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
+    if (originalBackupDir === undefined) delete process.env.KAYAN_BACKUP_DIR;
+    else process.env.KAYAN_BACKUP_DIR = originalBackupDir;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -164,6 +179,9 @@ describe('full restore failure safety', () => {
   it('holds maintenance when licence reconciliation fails after restore', async () => {
     licensing.reconcile.mockRejectedValue(new Error('synthetic failure'));
     await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(await new RestoreJournalStore(dir).read()).toMatchObject({
+      kind: 'dump', phase: 'db-restored', safetyBackup: 'kayan-safety-test.dump',
+    });
     expect(maintenance.isActive).toBe(true);
   });
 

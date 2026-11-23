@@ -36,8 +36,9 @@ import {
   verifyRestoredShape,
 } from './system/pg-support';
 import { scratchDatabaseActor } from './system/restore-admin';
-import { isUnfinished, RestoreJournalStore } from './system/restore-journal';
+import { isUnfinished, RestoreJournalStore, type RestoreJournal } from './system/restore-journal';
 import { acquireRestoreLock } from './system/restore-lock';
+import { runRestoreTool } from './system/restore-tool';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -827,6 +828,8 @@ export class FullBackupService {
     // restore and licence reconciliation, or verified recovery, completes.
     let maintenanceOwned = false;
     let safeToReleaseMaintenance = false;
+    const journals = new RestoreJournalStore(backupDirectory());
+    let dumpJournal: RestoreJournal | null = null;
     try {
       // 1b. Read the archive's table of contents. This is what catches a
       //     truncated download or a file from a foreign database before any
@@ -923,13 +926,24 @@ export class FullBackupService {
       const safety = await this.createSafety();
       this.logger.log(`Safety backup taken: ${safety.name}`);
 
+      // Persist BEFORE touching the live schema. All other API processes read
+      // this journal while admitting business work, including after a crash.
+      dumpJournal = await journals.write({
+        kind: 'dump', id: randomUUID(), phase: 'safety-taken', source: label,
+        startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        sourceManifest: { createdAt: null, appVersion: null, companies: null, files: null },
+        safetyBackup: safety.name, previousUploads: null, stagingDir: null,
+        detail: null, checks: [],
+      });
+
       // Once destruction starts, only a verified restore or recovery may
       // release the maintenance switch.
       safeToReleaseMaintenance = false;
+      dumpJournal = await journals.advance(dumpJournal, 'db-replacing');
       let restored = false;
       try {
         await this.cleanDatabaseSchema();
-        await run(tools.pgRestore as string, [
+        await runLiveRestore(tools.pgRestore as string, [
           '--exit-on-error',
           '--no-owner',
           '--no-privileges',
@@ -938,10 +952,14 @@ export class FullBackupService {
           staging,
         ]);
         restored = true;
+        dumpJournal = await journals.advance(dumpJournal, 'db-restored');
       } catch (error) {
         this.logger.error(`pg_restore failed (${safeBackupFailure(error)}).`);
         // The database may be half-replaced. Put the safety copy back.
+        dumpJournal = await journals.advance(dumpJournal, 'rolling-back');
         await this.recoverFrom(safety.name, tools.pgRestore as string);
+        dumpJournal = await journals.advance(dumpJournal, 'rolled-back');
+        await journals.clear();
         safeToReleaseMaintenance = true;
         throw new ServiceUnavailableException(
           'The restore failed part way through. The safety backup taken just ' +
@@ -955,7 +973,10 @@ export class FullBackupService {
         const check = await this.postRestoreCheck();
         if (!check.ok) {
           this.logger.error('Post-restore validation failed.');
+          dumpJournal = await journals.advance(dumpJournal, 'rolling-back');
           await this.recoverFrom(safety.name, tools.pgRestore as string);
+          dumpJournal = await journals.advance(dumpJournal, 'rolled-back');
+          await journals.clear();
           safeToReleaseMaintenance = true;
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
@@ -1037,6 +1058,8 @@ export class FullBackupService {
           'تعذر تسجيل تدقيق الاستعادة؛ يبقى النظام في وضع الصيانة. / Restore audit failed; maintenance remains active.',
         );
       }
+      await journals.advance(dumpJournal, 'verified');
+      await journals.clear();
       safeToReleaseMaintenance = true;
 
       return {
@@ -1057,6 +1080,24 @@ export class FullBackupService {
       await unlink(staging).catch(() => {});
       if (maintenanceOwned && safeToReleaseMaintenance) this.maintenance.end();
     }
+  }
+
+  /** Called only while the shared restore ownership/barrier is held. */
+  async recoverDumpJournal(journal: RestoreJournal): Promise<void> {
+    if (journal.kind !== 'dump' || !journal.safetyBackup) {
+      throw new ServiceUnavailableException('The DUMP recovery journal has no safety backup.');
+    }
+    const tools = this.requireTools();
+    const journals = new RestoreJournalStore(backupDirectory());
+    this.maintenance.begin('Recovering an interrupted database archive restore.');
+    await this.maintenance.waitForBusinessRequests();
+    // Verify the safety file before the first destructive statement.
+    await this.verify(journal.safetyBackup);
+    await journals.advance(journal, 'rolling-back');
+    await this.recoverFrom(journal.safetyBackup, tools.pgRestore as string);
+    await journals.advance(journal, 'rolled-back');
+    await journals.clear();
+    this.maintenance.end();
   }
 
   /**
@@ -1096,7 +1137,7 @@ export class FullBackupService {
     try {
       const path = this.safePath(name);
       await this.cleanDatabaseSchema();
-      await run(pgRestore, [
+      await runLiveRestore(pgRestore, [
         '--exit-on-error',
         '--no-owner',
         '--no-privileges',
@@ -1447,6 +1488,10 @@ function safeBackupFailure(error: unknown): string {
 /// Runs a command without copying its stderr or arguments into exceptions.
 function run(command: string, args: string[], timeout = 600_000, env?: NodeJS.ProcessEnv): Promise<string> {
   return runCapture(command, args, timeout, env);
+}
+
+function runLiveRestore(command: string, args: string[]): Promise<void> {
+  return runRestoreTool({ command, args, timeout: 600_000, env: { ...process.env, ...connectionEnv() } });
 }
 
 function runCapture(

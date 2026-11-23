@@ -1,0 +1,2 @@
+export const BUSINESS_BARRIER_KEY = 918_273_646;
+export const RESTORE_TOOL_LOCK_KEY = 918_273_647;

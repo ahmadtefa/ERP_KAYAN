@@ -48,6 +48,7 @@ export const DESTRUCTIVE_PHASES: RestorePhase[] = [
 export const FINISHED_PHASES: RestorePhase[] = ['rolled-back'];
 
 export interface RestoreJournal {
+  kind?: 'dump' | 'complete';
   id: string;
   startedAt: string;
   updatedAt: string;

@@ -5,6 +5,7 @@ import { mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Client } from 'pg';
+import { runRestoreTool } from './restore-tool';
 
 import { sanitiseLicence, type SanitisedLicence } from './manifest';
 
@@ -574,6 +575,13 @@ export async function pgRestoreInto(database: string, dumpPath: string): Promise
       'pg_restore was not found on this machine, so a backup cannot be restored here. ' +
         'Set KAYAN_PG_RESTORE to the pg_restore of the PostgreSQL this database uses.',
     );
+  }
+  if (database === databaseNameFrom()) {
+    await runRestoreTool({ command: tools.pgRestore, args: [
+      '--exit-on-error', '--no-owner', '--no-privileges', '--no-password',
+      `--dbname=${database}`, dumpPath,
+    ], timeout: 30 * 60_000, env: { ...process.env, ...connectionEnv() } });
+    return;
   }
   await runCapture(
     tools.pgRestore,
