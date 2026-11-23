@@ -14,6 +14,7 @@ import {
   CurrentUser,
 } from "../../common/decorators/current-user.decorator";
 import { warehouseScopeOf } from "../../common/warehouse/warehouse.service";
+import { redactPriceFields } from "../../common/auth/price-redaction";
 import {
   mayReadCompanyAggregates,
   redactCompanyAggregates,
@@ -27,6 +28,26 @@ import {
   resolveInventoryReportAccess,
   type InventoryReportQuery,
 } from "./inventory-report-access";
+
+/** Cost-named columns that only some inventory reports produce. They are
+ * added to the shared cost set, which already covers unitCost, averageCost,
+ * valuation and the stock-value family. */
+const REPORT_COST_KEYS = [
+  "totalCost",
+  "value",
+  "balanceValue",
+  "varianceValue",
+  "valueIn",
+  "valueOut",
+  "netValue",
+  "ledgerValue",
+  "difference",
+  "estimatedOrderCost",
+] as const;
+
+/** Purchase-price columns in reports that predate the shared `estimatedOrderCost`
+ * cost entry. Kept explicit so a purchase-price denial cannot silently widen. */
+const REPORT_PURCHASE_PRICE_KEYS = ["purchasePrice", "estimatedOrderCost"] as const;
 
 @Controller("inventory/reports")
 export class InventoryAnalysisController {
@@ -115,42 +136,27 @@ export class InventoryAnalysisController {
     }
 
     const scope = access.branchId ? [access.branchId] : warehouseScopeOf(user);
+    // Redaction makes the shape vary by permission, so the public return type
+    // stays the service's report type rather than the narrowed redacted one.
     return this.service
       .run(slug, user.companyId, filter, scope)
-      .then((report) => {
-        const hide = (value: unknown, remove: Set<string>): unknown => {
-          if (Array.isArray(value))
-            return value.map((child) => hide(child, remove));
-          if (!value || typeof value !== "object") return value;
-          return Object.fromEntries(
-            Object.entries(value as Record<string, unknown>)
-              .filter(([key]) => !remove.has(key))
-              .map(([key, child]) => [key, hide(child, remove)]),
-          );
-        };
-        const hideCosts = new Set([
-          "unitCost",
-          "totalCost",
-          "averageCost",
-          "value",
-          "balanceValue",
-          "varianceValue",
-          "valueIn",
-          "valueOut",
-          "netValue",
-          "stockValue",
-          "ledgerValue",
-          "difference",
-          "varianceValue",
-          "estimatedOrderCost",
-        ]);
-        const hidePurchasePrices = new Set([
-          "purchasePrice",
-          "estimatedOrderCost",
-        ]);
-        let safe: unknown = report;
-        if (!access.canReadCost) safe = hide(safe, hideCosts);
-        if (!access.canReadPurchasePrice) safe = hide(safe, hidePurchasePrices);
+      .then((report): unknown => {
+        // The report figures are named per report, so the report-specific
+        // names join the shared redaction sets instead of a second recursive
+        // walk living here. One routine decides what leaves the API.
+        const safe = redactPriceFields(
+          report,
+          {
+            sale: false,
+            purchase: access.canReadPurchasePrice,
+            cost: access.canReadCost,
+          },
+          null,
+          {
+            costKeys: REPORT_COST_KEYS,
+            purchaseKeys: REPORT_PURCHASE_PRICE_KEYS,
+          },
+        );
         return mayReadCompanyAggregates(user)
           ? safe
           : redactCompanyAggregates(safe);
