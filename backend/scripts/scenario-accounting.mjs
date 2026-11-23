@@ -1475,6 +1475,13 @@ async function main() {
         Number(preview.data?.current?.account ?? 0) > 0,
       `status ${preview.status}, belongs ${preview.data?.belongsToThisCompany}, existing accounts ${preview.data?.current?.account ?? 0}`,
     );
+    const changedName = `Changed after backup ${stamp}`;
+    const changedCustomer = await api(`/parties/customers/${encodeURIComponent(customer.id)}`, {
+      method: 'PATCH', json: { nameEn: changedName },
+    });
+    check('customer is changed through the API after the JSON snapshot',
+      changedCustomer.status < 300 && changedCustomer.data?.nameEn === changedName,
+      `status ${changedCustomer.status}`);
     const jsonRestored = await uploadJsonBackup('/backup/restore?replace=true', companyBackup);
     check(
       'the company JSON backup restores into the disposable PostgreSQL company',
@@ -1482,6 +1489,19 @@ async function main() {
         Number(jsonRestored.data?.total ?? 0) > 0,
       `status ${jsonRestored.status}, replaced ${jsonRestored.data?.replaced}, rows ${jsonRestored.data?.total ?? 0}`,
     );
+    // Verify persisted values directly rather than inferring success from HTTP.
+    // On failure the pre-restore change must remain, not a partial replacement.
+    const restoredDatabase = new pg.Client({ connectionString: DATABASE_URL });
+    await restoredDatabase.connect();
+    try {
+      const rows = await restoredDatabase.query('SELECT "nameEn" FROM customers WHERE id = $1', [customer.id]);
+      const expectedName = jsonRestored.status < 300 ? customer.nameEn : changedName;
+      check('PostgreSQL contains the correct customer value after JSON restore or refusal',
+        rows.rows.length === 1 && rows.rows[0].nameEn === expectedName,
+        `rows ${rows.rows.length}, outcome ${jsonRestored.status < 300 ? 'restored' : 'refused'}`);
+    } finally {
+      await restoredDatabase.end();
+    }
     // Company JSON restores deliberately invalidate every restored user's
     // prior session, even when the archived tokenVersion is unchanged.
     const oldSessionAfterRestore = await api('/auth/me');
