@@ -172,10 +172,11 @@ const run = process.env.KAYAN_COMPANY_BACKUP_PG === '1';
       const restoring = service.restore(snapshot, companyId, { replace: true });
       // The existing transaction holds a conflicting table lock. A snapshot
       // must not be taken until that transaction has committed.
-      const earlySafety = await Promise.race([safetyReached.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250))]);
+      const failedRestore = restoring.then(() => { throw new Error('Restore finished before the safety checkpoint'); });
+      const earlySafety = await Promise.race([safetyReached.then(() => true), failedRestore, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250))]);
       expect(earlySafety).toBe(false);
       await writer.query('COMMIT');
-      await safetyReached;
+      await Promise.race([safetyReached, failedRestore]);
       let secondCompleted = false;
       pending = prisma.customer.update({ where: { id: customerId }, data: { nameEn: 'After restore' } })
         .then(() => { secondCompleted = true; });
