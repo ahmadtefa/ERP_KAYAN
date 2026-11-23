@@ -205,10 +205,23 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = 'build/windows/x64/runner/Release/erp_kayan.exe'
+          $release = 'build/windows/x64/runner/Release'
+          $exe = "$release/erp_kayan.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows executable not found.' }
           $file = Get-Item -LiteralPath $exe
           if ($file.Length -eq 0) { throw 'Windows executable is empty.' }
+
+          # erp_kayan.exe is only the C++ runner shell. In a release build the
+          # application itself is the engine DLL and the AOT snapshot, so a
+          # present-but-empty exe must not be recorded as a working build.
+          foreach ($required in @('flutter_windows.dll', 'data/icudtl.dat', 'data/app.so')) {
+            $path = Join-Path $release $required
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing release component: $required" }
+            $size = (Get-Item -LiteralPath $path).Length
+            if ($size -eq 0) { throw "Release component is empty: $required" }
+            Write-Host ("{0,12}  {1}" -f $size, $required)
+          }
+
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "Application executable bytes: $($file.Length)"
           Write-Host "Application executable SHA256: $hash"

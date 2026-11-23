@@ -64,6 +64,8 @@ assert.equal(windowsApp.environment, undefined);
 assert.equal(windowsApp['continue-on-error'], undefined);
 assert.deepEqual(windowsApp.permissions, undefined, 'the job inherits contents: read');
 const windowsAppSteps = windowsApp.steps.map(step => String(step.run || '')).join('\n');
+assert.match(windowsAppSteps, /data\/app\.so/,
+  'the release payload, not just the runner shell, must be verified');
 assert.match(windowsAppSteps, /flutter build windows --release --no-pub/,
   'the Windows job must build the application, not an installer');
 assert.doesNotMatch(windowsAppSteps, /build-installer\.ps1|ISCC|gh release|upload-artifact/,
