@@ -44,6 +44,7 @@ import '../../features/operations/operations_center_screen.dart';
 import '../../features/operations/operations_registry.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
+import '../../features/settings/presentation/screens/approval_policies_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../shell/erp_shell.dart';
 
@@ -92,6 +93,7 @@ class AppRoutes {
   static const companySettings = '/settings/company';
   static const settings = '/settings';
   static const licence = '/settings/licence';
+  static const approvalPolicies = '/settings/approvals';
 
   // Inventory sub-screens. The routes are declared here so the navigation and
   // the screens can be added one at a time; a path is only registered in the
@@ -376,5 +378,6 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.administration, child: AdminScreen()),
   (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
+  (path: AppRoutes.approvalPolicies, child: ApprovalPoliciesScreen()),
   (path: AppRoutes.licence, child: LicenceScreen()),
 ];

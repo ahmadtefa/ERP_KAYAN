@@ -157,6 +157,26 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.go(AppRoutes.licence),
           ),
         ),
+        // Configuring an approval chain is a different power from deciding one.
+        // The card appears only for people who may read the policies, and the
+        // screen itself respects the same permission, so a link that would be
+        // refused is never offered.
+        if (user?.can('admin.approvals.read') ?? false) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.rule_outlined),
+              title: Text(isArabic ? 'سياسات الموافقات' : 'Approval policies'),
+              subtitle: Text(
+                isArabic
+                    ? 'من يجب أن يعتمد ماذا، وبأي ترتيب وشروط'
+                    : 'Who must approve what, in order and under what conditions',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.go(AppRoutes.approvalPolicies),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         // Only an administrator sees this, and only when there is something
         // to reset. Everything about it is enforced again on the server.
