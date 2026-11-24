@@ -12,6 +12,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../dashboard/presentation/providers/dashboard_providers.dart';
@@ -89,6 +90,40 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     );
   }
 
+  bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
+  String _t(String ar, String en) => _arabic ? ar : en;
+
+  Future<void> _approveCredit(Json row) async {
+    final result = await showFormSheet(
+      context,
+      title: _t('الموافقة على تجاوز حد الائتمان', 'Approve credit-limit exception'),
+      fields: [FieldSpec('reason', _t('سبب الموافقة', 'Approval reason'),
+        kind: FieldKind.multiline, required: true,
+        helper: _t('سبب مكتوب لا يقل عن ٣ أحرف. تخص هذه الفاتورة فقط ولا ترحّلها.',
+          'At least 3 characters. Approves this invoice only, without posting it.'))],
+      onSubmit: (draft) async {
+        final reason = draft['reason']?.toString().trim() ?? '';
+        if (reason.length < 3) {
+          throw ApiFailure(_t('اكتب سببًا لا يقل عن ٣ أحرف', 'Enter a reason of at least 3 characters'),
+            statusCode: 422, fieldErrors: {'reason': _t('٣ أحرف على الأقل', 'At least 3 characters')});
+        }
+        try {
+          await ref.read(apiClientProvider).post('$_basePath/${row['id']}/credit-approval', body: {'reason': reason});
+        } on ApiFailure catch (failure) {
+          if (const {400, 403, 404, 409, 422}.contains(failure.statusCode)) rethrow;
+          throw UncertainFormSubmission(failure);
+        } catch (error) {
+          throw UncertainFormSubmission(error);
+        }
+      },
+    );
+    if (result != null && mounted) {
+      ref.invalidate(invoiceListProvider(widget.kind));
+      showMessage(context, _t('تمت الموافقة على التجاوز لهذه الفاتورة. لم تُرحّل الفاتورة.',
+        'Credit exception approved for this invoice. The invoice was not posted.'));
+    }
+  }
+
   Future<void> _post(Json row) async {
     final l10n = context.l10n;
     final ok = await confirmAction(
@@ -107,7 +142,13 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     } on Failure catch (e) {
       if (mounted) {
         ref.invalidate(invoiceListProvider(widget.kind));
-        showMessage(context, e, error: true);
+        if (e is ApiFailure && e.code == 'CUSTOMER_CREDIT_LIMIT_EXCEEDED') {
+          await showAppPlainError(context, _t(
+            'ترحيل الفاتورة يتجاوز حد ائتمان العميل. يلزم موافقة مستخدم آخر لديه صلاحية الموافقة على تجاوز حد الائتمان. الفاتورة ما زالت مسودة.',
+            'Posting exceeds the customer credit limit. Another user with credit-approval permission must approve it. The invoice is still a draft.'));
+        } else {
+          showMessage(context, e, error: true);
+        }
       }
     } catch (error) {
       if (mounted) {
@@ -172,6 +213,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     final provider = invoiceListProvider(widget.kind);
     final async = ref.watch(provider);
     final isSales = widget.kind.isSales;
+    final user = ref.watch(currentUserProvider);
 
     return ModuleScaffold(
       title: isSales ? l10n.salesInvoices : l10n.purchaseInvoices,
@@ -272,6 +314,14 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
                 icon: const Icon(Icons.receipt_long_outlined, size: 20),
                 onPressed: () => _openDetail(row),
               ),
+              if (status == 'draft' && isSales &&
+                  user?.can('sales.credit.approve') == true &&
+                  text(row, 'createdBy') != user?.id)
+                IconButton(
+                  tooltip: _t('الموافقة على تجاوز حد الائتمان', 'Approve credit-limit exception'),
+                  icon: const Icon(Icons.verified_user_outlined, size: 20),
+                  onPressed: _busy ? null : () => _approveCredit(row),
+                ),
               if (status == 'draft')
                 IconButton(
                   tooltip: l10n.post,

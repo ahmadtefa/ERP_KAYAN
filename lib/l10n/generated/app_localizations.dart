@@ -593,7 +593,7 @@ abstract class AppLocalizations {
   /// No description provided for @creditLimitNote.
   ///
   /// In en, this message translates to:
-  /// **'Recorded for reference. Enforcing it is a policy decision that has not been made yet.'**
+  /// **'Zero disables the limit. Sales posting over the limit needs separate credit approval.'**
   String get creditLimitNote;
 
   /// No description provided for @partyInactive.

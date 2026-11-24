@@ -267,7 +267,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get creditLimitNote =>
-      'Recorded for reference. Enforcing it is a policy decision that has not been made yet.';
+      'Zero disables the limit. Sales posting over the limit needs separate credit approval.';
 
   @override
   String get partyInactive => 'Inactive — cannot be used on new invoices';

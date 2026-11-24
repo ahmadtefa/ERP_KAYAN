@@ -266,7 +266,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get creditLimitNote =>
-      'مسجَّل للعلم فقط. تطبيقه قرار سياسة لم يُتخذ بعد.';
+      'صفر يعني أن الحد غير مفعّل. تجاوز الحد يمنع ترحيل البيع حتى الموافقة بصلاحية مستقلة.';
 
   @override
   String get partyInactive => 'موقوف — لا يمكن استخدامه في فواتير جديدة';

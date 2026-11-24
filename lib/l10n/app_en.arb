@@ -82,7 +82,7 @@
   "taxNumber": "Tax number",
   "address": "Address",
   "creditLimit": "Credit limit",
-  "creditLimitNote": "Recorded for reference. Enforcing it is a policy decision that has not been made yet.",
+  "creditLimitNote": "Zero disables the limit. Sales posting over the limit needs separate credit approval.",
   "partyInactive": "Inactive — cannot be used on new invoices",
   "items": "Items",
   "item": "Item",
