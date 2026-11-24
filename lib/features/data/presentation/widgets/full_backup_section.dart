@@ -937,7 +937,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                 FilledButton.icon(
                   onPressed: restoreBusy || toolsUnavailable ? null : _createBackup,
                   icon: const Icon(Icons.save_alt),
-                  label: Text(l10n.createFullBackup),
+                  label: Text(kIsWeb ? _t(context, 'إنشاء أرشيف على الخادم', 'Create archive on server') : l10n.createFullBackup),
                 ),
                 FilledButton.icon(
                   onPressed: restoreBusy || !completeAvailable ? null : _createSystemBackup,
