@@ -3,6 +3,11 @@ name: KAYAN comprehensive application tests (non-signing)
 on:
   workflow_dispatch:
     inputs:
+      prove_existing_windows_candidate:
+        description: 'Fresh hosted Windows proof of pinned edf71003 candidate and isolated native helper harness. No reset, licence change or release.'
+        type: boolean
+        default: false
+        required: false
       build_unreleased_windows:
         description: 'After all application checks pass, build an unreleased licence-protected Setup. No install, signing or release.'
         type: boolean
@@ -495,5 +500,41 @@ jobs:
         with:
           name: kayan-setup-identity-${{ github.event.pull_request.head.sha || github.sha }}
           path: build/windows-evaluation-setup/identity.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows-native-proof:
+    needs: [acceptance, postgres-acceptance, backup-restore-17]
+    if: github.event_name == 'workflow_dispatch' && inputs.prove_existing_windows_candidate == true
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Build isolated shared-helper harness without business routes
+        run: flutter build windows --release --target scripts/ci_native_dialog_probe.dart
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kayan-unreleased-setup-edf710035f9142297977e7400032f6aef11a9890
+          run-id: 45407948799
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Verify pinned identity, fresh install, first run, restart and actual native helpers
+        shell: pwsh
+        run: ./scripts/ci-fresh-windows-proof.ps1 -CandidateDir candidate
+      - name: Upload proof and actual screen captures, not a release
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-windows-native-proof-${{ github.sha }}
+          path: build/native-proof/
           if-no-files-found: warn
           retention-days: 7

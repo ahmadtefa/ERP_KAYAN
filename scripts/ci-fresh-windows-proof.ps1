@@ -1,0 +1,78 @@
+[CmdletBinding()]
+param([Parameter(Mandatory=$true)][string]$CandidateDir)
+$ErrorActionPreference='Stop'
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Fresh hosted Windows required' }
+$root=Join-Path $env:ProgramFiles 'KAYAN ERP'
+$data=Join-Path $env:ProgramData 'KAYAN-ERP'
+if ((Test-Path $root) -or (Test-Path $data) -or (Get-Service KayanERPPostgreSQL -ErrorAction SilentlyContinue)) { throw 'Existing installation refused' }
+$expected='edf710035f9142297977e7400032f6aef11a9890'
+$hash='440a71a6b2ec969bfbf31baa8d55db1c4a01cbdc2b0fb9e9ad684fb7f2cb6bec'
+$setup=(Resolve-Path (Join-Path $CandidateDir 'KAYAN-ERP-Setup.exe')).Path
+$identity=Get-Content (Join-Path $CandidateDir 'identity.json') -Raw | ConvertFrom-Json
+if ($identity.sourceCommit -ne $expected -or $identity.sha256 -ne $hash -or (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Candidate identity mismatch' }
+$out=Join-Path $PWD 'build/native-proof'
+New-Item -ItemType Directory -Force $out | Out-Null
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
+function Screenshot([string]$name) {
+  $bounds=[Windows.Forms.SystemInformation]::VirtualScreen
+  $b=New-Object Drawing.Bitmap($bounds.Width,$bounds.Height)
+  $g=[Drawing.Graphics]::FromImage($b)
+  try { $g.CopyFromScreen($bounds.Location,[Drawing.Point]::Empty,$bounds.Size); $b.Save((Join-Path $out "$name.png"),[Drawing.Imaging.ImageFormat]::Png) } finally { $g.Dispose();$b.Dispose() }
+}
+$p=Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru
+if (-not $p.WaitForExit(900000) -or $p.ExitCode -ne 0) { throw 'Fresh install failed or timed out' }
+Get-Process erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force
+if ((Get-Service KayanERPPostgreSQL).Status -ne 'Running') { throw 'Installed PostgreSQL not running' }
+$manifest=Get-Content (Join-Path $root 'runtime-manifest.json') -Raw | ConvertFrom-Json
+if ($manifest.sourceCommit -ne $expected -or $manifest.licenseEnforcement -ne 'enforce') { throw 'Installed manifest differs or enforcement missing' }
+$logPaths=@((Join-Path $env:APPDATA 'KAYAN-ERP/logs/backend.log'),(Join-Path $data 'logs/backend.log'))
+foreach ($phase in @('first-launch','restart')) {
+  $offsets=@{};foreach($log in $logPaths){$offsets[$log]=if(Test-Path $log){(Get-Item $log).Length}else{0}}
+  $client=Start-Process (Join-Path $root 'erp_kayan.exe') -WorkingDirectory $root -PassThru
+  try {
+    $asking=$false
+    for($i=0;$i -lt 90;$i++){
+      if($client.HasExited){throw 'Installed client exited during first-run proof'}
+      foreach($log in $logPaths){if(Test-Path $log){$f=[IO.File]::Open($log,'Open','Read','ReadWrite');try{$null=$f.Seek($offsets[$log],'Begin');$r=New-Object IO.StreamReader($f);if($r.ReadToEnd() -match 'asking who the first administrator is'){$asking=$true}}finally{$f.Dispose()}}}
+      if($asking){break};Start-Sleep 1
+    }
+    if(-not $asking){throw 'Installed first-run waiting state not observed'}
+    Start-Sleep 4
+    Screenshot $phase
+    foreach($port in @(3000,3001,3002,3003,3010,3020)){
+      $answers=$false;try{$v=Invoke-RestMethod "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 1;$answers=[bool]$v.status}catch{}
+      if($answers){throw 'API started before first-administrator setup'}
+    }
+  } finally {if(-not $client.HasExited){$null=$client.CloseMainWindow();if(-not $client.WaitForExit(10000)){Stop-Process -Id $client.Id -Force}}}
+}
+# A separate app exercises the exact shared helper code. Not an installed business flow.
+$probeDir=Join-Path $env:TEMP 'kayan-native-dialog-fixture'
+New-Item -ItemType Directory $probeDir | Out-Null
+[IO.File]::WriteAllText((Join-Path $probeDir 'visible.json'),'{}')
+[IO.File]::WriteAllText((Join-Path $probeDir 'hidden.txt'),'not allowed')
+$env:KAYAN_PROBE_DIR=$probeDir
+$probe=Start-Process (Join-Path $PWD 'build/windows/x64/runner/Release/erp_kayan.exe') -PassThru
+$keys=New-Object -ComObject WScript.Shell
+function Wait-Stage([string]$want){for($i=0;$i -lt 90;$i++){if(Test-Path "$probeDir/stage.txt"){$s=Get-Content "$probeDir/stage.txt" -Raw;if($s -like 'failed:*'){throw $s};if($s -eq $want){return}};Start-Sleep 1};throw "Probe stage timeout: $want"}
+function Wait-Dialog {
+ for($i=0;$i -lt 30;$i++){
+  $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+  foreach($w in $windows){if($w.Current.ClassName -eq '#32770'){return $w}}
+  Start-Sleep 1
+ };throw 'Native dialog absent'
+}
+try {
+ Wait-Stage 'save';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
+ Screenshot 'native-save-as'
+ $keys.SendKeys('%n');$keys.SendKeys((Join-Path $probeDir 'chosen.dump'));$keys.SendKeys('{ENTER}')
+ Wait-Stage 'open';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
+ $keys.SendKeys('^l');$keys.SendKeys($probeDir);$keys.SendKeys('{ENTER}');Start-Sleep 3
+ $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+ $names=@($elements | ForEach-Object {$_.Current.Name})
+ if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
+ Screenshot 'native-open-filter'
+ $keys.SendKeys('%n');$keys.SendKeys('visible.json');$keys.SendKeys('{ENTER}')
+ Wait-Stage 'cancel';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
+ Wait-Stage 'passed'
+}finally{if(-not $probe.HasExited){Stop-Process -Id $probe.Id -Force}}
+[ordered]@{result='fresh-install-first-run-restart-and-isolated-native-helper-proof';candidateSource=$expected;installerSha256=$hash;proofSource=$env:GITHUB_SHA;installedBusinessFlowTested=$false;activatedLicenceTested=$false;resetExecuted=$false;nativeSharedHelperSaveOpenCancel=$true} | ConvertTo-Json | Set-Content (Join-Path $out 'evidence.json') -Encoding utf8

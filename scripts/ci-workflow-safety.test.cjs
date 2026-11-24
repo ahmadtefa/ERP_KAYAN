@@ -83,9 +83,18 @@ const application = read('kayan-acceptance.yml');
 assert.ok(Object.hasOwn(application.on, 'workflow_dispatch'));
 assert.deepEqual(application.permissions, { contents: 'read' });
 for (const [name, job] of Object.entries(application.jobs)) {
-  assert.equal(job['runs-on'], name === 'windows-evaluation' ? 'windows-latest' : 'ubuntu-24.04');
+  assert.equal(job['runs-on'], name.startsWith('windows-') ? 'windows-latest' : 'ubuntu-24.04');
   assert.equal(job['continue-on-error'], undefined);
 }
+const proof = application.jobs['windows-native-proof'];
+assert.deepEqual(proof.needs, ['acceptance', 'postgres-acceptance', 'backup-restore-17']);
+assert.equal(proof.if, "github.event_name == 'workflow_dispatch' && inputs.prove_existing_windows_candidate == true");
+assert.deepEqual(proof.permissions, { contents: 'read', actions: 'read' });
+assert.equal(proof.environment, undefined);
+const proofSource = fs.readFileSync(path.join(workflows, '../../scripts/ci-fresh-windows-proof.ps1'), 'utf8');
+assert.match(proofSource, /440a71a6b2ec969bfbf31baa8d55db1c4a01cbdc2b0fb9e9ad684fb7f2cb6bec/);
+assert.doesNotMatch(proofSource, /reset-kayan|license-generator|generateKeyPair|createPrivateKey|RuntimeOnly|smoke-test-installed|Remove-Item|Set-Acl|Set-Content.*public-key/);
+for (const step of proof.steps) assert.equal(step['continue-on-error'], undefined);
 const optionalWindows = application.jobs['windows-evaluation'];
 assert.deepEqual(application.on.workflow_dispatch.inputs.build_unreleased_windows,
   { description: 'After all application checks pass, build an unreleased licence-protected Setup. No install, signing or release.', type: 'boolean', default: false, required: false });
