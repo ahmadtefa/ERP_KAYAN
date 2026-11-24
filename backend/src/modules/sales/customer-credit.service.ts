@@ -89,6 +89,17 @@ export class CustomerCreditService {
   }
 
   private async evaluate(tx: Prisma.TransactionClient, companyId: string, invoiceId: string, lock: boolean) {
+    // Lock order is always invoice row, then customer row (the same order the
+    // draft editor uses: it locks the invoice and never the customer). The
+    // invoice is read only after its lock is held, so an edit that was waiting
+    // or running is already committed and the decision is made on what will
+    // really be posted; the lock then keeps it from changing until commit.
+    if (lock) {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM sales_invoices
+         WHERE id = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`);
+    }
     const invoice = await tx.salesInvoice.findFirst({
       where: { id: invoiceId, companyId, deletedAt: null },
       select: { customerId: true, branchId: true, createdBy: true, updatedAt: true, status: true, documentType: true, totalAmount: true, paidAmount: true },

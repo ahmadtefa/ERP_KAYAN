@@ -140,4 +140,38 @@ const vmReady =
     const results = await Promise.all([attempt('e1000000-0000-4000-8000-000000000001'), attempt('e1000000-0000-4000-8000-000000000002')]);
     expect(results.sort()).toEqual(['CUSTOMER_CREDIT_LIMIT_EXCEEDED', 'posted']);
   });
+
+  it('an edit that is running when the post starts is seen by the check; an edit waiting behind the post cannot change what was checked', async () => {
+    await setLimit(1000);
+    await run(`UPDATE sales_invoices SET "deletedAt"=now() WHERE "customerId"='${CUST}'`);
+    const E = 'e2000000-0000-4000-8000-000000000001';
+    await invoice(E, 'R-1', 100, 'DRAFT');
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const editorLock = (tx: any) => tx.$queryRawUnsafe(`SELECT id FROM sales_invoices WHERE id='${E}' FOR UPDATE`);
+    // 1. editor holds the invoice lock and raises the amount; the post starts meanwhile
+    const editor = prisma.$transaction(async (tx: any) => {
+      await editorLock(tx);
+      await sleep(500);
+      await tx.$executeRawUnsafe(`UPDATE sales_invoices SET "totalAmount"=5000, "updatedAt"=now() WHERE id='${E}'`);
+    });
+    await sleep(150);
+    const poster = prisma.$transaction((tx: any) => credit.assertCanPost(tx, COMPANY, E, true)).then(() => 'passed', (e: any) => e.response?.code);
+    await editor;
+    expect(await poster).toBe('CUSTOMER_CREDIT_LIMIT_EXCEEDED'); // judged on 5000, not the stale 100
+    // 2. the post holds the lock; an editor that wants the customer switched / amount raised waits and then finds it posted
+    await run(`UPDATE sales_invoices SET "totalAmount"=100 WHERE id='${E}'`);
+    let editorSaw = '';
+    const poster2 = prisma.$transaction(async (tx: any) => {
+      await credit.assertCanPost(tx, COMPANY, E, true);
+      await tx.salesInvoice.updateMany({ where: { id: E, status: 'DRAFT' }, data: { status: 'POSTED' } });
+      await sleep(500);
+    });
+    await sleep(150);
+    const editor2 = prisma.$transaction(async (tx: any) => {
+      const rows = await tx.$queryRawUnsafe(`SELECT status FROM sales_invoices WHERE id='${E}' FOR UPDATE`);
+      editorSaw = rows[0].status;
+    });
+    await Promise.all([poster2, editor2]);
+    expect(editorSaw).toBe('POSTED'); // the draft editor refuses a non-draft
+  });
 });

@@ -13,6 +13,7 @@ import {
 } from './dto/sales-invoice.dto';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { CustomerCreditService } from './customer-credit.service';
+import { mayDiscloseCreditFigures } from './customer-credit-visibility';
 
 @Controller('sales/invoices')
 export class SalesInvoicesController {
@@ -92,7 +93,7 @@ export class SalesInvoicesController {
       reason: body?.expiredIssueReason ?? null,
     }, {
       // The credit figures are the customer card's company-wide figures.
-      mayDiscloseBalance: user.isSuperAdmin === true || (user.permissions ?? []).includes('parties.customers.read'),
+      mayDiscloseBalance: mayDiscloseCreditFigures(user),
     }).then((result) => this.redact(user, result));
   }
 
