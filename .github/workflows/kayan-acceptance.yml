@@ -294,8 +294,8 @@ jobs:
           node - "$RUNNER_TEMP/credit-post.json" <<'NODE'
           const fs = require('node:fs');
           const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (r.numPassedTestSuites !== 3 || r.numPassedTests !== 16 || r.numPendingTests !== 0 || r.numFailedTests !== 0) {
-            throw new Error('Credit service and actual posting require all 16 real PostgreSQL and HTTP cases, no skips.');
+          if (r.numPassedTestSuites !== 3 || r.numPassedTests !== 17 || r.numPendingTests !== 0 || r.numFailedTests !== 0) {
+            throw new Error('Credit service and actual posting require all 17 real PostgreSQL and HTTP cases, no skips.');
           }
           NODE
       - name: Run backend suite (except isolated licence signing and store tests)

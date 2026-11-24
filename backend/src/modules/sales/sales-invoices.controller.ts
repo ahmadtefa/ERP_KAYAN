@@ -13,6 +13,7 @@ import {
 } from './dto/sales-invoice.dto';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { CustomerCreditService } from './customer-credit.service';
+import { CreditApprovalDto } from './dto/credit-approval.dto';
 import { mayDiscloseCreditFigures } from './customer-credit-visibility';
 
 @Controller('sales/invoices')
@@ -101,9 +102,9 @@ export class SalesInvoicesController {
   /// posting, so who may approve is an assignment, not a side effect.
   @Post(':id/credit-approval')
   @RequirePermissions('sales.credit.approve')
-  approveCredit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { reason?: string }) {
+  approveCredit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: CreditApprovalDto) {
     if (!this.credit) throw new NotFoundException('Credit approval is not available');
-    return this.credit.approve(user.companyId, user.userId, id, body?.reason ?? '', branchReadScope(user));
+    return this.credit.approve(user.companyId, user.userId, id, body.reason, branchReadScope(user));
   }
 
   @Post(':id/reverse')

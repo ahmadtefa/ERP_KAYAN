@@ -1,4 +1,6 @@
-import { Module, type INestApplication } from '@nestjs/common';
+import { Module, ValidationPipe, type INestApplication } from '@nestjs/common';
+import { ProblemDetailsFilter } from '../../common/filters/problem-details.filter';
+import { validationExceptionFactory } from '../../common/validation/field-errors';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { APP_GUARD, NestFactory } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
@@ -26,8 +28,8 @@ import { SalesInvoicesService } from './sales-invoices.service';
 /// real session row, permissions and branches loaded from the database on every
 /// request), PermissionsGuard and BranchWriteGuard, on a real migrated
 /// PostgreSQL. Not wired: MaintenanceAdmissionGuard, RateLimitGuard,
-/// LicenseGuard, the global exception filter/interceptors of main.ts, and the
-/// ValidationPipe. Needs DATABASE_URL; run alone (`jest -i`): it truncates companies.
+/// LicenseGuard and the aggregate interceptor. The ValidationPipe and
+/// ProblemDetailsFilter are the ones main.ts installs. Needs DATABASE_URL; run alone (`jest -i`): it truncates companies.
 
 const CO = '11111111-1111-4111-8111-111111111111';
 const CO2 = '11111111-1111-4111-8111-111111111112';
@@ -132,6 +134,9 @@ const ready =
     class CreditHttpTestModule {}
     app = await NestFactory.create(CreditHttpTestModule, { logger: false });
     app.setGlobalPrefix('api/v1');
+    // The same pipe and filter main.ts installs, so bodies are what a client sees.
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true, exceptionFactory: validationExceptionFactory }));
+    app.useGlobalFilters(new ProblemDetailsFilter());
     await app.listen(0, '127.0.0.1');
     base = await app.getUrl();
     base = base.replace('[::1]', '127.0.0.1');
@@ -176,11 +181,12 @@ const ready =
     expect(noRight.status).toBe(403);
     const fm = await call('creator', 'POST', `/sales/invoices/${INV_A}/post`, {});
     expect(fm.status).toBe(409);
-    expect(fm.json.code).toBe('CUSTOMER_CREDIT_LIMIT_EXCEEDED');
-    expect(fm.json.projectedBalance).toBe('1200.0000');
+        expect(fm.json.errorCode).toBe('CUSTOMER_CREDIT_LIMIT_EXCEEDED');
+    expect(fm.json.message).toContain('1200.0000'); // the filter keeps the sentence, not the numeric properties
+    expect(fm.json.projectedBalance).toBeUndefined();
     const poster = await call('poster', 'POST', `/sales/invoices/${INV_A}/post`, {}); // no card permission, no aggregate role
     expect(poster.status).toBe(409);
-    expect(poster.json).toMatchObject({ code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED', message: 'This invoice needs credit approval before it can be posted.' });
+    expect(poster.json).toMatchObject({ errorCode: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED', message: 'This invoice needs credit approval before it can be posted.' });
     expect(poster.json.projectedBalance).toBeUndefined();
     expect(JSON.stringify(poster.json)).not.toMatch(/1200|1000/);
     const branchA = await call('branchA', 'POST', `/sales/invoices/${INV_A}/post`, {}); // branch-limited FM: has everything, still no figures
@@ -203,6 +209,7 @@ const ready =
   it('approve without any posting right succeeds with a minimal body, does not post, then the creator posts; the approval row stays for audit', async () => {
     const short = await call('approver', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'x' });
     expect(short.status).toBe(400);
+    expect(short.json.fieldErrors.reason).toBeDefined();
     const ok = await call('approver', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'Approved by finance, large order' });
     expect(ok.status).toBe(201);
     expect(ok.json).toEqual({ invoiceId: INV_A, approved: true });
@@ -231,5 +238,32 @@ const ready =
     const refused = await call('approver', 'POST', `/sales/invoices/${INV_C}/credit-approval`, { reason: 'after revocation' });
     expect(refused.status).toBe(403);
     expect(await approvals(INV_C)).toBe(0);
+  });
+
+  it('production body shape of the credit 409 (real pipe + filter): permitted viewer vs confidential; no numeric property reaches the client', async () => {
+    await run(`UPDATE customers SET "creditLimit"=1000 WHERE id='${CUST}'`);
+    await run(`UPDATE sales_invoices SET status='DRAFT',"deletedAt"=NULL WHERE id='${INV_B}'`);
+    const raw = async (as: string) => {
+      const res = await fetch(`${base}/api/v1/sales/invoices/${INV_C}/post`, { method: 'POST', headers: { authorization: `Bearer ${who[as].token}`, 'content-type': 'application/json' }, body: '{}' });
+      return { status: res.status, text: await res.text() };
+    };
+    const permitted = await raw('creator');
+    const hidden = await raw('poster');
+    // eslint-disable-next-line no-console
+    console.log('PERMITTED_BODY', permitted.text, 'HIDDEN_BODY', hidden.text);
+    for (const r of [permitted, hidden]) {
+      expect(r.status).toBe(409);
+      const body = JSON.parse(r.text);
+      expect(body.errorCode).toBe('CUSTOMER_CREDIT_LIMIT_EXCEEDED');
+      for (const k of ['currentBalance', 'projectedBalance', 'invoiceAmount', 'creditLimit', 'customerId']) expect(body[k]).toBeUndefined();
+    }
+    expect(JSON.parse(hidden.text).message).not.toMatch(/\d{3,}/);
+    // a bad body is refused by the pipe with a per-field error, never a 500
+    for (const body of [{}, { reason: 123 }, { reason: 'ab' }, { reason: 'x'.repeat(501) }, { reason: 'fine reason', extra: 1 }]) {
+      const r = await fetch(`${base}/api/v1/sales/invoices/${INV_C}/credit-approval`, { method: 'POST', headers: { authorization: `Bearer ${who.branchA.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const json: any = await r.json();
+      expect(r.status).toBe(400);
+      expect(Object.keys(json.fieldErrors ?? {}).length).toBeGreaterThan(0);
+    }
   });
 });
