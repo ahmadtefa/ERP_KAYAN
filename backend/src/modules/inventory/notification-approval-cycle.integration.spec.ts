@@ -253,4 +253,24 @@ const vmReady =
     await docs.approve(COMPANY, MANAGER, W2).catch(swallow);
     expect(await sees(woApprover)).toEqual([]);
   });
+
+  it('the real create() path raises the write-off alert at once, only for the right approver, and a plain adjustment raises nothing', async () => {
+    const audit: any = { record: async () => undefined, recordRequired: async () => undefined };
+    const numbers: any = { next: async (_tx: unknown, _c: string, key: string) => `${key}-1` };
+    const docs = new StockDocumentsService(prisma as never, numbers, undefined as never, undefined as never, audit, undefined as never, undefined as never, { assertPostable: async () => undefined } as never, undefined as never, notif);
+    const woApprover = nu(MANAGER, ['inventory.writeoff.approve'], ['WAREHOUSE_MANAGER']);
+    const other = nu(CHIEF, ['inventory.stock.approve'], ['WAREHOUSE_MANAGER']);
+    const line = { itemId: ITEM, quantity: '-2', unitCost: '1' };
+    await docs.create(COMPANY, BRANCH_A, REQUESTER, { kind: 'ADJUSTMENT', documentDate: '2026-11-24', toWarehouseId: FROM, lines: [{ itemId: ITEM, quantity: '1', unitCost: '1' }] } as never).catch(() => undefined);
+    expect(await sees(woApprover)).toEqual([]);
+    const made: any = await docs.create(COMPANY, BRANCH_A, REQUESTER, { kind: 'WRITE_OFF', documentDate: '2026-11-24', reason: 'damaged', toWarehouseId: FROM, lines: [line] } as never).catch((e: Error) => {
+      if (!/findOne|Cannot read|undefined/.test(String(e.stack))) throw e;
+      return null;
+    });
+    void made;
+    expect(await sees(woApprover)).toEqual(['WRITEOFF_PENDING_APPROVAL']);
+    expect(await sees(other)).toEqual([]);
+    const row = await prisma.$queryRawUnsafe(`SELECT kind, "createdBy" FROM stock_documents WHERE "companyId"='${COMPANY}' AND kind='WRITE_OFF'`);
+    expect(row.length).toBe(1);
+  });
 });
