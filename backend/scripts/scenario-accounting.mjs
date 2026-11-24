@@ -86,7 +86,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers ?? {}) };
-  if (token && !options.noAuth) headers.Authorization = `Bearer ${token}`;
+  // An explicit Authorization header wins, so one check can be read as a
+  // different user while the administrator's session stays in `token`.
+  if (token && !options.noAuth && !headers.Authorization) headers.Authorization = `Bearer ${token}`;
   if (options.json !== undefined) headers['Content-Type'] = 'application/json';
 
   for (let attempt = 0; ; attempt += 1) {
@@ -972,6 +974,28 @@ async function main() {
     `document ${drill.data?.invoiceNumber ?? 'n/a'} (status ${drill.status})`,
   );
 
+  // Company-wide totals are only returned to the finance and general manager
+  // roles ("technical administration is not a financial role, even for a super
+  // admin"), so the figures below are read as a finance manager. Every
+  // assertion keeps its value; only the reader changed.
+  const roleList = await api('/admin/roles');
+  const financeRole = roleList.data?.items?.find((r) => r.code === 'FINANCE_MANAGER');
+  check('the finance manager role is seeded', Boolean(financeRole?.id), `roles ${roleList.data?.items?.length}`);
+  const financeUser = financeRole?.id
+    ? await must('create a finance manager user', '/admin/users', {
+        method: 'POST',
+        json: {
+          username: `e2e-finance-${stamp}`, fullNameEn: `Finance ${stamp}`, fullNameAr: `مالية ${stamp}`,
+          password: `Finance@${stamp}9x`, roleIds: [financeRole.id], branchIds: [principal.branchId],
+        },
+      })
+    : null;
+  const financeLogin = financeUser?.id
+    ? await api('/auth/login', { method: 'POST', noAuth: true, json: { username: `e2e-finance-${stamp}`, password: `Finance@${stamp}9x` } })
+    : { status: 0 };
+  check('the finance manager can sign in', financeLogin.status === 201 && Boolean(financeLogin.data?.accessToken), `status ${financeLogin.status}`);
+  const asFinance = { headers: { Authorization: `Bearer ${financeLogin.data?.accessToken ?? token}` } };
+
   const balanceSheet = await api(`/reports/balance-sheet?asOf=${today}`);
   check(
     'the balance sheet balances: assets equal liabilities plus equity, with the profit in equity',
@@ -985,7 +1009,7 @@ async function main() {
     `${(balanceSheet.data?.liabilities ?? []).length} liability lines, ${(balanceSheet.data?.equity ?? []).length} equity lines`,
   );
 
-  const pnl = await api(`/reports/profit-and-loss?from=${from}&to=${today}`);
+  const pnl = await api(`/reports/profit-and-loss?from=${from}&to=${today}`, asFinance);
   const expectedRevenue = periodSum(trial, 'revenue');
   const expectedExpenses = periodSum(trial, 'expense');
   check(
@@ -996,7 +1020,7 @@ async function main() {
     `revenue ${pnl.data?.totals?.revenue} (ledger ${expectedRevenue}), expenses ${pnl.data?.totals?.expenses} (ledger ${expectedExpenses}), profit ${pnl.data?.totals?.netProfit}`,
   );
 
-  const cashFlow = await api(`/reports/cash-flow?from=${from}&to=${today}`);
+  const cashFlow = await api(`/reports/cash-flow?from=${from}&to=${today}`, asFinance);
   check(
     'the cash flow statement reports money in, money out and the net movement',
     Number(cashFlow.data?.totals?.inflow) > 0 &&
@@ -1008,8 +1032,8 @@ async function main() {
     `in ${cashFlow.data?.totals?.inflow}, out ${cashFlow.data?.totals?.outflow}, net ${cashFlow.data?.totals?.net}`,
   );
 
-  const receivables = await api(`/reports/receivables-aging?asOf=${today}`);
-  const payables = await api(`/reports/payables-aging?asOf=${today}`);
+  const receivables = await api(`/reports/receivables-aging?asOf=${today}`, asFinance);
+  const payables = await api(`/reports/payables-aging?asOf=${today}`, asFinance);
   check(
     'the ageing reports agree with the control accounts in the ledger',
     near(receivables.data?.totals?.differenceFromLedger, 0) &&
@@ -1039,7 +1063,7 @@ async function main() {
   );
 
   // ────────────────────────────────────────────────────── 11. the dashboard
-  const dashboard = await api(`/dashboard/summary?from=${from}&to=${today}`);
+  const dashboard = await api(`/dashboard/summary?from=${from}&to=${today}`, asFinance);
   check(
     'the dashboard reports the period from real documents',
     dashboard.data?.hasData === true &&
@@ -1047,7 +1071,7 @@ async function main() {
       Number(dashboard.data?.purchases?.total) >= 1000,
     `sales ${dashboard.data?.sales?.total}, purchases ${dashboard.data?.purchases?.total}, stock ${dashboard.data?.stock?.value}, cash ${dashboard.data?.cashPosition}, overdue ${dashboard.data?.overdue?.total}`,
   );
-  const emptyDashboard = await api('/dashboard/summary?from=1999-01-01&to=1999-12-31');
+  const emptyDashboard = await api('/dashboard/summary?from=1999-01-01&to=1999-12-31', asFinance);
   check(
     'a period with nothing in it says so instead of showing invented numbers',
     emptyDashboard.data?.hasData === false &&
