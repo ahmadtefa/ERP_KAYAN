@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/error/failure.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -428,6 +429,14 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
   late List<_LevelDraft> _levels;
   bool _saving = false;
   String? _error;
+  /// Reasons under the field they are about: name, priority, minimumAmount,
+  /// minimumQuantity, level.N.name, level.N.permission. Editing clears its own.
+  final Map<String, String> _errors = {};
+  void _clear(String key) {
+    if (_errors.remove(key) != null) setState(() {});
+  }
+
+  static final _decimal = RegExp(r'^\d+(\.\d+)?$');
 
   bool get _ar => widget.ar;
   String t(String a, String e) => _ar ? a : e;
@@ -525,9 +534,11 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                     child: TextField(
                       controller: _priority,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => _clear('priority'),
                       decoration: InputDecoration(
                         labelText: t('الأولوية', 'Priority'),
                         helperText: t('الأصغر أولًا', 'Lower wins'),
+                        errorText: _errors['priority'],
                       ),
                     ),
                   ),
@@ -539,7 +550,11 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                   Expanded(
                     child: TextField(
                       controller: _nameAr,
-                      decoration: InputDecoration(labelText: t('الاسم بالعربية', 'Name (Arabic)')),
+                      onChanged: (_) => _clear('name'),
+                      decoration: InputDecoration(
+                        labelText: t('الاسم بالعربية', 'Name (Arabic)'),
+                        errorText: _errors['name'],
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -618,7 +633,9 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                     child: TextField(
                       controller: _minimumAmount,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => _clear('minimumAmount'),
                       decoration: InputDecoration(
+                        errorText: _errors['minimumAmount'],
                         labelText: t('الحد الأدنى للقيمة', 'Minimum value'),
                         helperText: t(
                           'يسري عندما تبلغ قيمة البضاعة هذا الحد أو تتجاوزه',
@@ -632,7 +649,9 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                     child: TextField(
                       controller: _minimumQuantity,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => _clear('minimumQuantity'),
                       decoration: InputDecoration(
+                        errorText: _errors['minimumQuantity'],
                         labelText: t('الحد الأدنى للكمية', 'Minimum quantity'),
                       ),
                     ),
@@ -702,6 +721,7 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
   Widget _levelRow(int index) {
     final level = _levels[index];
     return Card(
+      key: ObjectKey(level),
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -719,6 +739,7 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                   onPressed: index == 0
                       ? null
                       : () => setState(() {
+                            _errors.removeWhere((k, _) => k.startsWith('level.'));
                             final moved = _levels.removeAt(index);
                             _levels.insert(index - 1, moved);
                           }),
@@ -729,6 +750,7 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                   onPressed: index == _levels.length - 1
                       ? null
                       : () => setState(() {
+                            _errors.removeWhere((k, _) => k.startsWith('level.'));
                             final moved = _levels.removeAt(index);
                             _levels.insert(index + 1, moved);
                           }),
@@ -738,7 +760,10 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                 IconButton(
                   onPressed: _levels.length == 1
                       ? null
-                      : () => setState(() => _levels.removeAt(index)),
+                      : () => setState(() {
+                            _errors.removeWhere((k, _) => k.startsWith('level.'));
+                            _levels.removeAt(index);
+                          }),
                   icon: const Icon(Icons.close, size: 18),
                   tooltip: t('حذف المستوى', 'Remove level'),
                 ),
@@ -749,8 +774,14 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                 Expanded(
                   child: TextFormField(
                     initialValue: level.nameAr,
-                    decoration: InputDecoration(labelText: t('اسم المستوى بالعربية', 'Level name (Arabic)')),
-                    onChanged: (value) => level.nameAr = value,
+                    decoration: InputDecoration(
+                      labelText: t('اسم المستوى بالعربية', 'Level name (Arabic)'),
+                      errorText: _errors['level.$index.name'],
+                    ),
+                    onChanged: (value) {
+                      level.nameAr = value;
+                      _clear('level.$index.name');
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -758,7 +789,10 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                   child: TextFormField(
                     initialValue: level.nameEn,
                     decoration: InputDecoration(labelText: t('اسم المستوى بالإنجليزية', 'Level name (English)')),
-                    onChanged: (value) => level.nameEn = value,
+                    onChanged: (value) {
+                      level.nameEn = value;
+                      _clear('level.$index.name');
+                    },
                   ),
                 ),
               ],
@@ -772,8 +806,12 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                     decoration: InputDecoration(
                       labelText: t('الصلاحية المطلوبة', 'Required permission'),
                       helperText: 'e.g. inventory.transfer.approve',
+                      errorText: _errors['level.$index.permission'],
                     ),
-                    onChanged: (value) => level.permission = value,
+                    onChanged: (value) {
+                      level.permission = value;
+                      _clear('level.$index.permission');
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -798,28 +836,51 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
   Future<void> _save() async {
     final nameAr = _nameAr.text.trim();
     final nameEn = _nameEn.text.trim();
+    final found = <String, String>{};
     if (nameAr.isEmpty && nameEn.isEmpty) {
-      setState(() => _error = t('الاسم مطلوب', 'A name is required'));
-      return;
+      found['name'] = t('الاسم مطلوب', 'A name is required');
+    }
+    final priority = _priority.text.trim();
+    if (priority.isNotEmpty && int.tryParse(priority) == null) {
+      found['priority'] = t('اكتب رقمًا صحيحًا', 'Enter a whole number');
+    }
+    for (final entry in {
+      'minimumAmount': _minimumAmount,
+      'minimumQuantity': _minimumQuantity,
+    }.entries) {
+      final value = entry.value.text.trim();
+      if (value.isNotEmpty && !_decimal.hasMatch(value)) {
+        found[entry.key] = t(
+          'اكتب رقمًا صحيحًا أو عشريًا بدون سالب',
+          'Enter a number, zero or more',
+        );
+      }
     }
     for (var index = 0; index < _levels.length; index++) {
       final level = _levels[index];
       if (level.permission.trim().isEmpty) {
-        setState(() => _error = t(
-              'المستوى ${index + 1} لا يحدد صلاحية، فلا شيء يحدد من يعتمده.',
-              'Level ${index + 1} names no permission, so nothing decides who approves it.',
-            ));
-        return;
+        found['level.$index.permission'] = t(
+          'اكتب الصلاحية التي تحدد من يعتمد هذا المستوى',
+          'Name the permission that decides who approves this level',
+        );
       }
       if (level.nameAr.trim().isEmpty && level.nameEn.trim().isEmpty) {
-        setState(() => _error =
-            t('المستوى ${index + 1} بلا اسم.', 'Level ${index + 1} has no name.'));
-        return;
+        found['level.$index.name'] = t('اسم المستوى مطلوب', 'The level name is required');
       }
+    }
+    if (found.isNotEmpty) {
+      setState(() {
+        _errors
+          ..clear()
+          ..addAll(found);
+        _error = null;
+      });
+      return;
     }
     setState(() {
       _saving = true;
       _error = null;
+      _errors.clear();
     });
     final body = <String, dynamic>{
       'operation': _operation,
@@ -865,10 +926,35 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) {
+      if (!mounted) return;
+      if (e is ApiFailure &&
+          const {400, 422}.contains(e.statusCode) &&
+          e.fieldErrors.isNotEmpty) {
+        // Nothing was saved: reasons go under their fields, input is kept.
+        final levelKey = RegExp(r'^levels\.(\d+)\.(nameAr|nameEn|permission|roleCode)$');
+        final rest = <String>[];
         setState(() {
           _saving = false;
-          _error = e.toString();
+          _errors.clear();
+          e.fieldErrors.forEach((key, message) {
+            final match = levelKey.firstMatch(key);
+            if (match != null) {
+              final field = match.group(2) == 'permission' ? 'permission' : 'name';
+              _errors['level.${match.group(1)}.$field'] = message;
+            } else if (key == 'nameAr' || key == 'nameEn') {
+              _errors['name'] = message;
+            } else if (const {'priority', 'minimumAmount', 'minimumQuantity'}.contains(key)) {
+              _errors[key] = message;
+            } else {
+              rest.add(message);
+            }
+          });
+          _error = rest.isEmpty ? null : rest.join('\n');
+        });
+      } else {
+        setState(() {
+          _saving = false;
+          _error = e is Failure ? e.message : e.toString();
         });
       }
     }
