@@ -10,6 +10,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart';
 import 'package:erp_kayan/features/data/presentation/widgets/full_backup_section.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -167,6 +168,19 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('web preserves explicit server archive and never claims chosen local save', (tester) async {
+    final service = _FakeFullBackupService();
+    var chooserCalled = false;
+    await _pump(tester, service, choose: () async { chooserCalled = true; return _Target(); });
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create archive on server'));
+    await tester.pumpAndSettle();
+    expect(service.createCalled, isTrue);
+    expect(chooserCalled, isFalse);
+    expect(find.textContaining('Server copy only.'), findsOneWidget);
+    expect(find.textContaining('Chosen file saved and verified'), findsNothing);
+  }, skip: !kIsWeb);
+
   testWidgets('cancel Save As does not create or save a backup', (tester) async {
     final service = _FakeFullBackupService();
     await _pump(tester, service, choose: () async => null);
