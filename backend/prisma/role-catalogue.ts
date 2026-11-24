@@ -482,7 +482,10 @@ export function permissionsForRole(
     }
     if (prefix === '.read') {
       for (const code of catalogue) {
-        if (code.endsWith('.read') && !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code)) wanted.add(code);
+        // The wildcard never reaches the admin area (audit trail, approvals):
+        // those reads must be granted by exact code.
+        if (code.endsWith('.read') && !code.startsWith('admin.') &&
+            !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code)) wanted.add(code);
       }
       continue;
     }
