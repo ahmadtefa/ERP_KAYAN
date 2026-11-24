@@ -11,6 +11,7 @@ const WH_FOREIGN = '66666666-6666-4666-8666-666666666666';
 function setup(docBranch: string | null = FOREIGN) {
   const prisma = {
     stockDocument: { findFirst: jest.fn(async () => ({ branchId: docBranch })) },
+    salesInvoice: { findFirst: jest.fn(async () => ({ branchId: docBranch })) },
     warehouse: {
       findFirst: jest.fn(async (args: { where: { id: string } }) => ({
         branchId: args.where.id === WH_OWN ? OWN : FOREIGN,
@@ -80,5 +81,24 @@ describe('BranchWriteGuard stock documents', () => {
       run('POST', '/api/v1/inventory/stock-documents', { branchId: FOREIGN }, { isSuperAdmin: true, companyId: 'c' }),
     ).resolves.toBe(true);
     await expect(run('GET', '/api/v1/items')).resolves.toBe(true);
+  });
+
+  const INV = `/api/v1/sales/invoices/${DOC}/reverse`;
+
+  it('hides a foreign-branch invoice from a change', async () => {
+    const { run } = setup(FOREIGN);
+    await expect(run('POST', INV)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('allows an own-branch invoice and refuses a no-branch document for branch staff', async () => {
+    await expect(setup(OWN).run('POST', INV)).resolves.toBe(true);
+    await expect(setup(null).run('POST', INV)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('fails closed for an ordinary account with no branch assignment', async () => {
+    const { run } = setup(OWN);
+    await expect(
+      run('POST', INV, {}, { companyId: 'c', branchIds: [], roles: ['SALES_CLERK'] }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
