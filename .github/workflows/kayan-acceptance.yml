@@ -322,6 +322,18 @@ jobs:
           if (r.numPassedTests !== 13 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 13 real-PG barrier lifecycle cases must run.');
           NODE
           node scripts/verify-barrier-write-fault.cjs
+      - name: Prove verified-session rate quotas over real HTTP and PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_RATE_LIMIT_PG: '1'
+          NODE_OPTIONS: --experimental-vm-modules
+        run: |
+          npm test -- --runInBand src/common/guards/rate-limit-http.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/rate-quota.json"
+          node - "$RUNNER_TEMP/rate-quota.json" <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (r.numPassedTests !== 8 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 8 real-session quota HTTP cases must run.');
+          NODE
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash

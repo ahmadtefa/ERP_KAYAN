@@ -16,7 +16,7 @@ import { PrintSettingsModule } from './common/print/print-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { BranchWriteGuard } from './common/guards/branch-write.guard';
-import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { RateLimitGuard, VerifiedUserRateLimitGuard } from './common/guards/rate-limit.guard';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -81,9 +81,14 @@ import { SearchModule } from './modules/search/search.module';
     { provide: APP_GUARD, useClass: MaintenanceAdmissionGuard },
     // Order matters. The rate limit runs before authentication, so a flood of
     // password guesses is turned away before any hashing work happens.
-    { provide: APP_GUARD, useClass: RateLimitGuard },
+    RateLimitGuard,
+    VerifiedUserRateLimitGuard,
+    { provide: APP_GUARD, useExisting: RateLimitGuard },
     // Authentication is required everywhere unless a route is marked @Public().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Right after authentication: a validated user is refunded from the address
+    // budget and counted against their own company/user budget.
+    { provide: APP_GUARD, useExisting: VerifiedUserRateLimitGuard },
     // Authorization is registered here rather than in one feature module: it
     // is a rule about every route, so it must not depend on which modules
     // happen to be imported. (It used to ride in with AccountingModule.)

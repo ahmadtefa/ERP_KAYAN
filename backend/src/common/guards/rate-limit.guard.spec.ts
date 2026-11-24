@@ -1,7 +1,7 @@
 import { ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { RateLimitGuard } from './rate-limit.guard';
+import { RateLimitGuard, VerifiedUserRateLimitGuard } from './rate-limit.guard';
 
 /// Builds the smallest thing the guard actually uses.
 function context(
@@ -115,5 +115,104 @@ describe('RateLimitGuard', () => {
     for (let i = 0; i < 20; i += 1) {
       expect(guard.canActivate(context('/x').context)).toBe(true);
     }
+  });
+});
+
+describe('address reservation, refund and verified-user quota', () => {
+  const config = (values: Record<string, unknown>) => ({
+    get: (key: string, fallback?: unknown) => (key in values ? values[key] : fallback),
+  }) as unknown as ConfigService;
+  type Req = { ip: string; path: string; url: string; route: { path: string }; headers: Record<string, string>; user?: unknown; rateReservation?: unknown };
+  const ctx = (req: Req) => ({
+    switchToHttp: () => ({
+      getRequest: () => req,
+      getResponse: () => ({ setHeader() {}, status: () => ({ json() {} }) }),
+    }),
+  }) as unknown as ExecutionContext;
+  const mk = (limit: number) => {
+    const pre = new RateLimitGuard(config({ RATE_LIMIT_MAX: limit, RATE_LIMIT_AUTH_MAX: 2 }));
+    return { pre, post: new VerifiedUserRateLimitGuard(pre) };
+  };
+  const req = (ip: string, path = '/x', user?: { userId: string; companyId: string }): Req =>
+    ({ ip, path, url: path, route: { path }, headers: {}, user });
+  const attempt = (fn: () => unknown) => { try { fn(); return 'ok'; } catch (e) { return (e as HttpException).getStatus?.() === 429 ? '429' : 'err'; } };
+  /// One full request through both guards, authenticated as `user` (undefined = auth fails).
+  const call = (g: ReturnType<typeof mk>, ip: string, user?: { userId: string; companyId: string }, path = '/x') => {
+    const r = req(ip, path);
+    const c = ctx(r);
+    const first = attempt(() => g.pre.canActivate(c));
+    if (first !== 'ok') return first;
+    if (!user) return 'ok-unauth'; // JwtAuthGuard would reject: reservation stays
+    r.user = user;
+    return attempt(() => g.post.canActivate(c));
+  };
+
+  it('100 users behind one address each keep their own 300-style allowance', () => {
+    const g = mk(3);
+    for (let round = 0; round < 3; round += 1) {
+      for (let u = 0; u < 100; u += 1) expect(call(g, '10.1.1.1', { userId: `u${u}`, companyId: 'c' })).toBe('ok');
+    }
+    expect(call(g, '10.1.1.1', { userId: 'u0', companyId: 'c' })).toBe('429'); // own quota
+    expect(call(g, '10.1.1.1', { userId: 'u99', companyId: 'c' })).toBe('429');
+    expect(call(g, '10.1.1.1', { userId: 'u100', companyId: 'c' })).toBe('ok'); // a new user is unaffected
+  });
+
+  it('keeps unauthenticated or revoked requests on the address budget (no refund)', () => {
+    const g = mk(3);
+    expect(['ok-unauth', 'ok-unauth', 'ok-unauth']).toEqual([call(g, '10.2.2.2'), call(g, '10.2.2.2'), call(g, '10.2.2.2')]);
+    expect(call(g, '10.2.2.2')).toBe('429');
+    // A validated user from the same address is also held while the address is full.
+    expect(call(g, '10.2.2.2', { userId: 'u1', companyId: 'c' })).toBe('429');
+  });
+
+  it('mixes failed and successful requests: refunds only the successful ones', () => {
+    const g = mk(4);
+    expect(call(g, '10.3.3.3')).toBe('ok-unauth');
+    for (let i = 0; i < 20; i += 1) expect(call(g, '10.3.3.3', { userId: `u${i}`, companyId: 'c' })).toBe('ok');
+    expect(call(g, '10.3.3.3')).toBe('ok-unauth');
+    expect(call(g, '10.3.3.3')).toBe('ok-unauth');
+    expect(call(g, '10.3.3.3')).toBe('ok-unauth'); // 4 failures so far, 20 successes refunded
+    expect(call(g, '10.3.3.3')).toBe('429'); // the fifth failure is over the limit of 4
+  });
+
+  it('refunds at most once, and never touches a later window', () => {
+    const pre = new RateLimitGuard(config({ RATE_LIMIT_MAX: 2, RATE_LIMIT_WINDOW_MS: 1000 }));
+    const post = new VerifiedUserRateLimitGuard(pre);
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+    const r1 = req('10.4.4.4');
+    pre.canActivate(ctx(r1));
+    now.mockReturnValue(1_002_000); // the window reset before auth finished
+    const r2 = req('10.4.4.4');
+    pre.canActivate(ctx(r2)); // opens a new window with count 1
+    r1.user = { userId: 'u1', companyId: 'c' };
+    post.canActivate(ctx(r1)); // refund for the old window must not lower the new one
+    post.canActivate(ctx(r1)); // second refund is a no-op
+    const r3 = req('10.4.4.4');
+    expect(attempt(() => pre.canActivate(ctx(r3)))).toBe('ok'); // count 2
+    expect(attempt(() => pre.canActivate(ctx(req('10.4.4.4'))))).toBe('429'); // count 3 > 2
+    now.mockRestore();
+  });
+
+  it('bounds concurrent pending requests with the same address budget', () => {
+    const g = mk(5);
+    const results = Array.from({ length: 8 }, () => call(g, '10.5.5.5'));
+    expect(results.filter((r) => r === '429')).toHaveLength(3);
+  });
+
+  it('leaves sign-in at its own tight address limit and never refunds it', () => {
+    const g = mk(300);
+    expect(call(g, '10.6.6.6', undefined, '/auth/login')).toBe('ok-unauth');
+    expect(call(g, '10.6.6.6', undefined, '/auth/login')).toBe('ok-unauth');
+    expect(call(g, '10.6.6.6', undefined, '/auth/login')).toBe('429');
+  });
+
+  it('counts one user once across tokens and addresses', () => {
+    const g = mk(3);
+    const u = { userId: 'u1', companyId: 'c' };
+    expect(call(g, '10.7.0.1', u)).toBe('ok');
+    expect(call(g, '10.7.0.2', u)).toBe('ok');
+    expect(call(g, '10.7.0.3', u)).toBe('ok');
+    expect(call(g, '10.7.0.4', u)).toBe('429');
   });
 });

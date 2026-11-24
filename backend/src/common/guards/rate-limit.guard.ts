@@ -23,11 +23,17 @@ import { ConfigService } from '@nestjs/config';
 /// proxy's address, so the proxy must be configured to forward the real client
 /// address (X-Forwarded-For) and this server started with TRUST_PROXY=true.
 /// Without that, one abusive client would use up everyone's allowance.
+interface WindowEntry { count: number; resetAt: number }
+
+/// What a request reserved in the per-address window before authentication.
+/// It names the exact window entry, so a refund can never touch a later window.
+export interface RateReservation { key: string; entry: WindowEntry; refunded: boolean }
+
 @Injectable()
 export class RateLimitGuard implements CanActivate {
   constructor(private readonly config: ConfigService) {}
 
-  private readonly counters = new Map<string, { count: number; resetAt: number }>();
+  private readonly counters = new Map<string, WindowEntry>();
   private lastPrune = Date.now();
 
   /// Routes that get the tight allowance, because guessing is cheap there.
@@ -41,6 +47,7 @@ export class RateLimitGuard implements CanActivate {
     if (!this.enabled) return true;
 
     const request = context.switchToHttp().getRequest<{
+      rateReservation?: RateReservation;
       ip?: string;
       socket?: { remoteAddress?: string };
       path?: string;
@@ -71,7 +78,9 @@ export class RateLimitGuard implements CanActivate {
 
     const entry = this.counters.get(key);
     if (!entry || entry.resetAt <= now) {
-      this.counters.set(key, { count: 1, resetAt: now + windowMs });
+      const fresh = { count: 1, resetAt: now + windowMs };
+      this.counters.set(key, fresh);
+      if (!sensitive) request.rateReservation = { key, entry: fresh, refunded: false };
       return true;
     }
 
@@ -80,14 +89,46 @@ export class RateLimitGuard implements CanActivate {
       const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
       return this.reject(response, retryAfter, sensitive);
     }
+    if (!sensitive) request.rateReservation = { key, entry, refunded: false };
     return true;
+  }
+
+  /// Gives back one address reservation, once, and only while its own window
+  /// is still the live one. Called after the session and principal have been
+  /// validated; sign-in routes never hold a reservation, so they never refund.
+  refund(reservation: RateReservation | undefined): void {
+    if (!reservation || reservation.refunded) return;
+    reservation.refunded = true;
+    const live = this.counters.get(reservation.key) === reservation.entry;
+    if (live && reservation.entry.resetAt > Date.now() && reservation.entry.count > 0) {
+      reservation.entry.count -= 1;
+    }
+  }
+
+  /// Counts one request against a verified user's own window (same limits as
+  /// the address window) and refuses it past the limit.
+  countUser(key: string, response: Parameters<RateLimitGuard['reject']>[0]): void {
+    if (!this.enabled) return;
+    const limit = this.config.get<number>('RATE_LIMIT_MAX', 300);
+    const windowMs = this.config.get<number>('RATE_LIMIT_WINDOW_MS', 60_000);
+    const now = Date.now();
+    this.prune(now);
+    const entry = this.counters.get(key);
+    if (!entry || entry.resetAt <= now) {
+      this.counters.set(key, { count: 1, resetAt: now + windowMs });
+      return;
+    }
+    entry.count += 1;
+    if (entry.count > limit) {
+      this.reject(response, Math.ceil((entry.resetAt - now) / 1000), false);
+    }
   }
 
   /// Writes the refusal straight onto the response.
   ///
   /// Doing it here rather than throwing keeps Retry-After on the reply, which
   /// is what a well-behaved client needs in order to back off correctly.
-  private reject(
+  reject(
     response: {
       setHeader(name: string, value: string): void;
       status(code: number): { json(body: unknown): void };
@@ -139,5 +180,29 @@ export class RateLimitGuard implements CanActivate {
     for (const [key, entry] of this.counters) {
       if (entry.resetAt <= now) this.counters.delete(key);
     }
+  }
+}
+
+/// Runs right after JwtAuthGuard. A request that got this far has a validated
+/// session and principal: its address reservation is refunded and it is
+/// counted against its own company/user window instead. Public routes and
+/// failed authentication never reach a refund, so the address budget still
+/// bounds them.
+@Injectable()
+export class VerifiedUserRateLimitGuard implements CanActivate {
+  constructor(private readonly limiter: RateLimitGuard) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest<{
+      user?: { id?: string; sub?: string; userId?: string; companyId?: string };
+      rateReservation?: RateReservation;
+    }>();
+    const user = request.user;
+    const userId = user?.id ?? user?.userId ?? user?.sub;
+    if (!user || !userId || !user.companyId) return true;
+    this.limiter.refund(request.rateReservation);
+    const response = context.switchToHttp().getResponse<Parameters<RateLimitGuard['reject']>[0]>();
+    this.limiter.countUser(`user:${user.companyId}:${userId}`, response);
+    return true;
   }
 }
