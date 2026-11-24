@@ -174,8 +174,21 @@ async function main() {
   if (!token) return false;
 
   const roleList = await api('/admin/roles');
-  const financeRole = roleList.data?.items?.find((r) => r.code === 'FINANCE_MANAGER');
-  check('the finance manager role is seeded', Boolean(financeRole?.id), `roles ${roleList.data?.items?.length}`);
+  let financeRole = roleList.data?.items?.find((r) => r.code === 'FINANCE_MANAGER');
+  // The preceding disposable accounting scenario exercises reset + initial
+  // setup, which recreates base roles only. This scenario owns its reader
+  // fixture instead of depending on the seed having run after that reset.
+  if (!financeRole) {
+    const catalogue = await api('/admin/permissions');
+    const codes = (catalogue.data?.items ?? []).map((p) => p.code);
+    const createdRole = await api('/admin/roles', {
+      method: 'POST',
+      json: { code: 'FINANCE_MANAGER', nameEn: 'Scenario finance manager',
+        nameAr: 'مدير مالي للاختبار', permissions: codes },
+    });
+    financeRole = createdRole.status < 300 ? createdRole.data : null;
+  }
+  check('the finance manager reader fixture exists', Boolean(financeRole?.id), `roles ${roleList.data?.items?.length}`);
   const branchList = await api('/company/branches');
   const branchRows = branchList.data?.items ?? branchList.data ?? [];
   stampF = Date.now().toString(36);
