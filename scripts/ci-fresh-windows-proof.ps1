@@ -46,7 +46,7 @@ foreach ($phase in @('first-launch','restart')) {
   } finally {if(-not $client.HasExited){$null=$client.CloseMainWindow();if(-not $client.WaitForExit(10000)){Stop-Process -Id $client.Id -Force}}}
 }
 # A separate app exercises the exact shared helper code. Not an installed business flow.
-$probeDir=Join-Path $env:TEMP 'kayan-native-dialog-fixture'
+$probeDir='C:\kayan-native-dialog-fixture'
 New-Item -ItemType Directory $probeDir | Out-Null
 [IO.File]::WriteAllText((Join-Path $probeDir 'visible.json'),'{}')
 [IO.File]::WriteAllText((Join-Path $probeDir 'hidden.txt'),'not allowed')
@@ -71,14 +71,17 @@ function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$val
  $id=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
  $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$id)
  if(-not $edit){throw 'Native filename control absent'}
- $pattern=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
- $pattern.SetValue($value)
  $edit.SetFocus()
+ $keys.SendKeys('^a')
+ $keys.SendKeys($value)
+ Start-Sleep 1
+ $keys.SendKeys('{TAB}')
+ Start-Sleep 1
 }
 try {
  Wait-Stage 'save';Start-Sleep 3;Screenshot 'before-dialog-discovery';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Screenshot 'native-save-as'
- Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$keys.SendKeys('{ENTER}')
+ Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$buttonCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1');$button=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$buttonCondition);$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Stage 'open';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Set-FileName $w ($probeDir + '\');$keys.SendKeys('{ENTER}');Start-Sleep 3
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
