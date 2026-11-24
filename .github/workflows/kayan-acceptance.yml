@@ -523,8 +523,8 @@ jobs:
         run: flutter build windows --release --target scripts/ci_native_dialog_probe.dart
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: kayan-unreleased-setup-edf710035f9142297977e7400032f6aef11a9890
-          run-id: 45407948799
+          name: kayan-unreleased-setup-1f4aad594ba4c053a94500153dd968a0f89411ea
+          run-id: 45428287095
           github-token: ${{ github.token }}
           path: candidate
       - name: Verify pinned identity, fresh install, first run, restart and actual native helpers

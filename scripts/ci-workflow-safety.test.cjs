@@ -92,7 +92,7 @@ assert.equal(proof.if, "github.event_name == 'workflow_dispatch' && inputs.prove
 assert.deepEqual(proof.permissions, { contents: 'read', actions: 'read' });
 assert.equal(proof.environment, undefined);
 const proofSource = fs.readFileSync(path.join(workflows, '../../scripts/ci-fresh-windows-proof.ps1'), 'utf8');
-assert.match(proofSource, /440a71a6b2ec969bfbf31baa8d55db1c4a01cbdc2b0fb9e9ad684fb7f2cb6bec/);
+assert.match(proofSource, /b3d09669d25f6af6614a621c4d2295744a42aed5f4de85bb0236e778f76b046e/);
 assert.doesNotMatch(proofSource, /reset-kayan|license-generator|generateKeyPair|createPrivateKey|RuntimeOnly|smoke-test-installed|Remove-Item|Set-Acl|Set-Content.*public-key/);
 for (const step of proof.steps) assert.equal(step['continue-on-error'], undefined);
 const optionalWindows = application.jobs['windows-evaluation'];

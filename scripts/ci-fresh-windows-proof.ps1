@@ -5,8 +5,8 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 $root=Join-Path $env:ProgramFiles 'KAYAN ERP'
 $data=Join-Path $env:ProgramData 'KAYAN-ERP'
 if ((Test-Path $root) -or (Test-Path $data) -or (Get-Service KayanERPPostgreSQL -ErrorAction SilentlyContinue)) { throw 'Existing installation refused' }
-$expected='edf710035f9142297977e7400032f6aef11a9890'
-$hash='440a71a6b2ec969bfbf31baa8d55db1c4a01cbdc2b0fb9e9ad684fb7f2cb6bec'
+$expected='1f4aad594ba4c053a94500153dd968a0f89411ea'
+$hash='b3d09669d25f6af6614a621c4d2295744a42aed5f4de85bb0236e778f76b046e'
 $setup=(Resolve-Path (Join-Path $CandidateDir 'KAYAN-ERP-Setup.exe')).Path
 $identity=Get-Content (Join-Path $CandidateDir 'identity.json') -Raw | ConvertFrom-Json
 if ($identity.sourceCommit -ne $expected -or $identity.sha256 -ne $hash -or (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Candidate identity mismatch' }
@@ -54,11 +54,19 @@ $env:KAYAN_PROBE_DIR=$probeDir
 $probe=Start-Process (Join-Path $PWD 'build/windows/x64/runner/Release/erp_kayan.exe') -PassThru
 $keys=New-Object -ComObject WScript.Shell
 function Wait-Stage([string]$want){for($i=0;$i -lt 90;$i++){if(Test-Path "$probeDir/stage.txt"){$s=Get-Content "$probeDir/stage.txt" -Raw;if($s -like 'failed:*'){throw $s};if($s -eq $want){return}};Start-Sleep 1};throw "Probe stage timeout: $want"}
-function Wait-Dialog {
+function Wait-Dialog([string]$title) {
  for($i=0;$i -lt 30;$i++){
   $classCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty,'#32770')
   $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,$classCondition)
-  foreach($w in $windows){if($w.Current.ClassName -eq '#32770'){return $w}}
+  foreach($w in $windows){
+   try {
+    if($w.Current.ProcessId -eq $probe.Id -and $w.Current.Name -eq $title -and -not $w.Current.IsOffscreen -and $w.Current.IsEnabled){
+     $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
+     $readyEdit=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
+     if($readyEdit -and $readyEdit.Current.IsEnabled -and -not $readyEdit.Current.IsOffscreen){return $w}
+    }
+   } catch {}
+  }
   if(Test-Path "$probeDir/stage.txt"){$stage=Get-Content "$probeDir/stage.txt" -Raw;if($stage -like 'failed:*'){Screenshot 'dialog-helper-failed';throw $stage}}
   Start-Sleep 1
  }
@@ -79,17 +87,17 @@ function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$val
  Start-Sleep 1
 }
 try {
- Wait-Stage 'save';Start-Sleep 3;Screenshot 'before-dialog-discovery';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
+ Wait-Stage 'save';Start-Sleep 3;Screenshot 'before-dialog-discovery';$w=Wait-Dialog 'Save As';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Screenshot 'native-save-as'
  Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$buttonCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1');$button=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$buttonCondition);$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
- Wait-Stage 'open';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
+ Wait-Stage 'open';$w=Wait-Dialog 'Open';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Set-FileName $w ($probeDir + '\');$keys.SendKeys('{ENTER}');Start-Sleep 3
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  $names=@($elements | ForEach-Object {$_.Current.Name})
  if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
  Screenshot 'native-open-filter'
  Set-FileName $w 'visible.json';$keys.SendKeys('{ENTER}')
- Wait-Stage 'cancel';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
+ Wait-Stage 'cancel';$w=Wait-Dialog 'Save As';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
  Wait-Stage 'passed'
-}finally{if(-not $probe.HasExited){Stop-Process -Id $probe.Id -Force}}
+}catch{Screenshot 'native-error';throw}finally{if(-not $probe.HasExited){Stop-Process -Id $probe.Id -Force}}
 [ordered]@{result='fresh-install-first-run-restart-and-isolated-native-helper-proof';candidateSource=$expected;installerSha256=$hash;proofSource=$env:GITHUB_SHA;installedBusinessFlowTested=$false;activatedLicenceTested=$false;resetExecuted=$false;nativeSharedHelperSaveOpenCancel=$true} | ConvertTo-Json | Set-Content (Join-Path $out 'evidence.json') -Encoding utf8
