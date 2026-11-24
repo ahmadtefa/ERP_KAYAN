@@ -331,7 +331,16 @@ class _FormSheetState extends State<_FormSheet> {
     try {
       await widget.onSubmit!(result);
       if (mounted) Navigator.of(context).pop(result);
-    } catch (error) {
+    } catch (caught) {
+      // A request wrapper must not hide an explicit validation refusal.
+      // Only structured 400/422 field errors are safe to unwrap here; an
+      // unknown transport/process outcome keeps its existing retry lock.
+      final cause = caught is UncertainFormSubmission ? caught.cause : caught;
+      final error = cause is ApiFailure &&
+              const {400, 422}.contains(cause.statusCode) &&
+              cause.fieldErrors.isNotEmpty
+          ? cause
+          : caught;
       // The analyzer only accepts a plain mounted check before a State context
       // is used across an await; a compound condition left this one flagged.
       if (error is FormSubmissionCancelled) return;

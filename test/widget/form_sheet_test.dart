@@ -51,6 +51,50 @@ void main() {
   );
 
   testWidgets(
+    'wrapped explicit validation errors stay beside fields instead of uncertain lock',
+    (tester) async {
+      await tester.pumpWidget(
+        wrapWithApp(
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => FilledButton(
+                onPressed: () => showFormSheet(
+                  context,
+                  title: 'Edit',
+                  fields: const [
+                    FieldSpec('name', 'Name'),
+                    FieldSpec('code', 'Code'),
+                  ],
+                  onSubmit: (_) async => throw const UncertainFormSubmission(ApiFailure(
+                    'Invalid',
+                    statusCode: 422,
+                    fieldErrors: {
+                      'name': 'Name already exists',
+                      'code': 'Code already exists',
+                    },
+                  )),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'Sara');
+      await tester.enterText(find.byType(TextFormField).last, 'S1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Name already exists'), findsOneWidget);
+      expect(find.text('Code already exists'), findsOneWidget);
+      expect(find.text('Sara'), findsOneWidget);
+      expect(find.text('S1'), findsOneWidget);
+      expect(tester.binding.focusManager.primaryFocus?.hasFocus, isTrue);
+    },
+  );
+
+  testWidgets(
     'focuses the first invalid field and shows errors without a field separately',
     (tester) async {
       await tester.pumpWidget(
