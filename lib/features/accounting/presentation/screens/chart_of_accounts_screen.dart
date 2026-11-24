@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
@@ -369,6 +370,8 @@ Future<void> _editAccount(
   // The API can commit before its response is lost. Until the server supports
   // idempotency/version checks, keep the draft but do not blindly resubmit it.
   bool uncertain = false;
+  // Reasons the server gave per field; a reason clears when its field is edited.
+  final fieldErrors = <String, String>{};
   bool confirmingDiscard = false;
   bool hasChanges() => initial != (
     codeController.text, nameArController.text, nameEnController.text,
@@ -449,7 +452,11 @@ Future<void> _editAccount(
                   ],
                   TextField(
                     controller: codeController,
+                    onChanged: (_) {
+                      if (fieldErrors.remove('code') != null) setDialogState(() {});
+                    },
                     decoration: InputDecoration(
+                      errorText: fieldErrors['code'],
                       labelText: dialogL10n.accountCode,
                       helperText: dialogL10n.accountCodeHelper,
                     ),
@@ -457,14 +464,22 @@ Future<void> _editAccount(
                   const SizedBox(height: 12),
                   TextField(
                     controller: nameArController,
+                    onChanged: (_) {
+                      if (fieldErrors.remove('nameAr') != null) setDialogState(() {});
+                    },
                     decoration: InputDecoration(
+                      errorText: fieldErrors['nameAr'],
                       labelText: dialogL10n.nameArabic,
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: nameEnController,
+                    onChanged: (_) {
+                      if (fieldErrors.remove('nameEn') != null) setDialogState(() {});
+                    },
                     decoration: InputDecoration(
+                      errorText: fieldErrors['nameEn'],
                       labelText: dialogL10n.nameEnglish,
                     ),
                   ),
@@ -472,7 +487,11 @@ Future<void> _editAccount(
                   TextField(
                     controller: descriptionController,
                     maxLength: 500,
+                    onChanged: (_) {
+                      if (fieldErrors.remove('description') != null) setDialogState(() {});
+                    },
                     decoration: InputDecoration(
+                      errorText: fieldErrors['description'],
                       labelText: dialogL10n.description,
                     ),
                   ),
@@ -632,9 +651,14 @@ Future<void> _editAccount(
             FilledButton(
               onPressed: saving || uncertain ? null : () async {
                 if (nameArController.text.trim().isEmpty && nameEnController.text.trim().isEmpty) {
-                  showMessage(dialogContext, arabic
+                  final reason = arabic
                       ? 'أدخل اسم الحساب بالعربية والإنجليزية.'
-                      : 'Enter both the Arabic and English account names.', error: true);
+                      : 'Enter both the Arabic and English account names.';
+                  setDialogState(() {
+                    fieldErrors['nameAr'] = reason;
+                    fieldErrors['nameEn'] = reason;
+                  });
+                  showMessage(dialogContext, reason, error: true);
                   return;
                 }
                 final input = AccountInput(
@@ -658,7 +682,32 @@ Future<void> _editAccount(
                     ? await controller.create(input)
                     : await controller.updateAccount(existing.id, input);
                 if (!dialogContext.mounted) return;
-                if (error != null) {
+                if (error is ApiFailure &&
+                    const {400, 422}.contains(error.statusCode) &&
+                    error.fieldErrors.isNotEmpty) {
+                  // The server refused the content, so nothing was saved and
+                  // the form stays editable: reasons go under their fields.
+                  const known = {'code', 'nameAr', 'nameEn', 'description'};
+                  final rest = <String, String>{};
+                  setDialogState(() {
+                    saving = false;
+                    fieldErrors.clear();
+                    for (final entry in error.fieldErrors.entries) {
+                      if (known.contains(entry.key)) {
+                        fieldErrors[entry.key] = entry.value;
+                      } else {
+                        rest[entry.key] = entry.value;
+                      }
+                    }
+                  });
+                  if (rest.isNotEmpty) {
+                    showMessage(
+                      dialogContext,
+                      ApiFailure(error.message, statusCode: error.statusCode, fieldErrors: rest),
+                      error: true,
+                    );
+                  }
+                } else if (error != null) {
                   setDialogState(() {
                     saving = false;
                     uncertain = true;
