@@ -195,6 +195,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   String? _toWarehouseId;
   String? _locationId;
   bool _busy = false;
+  bool _uncertain = false;
   bool _splitSources = false;
   final _sourceAmounts = <String, TextEditingController>{};
   String? _sourceError;
@@ -284,7 +285,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   }
 
   Future<void> _submit() async {
-    if (_busy || !(_form.currentState?.validate() ?? false)) return;
+    if (_busy || _uncertain || !(_form.currentState?.validate() ?? false)) return;
     final user = ref.read(currentUserProvider);
     final branchId =
         user?.branchId ?? text(widget.batch ?? const {}, 'branchId');
@@ -368,6 +369,13 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
+      if ((operation == BatchOperation.issue || operation == BatchOperation.writeOff) &&
+          !(error is ApiFailure && error.statusCode != null && error.statusCode! >= 400 && error.statusCode! < 500) &&
+          error is! PermissionFailure && error is! AuthFailure && error is! SessionExpiredFailure) {
+        setState(() => _uncertain = true);
+        _fail(_label('تعذر التأكد هل تمت الحركة. بياناتك محفوظة ولن نرسلها مرة ثانية. أغلق النافذة وحدّث الأرصدة وراجع الحركة قبل أي محاولة جديدة.', 'Could not confirm whether the stock movement completed. Your entries are kept and will not be submitted again. Close this form, refresh balances and check movements before any new attempt.'));
+        return;
+      }
       if (error is ApiFailure &&
           const {400, 422}.contains(error.statusCode) &&
           error.fieldErrors.isNotEmpty) {
@@ -679,7 +687,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           child: Text(context.l10n.cancel),
         ),
         FilledButton(
-          onPressed: _busy ? null : _submit,
+          onPressed: _busy || _uncertain ? null : _submit,
           child: _busy
               ? const SizedBox(
                   width: 16,

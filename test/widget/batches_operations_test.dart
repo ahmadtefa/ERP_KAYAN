@@ -551,6 +551,19 @@ void main() {
       ]);
     });
 
+    testWidgets('uncertain issue blocks duplicate submission and retains quantity', (tester) async {
+      final api = _BatchApi(failPost: const NetworkFailure());
+      await pump(tester, api);
+      await tapText(tester, 'Issue');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
+      await tapText(tester, 'Issue');
+      expect(find.textContaining('Could not confirm whether the stock movement completed.'), findsOneWidget);
+      await tapText(tester, 'OK');
+      final submit = find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(FilledButton, 'Issue'));
+      expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Quantity')).controller!.text, '2');
+    });
+
     testWidgets('split refusal retains all source quantities and reason for correction', (tester) async {
       final api = _BatchApi(failPost: const ApiFailure('Source B-02 has only 1. Refresh balances and reduce B-02 or choose another source.', statusCode: 400))..secondLocation = true;
       await pump(tester, api);
