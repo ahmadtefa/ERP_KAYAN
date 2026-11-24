@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -114,6 +115,14 @@ const notificationTypeFilters = <({String type, String ar, String en})>[
   (type: 'STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED', ar: 'فروق تنتظر الاعتماد', en: 'Differences awaiting approval'),
   (type: 'STOCK_TRANSFER_CLOSE_REQUIRED', ar: 'تحويلات مكتملة تنتظر الإغلاق', en: 'Transfers awaiting closure'),
   (type: 'JOURNAL_PENDING_APPROVAL', ar: 'قيود تنتظر الاعتماد', en: 'Journals to approve'),
+  (type: 'STOCK_TRANSFER_LEVEL_PENDING', ar: 'تحويلات في انتظار مرحلتك', en: 'Transfers at your approval level'),
+  (type: 'STOCK_TRANSFER_RETURNED', ar: 'تحويلات معادة للتعديل', en: 'Transfers returned'),
+  (type: 'STOCKTAKE_PENDING_APPROVAL', ar: 'جرد ينتظر الاعتماد', en: 'Stock counts to approve'),
+  (type: 'WRITEOFF_PENDING_APPROVAL', ar: 'إعدام ينتظر الاعتماد', en: 'Write-offs to approve'),
+  (type: 'SALES_ORDER_PENDING_APPROVAL', ar: 'أوامر بيع تنتظر الاعتماد', en: 'Sales orders to approve'),
+  (type: 'PURCHASE_ORDER_PENDING_APPROVAL', ar: 'أوامر شراء تنتظر الاعتماد', en: 'Purchase orders to approve'),
+  (type: 'DOCUMENT_APPROVED', ar: 'مستندات تم اعتمادها', en: 'Documents approved'),
+  (type: 'DOCUMENT_REJECTED', ar: 'مستندات مرفوضة', en: 'Documents rejected'),
   (type: 'INVOICE_OVERDUE', ar: 'فواتير عملاء متأخرة', en: 'Overdue invoices'),
   (type: 'PAYABLE_DUE', ar: 'مستحقات موردين قريبة', en: 'Supplier bills due'),
   (type: 'PAYABLE_OVERDUE', ar: 'مستحقات موردين متأخرة', en: 'Supplier bills overdue'),
@@ -481,6 +490,19 @@ class _NotificationCenterScreenState
         return Icons.task_alt_outlined;
       case 'JOURNAL_PENDING_APPROVAL':
         return Icons.playlist_add_check_rounded;
+      case 'STOCK_TRANSFER_LEVEL_PENDING':
+      case 'STOCKTAKE_PENDING_APPROVAL':
+      case 'SALES_ORDER_PENDING_APPROVAL':
+      case 'PURCHASE_ORDER_PENDING_APPROVAL':
+        return Icons.rule_folder_outlined;
+      case 'WRITEOFF_PENDING_APPROVAL':
+        return Icons.delete_sweep_outlined;
+      case 'STOCK_TRANSFER_RETURNED':
+        return Icons.undo_rounded;
+      case 'DOCUMENT_APPROVED':
+        return Icons.check_circle_outline_rounded;
+      case 'DOCUMENT_REJECTED':
+        return Icons.cancel_outlined;
       case 'INVOICE_OVERDUE':
         return Icons.request_quote_outlined;
       case 'PAYABLE_DUE':
@@ -786,13 +808,37 @@ class _NotificationCenterScreenState
 /// A badge is not decoration: it is the only way a person learns that a lot
 /// expires in three days without opening a screen to ask. It shows nothing at
 /// all when there is nothing to say, rather than a zero.
-class NotificationBell extends ConsumerWidget {
+class NotificationBell extends ConsumerStatefulWidget {
   const NotificationBell({super.key, this.foreground});
 
   final Color? foreground;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NotificationBell> createState() => _NotificationBellState();
+}
+
+class _NotificationBellState extends ConsumerState<NotificationBell> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // The number is only true until the next approval is raised, so ask again
+    // every minute instead of showing whatever the last sign-in saw.
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted) ref.invalidate(notificationCountProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = widget.foreground;
     final count = ref.watch(notificationCountProvider).asData?.value ?? 0;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return IconButton(
