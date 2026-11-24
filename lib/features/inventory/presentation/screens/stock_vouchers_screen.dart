@@ -1132,8 +1132,10 @@ class _StockVoucherCreateScreenState
       'documentDate',
       'counterpartyName',
       'reason',
+      'costCenterId',
+      'notes',
       for (var i = 0; i < _lines.length; i++)
-        for (final f in const ['quantity', 'unitCost'])
+        for (final f in const ['itemId', 'unitName', 'quantity', 'unitCost'])
           'lines.$i.$f',
     };
     final rest = <String, String>{};
@@ -1536,12 +1538,12 @@ class _StockVoucherCreateScreenState
                             ],
                             onChanged: (v) {
                               setState(() => _center = v);
-                              _changed();
+                              _edited('costCenterId');
                             },
                             validator: (_) =>
                                 widget.kind == 'ISSUE' && _center == null
                                 ? _label(context, 'مطلوب', 'Required')
-                                : null,
+                                : _srv('costCenterId'),
                           ),
                         if (widget.kind == 'ISSUE' && centers.isEmpty)
                           Padding(
@@ -1569,7 +1571,8 @@ class _StockVoucherCreateScreenState
                           ),
                         TextFormField(
                           controller: _notes,
-                          onChanged: (_) => _changed(),
+                          onChanged: (_) => _edited('notes'),
+                          validator: (_) => _srv('notes'),
                           decoration: InputDecoration(
                             labelText: _label(context, 'ملاحظات', 'Notes'),
                           ),
@@ -1661,7 +1664,7 @@ class _StockVoucherCreateScreenState
                                             line.itemId = v;
                                             line.unitName = null;
                                           });
-                                          _changed();
+                                          _edited('$at.itemId');
                                         },
                                         validator: (v) => v == null
                                             ? _label(
@@ -1669,7 +1672,7 @@ class _StockVoucherCreateScreenState
                                                 'مطلوب',
                                                 'Required',
                                               )
-                                            : null,
+                                            : _srv('$at.itemId'),
                                       ),
                                       if (item != null &&
                                           (units.isNotEmpty ||
@@ -1702,7 +1705,7 @@ class _StockVoucherCreateScreenState
                                           ],
                                           onChanged: (v) {
                                             setState(() => line.unitName = v);
-                                            _changed();
+                                            _edited('$at.unitName');
                                           },
                                           validator: (_) =>
                                               line.unitName != null &&
@@ -1716,7 +1719,7 @@ class _StockVoucherCreateScreenState
                                                   'اختر وحدة صالحة',
                                                   'Select an active unit',
                                                 )
-                                              : null,
+                                              : _srv('$at.unitName'),
                                         ),
                                       TextFormField(
                                         controller: line.quantity,
