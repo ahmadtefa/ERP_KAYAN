@@ -124,6 +124,11 @@ async function main() {
     `status ${revived.status}`,
   );
 
+  // Rotation revokes the session the first access token was bound to (sign-out
+  // and rotation end it server side), so every later request in this scenario
+  // must carry the renewed token, not the one from the first sign-in.
+  token = renewed.data.accessToken;
+
   // ── download ticket (Issue 6) ────────────────────────────────────────
   const ticketResponse = await api('/auth/download-ticket', { method: 'POST' });
   const ticket = ticketResponse.data?.ticket;
