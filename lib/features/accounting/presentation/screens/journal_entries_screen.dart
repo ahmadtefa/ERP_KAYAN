@@ -7,6 +7,7 @@ import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/status_pill.dart';
@@ -314,6 +315,10 @@ class _EntryLineDraft {
 
   String? accountId;
 
+  /// Why a field of this line was refused, by `accountId` / `debit` / `credit`.
+  final Map<String, String> errors = {};
+  final GlobalKey anchor = GlobalKey();
+
   /// The centre this line belongs to, when the cost is somebody's. Optional:
   /// a balance-sheet line usually has no owner. Ignored while [allocations] is
   /// non-empty: a line is either one centre or a controlled split, never both.
@@ -438,12 +443,28 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
       showMessage(context, l10n.entryUnbalanced, error: true);
       return;
     }
+    setState(() {
+      for (final draft in _lines) {
+        draft.errors.clear();
+      }
+    });
     final lines = <Json>[];
+    final included = <_EntryLineDraft>[];
     for (final line in _lines) {
-      if (line.accountId == null) continue;
       final debit = line.debit.text.trim();
       final credit = line.credit.text.trim();
+      if (line.accountId == null) {
+        // An amount with no account used to be dropped without a word.
+        final hasAmount = (debit.isNotEmpty && debit != '0') ||
+            (credit.isNotEmpty && credit != '0');
+        if (hasAmount) {
+          _flag(line, 'accountId', l10n.accountRequired);
+          return;
+        }
+        continue;
+      }
       if (debit.isEmpty && credit.isEmpty) continue;
+      included.add(line);
       final lineAmount = Decimal.tryParse(
         debit.isNotEmpty && debit != '0' ? debit : credit,
       );
@@ -518,10 +539,58 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     } catch (error) {
       if (mounted) {
         ref.invalidate(journalEntriesProvider);
-        showAppError(context, error);
+        _showServerError(error, included);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _flag(_EntryLineDraft line, String field, String reason) {
+    setState(() => line.errors[field] = reason);
+    showMessage(context, reason, error: true);
+    _scrollTo(line);
+  }
+
+  void _scrollTo(_EntryLineDraft line) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = line.anchor.currentContext;
+      if (target != null && target.mounted) Scrollable.ensureVisible(target);
+    });
+  }
+
+  /// Puts the server's per-field reasons beside the line fields they name;
+  /// anything it cannot place goes to the dialog, so nothing is lost.
+  void _showServerError(Object error, List<_EntryLineDraft> included) {
+    if (error is! ApiFailure || error.fieldErrors.isEmpty) {
+      showAppError(context, error);
+      return;
+    }
+    final pattern = RegExp(r'^lines\.(\d+)\.(accountId|debit|credit)$');
+    final rest = <String, String>{};
+    _EntryLineDraft? first;
+    setState(() {
+      for (final entry in error.fieldErrors.entries) {
+        final match = pattern.firstMatch(entry.key);
+        final index = match == null ? -1 : int.parse(match.group(1)!);
+        if (index >= 0 && index < included.length) {
+          included[index].errors[match!.group(2)!] = entry.value;
+          first ??= included[index];
+        } else {
+          rest[entry.key] = entry.value;
+        }
+      }
+    });
+    if (first != null) _scrollTo(first!);
+    if (rest.isNotEmpty) {
+      showAppError(
+        context,
+        ApiFailure(
+          error.message,
+          statusCode: error.statusCode,
+          fieldErrors: rest,
+        ),
+      );
     }
   }
 
@@ -621,6 +690,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                           key: ValueKey(_lines[index]),
                           padding: const EdgeInsets.symmetric(vertical: 6),
                           child: Column(
+                            key: _lines[index].anchor,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               Row(
@@ -632,6 +702,8 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                       isExpanded: true,
                                       decoration: InputDecoration(
                                         labelText: l10n.account,
+                                        errorText:
+                                            _lines[index].errors['accountId'],
                                         isDense: true,
                                         border: const OutlineInputBorder(),
                                       ),
@@ -665,7 +737,10 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                           ),
                                       ],
                                       onChanged: (value) => setState(
-                                        () => _lines[index].accountId = value,
+                                        () {
+                                          _lines[index].errors.remove('accountId');
+                                          _lines[index].accountId = value;
+                                        },
                                       ),
                                     ),
                                   ),
@@ -775,10 +850,13 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                           ),
                                       decoration: InputDecoration(
                                         labelText: l10n.debit,
+                                        errorText: _lines[index].errors['debit'],
                                         isDense: true,
                                         border: const OutlineInputBorder(),
                                       ),
-                                      onChanged: (_) => setState(() {}),
+                                      onChanged: (_) => setState(() {
+                                        _lines[index].errors.remove('debit');
+                                      }),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -792,10 +870,13 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                           ),
                                       decoration: InputDecoration(
                                         labelText: l10n.credit,
+                                        errorText: _lines[index].errors['credit'],
                                         isDense: true,
                                         border: const OutlineInputBorder(),
                                       ),
-                                      onChanged: (_) => setState(() {}),
+                                      onChanged: (_) => setState(() {
+                                        _lines[index].errors.remove('credit');
+                                      }),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
