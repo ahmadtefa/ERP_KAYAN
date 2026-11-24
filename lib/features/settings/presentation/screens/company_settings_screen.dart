@@ -152,6 +152,10 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   bool _saving = false;
   bool _externalChange = false;
   late String _savedSnapshot;
+  /// Reasons shown under the field they are about; editing clears its own.
+  final Map<String, String> _errors = {};
+  static final _codePattern = RegExp(r'^[A-Za-z0-9_-]{2,20}$');
+  static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
   final _logoKey = GlobalKey<_LogoRowState>();
   String _snapshot() => jsonEncode([_code.text,_nameAr.text,_nameEn.text,_taxId.text,_phone.text,_email.text,_address.text]);
   String _profileSnapshot(Map<String,dynamic> p) => jsonEncode([
@@ -214,7 +218,46 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 
   Future<void> _save() async {
     if (busy || _externalChange || !widget.canCommit) return;
-    setState(() => _saving = true);
+    final ar = Localizations.localeOf(context).languageCode == 'ar';
+    final found = <String, String>{};
+    if (!_codePattern.hasMatch(_code.text.trim())) {
+      found['code'] = ar
+          ? 'الكود من 2 إلى 20 حرفًا: حروف إنجليزية أو أرقام أو - أو _ بدون مسافات'
+          : 'Use 2 to 20 characters: letters, digits, dash or underscore, no spaces';
+    }
+    for (final entry in {'nameAr': _nameAr, 'nameEn': _nameEn}.entries) {
+      final value = entry.value.text.trim();
+      if (value.isEmpty) {
+        found[entry.key] = ar ? 'الاسم مطلوب' : 'The name is required';
+      } else if (value.length > 200) {
+        found[entry.key] = ar ? 'الاسم أطول من 200 حرف' : 'The name is longer than 200 characters';
+      }
+    }
+    final email = _email.text.trim();
+    if (email.isNotEmpty && !_emailPattern.hasMatch(email)) {
+      found['email'] = ar ? 'اكتب بريدًا صحيحًا مثل name@company.com' : 'Enter a valid email such as name@company.com';
+    }
+    if (_taxId.text.trim().length > 50) {
+      found['taxId'] = ar ? 'الرقم الضريبي أطول من 50 حرفًا' : 'The tax number is longer than 50 characters';
+    }
+    if (_phone.text.trim().length > 40) {
+      found['phone'] = ar ? 'الهاتف أطول من 40 حرفًا' : 'The phone is longer than 40 characters';
+    }
+    if (_address.text.trim().length > 500) {
+      found['address'] = ar ? 'العنوان أطول من 500 حرف' : 'The address is longer than 500 characters';
+    }
+    if (found.isNotEmpty) {
+      setState(() {
+        _errors
+          ..clear()
+          ..addAll(found);
+      });
+      return;
+    }
+    setState(() {
+      _errors.clear();
+      _saving = true;
+    });
     final error = await ref.read(companyProfileProvider.notifier).updateProfile(
       {
         'code': _code.text.trim(),
@@ -233,6 +276,29 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
       _savedSnapshot = _snapshot();
       ref.invalidate(companyProfileProvider);
       showMessage(context, l10n.profileSaved);
+    } else if (error is ApiFailure &&
+        const {400, 422}.contains(error.statusCode) &&
+        error.fieldErrors.isNotEmpty) {
+      // Nothing was saved: each reason goes under its field, input is kept.
+      const known = {'code', 'nameAr', 'nameEn', 'taxId', 'phone', 'email', 'address', 'addressEn'};
+      final rest = <String, String>{};
+      setState(() {
+        _errors.clear();
+        error.fieldErrors.forEach((key, message) {
+          if (known.contains(key)) {
+            _errors[key == 'addressEn' ? 'address' : key] = message;
+          } else {
+            rest[key] = message;
+          }
+        });
+      });
+      if (rest.isNotEmpty) {
+        showMessage(
+          context,
+          ApiFailure(error.message, statusCode: error.statusCode, fieldErrors: rest),
+          error: true,
+        );
+      }
     } else {
       showMessage(context, error, error: true);
     }
@@ -264,7 +330,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                   child: TextField(
                     controller: _code,
                     enabled: canEdit && !_saving,
-                    decoration: InputDecoration(labelText: l10n.companyCode),
+                    decoration: InputDecoration(labelText: l10n.companyCode, errorText: _errors['code']),
+                    onChanged: (_) { if (_errors.remove('code') != null) setState(() {}); },
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -272,7 +339,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                   child: TextField(
                     controller: _taxId,
                     enabled: canEdit && !_saving,
-                    decoration: InputDecoration(labelText: l10n.taxId),
+                    decoration: InputDecoration(labelText: l10n.taxId, errorText: _errors['taxId']),
+                    onChanged: (_) { if (_errors.remove('taxId') != null) setState(() {}); },
                   ),
                 ),
               ],
@@ -281,13 +349,15 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             TextField(
               controller: _nameAr,
               enabled: canEdit && !_saving,
-              decoration: InputDecoration(labelText: l10n.nameArabic),
+              decoration: InputDecoration(labelText: l10n.nameArabic, errorText: _errors['nameAr']),
+              onChanged: (_) { if (_errors.remove('nameAr') != null) setState(() {}); },
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _nameEn,
               enabled: canEdit && !_saving,
-              decoration: InputDecoration(labelText: l10n.nameEnglish),
+              decoration: InputDecoration(labelText: l10n.nameEnglish, errorText: _errors['nameEn']),
+              onChanged: (_) { if (_errors.remove('nameEn') != null) setState(() {}); },
             ),
             const SizedBox(height: 12),
             Row(
@@ -296,7 +366,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                   child: TextField(
                     controller: _phone,
                     enabled: canEdit && !_saving,
-                    decoration: InputDecoration(labelText: l10n.phone),
+                    decoration: InputDecoration(labelText: l10n.phone, errorText: _errors['phone']),
+                    onChanged: (_) { if (_errors.remove('phone') != null) setState(() {}); },
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -304,7 +375,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                   child: TextField(
                     controller: _email,
                     enabled: canEdit && !_saving,
-                    decoration: InputDecoration(labelText: l10n.email),
+                    decoration: InputDecoration(labelText: l10n.email, errorText: _errors['email']),
+                    onChanged: (_) { if (_errors.remove('email') != null) setState(() {}); },
                   ),
                 ),
               ],
@@ -313,7 +385,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             TextField(
               controller: _address,
               enabled: canEdit && !_saving,
-              decoration: InputDecoration(labelText: l10n.address),
+              decoration: InputDecoration(labelText: l10n.address, errorText: _errors['address']),
+              onChanged: (_) { if (_errors.remove('address') != null) setState(() {}); },
             ),
             const SizedBox(height: 16),
             if (_externalChange) ...[

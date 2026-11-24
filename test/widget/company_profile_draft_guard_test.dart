@@ -11,7 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
-Map<String,dynamic> _profile(String name) => {'id':'company','code':'C','nameAr':'شركة',
+Map<String,dynamic> _profile(String name) => {'id':'company','code':'CO','nameAr':'شركة',
   'nameEn':name,'taxId':'','phone':'','email':'','address':'','hasLogo':false};
 class _Profile extends CompanyProfileController {
   Completer<Map<String,dynamic>>? pending;
