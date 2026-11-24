@@ -65,7 +65,12 @@ class PersistentTableScrollState extends State<PersistentTableScroll> {
             child: SingleChildScrollView(
               controller: _vertical,
               scrollDirection: Axis.vertical,
-              child: widget.child,
+              // Room for the two bars, so the last row and the last column are
+              // never underneath them.
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(end: 16, bottom: 16),
+                child: widget.child,
+              ),
             ),
           ),
         ),
