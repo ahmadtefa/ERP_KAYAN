@@ -693,6 +693,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   /// first one. Returns true when something other than a line field remains
   /// to be shown in the ordinary error dialog.
   final _sentCharges = <_LandedCostDraft>[];
+  int? _salesChargeStart;
 
   bool _flagLineErrors(ApiFailure failure, int lineCount) {
     final marked = <String, String>{};
@@ -715,6 +716,15 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       if (entry.key == 'invoiceDate') {
         header['date'] = entry.value;
         continue;
+      }
+      final salesCharge = RegExp(r'^lines\.(\d+)\.(description|unitPrice|taxRate)$').firstMatch(entry.key);
+      if (widget.kind.isSales && _salesChargeStart != null && salesCharge != null) {
+        final index = int.parse(salesCharge.group(1)!) - _salesChargeStart!;
+        if (index >= 0 && index < _sentCharges.length) {
+          final field = salesCharge.group(2) == 'unitPrice' ? 'amount' : salesCharge.group(2)!;
+          _sentCharges[index].errors[field] = entry.value;
+          continue;
+        }
       }
       final match = _lineFieldPattern.firstMatch(entry.key);
       final index = match == null ? -1 : int.parse(match.group(1)!);
@@ -771,6 +781,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
     final landedCostCharges = <Json>[];
     _sentCharges.clear();
+    _salesChargeStart = null;
     var landedCost = Decimal.zero;
     var invalidCharge = false;
     for (final charge in _landedCosts) {
@@ -845,6 +856,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       });
     }
     if (widget.kind.isSales) {
+      _salesChargeStart = lines.length;
       lines.addAll(
         landedCostCharges.map(
           (charge) => {

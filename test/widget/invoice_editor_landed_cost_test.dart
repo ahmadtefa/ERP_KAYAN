@@ -261,6 +261,17 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(total, findsOneWidget);
+    api.refuse = const ApiFailure('Validation failed', statusCode: 422,
+      fieldErrors: {'lines.1.unitPrice': 'Additional charge amount rejected'});
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('landed-cost-amount-1'))).decoration?.errorText,
+      'Additional charge amount rejected');
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-1')), '5.0');
+    await tester.pump();
+    expect(find.text('Additional charge amount rejected'), findsNothing);
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-1')), '5');
+    api.refuse = null;
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(api.postPath, '/sales/invoices');

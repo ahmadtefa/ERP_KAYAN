@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
@@ -194,6 +195,18 @@ void main() {
     expect(api.postPath, isNull);
     expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, isNotNull);
     await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100');
+    final rowRefusal = api.pendingPost!;
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    rowRefusal.completeError(const ApiFailure('Validation failed', statusCode: 422,
+      fieldErrors: {'tables.0.lines.0.unitPrice': 'Price rejected by server'}));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, 'Price rejected by server');
+    await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100.0');
+    await tester.pump();
+    expect(find.text('Price rejected by server'), findsNothing);
+    await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100');
+    api.pendingPost = Completer<Map<String, dynamic>>();
     await tester.tap(find.text('Save'));
     await tester.pump();
     final formLock = find.byKey(const Key('quotation-edit-lock'));
