@@ -165,8 +165,9 @@ export class PartiesService {
     kind: PartyKind,
     id: string,
     branchId?: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    return this.prisma.$queryRaw<Array<{
+    return db.$queryRaw<Array<{
       id: string; number: string; date: Date; description: string | null;
       debit: Prisma.Decimal; credit: Prisma.Decimal; type: string;
     }>>(Prisma.sql`
@@ -188,17 +189,19 @@ export class PartiesService {
   }
 
   /**
-   * The partner's card: how much has been traded, what is still open, and the
-   * last documents - everything the list screen shows when a row is opened.
+   * The one place a partner's money position is worked out. The party card, and
+   * anything that must agree with it (such as a credit check at posting time),
+   * read these figures. Pass a transaction client to read inside it.
    */
-  async summary(companyId: string, kind: PartyKind, id: string) {
-    const model = this.model(kind);
-    const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!row) throw new NotFoundException(`${kind} not found`);
-
+  async balanceFigures(
+    companyId: string,
+    kind: PartyKind,
+    id: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
     const invoices =
       kind === 'customer'
-        ? await this.prisma.salesInvoice.findMany({
+        ? await db.salesInvoice.findMany({
             where: {
               companyId,
               customerId: id,
@@ -222,7 +225,7 @@ export class PartiesService {
             },
             orderBy: { invoiceDate: 'desc' },
           })
-        : await this.prisma.purchaseInvoice.findMany({
+        : await db.purchaseInvoice.findMany({
             where: {
               companyId,
               supplierId: id,
@@ -243,7 +246,7 @@ export class PartiesService {
             orderBy: { invoiceDate: 'desc' },
           });
 
-    const vouchers = await this.prisma.cashVoucher.findMany({
+    const vouchers = await db.cashVoucher.findMany({
       where: {
         companyId,
         deletedAt: null,
@@ -338,12 +341,26 @@ export class PartiesService {
       if (!loose.isPositive()) return sum;
       return voucher.kind === creditKind ? sum.plus(loose) : sum.minus(loose);
     }, new Prisma.Decimal(0));
-    const openings = await this.openingEntries(companyId, kind, id);
+    const openings = await this.openingEntries(companyId, kind, id, undefined, db);
     const openingBalance = openings.reduce(
       (sum, row) => sum.plus(kind === 'customer' ? row.debit.minus(row.credit) : row.credit.minus(row.debit)),
       new Prisma.Decimal(0),
     );
     const netBalance = outstanding.plus(openingBalance).minus(onAccount);
+    return { signed, attributed, invoices, vouchers, totalInvoiced, totalPaid, outstanding, overdue, onAccount, openingBalance, netBalance };
+  }
+
+  /**
+   * The partner's card: how much has been traded, what is still open, and the
+   * last documents - everything the list screen shows when a row is opened.
+   */
+  async summary(companyId: string, kind: PartyKind, id: string) {
+    const model = this.model(kind);
+    const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
+    if (!row) throw new NotFoundException(`${kind} not found`);
+
+    const { signed, attributed, invoices, vouchers, totalInvoiced, totalPaid, outstanding, overdue, onAccount, openingBalance, netBalance } =
+      await this.balanceFigures(companyId, kind, id);
 
     const recentDocuments = [
       ...invoices.slice(0, 5).map((inv) => ({
