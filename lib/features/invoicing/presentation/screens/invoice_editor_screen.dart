@@ -671,6 +671,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   /// (`lines.2.quantity` from the API becomes `2.quantity`). Shown beside the
   /// field and cleared when that field is edited.
   final _lineErrors = <String, String>{};
+
+  /// Reasons for the document header: `party` and `date`.
+  final _headerErrors = <String, String>{};
+  final _headerKey = GlobalKey();
   final _lineErrorKeys = <String, GlobalKey>{};
 
   GlobalKey _lineKey(int index, String field) =>
@@ -690,7 +694,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   bool _flagLineErrors(ApiFailure failure, int lineCount) {
     final marked = <String, String>{};
     var others = false;
+    final header = <String, String>{};
     for (final entry in failure.fieldErrors.entries) {
+      if (entry.key == 'customerId' || entry.key == 'supplierId') {
+        header['party'] = entry.value;
+        continue;
+      }
+      if (entry.key == 'invoiceDate') {
+        header['date'] = entry.value;
+        continue;
+      }
       final match = _lineFieldPattern.firstMatch(entry.key);
       final index = match == null ? -1 : int.parse(match.group(1)!);
       if (match != null && index < lineCount) {
@@ -706,8 +719,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       _lineErrors
         ..clear()
         ..addAll(marked);
+      _headerErrors
+        ..clear()
+        ..addAll(header);
     });
-    if (marked.isNotEmpty) {
+    if (header.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _headerKey.currentContext;
+        if (target != null && target.mounted) Scrollable.ensureVisible(target);
+      });
+    } else if (marked.isNotEmpty) {
       final first = (marked.keys.toList()
             ..sort((a, b) => int.parse(a.split('.').first)
                 .compareTo(int.parse(b.split('.').first))))
@@ -723,6 +744,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   Future<void> _save() async {
     final l10n = context.l10n;
     if (_partyId == null) {
+      setState(() {
+        _headerErrors['party'] = widget.kind.isSales
+            ? l10n.partyRequired
+            : l10n.supplierRequired;
+      });
       showMessage(
         context,
         widget.kind.isSales ? l10n.partyRequired : l10n.supplierRequired,
@@ -944,17 +970,24 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    _Header(
+                    KeyedSubtree(
+                      key: _headerKey,
+                      child: _Header(
                       key: ValueKey(
                         '${widget.invoiceId ?? 'new'}-$_loadingExisting',
                       ),
                       kind: widget.kind,
+                      errors: _headerErrors,
                       invoiceDate: _invoiceDate,
-                      onDateChanged: (value) =>
-                          setState(() => _invoiceDate = value),
+                      onDateChanged: (value) => setState(() {
+                        _headerErrors.remove('date');
+                        _invoiceDate = value;
+                      }),
                       partyId: _partyId,
-                      onPartyChanged: (value) =>
-                          setState(() => _partyId = value),
+                      onPartyChanged: (value) => setState(() {
+                        _headerErrors.remove('party');
+                        _partyId = value;
+                      }),
                       supplierReference: _supplierReference,
                       onSupplierReferenceChanged: (value) =>
                           setState(() => _supplierReference = value),
@@ -966,7 +999,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                           setState(() => _documentDiscountKind = value),
                       onDiscountChanged: () => setState(() {}),
                       parties: partiesAsync.value ?? const [],
-                    ),
+                    )),
                     ...[
                       const SizedBox(height: 12),
                       Row(
@@ -1150,6 +1183,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
 class _Header extends StatelessWidget {
   const _Header({
+    required this.errors,
     super.key,
     required this.kind,
     required this.invoiceDate,
@@ -1168,6 +1202,9 @@ class _Header extends StatelessWidget {
   });
 
   final InvoiceKind kind;
+
+  /// Reasons by `party` / `date`, shown beside those two fields.
+  final Map<String, String> errors;
   final String invoiceDate;
   final ValueChanged<String> onDateChanged;
   final String? partyId;
@@ -1212,6 +1249,7 @@ class _Header extends StatelessWidget {
                     },
                     child: InputDecorator(
                       decoration: InputDecoration(
+                        errorText: errors['date'],
                         labelText: l10n.invoiceDate,
                         border: const OutlineInputBorder(),
                         suffixIcon: const Icon(Icons.calendar_today_outlined),
@@ -1225,6 +1263,7 @@ class _Header extends StatelessWidget {
                   child: DropdownButtonFormField<String>(
                     initialValue: partyId,
                     decoration: InputDecoration(
+                      errorText: errors['party'],
                       labelText: kind.isSales
                           ? l10n.selectCustomer
                           : l10n.selectSupplier,

@@ -38,6 +38,7 @@ class _FakeApiClient extends ApiClient {
     throw const ApiFailure('x', statusCode: 400, code: 'VALIDATION_FAILED', fieldErrors: {
       'lines.0.quantity': 'القيمة يجب أن تكون أكبر من صفر',
       'lines.0.unitPrice': 'هذا الحقل مطلوب',
+      'invoiceDate': 'التاريخ غير صحيح',
     });
   }
 
@@ -172,6 +173,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('القيمة يجب أن تكون أكبر من صفر'), findsOneWidget);
     expect(find.text('هذا الحقل مطلوب'), findsOneWidget);
+    expect(find.text('التاريخ غير صحيح'), findsOneWidget);
     expect(
       tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text,
       '1',

@@ -1301,8 +1301,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           onPressed: _pickBackground,
           icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
           label: Text(_design.backgroundId == null
-              ? 'خلفية من ملف PDF'
-              : 'الخلفية: ${_design.backgroundName ?? 'PDF'}'),
+              ? 'خلفية لملف PDF المُصدَّر'
+              : 'خلفية ملف PDF: ${_design.backgroundName ?? 'PDF'}'),
         ),
         if (_design.backgroundId != null)
           TextButton(
