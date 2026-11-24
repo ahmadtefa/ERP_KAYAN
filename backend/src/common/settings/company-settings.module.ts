@@ -1,4 +1,5 @@
 import { BadRequestException, Global, Injectable, Module } from '@nestjs/common';
+import { fieldError } from '../validation/field-errors';
 import { Prisma } from '@prisma/client';
 
 import { AuditService } from '../audit/audit.service';
@@ -145,7 +146,7 @@ export class CompanySettingsService {
     if (typeof value === 'boolean') return value;
     if (value === 'true') return true;
     if (value === 'false') return false;
-    throw new BadRequestException(`${field} must be true or false`);
+    throw fieldError(field, 'القيمة يجب أن تكون نعم أو لا');
   }
 
   /// Free text shown on documents. An empty value clears the field; it is not
@@ -153,11 +154,11 @@ export class CompanySettingsService {
   private optionalText(value: unknown, field: string): string | null {
     if (value === null) return null;
     if (typeof value !== 'string') {
-      throw new BadRequestException(`${field} must be text`);
+      throw fieldError(field, 'القيمة يجب أن تكون نصًا');
     }
     const text = value.trim();
     if (text.length > 160) {
-      throw new BadRequestException(`${field} cannot be longer than 160 characters`);
+      throw fieldError(field, 'الطول يجب ألا يزيد على 160 حرفًا');
     }
     return text.length === 0 ? null : text;
   }
@@ -167,10 +168,11 @@ export class CompanySettingsService {
     try {
       decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(4);
     } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+      throw fieldError(field, 'القيمة يجب أن تكون رقمًا');
     }
+    if (!decimal.isFinite()) throw fieldError(field, 'القيمة يجب أن تكون رقمًا');
     if (decimal.lessThan(min) || decimal.greaterThan(max)) {
-      throw new BadRequestException(`${field} must be between ${min} and ${max}`);
+      throw fieldError(field, `القيمة يجب أن تكون بين ${min} و${max}`);
     }
     return decimal;
   }
@@ -178,7 +180,7 @@ export class CompanySettingsService {
   private count(value: unknown, field: string, min: number, max: number): number {
     const number = Number(value);
     if (!Number.isInteger(number) || number < min || number > max) {
-      throw new BadRequestException(`${field} must be a whole number between ${min} and ${max}`);
+      throw fieldError(field, `القيمة يجب أن تكون رقمًا صحيحًا بين ${min} و${max}`);
     }
     return number;
   }

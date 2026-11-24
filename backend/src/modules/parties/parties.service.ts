@@ -1,3 +1,4 @@
+import { fieldError } from '../../common/validation/field-errors';
 import {
   BadRequestException,
   ConflictException,
@@ -791,13 +792,15 @@ export class PartiesService {
   }
 
   private money(value: unknown, field: string): Prisma.Decimal {
+    let d: Prisma.Decimal;
     try {
-      const d = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
-      if (d.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
-      return d;
+      d = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException(`${field} is not a valid amount`);
+      throw fieldError(field, 'القيمة يجب أن تكون رقمًا');
     }
+    if (!d.isFinite()) throw fieldError(field, 'القيمة يجب أن تكون رقمًا');
+    if (d.isNegative()) throw fieldError(field, 'القيمة يجب ألا تقل عن 0');
+    return d;
   }
 
   private toResponse(row: PartyRow) {

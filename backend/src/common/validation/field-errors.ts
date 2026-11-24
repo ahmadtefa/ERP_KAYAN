@@ -66,3 +66,16 @@ export function validationExceptionFactory(errors: ValidationError[]): BadReques
     code: 'VALIDATION_FAILED',
   });
 }
+
+/// One refused field, in the same 400 shape a failed DTO validation has, so a
+/// service-side check marks its field on the form instead of showing a bare
+/// sentence. The English `message` stays readable for older clients.
+export function fieldError(field: string, reason: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    message: [`${field}: ${reason}`],
+    errors: { [field]: reason },
+    code: 'VALIDATION_FAILED',
+  });
+}
