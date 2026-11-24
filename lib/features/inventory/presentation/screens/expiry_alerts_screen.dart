@@ -1,3 +1,5 @@
+import '../widgets/location_summary.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -54,8 +56,9 @@ class ExpiryAlerts {
     ExpiryGroup.valid => counts.valid,
   };
 
-  List<Json> rowsOf(ExpiryGroup group) =>
-      items.where((row) => text(row, 'group') == group.wire).toList(growable: false);
+  List<Json> rowsOf(ExpiryGroup group) => items
+      .where((row) => text(row, 'group') == group.wire)
+      .toList(growable: false);
 }
 
 /// The expiry-alert feed.
@@ -64,7 +67,9 @@ class ExpiryAlerts {
 /// the alert standing against each one. Asking for a scan is a separate grant:
 /// the button is offered only to a user holding `notifications.manage`, and the
 /// server refuses the request even if this screen were bypassed.
-final expiryAlertsProvider = FutureProvider.autoDispose<ExpiryAlerts>((ref) async {
+final expiryAlertsProvider = FutureProvider.autoDispose<ExpiryAlerts>((
+  ref,
+) async {
   final user = ref.watch(currentUserProvider);
   if (user == null || !user.can('inventory.batches.read')) {
     // Not an error: a person the alerts are not written for simply has none.
@@ -88,7 +93,9 @@ Future<ExpiryAlerts> _fetch(ApiClient client, {bool scan = false}) async {
     '/inventory/batches/alerts',
     query: {if (scan) 'scan': 'true'},
   );
-  final counts = data['counts'] is Map ? Map<String, dynamic>.from(data['counts'] as Map) : const <String, dynamic>{};
+  final counts = data['counts'] is Map
+      ? Map<String, dynamic>.from(data['counts'] as Map)
+      : const <String, dynamic>{};
   return ExpiryAlerts(
     asOf: text(data, 'asOf'),
     counts: (
@@ -137,7 +144,9 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
       await ref.read(expiryAlertsProvider.future);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_t('تم فحص الصلاحية.', 'Expiry scan finished.'))),
+          SnackBar(
+            content: Text(_t('تم فحص الصلاحية.', 'Expiry scan finished.')),
+          ),
         );
       }
     } catch (error) {
@@ -172,14 +181,7 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
   String _warehouse(Json row) =>
       _arabic ? text(row, 'warehouseNameAr') : text(row, 'warehouseNameEn');
 
-  String _shelf(Json row) {
-    final location = row['storageLocation'];
-    if (location is! Map) return '—';
-    final shelf = Map<String, dynamic>.from(location);
-    return _arabic
-        ? text(shelf, 'nameAr', fallback: text(shelf, 'code'))
-        : text(shelf, 'nameEn', fallback: text(shelf, 'code'));
-  }
+  String _shelf(Json row) => batchLocationSummary(row, arabic: _arabic);
 
   /// A `@db.Date` arrives as a full timestamp; only the day means anything.
   String _dateCell(Object? value) {
@@ -279,7 +281,10 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
         child: AsyncStateView<ExpiryAlerts>(
           value: async,
           onRetry: _reload,
-          loadingMessage: _t('جارٍ تحميل تنبيهات الصلاحية…', 'Loading expiry alerts…'),
+          loadingMessage: _t(
+            'جارٍ تحميل تنبيهات الصلاحية…',
+            'Loading expiry alerts…',
+          ),
           isEmpty: (data) => data.items.isEmpty,
           emptyMessage: _t(
             'لا توجد دفعات قابلة للتنبيه: كل المخزون إما بلا تاريخ انتهاء أو تم صرفه.',
@@ -334,11 +339,7 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
 
     return Wrap(
       children: [
-        tab(
-          ExpiryGroup.expired,
-          _t('المنتهي', 'Expired'),
-          AppTone.danger,
-        ),
+        tab(ExpiryGroup.expired, _t('المنتهي', 'Expired'), AppTone.danger),
         tab(
           ExpiryGroup.expiringSoon,
           _t('سينتهي قريبًا', 'Expiring soon'),
@@ -354,12 +355,18 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
     if (rows.isEmpty) {
       return EmptyView(
         message: switch (_group) {
-          ExpiryGroup.expired => _t('لا توجد دفعات منتهية.', 'No expired lots.'),
+          ExpiryGroup.expired => _t(
+            'لا توجد دفعات منتهية.',
+            'No expired lots.',
+          ),
           ExpiryGroup.expiringSoon => _t(
             'لا توجد دفعات قريبة الانتهاء.',
             'No lots expiring soon.',
           ),
-          ExpiryGroup.valid => _t('لا توجد دفعات صالحة بكمية متبقية.', 'No valid lots in stock.'),
+          ExpiryGroup.valid => _t(
+            'لا توجد دفعات صالحة بكمية متبقية.',
+            'No valid lots in stock.',
+          ),
         },
         icon: Icons.event_available_outlined,
       );
@@ -383,7 +390,10 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
       },
       columns: [
         ColumnSpec(_t('الصنف', 'Item'), value: _itemName, flex: 2),
-        ColumnSpec(_t('رقم الدفعة', 'Batch'), value: (row) => text(row, 'batchNumber')),
+        ColumnSpec(
+          _t('رقم الدفعة', 'Batch'),
+          value: (row) => text(row, 'batchNumber'),
+        ),
         ColumnSpec(
           _t('الإنتاج', 'Production'),
           value: (row) => _dateCell(row['productionDate']),

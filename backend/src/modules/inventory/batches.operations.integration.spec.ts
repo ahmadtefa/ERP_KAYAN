@@ -166,7 +166,9 @@ const vmReady =
   });
 
   (process.env.KAYAN_LOCATION_UI === '1' ? it : it.skip)('real Flutter receipt over HTTP persists location and shows its stock balance', async () => {
-    const locations = new StorageLocationsService(pglitePrisma(db) as never, {} as never);
+    await db.exec(`INSERT INTO storage_locations (id, "companyId", "branchId", "warehouseId", kind, code, "nameEn", "nameAr", "isActive", "updatedAt") VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '${COMPANY}', '${BRANCH}', '${WAREHOUSE}', 'ZONE', 'B-01', 'Destination', 'الموقع الثاني', true, now())`);
+    await service.receive(COMPANY, USER, {branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'EXISTING-UNLOCATED',quantity:2,unitCost:4.25});
+    const locations = new StorageLocationsService(pglitePrisma(db) as never, {record:async()=>undefined} as never);
     const server = createServer(async (req, res) => {
       try {
         const url = new URL(req.url!, 'http://localhost');
@@ -175,6 +177,14 @@ const vmReady =
         if (path === '/inventory/batches/receive') {
           let body = ''; for await (const chunk of req) body += chunk;
           data = await service.receive(COMPANY, USER, JSON.parse(body));
+        } else if (path.startsWith('/inventory/locations/item/')) {
+          data = await locations.itemLocations(COMPANY, ITEM, {}, null);
+        } else if (path === '/inventory/locations/assign-unlocated') {
+          let body = ''; for await (const chunk of req) body += chunk;
+          data = await locations.assignUnlocated(COMPANY, USER, JSON.parse(body), null);
+        } else if (path === '/inventory/locations/move-stock') {
+          let body = ''; for await (const chunk of req) body += chunk;
+          data = await locations.move(COMPANY, USER, JSON.parse(body), null);
         } else if (path === '/inventory/batches') {
           data = await service.list(COMPANY, {});
         } else if (path === '/inventory/locations') {
@@ -195,9 +205,12 @@ const vmReady =
       });
       console.log(output.stdout);
       const persisted = (await db.query<{location:string; quantity:string}>(`SELECT "storageLocationId" AS location, "remainingQuantity"::text AS quantity FROM item_batches WHERE "batchNumber"='UI-ISOLATED-RECEIPT'`)).rows[0];
-      expect(persisted).toEqual({location:SHELF, quantity:'3.0000'});
+      expect(persisted).toEqual({location:null, quantity:'3.0000'});
       const rows = await locations.list(COMPANY, {warehouseId:WAREHOUSE});
-      expect(rows.items[0].stock).toEqual({items:1, quantity:'3.0000'});
+      expect(rows.items.find(row=>row.id===SHELF)?.stock).toEqual({items:1, quantity:'2.0000'});
+      expect(rows.items.find(row=>row.id==='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')?.stock).toEqual({items:1, quantity:'3.0000'});
+      const balances=(await db.query<{quantity:string;value:string}>(`SELECT quantity::text, value::text FROM stock_balances WHERE "itemId"='${ITEM}'`)).rows[0];
+      expect(balances).toEqual({quantity:'5.0000',value:'21.2500'});
       console.log('ISOLATED_UI_HTTP_DB_PROOF', JSON.stringify({persisted, stock:rows.items[0].stock}));
     } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
   }, 150000);

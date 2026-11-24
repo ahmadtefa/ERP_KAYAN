@@ -1,3 +1,5 @@
+import 'item_locations_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -84,6 +86,9 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final canReadLocations =
+        ref.watch(currentUserProvider)?.can('inventory.warehouses.read') ??
+        false;
     final async = ref.watch(stockListProvider);
     final canReadCost = ref.watch(currentUserProvider)?.canReadCost ?? false;
 
@@ -133,6 +138,30 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                 child: RecordsTable(
                   rows: visible,
                   onTap: _openLedger,
+                  actions: (row) => [
+                    if (canReadLocations)
+                      IconButton(
+                        tooltip:
+                            Localizations.localeOf(context).languageCode == 'ar'
+                            ? 'مواقع الصنف والكميات'
+                            : 'Item locations and quantities',
+                        icon: const Icon(Icons.location_on_outlined),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => ItemLocationsScreen(
+                              itemId: text(row, 'itemId'),
+                              itemName: text(
+                                row,
+                                Localizations.localeOf(context).languageCode ==
+                                        'ar'
+                                    ? 'itemNameAr'
+                                    : 'itemNameEn',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                   columns: [
                     ColumnSpec(
                       l10n.accountCode,

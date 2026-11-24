@@ -1,3 +1,5 @@
+import 'item_locations_screen.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -704,6 +706,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final l10n = context.l10n;
     final canSeeSalePrice =
         ref.watch(currentUserProvider)?.canReadSalePrice ?? false;
+    final canReadLocations =
+        ref.watch(currentUserProvider)?.can('inventory.warehouses.read') ??
+        false;
     final async = ref.watch(itemsListProvider);
 
     return ModuleScaffold(
@@ -807,6 +812,26 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ),
             ],
             actions: (row) => [
+              if (canReadLocations)
+                IconButton(
+                  tooltip: Localizations.localeOf(context).languageCode == 'ar'
+                      ? 'مواقع الصنف والكميات'
+                      : 'Item locations and quantities',
+                  icon: const Icon(Icons.location_on_outlined, size: 20),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ItemLocationsScreen(
+                        itemId: text(row, 'id'),
+                        itemName: text(
+                          row,
+                          Localizations.localeOf(context).languageCode == 'ar'
+                              ? 'nameAr'
+                              : 'nameEn',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               IconButton(
                 // The picture is edited on its own screen because changing it
                 // uploads a file, which the plain field sheet cannot do.

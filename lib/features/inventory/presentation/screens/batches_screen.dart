@@ -1,3 +1,5 @@
+import '../widgets/location_summary.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -260,17 +262,7 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
             ),
             ColumnSpec(
               _arabic ? 'الموقع' : 'Location',
-              // The shelf is optional and may have been removed since the lot
-              // was put away, so the code alone is shown when the detail is
-              // missing.
-              value: (r) {
-                final location = r['storageLocation'];
-                if (location is! Map) return '—';
-                final row = Map<String, dynamic>.from(location);
-                return _arabic
-                    ? text(row, 'nameAr', fallback: text(row, 'code'))
-                    : text(row, 'nameEn', fallback: text(row, 'code'));
-              },
+              value: (r) => batchLocationSummary(r, arabic: _arabic),
             ),
             ColumnSpec(
               _arabic ? 'الأيام' : 'Days',

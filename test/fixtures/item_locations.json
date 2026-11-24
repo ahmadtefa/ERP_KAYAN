@@ -1,0 +1,56 @@
+{
+  "itemId": "66666666-6666-4666-8666-666666666666",
+  "itemCode": "IT-1",
+  "unit": "piece",
+  "warehouses": [
+    {
+      "warehouseId": "44444444-4444-4444-8444-444444444444",
+      "warehouseCode": "W1",
+      "warehouseNameEn": "Main",
+      "warehouseNameAr": "رئيسي",
+      "total": "15.0000",
+      "locations": [
+        {
+          "locationId": "88888888-8888-4888-8888-888888888888",
+          "code": "A-01",
+          "kind": "SHELF",
+          "nameEn": "Aisle A shelf 1",
+          "nameAr": "ممر أ رف ١",
+          "quantity": "6.0000",
+          "lots": [
+            {
+              "batchId": "dd3e4073-169f-47a2-b662-455407950a3c",
+              "batchNumber": "L1",
+              "quantity": "6.0000"
+            }
+          ]
+        },
+        {
+          "locationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "code": "B-01",
+          "kind": "SHELF",
+          "nameEn": "B1",
+          "nameAr": "ب١",
+          "quantity": "4.0000",
+          "lots": [
+            {
+              "batchId": "dd3e4073-169f-47a2-b662-455407950a3c",
+              "batchNumber": "L1",
+              "quantity": "4.0000"
+            }
+          ]
+        }
+      ],
+      "unlocated": {
+        "quantity": "5.0000",
+        "lots": [
+          {
+            "batchId": "8aa1996f-ae25-4459-891c-2308f7d98ae5",
+            "batchNumber": "L2",
+            "quantity": "5.0000"
+          }
+        ]
+      }
+    }
+  ]
+}
