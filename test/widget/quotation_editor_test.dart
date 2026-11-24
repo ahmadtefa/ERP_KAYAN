@@ -181,6 +181,19 @@ void main() {
     );
     await tester.pump();
 
+    await tester.enterText(find.byKey(const ValueKey('quotation-qty-0-0')), '-1');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(api.postPath, isNull);
+    final qtyField = tester.widget<TextField>(find.byKey(const ValueKey('quotation-qty-0-0')));
+    expect(qtyField.decoration?.errorText, isNotNull);
+    await tester.enterText(find.byKey(const ValueKey('quotation-qty-0-0')), '3');
+    await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '-10');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(api.postPath, isNull);
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, isNotNull);
+    await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100');
     await tester.tap(find.text('Save'));
     await tester.pump();
     final formLock = find.byKey(const Key('quotation-edit-lock'));

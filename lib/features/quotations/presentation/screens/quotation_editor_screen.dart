@@ -433,11 +433,16 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// Reasons the server (or this screen) gave for header fields, shown
   /// beside the field. Cleared per field as the person edits it.
   final _serverErrors = <String, String>{};
+  final _inputErrors = <TextEditingController, String>{};
+  final _sentTableLines = <List<_QLineDraft>>[];
+
   final _errorFieldKeys = <String, GlobalKey>{
     'customerId': GlobalKey(),
     'subject': GlobalKey(),
     'terms': GlobalKey(),
     'notes': GlobalKey(),
+    'quotationDate': GlobalKey(),
+    'validUntil': GlobalKey(),
   };
 
   /// Marks header fields, then brings the first marked one (in screen order)
@@ -768,8 +773,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         '${picked.day.toString().padLeft(2, '0')}';
     setState(() {
       if (validUntil) {
+        _serverErrors.remove('validUntil');
         _validUntil = iso;
       } else {
+        _serverErrors.remove('quotationDate');
         _date = iso;
       }
     });
@@ -807,6 +814,25 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
     final tables = <Json>[];
+    _inputErrors.clear();
+    _sentTableLines.clear();
+    for (final table in _tables) {
+      if (table.title.text.trim().isEmpty) _inputErrors[table.title] = l10n.tableTitle;
+      final active = table.lines.where((l) => l.description.text.trim().isNotEmpty || l.itemId != null).toList();
+      if (active.isEmpty) _inputErrors[table.title] = l10n.quotationNeedsTable;
+      for (final line in active) {
+        final qty = Decimal.tryParse(line.quantity.text.trim());
+        if (qty == null || qty <= Decimal.zero) _inputErrors[line.quantity] = l10n.mustBePositive;
+        final rawPrice = line.unitPrice.text.trim();
+        final price = rawPrice.isEmpty ? Decimal.zero : Decimal.tryParse(rawPrice);
+        if (price == null || price < Decimal.zero) {
+          _inputErrors[line.unitPrice] = Localizations.localeOf(context).languageCode == 'ar'
+              ? 'اكتب سعرًا صحيحًا بدون سالب' : 'Enter a valid price, zero or more';
+        }
+      }
+      _sentTableLines.add(active);
+    }
+    if (_inputErrors.isNotEmpty) { setState(() {}); return; }
     for (final table in _tables) {
       final title = table.title.text.trim();
       if (title.isEmpty) {
@@ -913,12 +939,38 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     } catch (error) {
       if (!mounted) return;
       if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
+        final unmatched = <String, String>{};
+        _inputErrors.clear();
+        for (final entry in error.fieldErrors.entries) {
+          final m = RegExp(r'^tables\.(\d+)\.(?:lines\.(\d+)\.)?(title|quantity|unitPrice|description|countryOfOrigin|unit)$').firstMatch(entry.key);
+          if (m == null) { unmatched[entry.key] = entry.value; continue; }
+          final ti = int.parse(m.group(1)!);
+          if (ti >= _tables.length) { unmatched[entry.key] = entry.value; continue; }
+          final field = m.group(3)!;
+          TextEditingController? target;
+          if (m.group(2) == null && field == 'title') {
+            target = _tables[ti].title;
+          } else if (m.group(2) != null && ti < _sentTableLines.length) {
+            final li = int.parse(m.group(2)!);
+            if (li < _sentTableLines[ti].length) {
+              final line = _sentTableLines[ti][li];
+              target = switch (field) {
+                'quantity' => line.quantity, 'unitPrice' => line.unitPrice,
+                'description' => line.description, 'countryOfOrigin' => line.origin,
+                'unit' => line.unit, _ => null,
+              };
+            }
+          }
+          if (target == null) { unmatched[entry.key] = entry.value; }
+          else { _inputErrors[target] = entry.value; }
+        }
+        setState(() {});
         final known = _errorFieldKeys.keys.toSet();
         final here = {
-          for (final e in error.fieldErrors.entries)
+          for (final e in unmatched.entries)
             if (known.contains(e.key)) e.key: e.value,
         };
-        final hasOthers = error.fieldErrors.keys.any((k) => !known.contains(k));
+        final hasOthers = unmatched.keys.any((k) => !known.contains(k));
         if (here.isNotEmpty) _flagFields(here);
         // Errors on table rows or other parts of the offer are listed, with
         // their Arabic labels, instead of being dropped.
@@ -1025,15 +1077,27 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             ),
                             SizedBox(
                               width: 180,
-                              child: OutlinedButton.icon(
+                              child: Column(
+                                key: _errorFieldKeys['quotationDate'],
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  OutlinedButton.icon(
                                 onPressed: () => _pickDate(validUntil: false),
                                 icon: const Icon(Icons.event),
                                 label: Text('${l10n.quotationDate}: $_date'),
                               ),
+                                  if (_serverErrors['quotationDate'] != null)
+                                    Text(_serverErrors['quotationDate']!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                                ],
+                              ),
                             ),
                             SizedBox(
                               width: 200,
-                              child: OutlinedButton.icon(
+                              child: Column(
+                                key: _errorFieldKeys['validUntil'],
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  OutlinedButton.icon(
                                 onPressed: () => _pickDate(validUntil: true),
                                 icon: const Icon(Icons.event_available),
                                 label: Text(
@@ -1041,6 +1105,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       ? l10n.validUntil
                                       : '${l10n.validUntil}: $_validUntil',
                                 ),
+                              ),
+                                  if (_serverErrors['validUntil'] != null)
+                                    Text(_serverErrors['validUntil']!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                                ],
                               ),
                             ),
                             SizedBox(
@@ -2185,11 +2253,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     key: ValueKey('quotation-table-title-$index'),
                     controller: table.title,
                     decoration: InputDecoration(
+                      errorText: _inputErrors[table.title],
+                      errorMaxLines: 3,
                       labelText: l10n.tableTitle,
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(() { _inputErrors.remove(table.title); }),
                   ),
                 ),
                 IconButton(
@@ -2389,11 +2459,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 child: TextField(
                   controller: line.description,
                   decoration: InputDecoration(
+                      errorText: _inputErrors[line.description],
+                      errorMaxLines: 3,
                     labelText: l10n.description,
                     border: const OutlineInputBorder(),
                     isDense: true,
                   ),
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => setState(() { _inputErrors.remove(line.description); }),
                 ),
               ),
               IconButton(
@@ -2506,10 +2578,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             : null,
         decoration: InputDecoration(
           labelText: label,
+          errorText: _inputErrors[controller],
+          errorMaxLines: 3,
           border: const OutlineInputBorder(),
           isDense: true,
         ),
-        onChanged: (_) => setState(() {}),
+        onChanged: (_) => setState(() { _inputErrors.remove(controller); }),
       ),
     );
   }

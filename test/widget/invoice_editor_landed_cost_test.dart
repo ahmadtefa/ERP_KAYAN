@@ -1,4 +1,5 @@
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
@@ -29,6 +30,7 @@ class _FakeApiClient extends ApiClient {
     Map<String, dynamic>? query,
   }) async => {'pricesIncludeTax': true};
 
+  Object? refuse;
   String? postPath;
   Map<String, dynamic>? postBody;
 
@@ -40,6 +42,7 @@ class _FakeApiClient extends ApiClient {
   }) async {
     postPath = path;
     postBody = Map<String, dynamic>.from(body! as Map);
+    if (refuse != null) throw refuse!;
     return {'id': 'draft-id'};
   }
 
@@ -168,6 +171,21 @@ void main() {
       );
       await tester.pump();
 
+      await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-0')), '-1');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(api.postPath, isNull);
+      expect(tester.widget<TextField>(find.byKey(const ValueKey('landed-cost-amount-0'))).decoration?.errorText, isNotNull);
+      await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-0')), '7.00');
+      api.refuse = const ApiFailure('Validation failed', statusCode: 422,
+        fieldErrors: {'landedCostCharges.1.amount': 'Charge amount rejected'});
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(const ValueKey('landed-cost-amount-1'))).decoration?.errorText, 'Charge amount rejected');
+      await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-1')), '3.0');
+      await tester.pump();
+      expect(find.text('Charge amount rejected'), findsNothing);
+      api.refuse = null;
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 

@@ -127,6 +127,7 @@ class _LandedCostDraft {
   final TextEditingController description;
   final TextEditingController amount;
   final TextEditingController taxRate;
+  final errors = <String, String>{};
 
   void dispose() {
     description.dispose();
@@ -691,11 +692,22 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   /// Marks the line fields a validation failure names and scrolls to the
   /// first one. Returns true when something other than a line field remains
   /// to be shown in the ordinary error dialog.
+  final _sentCharges = <_LandedCostDraft>[];
+
   bool _flagLineErrors(ApiFailure failure, int lineCount) {
     final marked = <String, String>{};
     var others = false;
     final header = <String, String>{};
+    for (final charge in _landedCosts) { charge.errors.clear(); }
     for (final entry in failure.fieldErrors.entries) {
+      final chargeMatch = RegExp(r'^landedCostCharges\.(\d+)\.(description|amount|taxRate)$').firstMatch(entry.key);
+      if (chargeMatch != null) {
+        final index = int.parse(chargeMatch.group(1)!);
+        if (index < _sentCharges.length) {
+          _sentCharges[index].errors[chargeMatch.group(2)!] = entry.value;
+          continue;
+        }
+      }
       if (entry.key == 'customerId' || entry.key == 'supplierId') {
         header['party'] = entry.value;
         continue;
@@ -758,8 +770,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     }
 
     final landedCostCharges = <Json>[];
+    _sentCharges.clear();
     var landedCost = Decimal.zero;
+    var invalidCharge = false;
     for (final charge in _landedCosts) {
+      charge.errors.clear();
       final description = charge.description.text.trim();
       final rawAmount = charge.amount.text.trim();
       final amount = Decimal.tryParse(rawAmount);
@@ -768,37 +783,32 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         continue;
       }
       if (description.isEmpty) {
-        showMessage(context, l10n.landedCostDescriptionRequired, error: true);
-        return;
+        charge.errors['description'] = l10n.landedCostDescriptionRequired;
       }
       if (amount == null) {
-        showMessage(context, l10n.landedCostAmountInvalid, error: true);
-        return;
-      }
-      if (amount < Decimal.zero) {
-        showMessage(context, l10n.landedCostCannotBeNegative, error: true);
-        return;
+        charge.errors['amount'] = l10n.landedCostAmountInvalid;
+      } else if (amount < Decimal.zero) {
+        charge.errors['amount'] = l10n.landedCostCannotBeNegative;
       }
       final rateText = charge.taxRate.text.trim();
       final rate = rateText.isEmpty ? Decimal.zero : Decimal.tryParse(rateText);
       if (rate == null || rate < Decimal.zero || rate > Decimal.fromInt(100)) {
-        showMessage(
-          context,
-          Localizations.localeOf(context).languageCode == 'ar'
-              ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
-              : 'Charge tax rate must be between 0 and 100',
-          error: true,
-        );
-        return;
+        charge.errors['taxRate'] = Localizations.localeOf(context).languageCode == 'ar'
+            ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
+            : 'Charge tax rate must be between 0 and 100';
       }
-      final roundedAmount = amount.round(scale: moneyScale);
+      if (charge.errors.isNotEmpty) { invalidCharge = true; continue; }
+      final roundedAmount = amount!.round(scale: moneyScale);
       landedCost += roundedAmount;
+      _sentCharges.add(charge);
       landedCostCharges.add({
         'description': description,
         'amount': roundedAmount.toString(),
         if (rate != Decimal.zero) 'taxRate': rate.toString(),
       });
     }
+    setState(() {});
+    if (invalidCharge) return;
 
     final lines = <Json>[];
     for (final line in _lines) {
@@ -1051,11 +1061,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                 key: ValueKey('landed-cost-description-$index'),
                                 controller: _landedCosts[index].description,
                                 decoration: InputDecoration(
+                                  errorText: _landedCosts[index].errors['description'],
+                                  errorMaxLines: 3,
                                   labelText: l10n.description,
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() {}),
+                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('description'); }),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1069,11 +1081,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                       decimal: true,
                                     ),
                                 decoration: InputDecoration(
+                                  errorText: _landedCosts[index].errors['amount'],
+                                  errorMaxLines: 3,
                                   labelText: l10n.amount,
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() {}),
+                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('amount'); }),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1086,6 +1100,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                       decimal: true,
                                     ),
                                 decoration: InputDecoration(
+                                  errorText: _landedCosts[index].errors['taxRate'],
+                                  errorMaxLines: 3,
                                   labelText:
                                       Localizations.localeOf(context)
                                               .languageCode ==
@@ -1095,7 +1111,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() {}),
+                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('taxRate'); }),
                               ),
                             ),
                             IconButton(
