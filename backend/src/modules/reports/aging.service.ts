@@ -47,22 +47,199 @@ export interface AgingParty {
   invoices: AgingInvoice[];
 }
 
+export interface AgingPaging {
+  pageSize?: number;
+  page?: number;
+  detailPartyId?: string;
+  invoicePage?: number;
+  invoicePageSize?: number;
+}
+
 @Injectable()
 export class AgingService {
   constructor(private readonly prisma: PrismaService) {}
 
   async receivables(
     companyId: string,
-    query: { asOf?: string; customerId?: string; branchId?: string } = {},
+    query: { asOf?: string; customerId?: string; branchId?: string } & AgingPaging = {},
   ) {
+    if (query.pageSize) return this.buildPaged(companyId, 'customer', query);
     return this.build(companyId, 'customer', query);
   }
 
   async payables(
     companyId: string,
-    query: { asOf?: string; supplierId?: string; branchId?: string } = {},
+    query: { asOf?: string; supplierId?: string; branchId?: string } & AgingPaging = {},
   ) {
+    if (query.pageSize) return this.buildPaged(companyId, 'supplier', query);
     return this.build(companyId, 'supplier', query);
+  }
+
+  /// Paged form of the report, computed in the database over every matching
+  /// invoice: the same filters, the same signed credit-note arithmetic and the
+  /// same day buckets as build(), without loading invoices into memory.
+  /// Days overdue is the whole-day difference between the as-of date and the
+  /// due date (invoice date when there is none), which is what build() computes
+  /// from its end-of-day as-of timestamp.
+  private async buildPaged(
+    companyId: string,
+    side: 'customer' | 'supplier',
+    query: { asOf?: string; customerId?: string; supplierId?: string; branchId?: string } & AgingPaging,
+  ) {
+    return this.prisma.$transaction(async (tx) => this.buildPagedSnapshot(tx, companyId, side, query), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  private async buildPagedSnapshot(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    side: 'customer' | 'supplier',
+    query: { asOf?: string; customerId?: string; supplierId?: string; branchId?: string } & AgingPaging,
+  ) {
+    const asOfDate = (query.asOf ? new Date(`${query.asOf.slice(0, 10)}T23:59:59.999Z`) : new Date())
+      .toISOString().slice(0, 10);
+    const invoiceTable = Prisma.raw(side === 'customer' ? 'sales_invoices' : 'purchase_invoices');
+    const partyColumn = Prisma.raw(side === 'customer' ? '"customerId"' : '"supplierId"');
+    const partyTable = Prisma.raw(side === 'customer' ? 'customers' : 'suppliers');
+    const partyFilter = side === 'customer' ? query.customerId : query.supplierId;
+    const pageSize = query.pageSize ?? 50;
+    const page = Math.max(query.page ?? 1, 1);
+
+    const docs = Prisma.sql`
+      SELECT i.id, i.${partyColumn} AS pid, i."invoiceNumber", i."invoiceDate", i."dueDate",
+             i."documentType"::text AS dtype, i."totalAmount" AS total, i."paidAmount" AS paid,
+             i."journalEntryId" AS jid,
+             CASE WHEN i."documentType" = 'INVOICE' THEN i."totalAmount" - i."paidAmount"
+                  ELSE i."paidAmount" - i."totalAmount" END AS bal,
+             CASE WHEN i."documentType" = 'INVOICE'
+                  THEN (${asOfDate}::date - COALESCE(i."dueDate", i."invoiceDate"))
+                  ELSE 0 END AS days
+        FROM ${invoiceTable} i
+       WHERE i."companyId" = ${companyId}::uuid
+         AND i."deletedAt" IS NULL
+         AND i.status = 'POSTED'
+         AND i."invoiceDate" <= ${asOfDate}::date
+         ${partyFilter ? Prisma.sql`AND i.${partyColumn} = ${partyFilter}::uuid` : Prisma.sql``}
+         ${query.branchId ? Prisma.sql`AND i."branchId" = ${query.branchId}::uuid` : Prisma.sql``}`;
+    const bucketed = Prisma.sql`
+      SELECT d.*, CASE WHEN d.days <= 0 THEN 'current' WHEN d.days <= 30 THEN 'd1_30'
+                       WHEN d.days <= 60 THEN 'd31_60' WHEN d.days <= 90 THEN 'd61_90'
+                       ELSE 'd90_plus' END AS bucket
+        FROM (${docs}) d WHERE d.bal <> 0`;
+    const sumBucket = (key: string) =>
+      Prisma.sql`ROUND(COALESCE(SUM(b.bal) FILTER (WHERE b.bucket = ${key}), 0), 4)::text`;
+
+    type PartyRow = {
+      pid: string; code: string; nameEn: string; nameAr: string; total: string; overdue: string;
+      current: string; d1_30: string; d31_60: string; d61_90: string; d90_plus: string; n: number;
+    };
+    const rowsRaw = await tx.$queryRaw<PartyRow[]>(Prisma.sql`
+      SELECT b.pid, p.code, p."nameEn", p."nameAr",
+             ROUND(SUM(b.bal), 4)::text AS total,
+             ROUND(COALESCE(SUM(b.bal) FILTER (WHERE b.days > 0), 0), 4)::text AS overdue,
+             ${sumBucket('current')} AS "current", ${sumBucket('d1_30')} AS d1_30,
+             ${sumBucket('d31_60')} AS d31_60, ${sumBucket('d61_90')} AS d61_90,
+             ${sumBucket('d90_plus')} AS d90_plus, COUNT(*)::int AS n
+        FROM (${bucketed}) b JOIN ${partyTable} p ON p.id = b.pid
+       GROUP BY b.pid, p.code, p."nameEn", p."nameAr"
+       ORDER BY SUM(b.bal) DESC, b.pid
+       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`);
+
+    type TotalRow = {
+      parties: number; total: string; overdue: string;
+      current: string; d1_30: string; d31_60: string; d61_90: string; d90_plus: string;
+    };
+    const [t] = await tx.$queryRaw<TotalRow[]>(Prisma.sql`
+      SELECT COUNT(DISTINCT b.pid)::int AS parties,
+             ROUND(COALESCE(SUM(b.bal), 0), 4)::text AS total,
+             ROUND(COALESCE(SUM(b.bal) FILTER (WHERE b.days > 0), 0), 4)::text AS overdue,
+             ${sumBucket('current')} AS "current", ${sumBucket('d1_30')} AS d1_30,
+             ${sumBucket('d31_60')} AS d31_60, ${sumBucket('d61_90')} AS d61_90,
+             ${sumBucket('d90_plus')} AS d90_plus
+        FROM (${bucketed}) b`);
+
+    const controlCode = side === 'customer' ? '1103' : '2101';
+    const ledgerRows = await tx.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
+      SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+        JOIN accounts a ON a.id = l."accountId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND e."entryDate" <= ${asOfDate}::date
+         AND a.code = ${controlCode}
+         ${query.branchId ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid` : Prisma.sql``}
+    `);
+    const ledgerBalance = new Prisma.Decimal(ledgerRows[0]?.net ?? 0);
+    const documentBalance = new Prisma.Decimal(t?.total ?? 0);
+    const ledgerComparable = side === 'customer' ? ledgerBalance : ledgerBalance.negated();
+    const bucketKeys = BUCKETS.map((bucket) => bucket.key);
+    const pick = (r: Record<string, string>) =>
+      Object.fromEntries(bucketKeys.map((key) => [key, r[key] ?? '0.0000']));
+
+    let invoices: unknown;
+    if (query.detailPartyId) {
+      const invoicePageSize = query.invoicePageSize ?? 100;
+      const invoicePage = Math.max(query.invoicePage ?? 1, 1);
+      type InvRow = {
+        invoiceNumber: string; invoiceDate: Date; dueDate: Date | null; dtype: string;
+        total: Prisma.Decimal; paid: Prisma.Decimal; bal: Prisma.Decimal; days: number;
+        bucket: string; jid: string | null; count: number;
+      };
+      const inv = await tx.$queryRaw<InvRow[]>(Prisma.sql`
+        SELECT b."invoiceNumber", b."invoiceDate", b."dueDate", b.dtype, b.total, b.paid, b.bal,
+               b.days, b.bucket, b.jid, COUNT(*) OVER ()::int AS count
+          FROM (${bucketed}) b
+         WHERE b.pid = ${query.detailPartyId}::uuid
+         ORDER BY GREATEST(b.days, 0) DESC, b."invoiceNumber", b.id
+         LIMIT ${invoicePageSize} OFFSET ${(invoicePage - 1) * invoicePageSize}`);
+      const [invoiceCount] = await tx.$queryRaw<Array<{n:number}>>(Prisma.sql`
+        SELECT COUNT(*)::int AS n FROM (${bucketed}) b WHERE b.pid = ${query.detailPartyId}::uuid`);
+      invoices = {
+        partyId: query.detailPartyId,
+        page: invoicePage,
+        pageSize: invoicePageSize,
+        total: invoiceCount?.n ?? 0,
+        rows: inv.map((r) => ({
+          invoiceNumber: r.invoiceNumber,
+          invoiceDate: r.invoiceDate.toISOString().slice(0, 10),
+          dueDate: r.dueDate?.toISOString().slice(0, 10) ?? null,
+          documentType: r.dtype.toLowerCase(),
+          total: new Prisma.Decimal(r.total).toFixed(MONEY_SCALE),
+          paid: new Prisma.Decimal(r.paid).toFixed(MONEY_SCALE),
+          balance: new Prisma.Decimal(r.bal).toFixed(MONEY_SCALE),
+          daysOverdue: Math.max(Number(r.days), 0),
+          bucket: r.bucket,
+          journalEntryId: r.jid,
+        })),
+      };
+    }
+
+    return {
+      side,
+      asOf: asOfDate,
+      buckets: BUCKETS.map((bucket) => ({
+        key: bucket.key, labelEn: bucket.labelEn, labelAr: bucket.labelAr,
+      })),
+      rows: rowsRaw.map((r) => ({
+        partyId: r.pid, code: r.code, nameEn: r.nameEn, nameAr: r.nameAr,
+        buckets: pick(r as unknown as Record<string, string>),
+        total: r.total, overdue: r.overdue, invoiceCount: r.n,
+      })),
+      totals: {
+        total: t?.total ?? '0.0000',
+        overdue: t?.overdue ?? '0.0000',
+        buckets: pick((t ?? {}) as unknown as Record<string, string>),
+        ledgerBalance: ledgerBalance.toFixed(MONEY_SCALE),
+        differenceFromLedger: documentBalance.minus(ledgerComparable).toFixed(MONEY_SCALE),
+      },
+      paging: {
+        page, pageSize, totalParties: t?.parties ?? 0,
+        totalPages: Math.ceil((t?.parties ?? 0) / pageSize),
+      },
+      ...(invoices ? { invoices } : {}),
+    };
   }
 
   private async build(

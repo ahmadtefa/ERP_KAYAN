@@ -334,6 +334,17 @@ jobs:
           const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (r.numPassedTests !== 8 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 8 real-session quota HTTP cases must run.');
           NODE
+      - name: Prove paged aging matches full reports and nonzero ledgers
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_AGING_PG: '1'
+        run: |
+          npm test -- --runInBand src/modules/reports/aging-paged.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/aging-paged.json"
+          node - "$RUNNER_TEMP/aging-paged.json" <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (r.numPassedTests !== 5 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 5 real-PG aging equality cases must run.');
+          NODE
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash

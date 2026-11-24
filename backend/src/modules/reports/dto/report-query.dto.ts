@@ -27,6 +27,16 @@ export class PeriodQueryDto {
 export class AgingQueryDto extends PeriodQueryDto {
   @IsOptional() @IsUUID() customerId?: string;
   @IsOptional() @IsUUID() supplierId?: string;
+
+  /// Opt-in paging. Without pageSize the report keeps its original full shape.
+  /// With it, parties are paged and nested invoices are left out; totals still
+  /// cover every matching invoice.
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  /// With pageSize: also return one party's invoices, paged by invoicePage/invoicePageSize.
+  @IsOptional() @IsUUID() detailPartyId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) invoicePage?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) invoicePageSize?: number;
 }
 
 /// Operational reports: documents filtered by party, account and status.

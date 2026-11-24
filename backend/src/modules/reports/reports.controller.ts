@@ -40,6 +40,13 @@ import { ReportsService } from './reports.service';
 /// 400 rather than a driver error reported as a server failure.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function pagingOf(q: AgingQueryDto) {
+  return {
+    pageSize: q.pageSize, page: q.page, detailPartyId: q.detailPartyId,
+    invoicePage: q.invoicePage, invoicePageSize: q.invoicePageSize,
+  };
+}
+
 @Controller('reports')
 @UseGuards(BranchReportScopeGuard)
 @UseInterceptors(CompanyAggregateVisibilityInterceptor)
@@ -188,6 +195,7 @@ export class ReportsController {
       asOf: query.to,
       customerId: query.customerId,
       branchId: query.branchId,
+      ...pagingOf(query),
     });
   }
 
@@ -198,6 +206,7 @@ export class ReportsController {
       asOf: query.to,
       supplierId: query.supplierId,
       branchId: query.branchId,
+      ...pagingOf(query),
     });
   }
 
