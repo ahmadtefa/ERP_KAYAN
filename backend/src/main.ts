@@ -7,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { coordinateBusinessStartup } from './common/maintenance/startup-coordination';
+import { validationExceptionFactory } from './common/validation/field-errors';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { isCorsOriginAllowed } from './common/security/cors-origin';
 import {
@@ -37,6 +38,7 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: validationExceptionFactory,
     }),
   );
 

@@ -357,8 +357,9 @@ describeWithBrowser('quotation PDF through the real browser renderer', () => {
       page.drawText('LETTERHEAD BACKGROUND', { x: 80, y: 790, size: 18 });
       const letterhead = Buffer.from(await sheet.save());
 
-      const content = { ...snapshot(40, 2), design: { hideHeader: true, hideFooter: true, backgroundId: 'x' } };
-      const html = renderQuotationDocument(content, { logoData: LOGO, logoMime: 'image/png' }, 'en', false);
+      const language = (process.env.KAYAN_PDF_LANG === 'ar' ? 'ar' : 'en') as 'en' | 'ar';
+      const content = { ...snapshot(40, 2, { language }), design: { hideHeader: true, hideFooter: true, backgroundId: 'x' } };
+      const html = renderQuotationDocument(content, { logoData: LOGO, logoMime: 'image/png' }, language, false);
       const pdf = await browser.render(html, {
         fullBleed: true,
         pageNumberColor: { r: 0.3, g: 0.3, b: 0.3 },
