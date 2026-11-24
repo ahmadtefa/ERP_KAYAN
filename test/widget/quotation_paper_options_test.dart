@@ -1,13 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:erp_kayan/app/theme/app_theme.dart';
 
-import 'package:erp_kayan/app/router/app_router.dart';
-import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
