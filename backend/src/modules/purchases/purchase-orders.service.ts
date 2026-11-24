@@ -4,11 +4,13 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
 import { orderCreationIdentity, OrderCreationDuplicateError } from '../../common/units/order-creation-identity';
@@ -61,6 +63,7 @@ export class PurchaseOrdersService {
     private readonly prices: PriceListsService,
     private readonly invoices: PurchaseInvoicesService,
     private readonly audit: AuditService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async findAll(
@@ -393,7 +396,28 @@ export class PurchaseOrdersService {
         before: { status: order.status }, after: { orderNumber: order.orderNumber, status: OrderStatus.APPROVED },
       }, tx);
     });
-    return this.findOne(companyId, id);
+    const approved = await this.findOne(companyId, id);
+    const meta = await this.prisma.purchaseOrder.findFirst({
+      where: { id, companyId },
+      select: { branchId: true, createdBy: true, orderNumber: true },
+    });
+    // The approver's task is done and the person who raised the order is told
+    // now, not after the next scan.
+    await this.notifications?.clearPending(companyId, 'PurchaseOrder', id);
+    await this.notifications?.tellRequester({
+      companyId,
+      branchId: meta?.branchId ?? null,
+      requesterId: meta?.createdBy,
+      decidedBy: userId,
+      outcome: 'APPROVED',
+      entityType: 'PurchaseOrder',
+      entityId: id,
+      entityRef: String(meta?.orderNumber ?? ''),
+      nameAr: 'أمر الشراء',
+      nameEn: 'Purchase order',
+      actionPath: `/purchases/orders?order=${id}`,
+    });
+    return approved;
   }
 
   async cancel(companyId: string, userId: string, id: string, reason?: string) {
@@ -423,6 +447,7 @@ export class PurchaseOrdersService {
       }, tx);
     });
 
+    await this.notifications?.clearPending(companyId, 'PurchaseOrder', id);
     return this.findOne(companyId, id);
   }
 

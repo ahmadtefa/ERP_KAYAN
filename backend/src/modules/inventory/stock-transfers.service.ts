@@ -11,6 +11,8 @@ import { ApprovalChain } from '../../common/approvals/approval-chain';
 import { StockDocumentsService } from './stock-documents.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  DOCUMENT_APPROVED,
+  DOCUMENT_REJECTED,
   STOCK_TRANSFER_APPROVAL_REQUIRED,
   STOCK_TRANSFER_CLOSE_REQUIRED,
   STOCK_TRANSFER_DISPATCH_REQUIRED,
@@ -196,6 +198,7 @@ export class StockTransfersService {
       decision: 'APPROVE',
       reason: reason ?? null,
       expectedLevel: expectedLevel ?? null,
+      since: row.submittedAt,
     });
     if (result.state.isComplete) {
       return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'APPROVED', {
@@ -224,6 +227,7 @@ export class StockTransfersService {
     await this.approvals.decide(actor, {
       entityType: 'StockTransfer', entityId: id, chain,
       requesterId: row.createdBy, decision: 'REJECT', reason: reason.trim(),
+      since: row.submittedAt,
     });
     return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'REJECTED', {
       rejectedBy: userId, rejectedAt: new Date(), rejectionReason: reason.trim(),
@@ -261,6 +265,7 @@ export class StockTransfersService {
     await this.approvals.decide(actor, {
       entityType: 'StockTransfer', entityId: id, chain,
       requesterId: row.createdBy, decision: 'RETURN', reason: reason.trim(),
+      since: row.submittedAt,
     });
     return this.transition(companyId, userId, id, key, [row.status], 'DRAFT', {
       returnedBy: userId, returnedAt: new Date(), returnReason: reason.trim(),
@@ -361,6 +366,7 @@ export class StockTransfersService {
       chain,
       'StockTransfer',
       id,
+      row.submittedAt,
     );
     return {
       source: 'POLICY' as const,
@@ -760,8 +766,17 @@ export class StockTransfersService {
         chain,
         'StockTransfer',
         transfer.id,
+        transfer.submittedAt,
       );
       const level = chain.levels.find((candidate) => candidate.level === current.state.pendingLevel);
+      // Only the level that is waiting keeps an open task: the "awaiting
+      // review" alert raised at draft time and any earlier stage must go.
+      await this.notifications.resolveEntity(
+        transfer.companyId,
+        'StockTransfer',
+        transfer.id,
+        level ? [STOCK_TRANSFER_LEVEL_PENDING] : [],
+      );
       for (const type of level ? [STOCK_TRANSFER_LEVEL_PENDING] : []) {
         await this.notifyStage(transfer, type, level ?? undefined);
       }
@@ -770,7 +785,16 @@ export class StockTransfersService {
     // A returned request is the requester's own news, and it must reach them
     // rather than the approvers who have just finished with it.
     if (transfer.status === 'DRAFT' && transfer.returnedAt) {
+      // The approvers have finished with it: their open tasks must not outlive
+      // the return.
+      await this.notifications.resolveEntity(
+        transfer.companyId,
+        'StockTransfer',
+        transfer.id,
+        [STOCK_TRANSFER_RETURNED],
+      );
       await this.notifications.raise({
+        recipientUserId: transfer.createdBy,
         companyId: transfer.companyId,
         branchId: transfer.sourceBranchId,
         warehouseId: transfer.sourceWarehouseId,
@@ -811,12 +835,47 @@ export class StockTransfersService {
       stages,
     );
     for (const type of stages) await this.notifyStage(transfer, type);
+    await this.notifyRequesterOutcome(transfer);
+  }
+
+  /// Tells the person who asked what was decided. Addressed to them alone: the
+  /// row carries their user id, so a colleague in the same branch with the same
+  /// permission does not read it.
+  private async notifyRequesterOutcome(transfer: Awaited<ReturnType<StockTransfersService['findOne']>>) {
+    const approved = transfer.status === 'APPROVED';
+    const rejected = transfer.status === 'REJECTED';
+    if (!approved && !rejected) return;
+    const decidedBy = approved ? transfer.approvedBy : transfer.rejectedBy;
+    if (decidedBy && decidedBy === transfer.createdBy) return;
+    const decidedAt = approved ? transfer.approvedAt : transfer.rejectedAt;
+    const type = approved ? DOCUMENT_APPROVED : DOCUMENT_REJECTED;
+    const reason = (transfer.rejectionReason ?? '').trim();
+    await this.notifications.raise({
+      companyId: transfer.companyId,
+      branchId: transfer.sourceBranchId,
+      warehouseId: transfer.sourceWarehouseId,
+      type,
+      recipientUserId: transfer.createdBy,
+      titleAr: approved ? 'تم اعتماد طلب التحويل' : 'تم رفض طلب التحويل',
+      titleEn: approved ? 'Your transfer request was approved' : 'Your transfer request was rejected',
+      bodyAr: approved
+        ? `اعتُمد التحويل ${transfer.documentNumber} ويمكن تسليمه الآن.`
+        : `رُفض التحويل ${transfer.documentNumber}${reason ? `: ${reason}` : ''}.`,
+      bodyEn: approved
+        ? `Transfer ${transfer.documentNumber} was approved and can now be dispatched.`
+        : `Transfer ${transfer.documentNumber} was rejected${reason ? `: ${reason}` : ''}.`,
+      entityType: 'StockTransfer',
+      entityId: transfer.id,
+      entityRef: transfer.documentNumber,
+      actionPath: `/inventory/stock-transfers?transferId=${encodeURIComponent(transfer.id)}`,
+      dedupe: dedupeKey({ type, entityId: transfer.id, suffix: String(decidedAt ? decidedAt.getTime() : 0) }),
+    });
   }
 
   private async notifyStage(
     transfer: Awaited<ReturnType<StockTransfersService['findOne']>>,
     type: string,
-    level?: { level: number; nameEn: string; nameAr: string; permission: string },
+    level?: { level: number; nameEn: string; nameAr: string; permission: string; roleCode?: string | null },
   ) {
     const destinationStage = type === STOCK_TRANSFER_RECEIPT_REQUIRED ||
       type === STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED ||
@@ -884,6 +943,9 @@ export class StockTransfersService {
       // A configured level names the permission that may close it, so the
       // alert names that permission rather than the kind's default.
       permission: level?.permission ?? null,
+      // A level that names a role is for that role's holders only; the earlier
+      // level's manager does not keep seeing the task after deciding.
+      audienceRoles: level?.roleCode ? [level.roleCode] : null,
       // A transfer's current task is one deduplicated alert, even if the
       // shipment arrives in several dispatch/receipt batches.
       dedupe: dedupeKey({ type, entityId: transfer.id }),

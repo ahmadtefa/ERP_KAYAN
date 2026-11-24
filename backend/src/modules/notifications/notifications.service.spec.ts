@@ -1220,9 +1220,16 @@ describe('notifications', () => {
     const answer = await service.scanBusiness(COMPANY, TODAY);
 
     expect(answer.raised).toBe(3);
+    // Each order kind is addressed to the permission that can approve it.
+    const salesAlert = state.notifications.filter((one) => one.type === 'SALES_ORDER_PENDING_APPROVAL');
+    const purchaseAlert = state.notifications.filter((one) => one.type === 'PURCHASE_ORDER_PENDING_APPROVAL');
+    expect(salesAlert).toHaveLength(1);
+    expect(salesAlert[0].permission).toBe('sales.orders.approve');
+    expect(purchaseAlert).toHaveLength(1);
+    expect(purchaseAlert[0].permission).toBe('purchases.orders.approve');
     expect(
       state.notifications.filter((one) => one.type === 'STOCK_VOUCHER_PENDING_APPROVAL'),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
     const journal = state.notifications.find((one) => one.type === 'JOURNAL_PENDING_APPROVAL');
     expect(journal?.permission).toBe('accounting.journal.approve');
     expect(journal?.severity).toBe('WARNING');

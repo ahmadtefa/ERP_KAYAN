@@ -13,6 +13,9 @@ export interface NotificationKind {
   severity: 'INFO' | 'WARNING' | 'CRITICAL';
   /// The permission a person needs for this row to be shown to them at all.
   permission: string;
+  /// Addressed to one named person (the requester), never to a permission
+  /// holder. The row carries `recipientUserId` and no permission.
+  personal?: boolean;
   /// Where clicking it should take them, and what row it points at.
   entityType?: string;
   /// How often the scanner may raise the same fact again.
@@ -38,6 +41,13 @@ export const STOCK_TRANSFER_LEVEL_PENDING = 'STOCK_TRANSFER_LEVEL_PENDING';
 export const STOCK_TRANSFER_RETURNED = 'STOCK_TRANSFER_RETURNED';
 /// A journal entry waiting for approval.
 export const JOURNAL_PENDING_APPROVAL = 'JOURNAL_PENDING_APPROVAL';
+/// Sales and purchase orders each name their own approval permission, so each
+/// has its own kind: the alert must reach the people who can actually approve.
+export const SALES_ORDER_PENDING_APPROVAL = 'SALES_ORDER_PENDING_APPROVAL';
+export const PURCHASE_ORDER_PENDING_APPROVAL = 'PURCHASE_ORDER_PENDING_APPROVAL';
+/// The requester's own news: what was decided about the document they sent.
+export const DOCUMENT_APPROVED = 'DOCUMENT_APPROVED';
+export const DOCUMENT_REJECTED = 'DOCUMENT_REJECTED';
 /// A posted customer invoice whose due date has passed and is not fully paid.
 export const INVOICE_OVERDUE = 'INVOICE_OVERDUE';
 /// A supplier invoice falling due soon, and one that has fallen due.
@@ -174,7 +184,38 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     module: 'inventory',
     severity: 'WARNING',
     permission: 'inventory.transfer.create',
+    personal: true,
     entityType: 'StockTransfer',
+  },
+  {
+    type: SALES_ORDER_PENDING_APPROVAL,
+    module: 'sales',
+    severity: 'WARNING',
+    permission: 'sales.orders.approve',
+    entityType: 'SalesOrder',
+    repeatAfterHours: 24,
+  },
+  {
+    type: PURCHASE_ORDER_PENDING_APPROVAL,
+    module: 'purchases',
+    severity: 'WARNING',
+    permission: 'purchases.orders.approve',
+    entityType: 'PurchaseOrder',
+    repeatAfterHours: 24,
+  },
+  {
+    type: DOCUMENT_APPROVED,
+    module: 'admin',
+    severity: 'INFO',
+    permission: '',
+    personal: true,
+  },
+  {
+    type: DOCUMENT_REJECTED,
+    module: 'admin',
+    severity: 'WARNING',
+    permission: '',
+    personal: true,
   },
   {
     type: JOURNAL_PENDING_APPROVAL,

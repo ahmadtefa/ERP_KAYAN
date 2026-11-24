@@ -4,11 +4,14 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { JournalStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { JOURNAL_PENDING_APPROVAL, dedupeKey } from '../notifications/notification-kinds';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { ACCOUNT_CODES } from './account-map.service';
 import { CostCentersService } from './cost-centers.service';
@@ -53,6 +56,7 @@ export class JournalEntriesService {
     private readonly periods: FiscalPeriodsService,
     private readonly settings: CompanySettingsService,
     private readonly costCenters: CostCentersService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async findAll(companyId: string, page = 1, pageSize = 50, branchScope: string[] | null = null) {
@@ -334,11 +338,13 @@ export class JournalEntriesService {
   /// ledger, and the entry can still be cancelled or corrected by its author.
   async submitForApproval(companyId: string, userId: string, id: string) {
     const entry = await this.requireStatus(companyId, id, [JournalStatus.DRAFT]);
-    return this.transition(companyId, userId, entry, {
+    const result = await this.transition(companyId, userId, entry, {
       status: JournalStatus.PENDING_APPROVAL,
       submittedAt: new Date(),
       submittedBy: userId,
     }, 'SUBMIT');
+    await this.announce(companyId, id, 'SUBMIT', userId, entry.createdBy);
+    return result;
   }
 
   /// Approves an entry that is waiting. The approver's identity is recorded on
@@ -358,11 +364,69 @@ export class JournalEntriesService {
       );
     }
 
-    return this.transition(companyId, userId, entry, {
+    const result = await this.transition(companyId, userId, entry, {
       status: JournalStatus.APPROVED,
       approvedAt: new Date(),
       approvedBy: userId,
     }, 'APPROVE');
+    await this.announce(companyId, id, 'APPROVE', userId, entry.createdBy);
+    return result;
+  }
+
+  /// Keeps the notification centre in step with the workflow at once: the
+  /// approver is told when an entry is submitted, the task disappears when it
+  /// is decided, and the author hears the outcome. A notification failure
+  /// never undoes the accounting action; the 30-minute scan is the backstop.
+  private async announce(
+    companyId: string,
+    id: string,
+    action: 'SUBMIT' | 'APPROVE' | 'CANCEL',
+    userId: string,
+    createdBy: string | null,
+    reason?: string | null,
+  ) {
+    if (!this.notifications) return;
+    try {
+      const entry = await this.prisma.journalEntry.findFirst({
+        where: { id, companyId },
+        select: { branchId: true, entryNumber: true, description: true, totalDebit: true },
+      });
+      if (!entry) return;
+      if (action === 'SUBMIT') {
+        await this.notifications.raiseSafely({
+          companyId,
+          type: JOURNAL_PENDING_APPROVAL,
+          branchId: entry.branchId,
+          entityType: 'JournalEntry',
+          entityId: id,
+          entityRef: entry.entryNumber,
+          actionPath: `/accounting/journal-entries?entry=${id}`,
+          titleEn: `Journal entry ${entry.entryNumber} is waiting for approval`,
+          titleAr: `القيد ${entry.entryNumber} في انتظار الاعتماد`,
+          bodyEn: entry.description ?? `${entry.totalDebit} waiting to be approved.`,
+          bodyAr: entry.description ?? `${entry.totalDebit} في انتظار الاعتماد.`,
+          dedupe: dedupeKey({ type: JOURNAL_PENDING_APPROVAL, entityId: id }),
+        });
+        return;
+      }
+      await this.notifications.clearPending(companyId, 'JournalEntry', id);
+      await this.notifications.tellRequester({
+        companyId,
+        branchId: entry.branchId,
+        requesterId: createdBy,
+        decidedBy: userId,
+        outcome: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        entityType: 'JournalEntry',
+        entityId: id,
+        entityRef: entry.entryNumber,
+        nameAr: 'القيد',
+        nameEn: 'Journal entry',
+        actionPath: `/accounting/journal-entries?entry=${id}`,
+        reason,
+      });
+    } catch {
+      // The scan reconciles the centre on its next pass.
+    }
   }
 
   /// Cancels a draft, a submitted entry or an approved one.
@@ -377,12 +441,14 @@ export class JournalEntriesService {
       JournalStatus.APPROVED,
     ]);
 
-    return this.transition(companyId, userId, entry, {
+    const result = await this.transition(companyId, userId, entry, {
       status: JournalStatus.CANCELLED,
       cancelledAt: new Date(),
       cancelledBy: userId,
       cancelReason: reason?.trim() || null,
     }, 'CANCEL', reason ?? null);
+    await this.announce(companyId, id, 'CANCEL', userId, entry.createdBy, reason ?? null);
+    return result;
   }
 
   /** Compare the observed state inside the write transaction. A competing

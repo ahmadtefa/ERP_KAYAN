@@ -882,6 +882,8 @@ model ApprovalDecision {
   entityId   String @db.Uuid
 
   level Int
+  /// Round number: 1, then +1 after every return for amendment.
+  cycle Int @default(1)
 
   /// APPROVE | REJECT | RETURN
   decision String @db.VarChar(16)
@@ -3228,6 +3230,8 @@ model Notification {
   entityRef  String? @db.VarChar(120)
   actionPath String? @db.VarChar(200)
   permission String? @db.VarChar(64)
+  /// Set when the alert is one person's own news (a decision on their request).
+  recipientUserId String? @db.Uuid
 
   /// One fact, one row: the unique index below is the whole duplicate policy.
   dedupeKey String @db.VarChar(200)
@@ -3246,6 +3250,7 @@ model Notification {
   @@index([companyId, status, createdAt])
   @@index([companyId, type, status])
   @@index([companyId, entityId])
+  @@index([companyId, recipientUserId, status])
   @@map("notifications")
 }
 

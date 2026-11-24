@@ -347,8 +347,19 @@ export class ApprovalsService {
     }));
   }
 
-  async stateFor(companyId: string, chain: ApprovalChain, entityType: string, entityId: string) {
-    const decisions = await this.decisions(companyId, entityType, entityId);
+  /// `since` is when the document was last (re)submitted. A request that was
+  /// returned and sent in again starts a fresh round at level 1: the earlier
+  /// round stays in the history but no longer decides who is pending.
+  async stateFor(
+    companyId: string,
+    chain: ApprovalChain,
+    entityType: string,
+    entityId: string,
+    since?: Date | null,
+  ) {
+    const decisions = (await this.decisions(companyId, entityType, entityId)).filter(
+      (decision) => !since || decision.createdAt.getTime() >= since.getTime(),
+    );
     return { chain, decisions, state: foldDecisions(chain, decisions) };
   }
 
@@ -367,6 +378,8 @@ export class ApprovalsService {
       decision: ApprovalDecisionKind;
       reason?: string | null;
       expectedLevel?: number | null;
+      /// When the document was last submitted; earlier rounds are history only.
+      since?: Date | null;
     },
   ) {
     const { decision, entityType, entityId, chain } = params;
@@ -381,7 +394,12 @@ export class ApprovalsService {
     if (chain.source === 'LEGACY') {
       throw new ConflictException('This document does not use a configured approval chain');
     }
-    const existing = await this.decisions(actor.companyId, entityType, entityId);
+    const everything = await this.decisions(actor.companyId, entityType, entityId);
+    const since = params.since ?? null;
+    const existing = everything.filter(
+      (item) => !since || item.createdAt.getTime() >= since.getTime(),
+    );
+    const cycle = everything.filter((item) => item.decision === 'RETURN').length + 1;
     const state = foldDecisions(chain, existing);
     if (state.stopped) throw new ConflictException('This approval chain has already been decided');
     if (state.isComplete) throw new ConflictException('This approval chain is already complete');
@@ -410,6 +428,7 @@ export class ApprovalsService {
           entityId,
           level: levelNumber,
           decision,
+          cycle,
           reason,
           actorId: actor.userId,
           actorRoleCode: roleCode,
@@ -439,7 +458,7 @@ export class ApprovalsService {
       entityId: created.id,
       after: { entityType, entityId, level: levelNumber, reason },
     });
-    const after = await this.stateFor(actor.companyId, chain, entityType, entityId);
+    const after = await this.stateFor(actor.companyId, chain, entityType, entityId, since);
     return { decision: created, ...after };
   }
 

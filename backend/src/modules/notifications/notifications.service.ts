@@ -18,6 +18,8 @@ import {
   PAYABLE_DUE,
   PAYABLE_OVERDUE,
   STOCK_ABNORMAL,
+  DOCUMENT_APPROVED,
+  DOCUMENT_REJECTED,
   STOCK_ABOVE_MAXIMUM,
   STOCK_BELOW_MINIMUM,
   STOCK_EXPIRED,
@@ -26,6 +28,8 @@ import {
   STOCK_OUT_OF_STOCK,
   STOCK_TRANSFER_RECEIPT_REQUIRED,
   STOCK_VOUCHER_PENDING_APPROVAL,
+  SALES_ORDER_PENDING_APPROVAL,
+  PURCHASE_ORDER_PENDING_APPROVAL,
   assertKnownKind,
   dedupeKey,
   notificationKind,
@@ -75,6 +79,11 @@ export interface RaiseInput {
   /// — an approval level carries its own permission, and an alert about that
   /// level must be visible to exactly the people who can close it.
   permission?: string | null;
+  /// Addresses the row to one person. Nobody else sees it, super admins
+  /// included: a decision about somebody's request is theirs to read.
+  recipientUserId?: string | null;
+  /// Overrides the setting's role list, for a stage that belongs to a role.
+  audienceRoles?: string[] | null;
 }
 
 interface SettingRow {
@@ -418,7 +427,11 @@ export class NotificationsService {
   /// hold. A user with no `inventory.cost.read` still sees that a lot expired;
   /// they do not see a row that was written for a permission they lack.
   private visibleTo(user: NotificationUser): Prisma.NotificationWhereInput {
-    if (user.isSuperAdmin) return {};
+    // A personal row is addressed to one person and to nobody else.
+    const personal: Prisma.NotificationWhereInput = {
+      OR: [{ recipientUserId: null }, { recipientUserId: user.userId }],
+    };
+    if (user.isSuperAdmin) return personal;
     const scopes = (user.branchIds ?? []).filter(Boolean);
     // Two filters, and both matter: the branch the row belongs to, and the
     // permission it was written for. An alert about a costed lot is as
@@ -469,7 +482,7 @@ export class NotificationsService {
       }
       warehouse = { OR: addressed };
     }
-    return { AND: [branch, permission, audience, warehouse] };
+    return { AND: [personal, branch, permission, audience, warehouse] };
   }
 
   private maySee(user: NotificationUser, permission: string | null): boolean {
@@ -616,6 +629,7 @@ export class NotificationsService {
     entityType: string,
     entityId: string,
     activeTypes: readonly string[],
+    keepTypes: readonly string[] = [DOCUMENT_APPROVED, DOCUMENT_REJECTED],
   ): Promise<{ closed: number }> {
     const result = await this.prisma.notification.updateMany({
       where: {
@@ -623,6 +637,9 @@ export class NotificationsService {
         entityType,
         entityId,
         status: { in: ['OPEN', 'READ'] },
+        // The requester's own outcome notices are theirs to read; the
+        // workflow moving on does not take them away.
+        type: { notIn: [...keepTypes] },
         ...(activeTypes.length
           ? {
               OR: [
@@ -640,6 +657,65 @@ export class NotificationsService {
       data: { status: 'CLOSED', readAt: new Date() },
     });
     return { closed: result.count };
+  }
+
+
+  /// A document's pending-approval task is over (approved, cancelled, sent
+  /// back). Closes it now instead of waiting for the next 30-minute scan, and
+  /// never lets a notification failure undo the business action.
+  async clearPending(companyId: string, entityType: string, entityId: string): Promise<void> {
+    try {
+      await this.resolveEntity(companyId, entityType, entityId, []);
+    } catch {
+      // The scan closes it on its next pass.
+    }
+  }
+
+  /// Raises a document's pending-approval task at once (journals have a real
+  /// submit step, so there is no reason to make the approver wait for a scan).
+  async raiseSafely(input: RaiseInput): Promise<void> {
+    try {
+      await this.raise(input);
+    } catch {
+      // The scan raises it on its next pass.
+    }
+  }
+
+  /// Tells the requester what was decided about their document. Addressed to
+  /// that person alone. Nothing is sent when they decided it themselves.
+  async tellRequester(input: {
+    companyId: string;
+    branchId?: string | null;
+    requesterId: string | null | undefined;
+    decidedBy: string;
+    outcome: 'APPROVED' | 'REJECTED';
+    entityType: string;
+    entityId: string;
+    entityRef: string;
+    nameAr: string;
+    nameEn: string;
+    actionPath: string;
+    reason?: string | null;
+  }): Promise<void> {
+    if (!input.requesterId || input.requesterId === input.decidedBy) return;
+    const ok = input.outcome === 'APPROVED';
+    const type = ok ? DOCUMENT_APPROVED : DOCUMENT_REJECTED;
+    const reason = (input.reason ?? '').trim();
+    await this.raiseSafely({
+      companyId: input.companyId,
+      branchId: input.branchId ?? null,
+      type,
+      recipientUserId: input.requesterId,
+      titleAr: ok ? `تم اعتماد ${input.nameAr}` : `تم رفض ${input.nameAr}`,
+      titleEn: ok ? `${input.nameEn} approved` : `${input.nameEn} rejected`,
+      bodyAr: `${input.nameAr} ${input.entityRef} ${ok ? 'تم اعتماده' : 'تم رفضه'}${reason ? `: ${reason}` : ''}.`,
+      bodyEn: `${input.nameEn} ${input.entityRef} was ${ok ? 'approved' : 'rejected'}${reason ? `: ${reason}` : ''}.`,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      entityRef: input.entityRef,
+      actionPath: input.actionPath,
+      dedupe: dedupeKey({ type, entityId: input.entityId, suffix: String(Date.now()) }),
+    });
   }
 
   /// Records one fact, once.
@@ -674,9 +750,15 @@ export class NotificationsService {
       | 'INFO'
       | 'WARNING'
       | 'CRITICAL';
-    const audienceRoles = Array.isArray(setting?.roles)
-      ? (setting?.roles as unknown[]).filter((role): role is string => typeof role === 'string')
-      : [];
+    const audienceRoles = input.audienceRoles
+      ? input.audienceRoles.filter(Boolean)
+      : Array.isArray(setting?.roles)
+        ? (setting?.roles as unknown[]).filter((role): role is string => typeof role === 'string')
+        : [];
+    const permission = kind?.personal
+      ? null
+      : (input.permission ?? kind?.permission ?? null);
+    const recipientUserId = input.recipientUserId ?? null;
     const repeatAfterHours = Math.max(Number(setting?.repeatAfterHours ?? 24), 1);
 
     // How long a still-true fact stays quiet. The row is not duplicated; it is
@@ -684,12 +766,19 @@ export class NotificationsService {
     // acted on comes back instead of disappearing under newer news.
     const existing = await this.prisma.notification.findUnique({
       where: { companyId_dedupeKey: { companyId: input.companyId, dedupeKey: input.dedupe } },
-      select: { id: true, status: true, lastRaisedAt: true, raisedCount: true },
+      select: { id: true, status: true, lastRaisedAt: true, raisedCount: true, permission: true, audienceRoles: true },
     });
+    // A stage handed to somebody else (the next approval level) is a new task
+    // for them, not a repeat of the old one for the people who just finished.
+    const audienceChanged =
+      existing !== null &&
+      ((existing.permission ?? null) !== permission ||
+        [...(existing.audienceRoles ?? [])].sort().join('|') !== [...audienceRoles].sort().join('|'));
     const dueForRepeat =
       existing !== null &&
       existing.status !== 'ARCHIVED' &&
-      (existing.status === 'CLOSED' || existing.lastRaisedAt === null ||
+      (audienceChanged ||
+        existing.status === 'CLOSED' || existing.lastRaisedAt === null ||
         Date.now() - existing.lastRaisedAt.getTime() >= repeatAfterHours * 3_600_000);
 
     try {
@@ -716,7 +805,8 @@ export class NotificationsService {
           entityId: input.entityId ?? null,
           entityRef: input.entityRef ?? null,
           actionPath: input.actionPath ?? null,
-          permission: input.permission ?? kind?.permission ?? null,
+          permission,
+          recipientUserId,
           dedupeKey: input.dedupe,
           dueAt: input.dueAt ?? null,
         },
@@ -737,6 +827,14 @@ export class NotificationsService {
               lastRaisedAt: new Date(),
               raisedCount: (existing?.raisedCount ?? 0) + 1,
               status: 'OPEN',
+              // Closing stamps readAt; a reopened task is unread again.
+              readAt: null,
+              archivedAt: null,
+              permission,
+              audienceRoles,
+              recipientUserId,
+              branchId: input.branchId ?? null,
+              warehouseId: input.warehouseId ?? null,
             }
           : {
               titleEn: input.titleEn,
@@ -751,6 +849,14 @@ export class NotificationsService {
           where: { notificationId: row.id, dismissedAt: null },
           data: { readAt: null },
         });
+        // The task moved to a different audience: anyone who dismissed the
+        // earlier stage must still see this one.
+        if (audienceChanged) {
+          await this.prisma.notificationUserState.updateMany({
+            where: { notificationId: row.id },
+            data: { dismissedAt: null, readAt: null },
+          });
+        }
       }
       return { id: row.id };
     } catch (error) {
@@ -1121,6 +1227,8 @@ export class NotificationsService {
     // ── orders waiting for approval ──────────────────────────────────────
     evaluated(
       STOCK_VOUCHER_PENDING_APPROVAL,
+      SALES_ORDER_PENDING_APPROVAL,
+      PURCHASE_ORDER_PENDING_APPROVAL,
       JOURNAL_PENDING_APPROVAL,
       INVOICE_OVERDUE,
       PAYABLE_DUE,
@@ -1129,7 +1237,7 @@ export class NotificationsService {
       ADMIN_ALERT,
     );
 
-    if (enabled(STOCK_VOUCHER_PENDING_APPROVAL)) {
+    if (enabled(SALES_ORDER_PENDING_APPROVAL) || enabled(PURCHASE_ORDER_PENDING_APPROVAL)) {
       const [salesOrders, purchaseOrders] = await Promise.all([
         this.prisma.salesOrder.findMany({
           where: { companyId, status: 'DRAFT', deletedAt: null, approvedAt: null },
@@ -1158,14 +1266,15 @@ export class NotificationsService {
           take: 200,
         }),
       ]);
-      for (const order of salesOrders) {
-        const dedupe = dedupeKey({ type: STOCK_VOUCHER_PENDING_APPROVAL, entityId: order.id });
-        stillTrue(STOCK_VOUCHER_PENDING_APPROVAL, dedupe);
+      for (const order of enabled(SALES_ORDER_PENDING_APPROVAL) ? salesOrders : []) {
+        const dedupe = dedupeKey({ type: SALES_ORDER_PENDING_APPROVAL, entityId: order.id });
+        stillTrue(SALES_ORDER_PENDING_APPROVAL, dedupe);
         const days = Math.max(0, Math.round((startOfDay.getTime() - dayOnly(order.orderDate).getTime()) / 86_400_000));
         await this.raise({
           companyId,
-          type: STOCK_VOUCHER_PENDING_APPROVAL,
+          type: SALES_ORDER_PENDING_APPROVAL,
           branchId: order.branchId,
+          entityType: 'SalesOrder',
           entityId: order.id,
           entityRef: order.orderNumber,
           actionPath: `/sales/orders?order=${order.id}`,
@@ -1178,13 +1287,14 @@ export class NotificationsService {
         });
         raised += 1;
       }
-      for (const order of purchaseOrders) {
-        const dedupe = dedupeKey({ type: STOCK_VOUCHER_PENDING_APPROVAL, entityId: order.id });
-        stillTrue(STOCK_VOUCHER_PENDING_APPROVAL, dedupe);
+      for (const order of enabled(PURCHASE_ORDER_PENDING_APPROVAL) ? purchaseOrders : []) {
+        const dedupe = dedupeKey({ type: PURCHASE_ORDER_PENDING_APPROVAL, entityId: order.id });
+        stillTrue(PURCHASE_ORDER_PENDING_APPROVAL, dedupe);
         await this.raise({
           companyId,
-          type: STOCK_VOUCHER_PENDING_APPROVAL,
+          type: PURCHASE_ORDER_PENDING_APPROVAL,
           branchId: order.branchId,
+          entityType: 'PurchaseOrder',
           entityId: order.id,
           entityRef: order.orderNumber,
           actionPath: `/purchases/orders?order=${order.id}`,
