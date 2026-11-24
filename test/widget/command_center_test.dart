@@ -26,6 +26,7 @@ void main() {
       supportedLocales: AppLocalizations.supportedLocales, routerConfig: router));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('command-sales')), findsOneWidget);
+    expect(tester.widget<Scrollbar>(find.byType(Scrollbar).first).thumbVisibility, isTrue);
     expect(find.byKey(const ValueKey('command-purchases')), findsNothing);
     expect(find.byKey(const ValueKey('command-link-/sales/orders')), findsNothing);
     expect(tester.takeException(), isNull);

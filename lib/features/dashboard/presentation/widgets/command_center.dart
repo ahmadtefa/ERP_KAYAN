@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../shared/widgets/persistent_table_scroll.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../features/auth/domain/entities/app_user.dart';
 import '../../../../l10n/generated/app_localizations.dart';
@@ -123,7 +124,7 @@ class _ModuleTile extends StatelessWidget {
             ]),
             const Spacer(),
             // Sub-buttons never clip: a narrow card scrolls them sideways.
-            SingleChildScrollView(scrollDirection: Axis.horizontal,
+            HorizontalScrollFrame(
               child: Row(children: [
                 for (final link in links)
                   Padding(
