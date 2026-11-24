@@ -1,5 +1,6 @@
 import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'dart:convert';
+import '../../../../core/platform/browser_actions.dart';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
@@ -1178,7 +1179,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(children: [
+        child: Column(children: [Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('تنسيق عرض السعر', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 4),
@@ -1208,8 +1209,64 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             ],
           ),
         ]),
+          const Divider(height: 20),
+          _paperOptions(context),
+        ]),
       ),
     );
+  }
+
+  /// خيارات الورق: إخفاء الهيدر/الفوتر وخلفية PDF.
+  Widget _paperOptions(BuildContext context) {
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilterChip(
+          key: const ValueKey('quotation-hide-header'),
+          label: const Text('إخفاء الهيدر'),
+          selected: _design.hideHeader,
+          onSelected: (v) => setState(() => _design = _design.withLetterhead(hideHeader: v)),
+        ),
+        FilterChip(
+          key: const ValueKey('quotation-hide-footer'),
+          label: const Text('إخفاء الفوتر'),
+          selected: _design.hideFooter,
+          onSelected: (v) => setState(() => _design = _design.withLetterhead(hideFooter: v)),
+        ),
+        OutlinedButton.icon(
+          key: const ValueKey('quotation-pick-background'),
+          onPressed: _pickBackground,
+          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+          label: Text(_design.backgroundId == null
+              ? 'خلفية من ملف PDF'
+              : 'الخلفية: ${_design.backgroundName ?? 'PDF'}'),
+        ),
+        if (_design.backgroundId != null)
+          TextButton(
+            onPressed: () => setState(() => _design = _design.withLetterhead(clearBackground: true)),
+            child: const Text('إزالة الخلفية'),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _pickBackground() async {
+    final file = await pickFile(extensions: const ['pdf']);
+    if (file == null || !mounted) return;
+    try {
+      final created = await ref.read(apiClientProvider).post('/sales/quotation-backgrounds', body: {
+        'name': file.name.length > 120 ? file.name.substring(0, 120) : file.name,
+        'dataBase64': base64Encode(file.bytes),
+      });
+      if (!mounted) return;
+      setState(() => _design = _design.withLetterhead(
+            backgroundId: '${created['id']}', backgroundName: '${created['name']}'));
+    } catch (error) {
+      if (!mounted) return;
+      await showAppError(context, error);
+    }
   }
 
   Future<String?> _askDesignTemplateName({String initial = ''}) async {
@@ -1446,21 +1503,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     });
   }
 
-  QuotationDocumentDesign _replaceDesign(QuotationDocumentDesign d, String key, QuotationDocumentElementStyle s) {
-    return switch(key) {
-      'title'=>QuotationDocumentDesign(title:s,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'company'=>QuotationDocumentDesign(title:d.title,company:s,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'customer'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:s,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'sectionTitle'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:s,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'tableHeader'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:s,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'tableCell'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:s,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'totalsLabel'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:s,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'totalsValue'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:s,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
-      'finalTotal'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:s,footer:d.footer,header:d.header),
-      'footer'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:s,header:d.header),
-      _=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:s),
-    };
-  }
+  QuotationDocumentDesign _replaceDesign(QuotationDocumentDesign d, String key, QuotationDocumentElementStyle s) =>
+      d.withStyle(key, s);
 
   /// One table's column summary and the button that edits *its* layout.
   /// Columns live on the table now, so the control lives on the table too:

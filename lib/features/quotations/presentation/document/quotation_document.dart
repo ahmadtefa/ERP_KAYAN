@@ -23,8 +23,10 @@ class QuotationDocumentElementStyle {
 
   /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
   final double fontSizeMultiplier;
+
   /// سمك الخط (اختياري).
   final FontWeight? fontWeight;
+
   /// لون النص (اختياري).
   final String? color;
   final String? fontFamily;
@@ -80,6 +82,10 @@ class QuotationDocumentDesign {
     this.finalTotal,
     this.footer,
     this.header,
+    this.hideHeader = false,
+    this.hideFooter = false,
+    this.backgroundId,
+    this.backgroundName,
   });
 
   final QuotationDocumentElementStyle? title;
@@ -94,8 +100,65 @@ class QuotationDocumentDesign {
   final QuotationDocumentElementStyle? footer;
   final QuotationDocumentElementStyle? header;
 
+  /// يخفي شريط الهيدر/الفوتر بالكامل (للورق المطبوع مسبقًا).
+  final bool hideHeader;
+  final bool hideFooter;
+
+  /// خلفية PDF (صفحة واحدة) مخزنة على الخادم، وتحت كل صفحات العرض.
+  final String? backgroundId;
+  final String? backgroundName;
+
+  QuotationDocumentDesign withLetterhead({
+    bool? hideHeader,
+    bool? hideFooter,
+    String? backgroundId,
+    String? backgroundName,
+    bool clearBackground = false,
+  }) => QuotationDocumentDesign(
+    title: title,
+    company: company,
+    customer: customer,
+    sectionTitle: sectionTitle,
+    tableHeader: tableHeader,
+    tableCell: tableCell,
+    totalsLabel: totalsLabel,
+    totalsValue: totalsValue,
+    finalTotal: finalTotal,
+    footer: footer,
+    header: header,
+    hideHeader: hideHeader ?? this.hideHeader,
+    hideFooter: hideFooter ?? this.hideFooter,
+    backgroundId: clearBackground ? null : (backgroundId ?? this.backgroundId),
+    backgroundName: clearBackground
+        ? null
+        : (backgroundName ?? this.backgroundName),
+  );
+
+  /// نسخة بتنسيق عنصر واحد مستبدل، مع الاحتفاظ بخيارات الورق والخلفية.
+  QuotationDocumentDesign withStyle(
+    String key,
+    QuotationDocumentElementStyle s,
+  ) => QuotationDocumentDesign(
+    title: key == 'title' ? s : title,
+    company: key == 'company' ? s : company,
+    customer: key == 'customer' ? s : customer,
+    sectionTitle: key == 'sectionTitle' ? s : sectionTitle,
+    tableHeader: key == 'tableHeader' ? s : tableHeader,
+    tableCell: key == 'tableCell' ? s : tableCell,
+    totalsLabel: key == 'totalsLabel' ? s : totalsLabel,
+    totalsValue: key == 'totalsValue' ? s : totalsValue,
+    finalTotal: key == 'finalTotal' ? s : finalTotal,
+    footer: key == 'footer' ? s : footer,
+    header: key == 'header' ? s : header,
+    hideHeader: hideHeader,
+    hideFooter: hideFooter,
+    backgroundId: backgroundId,
+    backgroundName: backgroundName,
+  );
+
   /// الأنماط الافتراضية (بدون تجاوزات).
-  static QuotationDocumentDesign defaultDesign() => const QuotationDocumentDesign();
+  static QuotationDocumentDesign defaultDesign() =>
+      const QuotationDocumentDesign();
 
   /// يدمج هذا التصميم مع آخر (القيم في [other] تغلب).
   QuotationDocumentDesign merge(QuotationDocumentDesign other) {
@@ -111,6 +174,10 @@ class QuotationDocumentDesign {
       finalTotal: other.finalTotal ?? finalTotal,
       footer: other.footer ?? footer,
       header: other.header ?? header,
+      hideHeader: other.hideHeader || hideHeader,
+      hideFooter: other.hideFooter || hideFooter,
+      backgroundId: other.backgroundId ?? backgroundId,
+      backgroundName: other.backgroundName ?? backgroundName,
     );
   }
 
@@ -135,6 +202,7 @@ class QuotationDocumentDesign {
         customText: v['customText'] as String?,
       );
     }
+
     return QuotationDocumentDesign(
       title: styleOf('title'),
       company: styleOf('company'),
@@ -147,6 +215,14 @@ class QuotationDocumentDesign {
       finalTotal: styleOf('finalTotal'),
       footer: styleOf('footer'),
       header: styleOf('header'),
+      hideHeader: raw['hideHeader'] == true,
+      hideFooter: raw['hideFooter'] == true,
+      backgroundId: raw['backgroundId'] is String
+          ? raw['backgroundId'] as String
+          : null,
+      backgroundName: raw['backgroundName'] is String
+          ? raw['backgroundName'] as String
+          : null,
     );
   }
 
@@ -157,18 +233,23 @@ class QuotationDocumentDesign {
       if (s == null) return;
       result[key] = {
         'fontSizeMultiplier': s.fontSizeMultiplier,
-        if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString().split('.').last,
+        if (s.fontWeight != null)
+          'fontWeight': s.fontWeight.toString().split('.').last,
         if (s.color != null) 'color': s.color,
-        if (s.fontFamily != null && s.fontFamily!.trim().isNotEmpty) 'fontFamily': s.fontFamily,
-        if (s.textAlign != null) 'textAlign': s.textAlign.toString().split('.').last,
+        if (s.fontFamily != null && s.fontFamily!.trim().isNotEmpty)
+          'fontFamily': s.fontFamily,
+        if (s.textAlign != null)
+          'textAlign': s.textAlign.toString().split('.').last,
         if (s.lineHeight != null) 'lineHeight': s.lineHeight,
         if (s.backgroundColor != null) 'backgroundColor': s.backgroundColor,
         if (s.borderColor != null) 'borderColor': s.borderColor,
         if (s.borderWidth > 0) 'borderWidth': s.borderWidth,
         if (!s.visible) 'visible': false,
-        if (s.customText != null && s.customText!.trim().isNotEmpty) 'customText': s.customText,
+        if (s.customText != null && s.customText!.trim().isNotEmpty)
+          'customText': s.customText,
       };
     }
+
     set('title', title);
     set('company', company);
     set('customer', customer);
@@ -180,6 +261,12 @@ class QuotationDocumentDesign {
     set('finalTotal', finalTotal);
     set('footer', footer);
     set('header', header);
+    if (hideHeader) result['hideHeader'] = true;
+    if (hideFooter) result['hideFooter'] = true;
+    if (backgroundId != null) {
+      result['backgroundId'] = backgroundId;
+      if (backgroundName != null) result['backgroundName'] = backgroundName;
+    }
     return result;
   }
 }
@@ -215,10 +302,7 @@ FontWeight? _fontWeightOf(dynamic v) {
 
 /// One printed line, already resolved for the reader's language.
 class QuotationDocumentRow {
-  const QuotationDocumentRow({
-    required this.number,
-    required this.cells,
-  });
+  const QuotationDocumentRow({required this.number, required this.cells});
 
   final String number;
 
@@ -288,8 +372,10 @@ class QuotationDocumentTotals {
   final String tableDiscountTotal;
   final String quotationDiscount;
   final String totalAmount;
+
   /// The company's VAT rate in force when the offer was prepared, in percent.
   final String taxRate;
+
   /// VAT charged exactly once on the discounted net value.
   final String taxAmount;
 
@@ -381,6 +467,7 @@ class QuotationDocument {
   final String responsiblePhone;
   final bool showTaxId;
   final bool arabic;
+
   /// تصميم العناصر (حجم الخط، سمكه، لونه، محاذاته) المخزّن مع القالب أو العرض.
   final QuotationDocumentDesign? design;
 
@@ -480,7 +567,8 @@ class QuotationDocument {
       'discountTotal',
       fallback: text(quotation, 'discountTotal'),
     );
-    final quotationDiscount = (num.tryParse(discountTotal) ?? 0) - tableDiscount;
+    final quotationDiscount =
+        (num.tryParse(discountTotal) ?? 0) - tableDiscount;
     final subTotal = text(
       totalsRaw,
       'subTotal',
@@ -497,11 +585,27 @@ class QuotationDocument {
         : Map<String, dynamic>.from(company);
 
     return QuotationDocument(
-      number: text(source, 'quotationNumber', fallback: text(quotation, 'quotationNumber')),
-      date: text(source, 'quotationDate', fallback: text(quotation, 'quotationDate')),
-      validUntil: text(source, 'validUntil', fallback: text(quotation, 'validUntil')),
+      number: text(
+        source,
+        'quotationNumber',
+        fallback: text(quotation, 'quotationNumber'),
+      ),
+      date: text(
+        source,
+        'quotationDate',
+        fallback: text(quotation, 'quotationDate'),
+      ),
+      validUntil: text(
+        source,
+        'validUntil',
+        fallback: text(quotation, 'validUntil'),
+      ),
       currency: text(source, 'currency', fallback: text(quotation, 'currency')),
-      status: text(source, 'status', fallback: text(quotation, 'status')).toLowerCase(),
+      status: text(
+        source,
+        'status',
+        fallback: text(quotation, 'status'),
+      ).toLowerCase(),
       version: asNum(source['version'])?.toInt() ?? 1,
       subject: text(source, 'subject', fallback: text(quotation, 'subject')),
       customer: QuotationDocumentParty(
@@ -513,7 +617,12 @@ class QuotationDocument {
         address: text(customerRaw, 'address'),
       ),
       company: QuotationDocumentCompany(
-        name: pick(snapshotCompany, 'nameEn', 'nameAr', fallback: pick(profile, 'nameEn', 'nameAr')),
+        name: pick(
+          snapshotCompany,
+          'nameEn',
+          'nameAr',
+          fallback: pick(profile, 'nameEn', 'nameAr'),
+        ),
         secondaryName: arabic
             ? text(snapshotCompany, 'nameEn').ifEmpty(text(profile, 'nameEn'))
             : text(snapshotCompany, 'nameAr').ifEmpty(text(profile, 'nameAr')),
@@ -531,8 +640,10 @@ class QuotationDocument {
         phone: text(snapshotCompany, 'phone').ifEmpty(text(profile, 'phone')),
         email: text(snapshotCompany, 'email').ifEmpty(text(profile, 'email')),
         taxId: text(snapshotCompany, 'taxId').ifEmpty(text(profile, 'taxId')),
-        commercialRegistration: text(snapshotCompany, 'commercialRegistration')
-            .ifEmpty(text(profile, 'commercialRegistration')),
+        commercialRegistration: text(
+          snapshotCompany,
+          'commercialRegistration',
+        ).ifEmpty(text(profile, 'commercialRegistration')),
       ),
       sections: sections,
       totals: QuotationDocumentTotals(
@@ -543,13 +654,29 @@ class QuotationDocument {
             ? '0'
             : quotationDiscount.toStringAsFixed(2),
         totalAmount: totalAmount,
-        taxRate: text(totalsRaw, 'taxRate', fallback: text(quotation, 'taxRate')),
-        taxAmount: text(totalsRaw, 'taxAmount', fallback: text(quotation, 'taxAmount')),
+        taxRate: text(
+          totalsRaw,
+          'taxRate',
+          fallback: text(quotation, 'taxRate'),
+        ),
+        taxAmount: text(
+          totalsRaw,
+          'taxAmount',
+          fallback: text(quotation, 'taxAmount'),
+        ),
       ),
       terms: text(source, 'terms', fallback: text(quotation, 'terms')),
       notes: text(source, 'notes', fallback: text(quotation, 'notes')),
-      managerName: text(source, 'managerName', fallback: text(quotation, 'managerName')),
-      responsibleName: text(source, 'responsibleName', fallback: text(quotation, 'responsibleName')),
+      managerName: text(
+        source,
+        'managerName',
+        fallback: text(quotation, 'managerName'),
+      ),
+      responsibleName: text(
+        source,
+        'responsibleName',
+        fallback: text(quotation, 'responsibleName'),
+      ),
       responsiblePhone: text(
         source,
         'responsiblePhone',
@@ -581,13 +708,14 @@ class QuotationDocument {
       final weight = asNum(entry['width'])?.toInt() ?? 2;
       final builtIn = _labels[key];
       final rawKind = text(entry, 'kind');
-      final kind = const {
-        'text',
-        'number',
-        'quantity',
-        'price',
-        'percent',
-      }.contains(rawKind)
+      final kind =
+          const {
+            'text',
+            'number',
+            'quantity',
+            'price',
+            'percent',
+          }.contains(rawKind)
           ? rawKind
           : 'text';
       result.add(
