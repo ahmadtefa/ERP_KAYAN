@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:erp_kayan/features/auth/presentation/widgets/user_photo.dart';
 
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
@@ -148,7 +151,7 @@ const _groupKeys = [
   'nav-group-administration',
 ];
 
-Future<void> _pumpShell(WidgetTester tester) async {
+Future<void> _pumpShell(WidgetTester tester, {bool dark = false, Uint8List? photo}) async {
   tester.view.physicalSize = const Size(1440, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
@@ -171,6 +174,7 @@ Future<void> _pumpShell(WidgetTester tester) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        if(photo!=null) userPhotoProvider((companyId:screenshotAdmin.companyId,userId:screenshotAdmin.id)).overrideWith((ref) async => photo),
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
         authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_ShellApi()),
@@ -189,7 +193,7 @@ Future<void> _pumpShell(WidgetTester tester) async {
         locale: const Locale('ar'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        theme: AppTheme.light(),
+        theme: dark ? AppTheme.dark() : AppTheme.light(),
         routerConfig: router,
       ),
     ),
@@ -209,6 +213,28 @@ Future<void> _shoot(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets('enlarged user avatar dark Arabic desktop visual proof', (tester) async {
+    await tester.runAsync(() async => _loadFonts());
+    final recorder=ui.PictureRecorder();final canvas=Canvas(recorder);
+    canvas.drawRect(const Rect.fromLTWH(0,0,128,128),Paint()..color=const Color(0xFF36789B));
+    canvas.drawCircle(const Offset(64,44),24,Paint()..color=const Color(0xFFF2CAA3));
+    canvas.drawOval(const Rect.fromLTWH(22,75,84,80),Paint()..color=const Color(0xFF10243A));
+    final picture=recorder.endRecording();final data=await tester.runAsync(() async {final image=await picture.toImage(128,128);return image.toByteData(format:ui.ImageByteFormat.png);});
+    await _pumpShell(tester,dark:true,photo:data!.buffer.asUint8List());
+    await tester.runAsync(() async { await precacheImage(MemoryImage(data.buffer.asUint8List()),tester.element(find.byType(ErpShell))); });
+    await tester.pumpAndSettle();
+    final top=find.byKey(ValueKey('topbar-photo-${screenshotAdmin.id}'));
+    final side=find.byKey(ValueKey('sidebar-photo-${screenshotAdmin.id}'));
+    expect(tester.widget<CircleAvatar>(top).foregroundImage,isA<MemoryImage>());expect(tester.getSize(top),const Size(52,52));expect(tester.getSize(side),const Size(64,64));expect(tester.takeException(),isNull);
+    final path=Platform.environment['KAYAN_AVATAR_SCREENSHOT'];
+    if(path!=null) { await tester.runAsync(() async {
+      final root=tester.binding.renderViews.first;RenderRepaintBoundary? boundary;
+      void visit(RenderObject object) { if(object is RenderRepaintBoundary && object.size.width>1300) {boundary=object;} object.visitChildren(visit); }
+      visit(root);final image=await boundary!.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
+      File(path).writeAsBytesSync(bytes!.buffer.asUint8List());
+    }); }
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(_loadFonts);

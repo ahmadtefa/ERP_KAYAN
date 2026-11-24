@@ -15,16 +15,16 @@ import 'package:flutter/material.dart';
 /// loudest thing on the screen.
 abstract final class AppColors {
   // Structure — the navy the program is framed in.
-  static const navy = Color(0xFF0A1E3C);
-  static const navyDeep = Color(0xFF06142A);
-  static const navySoft = Color(0xFF16305C);
+  static const navy = Color(0xFF203B60);
+  static const navyDeep = Color(0xFF182D4B);
+  static const navySoft = Color(0xFF2A4B77);
 
   // The sidebar and drawer, in both themes: a navy column whose text and
   // hairlines are stepped from the same ramp.
   static const sidebarBackground = navy;
   static const sidebarBackgroundDeep = navyDeep;
   static const onSidebar = Color(0xFFEAF1FC);
-  static const onSidebarMuted = Color(0xFF93A9CC);
+  static const onSidebarMuted = Color(0xFFC2D1E8);
   static const sidebarHairline = Color(0x1FFFFFFF);
 
   // Action — royal blue, with its hover and pressed steps deepening
@@ -68,12 +68,12 @@ abstract final class AppColors {
   static const chartPurchasesDark = Color(0xFFD8B678);
 
   // Dark theme counterparts — Luxury Obsidian & Slate with Amber/Gold accents.
-  static const darkBackground = Color(0xFF080C14);
-  static const darkSurface = Color(0xFF0F1624);
-  static const darkSurfaceAlt = Color(0xFF162033);
-  static const darkBorder = Color(0xFF1E2B42);
+  static const darkBackground = Color(0xFF182334);
+  static const darkSurface = Color(0xFF233248);
+  static const darkSurfaceAlt = Color(0xFF2C3E56);
+  static const darkBorder = Color(0xFF536982);
   static const darkText = Color(0xFFF8FAFC);
-  static const darkTextMuted = Color(0xFF94A3B8);
+  static const darkTextMuted = Color(0xFFCAD5E3);
 }
 
 /// The one gradient in the product: the navy frame (sidebar, drawer and

@@ -60,6 +60,8 @@ void main() {
     await tester.pumpAndSettle();
     final first = tester.widget<CircleAvatar>(find.byKey(const ValueKey('topbar-photo-one')));
     expect(first.foregroundImage, isA<MemoryImage>());
+    expect(first.radius,26);
+    expect(tester.getSize(find.byKey(const ValueKey('sidebar-photo-one'))),const Size(64,64));
     expect(find.text('Account one'), findsWidgets);
     container.read(_activeShellUser.notifier).setUser(null);
     await tester.pump();
@@ -93,6 +95,8 @@ void main() {
       ], child: wrapWithApp(locale: locale, child: const ErpShell(currentPath: AppRoutes.dashboard, child: SizedBox.expand()))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'viewport width $width, locale $locale');
+      final avatar=tester.widget<CircleAvatar>(find.byKey(const ValueKey('topbar-photo-one')));
+      expect(avatar.radius, greaterThanOrEqualTo(21));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 3));
     }

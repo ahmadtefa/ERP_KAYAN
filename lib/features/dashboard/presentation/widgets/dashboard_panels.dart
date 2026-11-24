@@ -45,6 +45,14 @@ class MonthlyBarsChart extends StatelessWidget {
       return math.max(max, math.max(result, math.max(sales, purchases)));
     });
 
+    final minValue = months.fold<double>(0, (value,row) => showResult ? math.min(value,asNum(row['result'])?.toDouble() ?? 0) : value);
+    final minPlotWidth = math.max(320.0, months.length * 66.0 + 90);
+    final labelStyle = theme.textTheme.bodySmall!.copyWith(color:scheme.onSurface,fontSize:12,fontWeight:FontWeight.w600);
+    String tooltip(Json row) => [row['month']?.toString() ?? '',
+      if(showSales) '${arabic ? 'المبيعات' : 'Sales'}: ${row['sales'] ?? 0}',
+      if(showPurchases) '${arabic ? 'المشتريات' : 'Purchases'}: ${row['purchases'] ?? 0}',
+      if(showResult) '${arabic ? 'صافي النتيجة' : 'Net result'}: ${row['result'] ?? 0}',
+    ].join('\n');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -85,20 +93,24 @@ class MonthlyBarsChart extends StatelessWidget {
                     ),
                   ),
                 )
-              : CustomPaint(
-                  painter: _MonthlyBarsPainter(
-                    months: months,
-                    maxValue: maxValue <= 0 ? 1 : maxValue,
-                    salesColor: salesColor,
-                    purchaseColor: purchaseColor,
-                    resultColor: resultColor,
-                    showSales: showSales,
-                    showPurchases: showPurchases,
-                    showResult: showResult,
-                    gridColor: scheme.outlineVariant.withValues(alpha: 0.6),
-                    labelColor: scheme.onSurfaceVariant,
-                  ),
-                ),
+              : LayoutBuilder(builder:(context,constraints) {
+                  final width=math.max(constraints.maxWidth,minPlotWidth);
+                  return SingleChildScrollView(scrollDirection:Axis.horizontal,child:SizedBox(width:width,height:236,
+                    child:Stack(children:[Positioned.fill(child:CustomPaint(
+                      painter:_MonthlyBarsPainter(months:months,maxValue:maxValue<=0?1:maxValue,minValue:minValue,
+                        salesColor:salesColor,purchaseColor:purchaseColor,resultColor:resultColor,
+                        showSales:showSales,showPurchases:showPurchases,showResult:showResult,
+                        gridColor:scheme.outlineVariant,labelColor:scheme.onSurface,labelStyle:labelStyle),
+                    )),Positioned(left:76,right:10,top:10,bottom:34,child:Row(children:[
+                      for(final row in months) Expanded(child:Tooltip(message:tooltip(row),
+                        triggerMode:TooltipTriggerMode.tap,waitDuration:const Duration(milliseconds:150),
+                        textStyle:labelStyle.copyWith(color:scheme.onSurface),
+                        decoration:BoxDecoration(color:scheme.surfaceContainerHighest,borderRadius:BorderRadius.circular(8),border:Border.all(color:scheme.outline)),
+                        child:Semantics(label:tooltip(row),child:const SizedBox.expand()),
+                      )),
+                    ]))]),
+                  ));
+                }),
         ),
       ],
     );
@@ -109,6 +121,8 @@ class _MonthlyBarsPainter extends CustomPainter {
   const _MonthlyBarsPainter({
     required this.months,
     required this.maxValue,
+    required this.minValue,
+    required this.labelStyle,
     required this.salesColor,
     required this.purchaseColor,
     required this.resultColor,
@@ -121,6 +135,8 @@ class _MonthlyBarsPainter extends CustomPainter {
 
   final List<Json> months;
   final double maxValue;
+  final double minValue;
+  final TextStyle labelStyle;
   final Color salesColor;
   final Color purchaseColor;
   final Color resultColor;
@@ -133,22 +149,27 @@ class _MonthlyBarsPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const top = 10.0;
-    const bottom = 30.0;
-    const left = 6.0;
-    const right = 6.0;
+    const bottom = 34.0;
+    const left = 76.0;
+    const right = 10.0;
     final rect = Rect.fromLTRB(
       left,
       top,
       size.width - right,
       size.height - bottom,
     );
-    final grid = Paint()
-      ..color = gridColor
-      ..strokeWidth = 1;
-    for (var i = 0; i < 4; i += 1) {
-      final y = rect.top + rect.height * i / 3;
-      canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), grid);
+    final range=maxValue-minValue;
+    double yOf(double value) => rect.bottom-(value-minValue)/range*rect.height;
+    final zeroY=yOf(0);
+    final grid = Paint()..color=gridColor..strokeWidth=1;
+    for(var i=0;i<=4;i++) {
+      final value=maxValue-range*i/4;final y=yOf(value);
+      canvas.drawLine(Offset(rect.left,y),Offset(rect.right,y),grid);
+      final unit=value.abs()>=1000000 ? '${(value/1000000).toStringAsFixed(1)}M' : value.abs()>=1000 ? '${(value/1000).toStringAsFixed(1)}K' : value.toStringAsFixed(0);
+      final text=TextPainter(text:TextSpan(text:unit,style:labelStyle),textDirection:TextDirection.ltr)..layout(maxWidth:68);
+      text.paint(canvas,Offset(rect.left-text.width-8,(y-text.height/2).clamp(0,size.height-text.height)));
     }
+    canvas.drawLine(Offset(rect.left,zeroY),Offset(rect.right,zeroY),Paint()..color=labelColor.withValues(alpha:0.65)..strokeWidth=1.3);
 
     final count = months.length;
     if (count == 0) return;
@@ -159,19 +180,10 @@ class _MonthlyBarsPainter extends CustomPainter {
       final row = months[i];
       final centerX = rect.left + slot * i + slot / 2;
 
-      final sales = showSales ? (asNum(row['sales'])?.toDouble() ?? 0) / maxValue : 0.0;
-      final purchases = showPurchases ? (asNum(row['purchases'])?.toDouble() ?? 0) / maxValue : 0.0;
-
-      final salesRect = Rect.fromCenter(
-        center: Offset(centerX - barWidth * 0.7, rect.bottom),
-        width: barWidth,
-        height: rect.height * sales.clamp(0.0, 1.0),
-      );
-      final purchaseRect = Rect.fromCenter(
-        center: Offset(centerX + barWidth * 0.7, rect.bottom),
-        width: barWidth,
-        height: rect.height * purchases.clamp(0.0, 1.0),
-      );
+      final sales=showSales ? asNum(row['sales'])?.toDouble() ?? 0 : 0.0;
+      final purchases=showPurchases ? asNum(row['purchases'])?.toDouble() ?? 0 : 0.0;
+      final salesRect=Rect.fromLTRB(centerX-barWidth*1.2,yOf(sales),centerX-barWidth*0.2,zeroY);
+      final purchaseRect=Rect.fromLTRB(centerX+barWidth*0.2,yOf(purchases),centerX+barWidth*1.2,zeroY);
       canvas.drawRRect(
         RRect.fromRectAndRadius(salesRect, const Radius.circular(3)),
         Paint()..color = salesColor.withValues(alpha: 0.9),
@@ -182,13 +194,13 @@ class _MonthlyBarsPainter extends CustomPainter {
       );
 
       // Month label: show one every other month to keep wide dates readable.
-      if (i % 2 == 0 || count <= 6) {
+      if (true) {
         final label = (row['month'] as String?) ?? '';
-        final short = label.length >= 7 ? label.substring(5) : label;
+        final short = label;
         final painter = TextPainter(
           text: TextSpan(
             text: short,
-            style: TextStyle(color: labelColor, fontSize: 9.5),
+            style: labelStyle,
           ),
           textDirection: TextDirection.ltr,
         )..layout();
@@ -204,11 +216,11 @@ class _MonthlyBarsPainter extends CustomPainter {
     if (showResult) {
       final points = <Offset>[];
       for (var i = 0; i < count; i += 1) {
-        final result = (asNum(months[i]['result'])?.toDouble() ?? 0) / maxValue;
+        final result = asNum(months[i]['result'])?.toDouble() ?? 0;
         points.add(
           Offset(
             rect.left + slot * i + slot / 2,
-            rect.bottom - result.clamp(-1.0, 1.0) * rect.height,
+            yOf(result),
           ),
         );
       }
@@ -235,6 +247,9 @@ class _MonthlyBarsPainter extends CustomPainter {
   bool shouldRepaint(covariant _MonthlyBarsPainter old) =>
       old.months != months ||
       old.maxValue != maxValue ||
+      old.minValue != minValue ||
+      old.resultColor != resultColor ||
+      old.labelStyle != labelStyle ||
       old.salesColor != salesColor ||
       old.purchaseColor != purchaseColor ||
       old.showSales != showSales ||

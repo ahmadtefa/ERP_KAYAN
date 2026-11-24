@@ -1149,9 +1149,11 @@ class _SidebarFooter extends ConsumerWidget {
     final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
 
+    final avatarSize = extended ? 64.0 : 52.0;
     final avatar = Container(
-      width: 44,
-      height: 44,
+      key: ValueKey('sidebar-photo-${user.id}'),
+      width: avatarSize,
+      height: avatarSize,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.12),
@@ -1173,7 +1175,7 @@ class _SidebarFooter extends ConsumerWidget {
               initials,
               style: const TextStyle(
                 color: AppColors.onSidebar,
-                fontSize: 15,
+                fontSize: 20,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               ),
@@ -1181,14 +1183,14 @@ class _SidebarFooter extends ConsumerWidget {
           : ClipOval(
               child: Image.memory(
                 photo,
-                width: 44,
-                height: 44,
+                width: avatarSize,
+                height: avatarSize,
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => Text(
                   initials,
                   style: const TextStyle(
                     color: AppColors.onSidebar,
-                    fontSize: 15,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -1301,7 +1303,7 @@ class _TopBar extends ConsumerWidget {
           ),
         ],
       ),
-      padding: EdgeInsets.symmetric(horizontal: compact ? AppSpacing.xs : AppSpacing.lg),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 2 : AppSpacing.lg),
       child: Row(
         children: [
           if (!isWide) ...[
@@ -1395,7 +1397,7 @@ class _TopBar extends ConsumerWidget {
             path: AppRoutes.operationsInputs,
             showLabel: !compact,
           ),
-          const SizedBox(width: AppSpacing.xs),
+          SizedBox(width: compact ? 0 : AppSpacing.xs),
           _OpsCenterButton(
             key: const ValueKey('topbar-operations-outputs'),
             icon: Icons.description_rounded,
@@ -1418,14 +1420,14 @@ class _TopBar extends ConsumerWidget {
           if (ref.watch(currentUserProvider)?.can('notifications.read') ?? false)
             const NotificationBell(key: ValueKey('topbar-notification-bell')),
           if (!compact) _SearchTrigger(expanded: isExtended),
-          if (!compact) const SizedBox(width: AppSpacing.xs),
+          if (!compact) SizedBox(width: compact ? 0 : AppSpacing.xs),
           if (!compact) const _LanguageMenu(),
-          const SizedBox(width: AppSpacing.xs),
+          SizedBox(width: compact ? 0 : AppSpacing.xs),
           Builder(builder: (context) {
             final user = ref.watch(currentUserProvider);
             if (user == null) return const SizedBox.shrink();
             final bytes = ref.watch(userPhotoProvider((companyId: user.companyId, userId: user.id))).asData?.value;
-            final avatarRadius = compact ? 15.0 : 18.5;
+            final avatarRadius = compact ? 21.0 : 26.0;
             return Row(key: const ValueKey('topbar-current-user'), mainAxisSize: MainAxisSize.min, children: [
               Container(
                 decoration: BoxDecoration(
@@ -1440,13 +1442,13 @@ class _TopBar extends ConsumerWidget {
                   radius: avatarRadius,
                   foregroundImage: bytes == null ? null : MemoryImage(bytes),
                   onForegroundImageError: bytes == null ? null : (_, _) {},
-                  child: Icon(Icons.person_outline, size: compact ? 17 : 20),
+                  child: Icon(Icons.person_outline, size: compact ? 24 : 30),
                 ),
               ),
               // At compact widths the name would push the bar past the
               // screen edge; the avatar alone identifies the account
               // there (the full name stays in the drawer/profile).
-              if (!compact) const SizedBox(width: AppSpacing.xs),
+              if (!compact) SizedBox(width: compact ? 0 : AppSpacing.xs),
               if (!compact) ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: isExtended ? 130 : 72),
                 child: Text(
