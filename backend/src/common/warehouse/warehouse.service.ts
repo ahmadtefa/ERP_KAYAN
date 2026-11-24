@@ -1,3 +1,4 @@
+import { branchReadScope } from '../auth/branch-read-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -27,14 +28,15 @@ export type WarehouseScope = string[] | null;
  * cannot drift apart.
  */
 export function warehouseScopeOf(user: {
+  isSuperAdmin?: boolean;
+  roles?: string[] | null;
   branchId?: string | null;
   branchIds?: string[] | null;
 }): WarehouseScope {
-  const assigned = (user.branchIds ?? []).filter(
-    (id): id is string => typeof id === 'string' && id !== '',
-  );
-  if (assigned.length > 0) return assigned;
-  return user.branchId ? [user.branchId] : null;
+  // One rule for every branch limit: assigned branches, company-wide for super
+  // administrators and deliberately company-wide roles, nothing for ordinary
+  // staff without an assignment (see branch-read-scope.ts).
+  return branchReadScope(user);
 }
 
 /**
@@ -802,7 +804,7 @@ export class WarehouseService {
  *     merged total that belongs to no single branch.
  */
 export function scopedBranchId(
-  user: { branchId?: string | null; branchIds?: string[] | null },
+  user: { isSuperAdmin?: boolean; roles?: string[] | null; branchId?: string | null; branchIds?: string[] | null },
   requested?: string | null,
 ): string | undefined {
   const scope = warehouseScopeOf(user);

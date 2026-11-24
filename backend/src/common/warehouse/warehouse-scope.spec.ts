@@ -23,7 +23,11 @@ describe('warehouseScopeOf', () => {
   });
 
   it('leaves a company-wide account unrestricted', () => {
-    expect(warehouseScopeOf({ branchId: null, branchIds: [] })).toBeNull();
+    expect(warehouseScopeOf({ branchId: null, branchIds: [], roles: ['GENERAL_MANAGER'] })).toBeNull();
+  });
+
+  it('fails closed for an ordinary account with no branch', () => {
+    expect(warehouseScopeOf({ branchId: null, branchIds: [], roles: ['SALES_CLERK'] })).toEqual([]);
   });
 });
 
