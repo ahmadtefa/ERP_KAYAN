@@ -67,8 +67,16 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
     super.initState();
     _restoreDraft();
     for (final controller in [
-      _companyCode, _companyNameAr, _companyNameEn, _phone, _email,
-      _address, _hqCode, _hqNameAr, _hqNameEn, _adminUsername,
+      _companyCode,
+      _companyNameAr,
+      _companyNameEn,
+      _phone,
+      _email,
+      _address,
+      _hqCode,
+      _hqNameAr,
+      _hqNameEn,
+      _adminUsername,
     ]) {
       controller.addListener(_saveDraft);
     }
@@ -77,9 +85,18 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   @override
   void dispose() {
     for (final controller in [
-      _companyCode, _companyNameAr, _companyNameEn, _phone, _email,
-      _address, _hqCode, _hqNameAr, _hqNameEn, _adminUsername,
-      _adminPassword, _adminAgain,
+      _companyCode,
+      _companyNameAr,
+      _companyNameEn,
+      _phone,
+      _email,
+      _address,
+      _hqCode,
+      _hqNameAr,
+      _hqNameEn,
+      _adminUsername,
+      _adminPassword,
+      _adminAgain,
     ]) {
       controller.dispose();
     }
@@ -151,7 +168,9 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   }
 
   Future<void> _pickLogo() async {
-    final picked = await pickFile(extensions: ['.png', '.jpg', '.jpeg', '.webp']);
+    final picked = await pickFile(
+      extensions: ['.png', '.jpg', '.jpeg', '.webp'],
+    );
     if (picked == null || !mounted) return;
     try {
       final bytes = await normalizeCompanyLogo(picked.bytes);
@@ -199,24 +218,30 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
     }
     setState(() => _localError = null);
 
-    widget.onSubmit(
-      CompanySetupData(
-        companyCode: code,
-        companyNameAr: nameAr,
-        companyNameEn: nameEn,
-        facilityKind: _facilityKind,
-        phone: _phone.text.trim(),
-        email: _email.text.trim(),
-        address: _address.text.trim(),
-        hqCode: _hqCode.text.trim().isEmpty ? null : _hqCode.text.trim(),
-        hqNameAr: _hqNameAr.text.trim().isEmpty ? null : _hqNameAr.text.trim(),
-        hqNameEn: _hqNameEn.text.trim().isEmpty ? null : _hqNameEn.text.trim(),
-        logoBytes: _logo?.bytes,
-        logoMime: _logo?.mimeType,
-        adminUsername: username,
-        adminPassword: password,
-      ),
-    ).then((_) => _clearDraft());
+    widget
+        .onSubmit(
+          CompanySetupData(
+            companyCode: code,
+            companyNameAr: nameAr,
+            companyNameEn: nameEn,
+            facilityKind: _facilityKind,
+            phone: _phone.text.trim(),
+            email: _email.text.trim(),
+            address: _address.text.trim(),
+            hqCode: _hqCode.text.trim().isEmpty ? null : _hqCode.text.trim(),
+            hqNameAr: _hqNameAr.text.trim().isEmpty
+                ? null
+                : _hqNameAr.text.trim(),
+            hqNameEn: _hqNameEn.text.trim().isEmpty
+                ? null
+                : _hqNameEn.text.trim(),
+            logoBytes: _logo?.bytes,
+            logoMime: _logo?.mimeType,
+            adminUsername: username,
+            adminPassword: password,
+          ),
+        )
+        .then((_) => _clearDraft());
   }
 
   /// Below this width the fields stack in one column; above it they sit side
@@ -345,8 +370,9 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
                     if (_hqCode.text.trim().isEmpty ||
                         _hqCode.text == 'MAIN' ||
                         _hqCode.text == 'BR01') {
-                      _hqCode.text =
-                          _facilityKind == 'HEADQUARTERS' ? 'MAIN' : 'BR01';
+                      _hqCode.text = _facilityKind == 'HEADQUARTERS'
+                          ? 'MAIN'
+                          : 'BR01';
                     }
                   });
                 },
@@ -450,7 +476,11 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
             labelText: 'كلمة السر * / Password * (8+)',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
-              icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+              icon: Icon(
+                _obscure
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
               onPressed: () => setState(() => _obscure = !_obscure),
             ),
           ),
@@ -468,13 +498,20 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         ),
         if (error != null) ...[
           const SizedBox(height: 12),
-          Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          Text(
+            error,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: busy ? null : _submit,
           icon: busy
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Icon(Icons.check),
           label: Text(widget.submitLabel),
         ),

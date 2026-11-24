@@ -164,9 +164,7 @@ class _DataDialogState<T> extends State<DataDialog<T>> {
                         child: Icon(
                           Icons.open_in_full,
                           size: 15,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
+                          color: Theme.of(context).colorScheme.onSurface
                               .withValues(alpha: 0.45),
                         ),
                       ),
@@ -209,7 +207,9 @@ class _DialogHeader extends StatelessWidget {
       decoration: BoxDecoration(
         color: muted,
         border: BorderDirectional(
-          bottom: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+          bottom: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.8),
+          ),
         ),
       ),
       padding: const EdgeInsetsDirectional.only(

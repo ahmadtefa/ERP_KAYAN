@@ -67,7 +67,11 @@ class StatusPill extends StatelessWidget {
 /// words the screens already show.
 AppTone toneForStatus(String status) {
   return switch (status.trim().toLowerCase()) {
-    'posted' || 'active' || 'accepted' || 'approved' || 'paid' => AppTone.success,
+    'posted' ||
+    'active' ||
+    'accepted' ||
+    'approved' ||
+    'paid' => AppTone.success,
     'draft' || 'pending' || 'partial' || 'partially_paid' => AppTone.warning,
     'cancelled' ||
     'rejected' ||

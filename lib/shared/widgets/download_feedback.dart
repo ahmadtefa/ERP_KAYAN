@@ -29,11 +29,7 @@ Future<void> runDownload(
     _say(context, context.l10n.downloadStarted, isError: false);
   } catch (error) {
     if (!context.mounted) return;
-    _say(
-      context,
-      _classify(error),
-      isError: true,
-    );
+    _say(context, _classify(error), isError: true);
   } finally {
     onDone?.call();
   }
@@ -59,11 +55,7 @@ Future<void> runPrint(
     _say(context, context.l10n.printOpened, isError: false);
   } catch (error) {
     if (!context.mounted) return;
-    _say(
-      context,
-      _classify(error),
-      isError: true,
-    );
+    _say(context, _classify(error), isError: true);
   } finally {
     onDone?.call();
   }
@@ -95,11 +87,7 @@ String _message(Object error) {
   return error.toString();
 }
 
-void _say(
-  BuildContext context,
-  Object message, {
-  required bool isError,
-}) {
+void _say(BuildContext context, Object message, {required bool isError}) {
   // A failed download is an error: it is not a note to glance at on the way
   // to something else, and its reason (no permission, server unreachable)
   // has to be read. Successes stay as a light note at the bottom.
@@ -115,7 +103,9 @@ void _say(
         children: [
           Icon(
             isError ? Icons.error_outline : Icons.download_done_outlined,
-            color: isError ? scheme.onErrorContainer : scheme.onPrimaryContainer,
+            color: isError
+                ? scheme.onErrorContainer
+                : scheme.onPrimaryContainer,
             size: 20,
           ),
           const SizedBox(width: 8),

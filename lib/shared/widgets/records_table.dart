@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
+import 'persistent_table_scroll.dart';
 import 'status_pill.dart';
 
 /// One column of a [RecordsTable].
@@ -25,6 +26,7 @@ class ColumnSpec {
   final bool numeric;
   final int flex;
   final bool emphasise;
+
   /// Overrides the ambient direction for values such as international phone numbers.
   final TextDirection? textDirection;
 
@@ -70,39 +72,6 @@ class _CellWithLeading extends StatelessWidget {
       ],
     );
   }
-}
-
-
-class _PersistentHorizontalScroll extends StatefulWidget {
-  const _PersistentHorizontalScroll({required this.child});
-  final Widget child;
-
-  @override
-  State<_PersistentHorizontalScroll> createState() =>
-      _PersistentHorizontalScrollState();
-}
-
-class _PersistentHorizontalScrollState extends State<_PersistentHorizontalScroll> {
-  final ScrollController _controller = ScrollController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scrollbar(
-    controller: _controller,
-    thumbVisibility: true,
-    trackVisibility: true,
-    notificationPredicate: (notification) => notification.depth <= 1,
-    child: SingleChildScrollView(
-      controller: _controller,
-      scrollDirection: Axis.horizontal,
-      child: widget.child,
-    ),
-  );
 }
 
 /// A record list that stays readable on a phone and on a desktop.
@@ -160,68 +129,63 @@ class RecordsTable extends StatelessWidget {
     final hover = theme.brightness == Brightness.light
         ? AppColors.surfaceMuted
         : AppColors.darkSurfaceAlt;
-    return Scrollbar(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.vertical,
-        child: _PersistentHorizontalScroll(
-          child: DataTable(
-            showCheckboxColumn: false,
-            headingTextStyle: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
-            ),
-            columns: [
-              for (final column in columns)
-                DataColumn(
-                  // A heading never wraps into a tower of syllables: the
-                  // column takes the width its heading needs and the
-                  // table scrolls sideways for the rest.
-                  label: Text(column.label, softWrap: false),
-                  numeric: column.numeric,
-                ),
-              if (actions != null)
-                DataColumn(label: Text(context.l10n.actions, softWrap: false)),
-            ],
-            rows: [
-              for (final row in rows)
-                DataRow(
-                  color: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.hovered) ||
-                        states.contains(WidgetState.focused)) {
-                      return hover;
-                    }
-                    return null;
-                  }),
-                  onSelectChanged: onTap == null ? null : (_) => onTap!(row),
-                  cells: [
-                    for (final column in columns)
-                      DataCell(
-                        // A column without a leading widget gets its cell
-                        // back untouched: wrapping every cell in a widget of
-                        // our own changed how DataTable measured them, and the
-                        // invoice screenshot drifted 1.7% on columns that have
-                        // no picture at all.
-                        column.leading == null
-                            ? _plainCell(theme, column, row)
-                            : _CellWithLeading(
-                                column: column,
-                                row: row,
-                                child: _plainCell(theme, column, row),
-                              ),
-                      ),
-                    if (actions != null)
-                      DataCell(
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: actions!(row),
-                        ),
-                      ),
-                  ],
-                ),
-            ],
-          ),
+    return PersistentTableScroll(
+      child: DataTable(
+        showCheckboxColumn: false,
+        headingTextStyle: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
         ),
+        columns: [
+          for (final column in columns)
+            DataColumn(
+              // A heading never wraps into a tower of syllables: the
+              // column takes the width its heading needs and the
+              // table scrolls sideways for the rest.
+              label: Text(column.label, softWrap: false),
+              numeric: column.numeric,
+            ),
+          if (actions != null)
+            DataColumn(label: Text(context.l10n.actions, softWrap: false)),
+        ],
+        rows: [
+          for (final row in rows)
+            DataRow(
+              color: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.hovered) ||
+                    states.contains(WidgetState.focused)) {
+                  return hover;
+                }
+                return null;
+              }),
+              onSelectChanged: onTap == null ? null : (_) => onTap!(row),
+              cells: [
+                for (final column in columns)
+                  DataCell(
+                    // A column without a leading widget gets its cell
+                    // back untouched: wrapping every cell in a widget of
+                    // our own changed how DataTable measured them, and the
+                    // invoice screenshot drifted 1.7% on columns that have
+                    // no picture at all.
+                    column.leading == null
+                        ? _plainCell(theme, column, row)
+                        : _CellWithLeading(
+                            column: column,
+                            row: row,
+                            child: _plainCell(theme, column, row),
+                          ),
+                  ),
+                if (actions != null)
+                  DataCell(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: actions!(row),
+                    ),
+                  ),
+              ],
+            ),
+        ],
       ),
     );
   }
@@ -250,23 +214,23 @@ class RecordsTable extends StatelessWidget {
           dense: true,
         ),
       );
-  }
-  if (column.numeric) {
-    return Text(
-      column.value(row) ?? '—',
-      textDirection: column.textDirection,
-      softWrap: false,
-      style: _cellStyle(theme, column),
+    }
+    if (column.numeric) {
+      return Text(
+        column.value(row) ?? '—',
+        textDirection: column.textDirection,
+        softWrap: false,
+        style: _cellStyle(theme, column),
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 110, maxWidth: 300),
+      child: Text(
+        column.value(row) ?? '—',
+        textDirection: column.textDirection,
+        style: _cellStyle(theme, column),
+      ),
     );
-  }
-  return ConstrainedBox(
-    constraints: const BoxConstraints(minWidth: 110, maxWidth: 300),
-    child: Text(
-      column.value(row) ?? '—',
-      textDirection: column.textDirection,
-      style: _cellStyle(theme, column),
-    ),
-  );
   }
 
   Widget _cardList(BuildContext context, {required bool boundedHeight}) {
@@ -281,9 +245,7 @@ class RecordsTable extends StatelessWidget {
       itemBuilder: (context, index) {
         final row = rows[index];
         // The first column is the identifier, the rest are detail lines.
-        final headline = columns.isEmpty
-            ? ''
-            : columns.first.value(row) ?? '—';
+        final headline = columns.isEmpty ? '' : columns.first.value(row) ?? '—';
         return Material(
           color: scheme.surface,
           borderRadius: AppRadii.control,

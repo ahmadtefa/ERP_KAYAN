@@ -95,10 +95,12 @@ class _SearchableOptionsDialogState extends State<_SearchableOptionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = widget.options.where((option) {
-      final query = _query.text.trim().toLowerCase();
-      return query.isEmpty || option.label.toLowerCase().contains(query);
-    }).toList(growable: false);
+    final filtered = widget.options
+        .where((option) {
+          final query = _query.text.trim().toLowerCase();
+          return query.isEmpty || option.label.toLowerCase().contains(query);
+        })
+        .toList(growable: false);
 
     return AlertDialog(
       title: Text(widget.title),
@@ -116,7 +118,8 @@ class _SearchableOptionsDialogState extends State<_SearchableOptionsDialog> {
                 suffixIcon: _query.text.isEmpty
                     ? null
                     : IconButton(
-                        tooltip: MaterialLocalizations.of(context).deleteButtonTooltip,
+                        tooltip: MaterialLocalizations.of(context)
+                            .deleteButtonTooltip,
                         onPressed: () => setState(_query.clear),
                         icon: const Icon(Icons.clear_rounded),
                       ),
@@ -127,7 +130,9 @@ class _SearchableOptionsDialogState extends State<_SearchableOptionsDialog> {
             Expanded(
               child: filtered.isEmpty
                   ? Center(
-                      child: Text(MaterialLocalizations.of(context).searchFieldLabel),
+                      child: Text(
+                        MaterialLocalizations.of(context).searchFieldLabel,
+                      ),
                     )
                   : ListView.builder(
                       itemCount: filtered.length,
