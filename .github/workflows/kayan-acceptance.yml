@@ -279,12 +279,12 @@ jobs:
         env:
           NODE_OPTIONS: --experimental-vm-modules
         run: |
-          npm test -- --runInBand src/modules/sales/customer-credit.integration.spec.ts src/modules/sales/sales-invoice-credit-post.integration.spec.ts --json --outputFile="$RUNNER_TEMP/credit-post.json"
+          npm test -- --runInBand src/modules/sales/customer-credit.integration.spec.ts src/modules/sales/sales-invoice-credit-post.integration.spec.ts src/modules/sales/sales-credit-http.integration.spec.ts --json --outputFile="$RUNNER_TEMP/credit-post.json"
           node - "$RUNNER_TEMP/credit-post.json" <<'NODE'
           const fs = require('node:fs');
           const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (r.numPassedTestSuites !== 2 || r.numPassedTests !== 11 || r.numPendingTests !== 0 || r.numFailedTests !== 0) {
-            throw new Error('Credit service and actual posting require all 11 real PostgreSQL cases, no skips.');
+          if (r.numPassedTestSuites !== 3 || r.numPassedTests !== 16 || r.numPendingTests !== 0 || r.numFailedTests !== 0) {
+            throw new Error('Credit service and actual posting require all 16 real PostgreSQL and HTTP cases, no skips.');
           }
           NODE
       - name: Run backend suite (except isolated licence signing and store tests)
