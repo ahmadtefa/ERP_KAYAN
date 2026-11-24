@@ -205,9 +205,11 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pump();
     rowRefusal.completeError(const ApiFailure('Validation failed', statusCode: 422,
-      fieldErrors: {'tables.0.lines.0.unitPrice': 'Price rejected by server'}));
+      fieldErrors: {'tables.0.lines.0.unitPrice': 'Price rejected by server',
+        'validUntil': 'Expiry date rejected by server'}));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, 'Price rejected by server');
+    expect(find.text('Expiry date rejected by server'), findsOneWidget);
     await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100.0');
     await tester.pump();
     expect(find.text('Price rejected by server'), findsNothing);
