@@ -5,8 +5,8 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 $root=Join-Path $env:ProgramFiles 'KAYAN ERP'
 $data=Join-Path $env:ProgramData 'KAYAN-ERP'
 if ((Test-Path $root) -or (Test-Path $data) -or (Get-Service KayanERPPostgreSQL -ErrorAction SilentlyContinue)) { throw 'Existing installation refused' }
-$expected='a4963194f57e09bbabfb43e1f2286f4b0cbc1721'
-$hash='0b78c58049c3bb42f999472fd5daa2bad79d77634c2986ce51a9c77899b57c6b'
+$expected='2a018207f55f71f127ab3168976db600e11c0afa'
+$hash='feb03b03f6f5c11ca5ae6fd723f7328615627311eaca343a7c572593eca5dc2d'
 $setup=(Resolve-Path (Join-Path $CandidateDir 'KAYAN-ERP-Setup.exe')).Path
 $identity=Get-Content (Join-Path $CandidateDir 'identity.json') -Raw | ConvertFrom-Json
 if ($identity.sourceCommit -ne $expected -or $identity.sha256 -ne $hash -or (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Candidate identity mismatch' }
@@ -54,13 +54,24 @@ $env:KAYAN_PROBE_DIR=$probeDir
 $probe=Start-Process (Join-Path $PWD 'build/windows/x64/runner/Release/erp_kayan.exe') -PassThru
 $keys=New-Object -ComObject WScript.Shell
 function Wait-Stage([string]$want){for($i=0;$i -lt 90;$i++){if(Test-Path "$probeDir/stage.txt"){$s=Get-Content "$probeDir/stage.txt" -Raw;if($s -like 'failed:*'){throw $s};if($s -eq $want){return}};Start-Sleep 1};throw "Probe stage timeout: $want"}
+function Test-ProbeProcess([int]$candidateId) {
+ # Save As belongs to Flutter; OpenFileDialog is owned by its PowerShell child.
+ # Accept only this probe process or a proven descendant, never a title alone.
+ for($depth=0;$depth -lt 4;$depth++){
+  if($candidateId -eq $probe.Id){return $true}
+  $processInfo=Get-CimInstance Win32_Process -Filter "ProcessId=$candidateId" -ErrorAction SilentlyContinue
+  if(-not $processInfo){return $false}
+  $candidateId=[int]$processInfo.ParentProcessId
+ }
+ return $false
+}
 function Wait-Dialog([string]$title) {
  for($i=0;$i -lt 30;$i++){
   $classCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty,'#32770')
   $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,$classCondition)
   foreach($w in $windows){
    try {
-    if($w.Current.ProcessId -eq $probe.Id -and $w.Current.Name -eq $title -and -not $w.Current.IsOffscreen -and $w.Current.IsEnabled){
+    if((Test-ProbeProcess $w.Current.ProcessId) -and $w.Current.Name -eq $title -and -not $w.Current.IsOffscreen -and $w.Current.IsEnabled){
      $readyEdit=Find-FileNameEdit $w
      if($readyEdit){return $w}
     }

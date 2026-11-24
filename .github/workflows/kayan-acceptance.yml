@@ -592,8 +592,8 @@ jobs:
         run: flutter build windows --release --target scripts/ci_native_dialog_probe.dart
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: kayan-unreleased-setup-a4963194f57e09bbabfb43e1f2286f4b0cbc1721
-          run-id: 45457351819
+          name: kayan-unreleased-setup-2a018207f55f71f127ab3168976db600e11c0afa
+          run-id: 45466255794
           github-token: ${{ github.token }}
           path: candidate
       - name: Verify pinned identity, fresh install, first run, restart and actual native helpers
@@ -622,8 +622,8 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: kayan-unreleased-setup-a4963194f57e09bbabfb43e1f2286f4b0cbc1721
-          run-id: 45457351819
+          name: kayan-unreleased-setup-2a018207f55f71f127ab3168976db600e11c0afa
+          run-id: 45466255794
           github-token: ${{ github.token }}
           path: candidate
       - name: Record exact signature and scan only without automatic sample submission

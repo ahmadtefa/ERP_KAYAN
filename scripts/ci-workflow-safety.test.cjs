@@ -92,11 +92,13 @@ assert.equal(proof.if, "github.event_name == 'workflow_dispatch' && inputs.prove
 assert.deepEqual(proof.permissions, { contents: 'read', actions: 'read' });
 assert.equal(proof.environment, undefined);
 const proofSource = fs.readFileSync(path.join(workflows, '../../scripts/ci-fresh-windows-proof.ps1'), 'utf8');
-assert.match(proofSource, /0b78c58049c3bb42f999472fd5daa2bad79d77634c2986ce51a9c77899b57c6b/);
-assert.match(proofSource, /a4963194f57e09bbabfb43e1f2286f4b0cbc1721/);
+assert.match(proofSource, /feb03b03f6f5c11ca5ae6fd723f7328615627311eaca343a7c572593eca5dc2d/);
+assert.match(proofSource, /2a018207f55f71f127ab3168976db600e11c0afa/);
 const pinnedDownload=proof.steps.find(step=>String(step.uses??'').startsWith('actions/download-artifact@'));
-assert.equal(pinnedDownload.with.name,'kayan-unreleased-setup-a4963194f57e09bbabfb43e1f2286f4b0cbc1721');
-assert.equal(pinnedDownload.with['run-id'],45457351819);
+assert.equal(pinnedDownload.with.name,'kayan-unreleased-setup-2a018207f55f71f127ab3168976db600e11c0afa');
+assert.equal(pinnedDownload.with['run-id'],45466255794);
+assert.match(proofSource, /Test-ProbeProcess \$w.Current.ProcessId/, 'Native dialog must belong to the probe or its verified child');
+assert.match(proofSource, /Get-CimInstance Win32_Process/);
 assert.doesNotMatch(proofSource, /reset-kayan|license-generator|generateKeyPair|createPrivateKey|RuntimeOnly|smoke-test-installed|Remove-Item|Set-Acl|Set-Content.*public-key/);
 for (const step of proof.steps) assert.equal(step['continue-on-error'], undefined);
 const optionalWindows = application.jobs['windows-evaluation'];
@@ -294,7 +296,7 @@ assert.deepEqual(security.needs, ['acceptance', 'postgres-acceptance', 'backup-r
 assert.equal(security.if, proof.if);
 assert.deepEqual(security.permissions, { contents: 'read', actions: 'read' });
 const securitySource = fs.readFileSync(path.join(workflows, '../../scripts/ci-windows-security-evidence.ps1'), 'utf8');
-assert.match(securitySource, /0b78c58049c3bb42f999472fd5daa2bad79d77634c2986ce51a9c77899b57c6b/);
+assert.match(securitySource, /feb03b03f6f5c11ca5ae6fd723f7328615627311eaca343a7c572593eca5dc2d/);
 assert.match(securitySource, /SubmitSamplesConsent -ne 2/);
 assert.match(securitySource, /Get-AuthenticodeSignature/);
 assert.match(securitySource, /Start-MpScan -ScanType CustomScan -ScanPath/);
