@@ -286,7 +286,12 @@ const vmReady =
   it('reconciles a legacy deficit in the right direction: bucket up, shelf down, books unchanged', async () => {
     const lot = await receiveLot(5, SHELF);
     // the old behaviour: a sale that named no shelf
-    await batches.issue(COMPANY, USER, { branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM, quantity: 2, batchId: lot.batchId as string });
+    // (the service now refuses this, so the legacy row is written directly)
+    await db.query(
+      `INSERT INTO stock_movements (id,"companyId","branchId","warehouseId","itemId","batchId",direction,quantity,"unitCost","totalCost","movementDate","referenceType","createdBy")
+       VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,'OUT',2,2,4,now(),'LEGACY_SALE',$6)`,
+      [COMPANY, BRANCH, WAREHOUSE, ITEM, lot.batchId, USER],
+    );
     let b = await breakdown();
     expect([b?.locations[0].quantity, b?.unlocated.quantity]).toEqual(['5.0000', '-2.0000']);
     const before = await balances();
@@ -304,5 +309,89 @@ const vmReady =
     await expect(
       locations.reconcileUnlocated(COMPANY, USER, { warehouseId: WAREHOUSE, fromLocationId: SHELF, itemId: ITEM, batchId: lot.batchId as string, quantity: 1, reason: 'again' }, null),
     ).rejects.toThrow(/nothing to correct/);
+  });
+
+  describe('direct issue and write-off keep the manual-source rule', () => {
+    const receiveAt = (batchNumber: string, quantity: number, storageLocationId: string | undefined, expiryDate: string) =>
+      batches.receive(COMPANY, USER, {
+        branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM, batchNumber, quantity, unitCost: 2,
+        ...(storageLocationId ? { storageLocationId } : {}), expiryDate,
+      });
+    const base = { branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM };
+    const outs = async () =>
+      Number((await one(db, `SELECT COALESCE(SUM(quantity),0)::text q FROM stock_movements WHERE "itemId"=$1 AND direction='OUT'`, [ITEM])).q);
+    const at = async (loc: string) =>
+      Number((await one(db, `SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "itemId"=$1 AND "storageLocationId"=$2`, [ITEM, loc])).q);
+    const failure = async (p: Promise<unknown>) => {
+      try { await p; } catch (e) { return (e as { response?: { code?: string; message?: string } }).response ?? { message: String(e) }; }
+      return null;
+    };
+
+    beforeEach(async () => {
+      await receiveAt('L1', 3, SHELF, '2027-02-01');
+      await receiveAt('L2', 2, SHELF_B, '2027-03-01');
+    });
+
+    it('refuses an issue with no source while the item has located stock, and writes nothing', async () => {
+      const before = await balances();
+      const err = await failure(batches.issue(COMPANY, USER, { ...base, quantity: 1 }));
+      expect(err?.code).toBe('ISSUE_LOCATION_REQUIRED');
+      expect(err?.message).toContain('A-01');
+      expect(err?.message).toContain('B-01');
+      expect(await outs()).toBe(0);
+      expect(await balances()).toEqual(before);
+    });
+
+    it('issues a split over two shelves atomically and conserves the quantity', async () => {
+      const r = await batches.issue(COMPANY, USER, {
+        ...base, quantity: 4,
+        locationAllocations: [{ storageLocationId: SHELF, quantity: 2 }, { storageLocationId: SHELF_B, quantity: 2 }],
+      });
+      expect(r.quantity).toBe('4.0000');
+      expect(await outs()).toBe(4);
+      expect(await at(SHELF)).toBe(1);
+      expect(await at(SHELF_B)).toBe(0);
+      expect((await balances()).branch.q).toBe('1.0000');
+    });
+
+    it('refuses a split that does not add up, with nothing written', async () => {
+      const err = await failure(batches.issue(COMPANY, USER, {
+        ...base, quantity: 4,
+        locationAllocations: [{ storageLocationId: SHELF, quantity: 2 }, { storageLocationId: SHELF_B, quantity: 1 }],
+      }));
+      expect(err?.code).toBe('ISSUE_ALLOCATION_SUM');
+      expect(await outs()).toBe(0);
+    });
+
+    it('rolls back the first slice when a later slice is short', async () => {
+      const err = await failure(batches.issue(COMPANY, USER, {
+        ...base, quantity: 5,
+        locationAllocations: [{ storageLocationId: SHELF, quantity: 2 }, { storageLocationId: SHELF_B, quantity: 3 }],
+      }));
+      expect(err).not.toBeNull();
+      expect(await outs()).toBe(0);
+      expect(await at(SHELF)).toBe(3);
+    });
+
+    it('writes off only from a named shelf, up to what the shelf holds of the lot', async () => {
+      const lot = (await one(db, `SELECT id FROM item_batches WHERE "batchNumber"='L1'`)).id;
+      const w = { ...base, batchId: lot, reason: 'damaged' };
+      expect((await failure(batches.writeOff(COMPANY, USER, { ...w, quantity: 1 })))?.code).toBe('WRITEOFF_LOCATION_REQUIRED');
+      expect((await failure(batches.writeOff(COMPANY, USER, { ...w, quantity: 1, storageLocationId: SHELF_B })))?.code).toBe('WRITEOFF_LOCATION_SHORT');
+      expect(await outs()).toBe(0);
+      await batches.writeOff(COMPANY, USER, { ...w, quantity: 1, storageLocationId: SHELF });
+      expect(await at(SHELF)).toBe(2);
+      expect(await outs()).toBe(1);
+    });
+
+    it('keeps the legacy behaviour for an item with no located stock', async () => {
+      await batches.receive(COMPANY, USER, {
+        branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM_NO_EXPIRY, batchNumber: 'S1', quantity: 5, unitCost: 1,
+      });
+      const err = await failure(batches.issue(COMPANY, USER, { ...base, itemId: ITEM_NO_EXPIRY, quantity: 1 }));
+      expect(err).toBeNull();
+      expect(await outs()).toBe(0);
+      expect(Number((await one(db, `SELECT COALESCE(SUM(quantity),0)::text q FROM stock_movements WHERE "itemId"=$1 AND direction='OUT'`, [ITEM_NO_EXPIRY])).q)).toBe(1);
+    });
   });
 });

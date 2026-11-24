@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -43,6 +44,11 @@ class ReceiveLotDto implements ReceiveLotInput {
   @IsOptional() @IsString() documentDate?: string | null;
 }
 
+class IssueLocationAllocationDto {
+  @IsString() storageLocationId!: string;
+  @IsNumber() quantity!: number;
+}
+
 class IssueDto implements IssueInput {
   @IsString() branchId!: string;
   @IsString() warehouseId!: string;
@@ -55,6 +61,8 @@ class IssueDto implements IssueInput {
   @IsOptional() @IsBoolean() allowExpired?: boolean;
   @IsOptional() @IsString() reason?: string | null;
   @IsOptional() @IsString() storageLocationId?: string | null;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => IssueLocationAllocationDto)
+  locationAllocations?: IssueLocationAllocationDto[] | null;
   @IsOptional() @IsString() referenceType?: string;
   @IsOptional() @IsString() referenceId?: string | null;
   @IsOptional() @IsString() referenceNumber?: string | null;
@@ -68,6 +76,7 @@ class WriteOffDto implements WriteOffInput {
   @IsString() batchId!: string;
   @IsNumber() quantity!: number;
   @IsString() reason!: string;
+  @IsOptional() @IsString() storageLocationId?: string | null;
   @IsOptional() @IsString() documentDate?: string | null;
 }
 

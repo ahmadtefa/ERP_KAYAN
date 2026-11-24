@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
@@ -85,6 +89,7 @@ class _BatchApi extends ApiClient {
 
   bool locationsAvailable = true;
   bool requiresBatch = false;
+  bool secondLocation = false;
   final List<Json>? lots;
   final Object? failPost;
 
@@ -133,6 +138,7 @@ class _BatchApi extends ApiClient {
       shelfQueries.add(query);
       if (!locationsAvailable) return [];
       return [
+        if (secondLocation) {'id': 'loc-2', 'code': 'B-02', 'nameEn': 'Shelf B', 'warehouseId': 'wh-1', 'isActive': false},
         {
           'id': 'loc-1',
           'code': 'A-01',
@@ -159,6 +165,7 @@ class _BatchApi extends ApiClient {
 }
 
 void main() {
+  final visualKey = GlobalKey();
   Future<void> pump(
     WidgetTester tester,
     _BatchApi api, {
@@ -175,12 +182,13 @@ void main() {
           apiClientProvider.overrideWithValue(api),
           currentUserProvider.overrideWithValue(user),
         ],
-        child: MaterialApp(
+        child: RepaintBoundary(key: visualKey, child: MaterialApp(
+          theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: const Scaffold(body: BatchesScreen()),
-        ),
+        )),
       ),
     );
     await tester.pumpAndSettle();
@@ -483,6 +491,84 @@ void main() {
         expect(api.posted.single.$2['storageLocationId'], 'loc-1');
       },
     );
+
+    testWidgets('writeoff sends its one explicitly chosen physical source', (tester) async {
+      final api = _BatchApi();
+      await pump(tester, api);
+      await tapText(tester, 'Write off');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Reason'), 'damaged');
+      await tapText(tester, 'Write off');
+      expect(api.posted.single.$2['storageLocationId'], 'loc-1');
+    });
+
+    testWidgets('split source visual proof with actual fonts', (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
+        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();
+      });
+      final ar = Platform.environment['KAYAN_ARABIC_COMPACT'] == '1';
+      final api = _BatchApi()..secondLocation = true;
+      await pump(tester, api, locale: Locale(ar ? 'ar' : 'en'));
+      if (ar) { tester.view.physicalSize = const Size(700, 1100); await tester.pumpAndSettle(); }
+      await tapText(tester, ar ? 'صرف' : 'Issue');
+      await tester.enterText(find.widgetWithText(TextFormField, ar ? 'الكمية' : 'Quantity'), '5');
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-1')), '2');
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-2')), '3');
+      await tester.pumpAndSettle();
+      final boundary = visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/batch-split-${ar ? 'ar' : 'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());
+        image.dispose();
+      });
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('atomic issue split must sum exactly and sends one multi-source call', (tester) async {
+      final api = _BatchApi()..secondLocation = true;
+      await pump(tester, api);
+      await tapText(tester, 'Issue');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '5');
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-1')), '2');
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-2')), '2');
+      await tapText(tester, 'Issue');
+      expect(api.posted, isEmpty);
+      expect(find.textContaining('Source quantities must add up'), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-2')), '3');
+      await tapText(tester, 'Issue');
+      expect(api.posted, hasLength(1));
+      final body = api.posted.single.$2;
+      expect(body.containsKey('storageLocationId'), isFalse);
+      expect(body['locationAllocations'], [
+        {'storageLocationId': 'loc-2', 'quantity': 3},
+        {'storageLocationId': 'loc-1', 'quantity': 2},
+      ]);
+    });
+
+    testWidgets('split refusal retains all source quantities and reason for correction', (tester) async {
+      final api = _BatchApi(failPost: const ApiFailure('Source B-02 has only 1. Refresh balances and reduce B-02 or choose another source.', statusCode: 400))..secondLocation = true;
+      await pump(tester, api);
+      await tapText(tester, 'Issue');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '5');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Reason (optional)'), 'manual pick');
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-1')), '2');
+      await tester.enterText(find.byKey(const ValueKey('issue-source-loc-2')), '3');
+      await tapText(tester, 'Issue');
+      expect(find.textContaining('Refresh balances and reduce'), findsOneWidget);
+      await tapText(tester, 'OK');
+      for (final entry in {'loc-1': '2', 'loc-2': '3'}.entries) {
+        expect(tester.widget<TextFormField>(find.byKey(ValueKey('issue-source-${entry.key}'))).controller!.text, entry.value);
+      }
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Reason (optional)')).controller!.text, 'manual pick');
+    });
 
     testWidgets(
       'receive refreshes locations created after an earlier empty dialog',

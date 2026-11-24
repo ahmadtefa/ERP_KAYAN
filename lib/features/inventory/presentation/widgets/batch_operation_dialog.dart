@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -72,6 +73,7 @@ Map<String, dynamic> batchOperationBody({
   String? productionDate,
   String? expiryDate,
   String? storageLocationId,
+  List<Json>? locationAllocations,
   String? documentDate,
 }) {
   final body = <String, dynamic>{
@@ -117,10 +119,14 @@ Map<String, dynamic> batchOperationBody({
       body['storageLocationId'] = storageLocationId;
     }
   }
-  if (operation == BatchOperation.issue &&
+  if ((operation == BatchOperation.issue || operation == BatchOperation.writeOff) &&
       storageLocationId != null &&
       storageLocationId.isNotEmpty) {
     body['storageLocationId'] = storageLocationId;
+  }
+  if (operation == BatchOperation.issue && locationAllocations != null && locationAllocations.isNotEmpty) {
+    body.remove('storageLocationId');
+    body['locationAllocations'] = locationAllocations;
   }
   if (documentDate != null && documentDate.trim().isNotEmpty) {
     body['documentDate'] = documentDate.trim();
@@ -189,6 +195,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   String? _toWarehouseId;
   String? _locationId;
   bool _busy = false;
+  bool _splitSources = false;
+  final _sourceAmounts = <String, TextEditingController>{};
+  String? _sourceError;
   final _fieldErrors = <String, String>{};
   void _clearField(String key) {
     if (_fieldErrors.remove(key) != null) setState(() {});
@@ -222,6 +231,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
 
   @override
   void dispose() {
+    for (final controller in _sourceAmounts.values) { controller.dispose(); }
     _batchNumber.dispose();
     _quantity.dispose();
     _unitCost.dispose();
@@ -303,6 +313,25 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
       );
       return;
     }
+    List<Json>? allocations;
+    if (operation == BatchOperation.issue && _splitSources) {
+      allocations = [];
+      var sum = Decimal.zero;
+      for (final entry in _sourceAmounts.entries) {
+        final raw = entry.value.text.trim();
+        if (raw.isEmpty) continue;
+        if (_number(raw) != null) {
+          setState(() => _sourceError = _label('أدخل كمية أكبر من صفر حتى ٤ أرقام عشرية لكل موقع أو اتركه فارغًا.', 'Enter a positive quantity with up to 4 decimals for each source, or leave it blank.'));
+          return;
+        }
+        sum += Decimal.parse(raw);
+        allocations.add({'storageLocationId': entry.key, 'quantity': num.parse(raw)});
+      }
+      if (allocations.isEmpty || sum != Decimal.parse(_quantity.text.trim())) {
+        setState(() => _sourceError = _label('مجموع كميات المواقع يجب أن يساوي كمية الصرف. عدّل التوزيع ثم أعد المحاولة؛ بياناتك محفوظة.', 'Source quantities must add up to the issued quantity. Adjust the split and retry; your entries are kept.'));
+        return;
+      }
+    }
     final Map<String, dynamic> body;
     try {
       body = batchOperationBody(
@@ -322,7 +351,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
         batchNumber: _batchNumber.text,
         productionDate: _productionDate.text,
         expiryDate: _expiryDate.text,
-        storageLocationId: _locationId,
+        storageLocationId: _splitSources ? null : _locationId,
+        locationAllocations: allocations,
       );
     } on FormatException {
       _fail(_label('رقم غير صالح', 'Invalid number'));
@@ -516,6 +546,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                       onChanged: (value) => setState(() {
                         _warehouseId = value;
                         _locationId = null;
+                        for (final c in _sourceAmounts.values) { c.clear(); }
                       }),
                     ),
                   ),
@@ -611,8 +642,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                   ),
                 ],
                 if ((operation == BatchOperation.receive ||
-                        (operation == BatchOperation.issue &&
-                            widget.batch != null)) &&
+                        (operation == BatchOperation.issue || operation == BatchOperation.writeOff)) &&
                     _warehouseId != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -684,13 +714,13 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
       builder: (context, ref, _) {
         final shelves = ref.watch(batchShelvesOfProvider(warehouseId));
         final rows = (shelves.value ?? prefetched)
-            .where((row) => row['isActive'] != false)
+            .where((row) => widget.operation != BatchOperation.receive || row['isActive'] != false)
             .toList(growable: false);
         final sourceRequired =
-            widget.operation == BatchOperation.issue &&
+            (widget.operation == BatchOperation.issue || widget.operation == BatchOperation.writeOff) &&
             (listOf(widget.batch?['locations']).isNotEmpty ||
                 asString(widget.batch?['storageLocationId']) != null);
-        return DropdownButtonFormField<String>(
+        final dropdown = DropdownButtonFormField<String>(
           initialValue: rows.any((row) => text(row, 'id') == _locationId)
               ? _locationId
               : null,
@@ -729,8 +759,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           ),
           validator: (value) => sourceRequired && (value ?? '').isEmpty
               ? _label(
-                  'اختر الموقع الذي ستصرف منه البضاعة. لو الكمية موزعة، اصرف كمية كل موقع على حدة.',
-                  'Choose the physical source location. For split stock, issue each location quantity separately.',
+                  'اختر الموقع الذي ستصرف منه البضاعة. للصرف الموزع فعّل توزيع الكمية على مواقع.',
+                  'Choose the physical source location. For split issue, turn on Split quantity across locations.',
                 )
               : null,
           items: [
@@ -748,6 +778,33 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
             _locationId = value;
           }),
         );
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (widget.operation == BatchOperation.issue)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(_label('توزيع الكمية على مواقع', 'Split quantity across locations')),
+              value: _splitSources,
+              onChanged: _busy ? null : (v) => setState(() { _splitSources = v; _sourceError = null; }),
+            ),
+          if (!_splitSources) dropdown,
+          if (_splitSources) ...[
+            Text(_label('أدخل كمية الصرف من كل موقع بوحدة الصنف الأساسية. يتم صرف التوزيع كله معًا أو لا شيء.', 'Enter the issue quantity from each source in base units. All sources commit together or none do.')),
+            for (final row in rows)
+              Padding(padding: const EdgeInsets.only(top: 8), child: TextFormField(
+                key: ValueKey('issue-source-${text(row, 'id')}'),
+                controller: _sourceAmounts.putIfAbsent(text(row, 'id'), () => TextEditingController()),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(labelText: '${text(row, 'code')} • ${_locationName(row)}',
+                  helperText: _label('كمية الصرف من هذا الموقع', 'Quantity to issue from this source')),
+                onChanged: (_) => setState(() => _sourceError = null),
+              )),
+            if (shelves.hasError || rows.isEmpty)
+              TextButton.icon(onPressed: () => ref.invalidate(batchShelvesOfProvider(warehouseId)), icon: const Icon(Icons.refresh), label: Text(_label('حدّث مواقع التخزين', 'Refresh storage locations'))),
+            if (_sourceError != null) Text(_sourceError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+          if (widget.operation == BatchOperation.writeOff)
+            Text(_label('الشطب من موقع واحد في كل عملية. الشطب الموزع دفعة واحدة غير متاح بعد.', 'Write-off uses one source per operation. Atomic split write-off is not available yet.')),
+        ]);
       },
     );
   }

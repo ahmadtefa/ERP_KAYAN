@@ -105,6 +105,9 @@ export interface IssueInput {
   expiredApproval?: { userId: string; reason: string };
   reason?: string | null;
   storageLocationId?: string | null;
+  /// An atomic split over several shelves: the quantities must add up to
+  /// `quantity` exactly. Mutually exclusive with `storageLocationId`.
+  locationAllocations?: Array<{ storageLocationId: string; quantity: QuantityInput }> | null;
   referenceType?: string;
   referenceId?: string | null;
   referenceNumber?: string | null;
@@ -128,6 +131,8 @@ export interface WriteOffInput {
   quantity: QuantityInput;
   /** Required: a write-off without a reason is how stock disappears. */
   reason: string;
+  /// The shelf the goods leave. Required when the lot has located stock.
+  storageLocationId?: string | null;
   documentDate?: string | null;
 }
 
@@ -724,6 +729,35 @@ export class BatchesService {
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     const item = await this.requireItem(companyId, input.itemId);
 
+    if (input.locationAllocations?.length) {
+      const slices = this.normalizeIssueSlices(input, quantity, item.code);
+      return this.prisma.$transaction(async (tx) => {
+        const results: Array<Awaited<ReturnType<BatchesService['issueTx']>>> = [];
+        for (const slice of slices) {
+          results.push(
+            await this.issueTx(
+              tx,
+              companyId,
+              userId,
+              { warehouse, branchId: warehouse.branchId, item },
+              { ...input, locationAllocations: null, storageLocationId: slice.storageLocationId },
+              slice.quantity,
+            ),
+          );
+        }
+        const value = results.reduce((a, r) => a.plus(r.value), new Prisma.Decimal(0));
+        return {
+          lots: results.flatMap((r) => r.lots),
+          quantity: quantity.toFixed(MONEY_SCALE),
+          unitCost: quantity.isZero() ? '0.0000' : value.div(quantity).toFixed(4),
+          value: value.toFixed(MONEY_SCALE),
+          expiredQuantity: results
+            .reduce((a, r) => a.plus(r.expiredQuantity), new Prisma.Decimal(0))
+            .toFixed(MONEY_SCALE),
+        };
+      });
+    }
+
     return this.prisma.$transaction((tx) =>
       this.issueTx(
         tx,
@@ -759,6 +793,9 @@ export class BatchesService {
     const { warehouse, item } = resolved;
     const policy = batchPolicyOf(item);
     const today = new Date();
+    if (warehouse && !input.storageLocationId) {
+      await this.assertNoLocatedStock(tx, companyId, warehouse.id, item);
+    }
     if (!warehouse) {
       // The branch has no shelf at all: there is nothing for a lot to belong
       // to, so this is exactly the behaviour before warehouses existed.
@@ -1190,6 +1227,34 @@ export class BatchesService {
         'الدفعة تم إعدامها بالفعل. / This lot has already been written off.',
       );
     }
+    // Located stock may only be written off from a named shelf, and only up
+    // to what that shelf holds of this lot.
+    const lotShelves = await this.placedRows(this.prisma as unknown as Prisma.TransactionClient, companyId, warehouse.id, input.itemId, batch.id);
+    let writeOffShelf: string | null = null;
+    if (input.storageLocationId) {
+      const here = lotShelves.find((r) => r.id === input.storageLocationId);
+      const have = here?.quantity ?? new Prisma.Decimal(0);
+      if (have.lessThan(quantity)) {
+        throw new BadRequestException({
+          code: 'WRITEOFF_LOCATION_SHORT',
+          message:
+            `الموقع المختار يحوي ${have.toFixed(MONEY_SCALE)} فقط من هذه الدفعة، والمطلوب ${quantity.toFixed(MONEY_SCALE)}. ` +
+            'قلل الكمية أو اختر موقعًا آخر. / ' +
+            `The chosen location holds ${have.toFixed(MONEY_SCALE)} of this lot, not ${quantity.toFixed(MONEY_SCALE)}. Reduce the quantity or choose another location.`,
+          errors: { available: have.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
+        });
+      }
+      writeOffShelf = input.storageLocationId;
+    } else if (lotShelves.length) {
+      const list = lotShelves.map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`);
+      throw new BadRequestException({
+        code: 'WRITEOFF_LOCATION_REQUIRED',
+        message:
+          `هذه الدفعة موزعة على مواقع (${list.join('، ')}). اختر الموقع الذي يُعدم منه ثم أعد المحاولة؛ بياناتك محفوظة. / ` +
+          `This lot is stored on locations (${list.join(', ')}). Choose the location to write off from, then try again; what you entered is kept.`,
+        errors: { locations: lotShelves.map((r) => ({ locationId: r.id, code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })) },
+      });
+    }
 
     const date = input.documentDate ? dayOnly(input.documentDate) : dayOnly(new Date());
 
@@ -1220,6 +1285,7 @@ export class BatchesService {
           warehouseId: warehouse.id,
           itemId: batch.itemId,
           batchId: batch.id,
+          storageLocationId: writeOffShelf,
           movementDate: date,
           direction: StockDirection.OUT,
           quantity,
@@ -1232,6 +1298,7 @@ export class BatchesService {
           createdBy: userId,
         },
       });
+      if (writeOffShelf) await refreshLotPrimaryLocation(tx, companyId, batch.id, null);
 
       await this.ledger.post(tx, {
         companyId,
@@ -1849,6 +1916,99 @@ export class BatchesService {
       );
     }
     return item;
+  }
+
+  /// Shelves holding stock of an item (or of one lot), from the movement
+  /// ledger. Only positive balances are returned.
+  private async placedRows(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+    batchId?: string,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ id: string; code: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+      SELECT l."id" AS "id", l."code" AS "code",
+             SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) AS "quantity"
+        FROM "stock_movements" m
+        JOIN "storage_locations" l ON l."id" = m."storageLocationId"
+       WHERE m."companyId" = ${companyId}::uuid
+         AND m."warehouseId" = ${warehouseId}::uuid
+         AND m."itemId" = ${itemId}::uuid
+         ${batchId ? Prisma.sql`AND m."batchId" = ${batchId}::uuid` : Prisma.empty}
+       GROUP BY l."id", l."code"
+       HAVING SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) > 0
+       ORDER BY l."code"
+    `);
+    return rows.map((r) => ({ id: r.id, code: r.code, quantity: new Prisma.Decimal(r.quantity) }));
+  }
+
+  /// Located stock may not leave without naming the shelf. An item that is
+  /// entirely unlocated keeps the old behaviour.
+  private async assertNoLocatedStock(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    item: { id: string; code?: string },
+  ) {
+    const rows = await this.placedRows(tx, companyId, warehouseId, item.id);
+    if (!rows.length) return;
+    const list = rows.map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`);
+    throw new BadRequestException({
+      code: 'ISSUE_LOCATION_REQUIRED',
+      message:
+        `الصنف ${item.code ?? ''} له رصيد موزع على مواقع (${list.join('، ')}). حدد الموقع (أو عدة مواقع بكميات) ثم أعد الصرف؛ بياناتك محفوظة في الشاشة. / ` +
+        `Item ${item.code ?? ''} is stored on locations (${list.join(', ')}). Choose the location, or several locations with quantities, then issue again; what you entered is kept on screen.`,
+      errors: {
+        itemCode: (item.code ?? '').slice(0, 64),
+        locations: rows.map((r) => ({ locationId: r.id, code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })),
+      },
+    });
+  }
+
+  private normalizeIssueSlices(input: IssueInput, quantity: Prisma.Decimal, itemCode: string) {
+    if (input.storageLocationId) {
+      throw new BadRequestException({
+        code: 'ISSUE_LOCATION_AMBIGUOUS',
+        message:
+          'أرسل موقعًا واحدًا أو توزيعًا على مواقع، وليس الاثنين. / Send either one location or a split over locations, not both.',
+        errors: { itemCode: itemCode.slice(0, 64) },
+      });
+    }
+    const seen = new Set<string>();
+    let sum = new Prisma.Decimal(0);
+    const slices = (input.locationAllocations ?? []).map((row, i) => {
+      const q = toDecimal(row.quantity);
+      if (!row.storageLocationId || q.lessThanOrEqualTo(0)) {
+        throw new BadRequestException({
+          code: 'ISSUE_ALLOCATION_INVALID',
+          message:
+            `الصف ${i + 1}: اختر موقعًا وكمية أكبر من صفر. / Row ${i + 1}: choose a location and a quantity above zero.`,
+          errors: { row: String(i + 1) },
+        });
+      }
+      if (seen.has(row.storageLocationId)) {
+        throw new BadRequestException({
+          code: 'ISSUE_ALLOCATION_DUPLICATE',
+          message:
+            `الصف ${i + 1}: هذا الموقع مذكور مرتين. ادمج الكميتين في صف واحد. / Row ${i + 1}: this location appears twice. Merge the two quantities into one row.`,
+          errors: { row: String(i + 1) },
+        });
+      }
+      seen.add(row.storageLocationId);
+      sum = sum.plus(q);
+      return { storageLocationId: row.storageLocationId, quantity: q };
+    });
+    if (!sum.equals(quantity)) {
+      throw new BadRequestException({
+        code: 'ISSUE_ALLOCATION_SUM',
+        message:
+          `مجموع الكميات الموزعة ${sum.toFixed(MONEY_SCALE)} لا يساوي كمية الصرف ${quantity.toFixed(MONEY_SCALE)}. عدّل الكميات حتى تتطابق. / ` +
+          `The split adds up to ${sum.toFixed(MONEY_SCALE)} but the issued quantity is ${quantity.toFixed(MONEY_SCALE)}. Adjust the rows so they match.`,
+        errors: { allocated: sum.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
+      });
+    }
+    return slices;
   }
 
   /// An issue may leave an inactive shelf (the goods are still on it), but
