@@ -22,7 +22,12 @@ export function createPgAdapter(): PrismaPg {
         'postgresql://user:password@localhost:5432/kayan',
     );
   }
-  return new PrismaPg({ connectionString, application_name: API_APPLICATION_NAME });
+  // Unset keeps the driver default (10). PG_POOL_MAX raises it for a server
+  // sized for it; keep it within the database's max_connections together with
+  // BARRIER_POOL_MAX, since every API process uses both pools.
+  const configured = Number(process.env.PG_POOL_MAX);
+  const max = Number.isInteger(configured) && configured >= 1 && configured <= 500 ? configured : undefined;
+  return new PrismaPg({ connectionString, application_name: API_APPLICATION_NAME, ...(max ? { max } : {}) });
 }
 
 @Injectable()
