@@ -199,7 +199,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(target.saved, [80, 71, 68, 77, 80, 1]);
     expect(find.textContaining('Chosen file saved and verified'), findsOneWidget);
-    expect(find.textContaining('/chosen/backup.dump'), findsOneWidget);
+    expect(find.textContaining('\u2066/chosen/backup.dump\u2069'), findsOneWidget);
   });
   testWidgets('write failure cannot claim chosen location saved or fallback', (tester) async {
     final service = _FakeFullBackupService();

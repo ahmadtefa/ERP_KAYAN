@@ -169,7 +169,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       final bytes = await ref.read(fullBackupServiceProvider).downloadBytes(serverFile);
       await target!.write(bytes);
       if (!mounted) return;
-      setState(() => _notice = '${_createdNotice(file, complete: false)}\n${_t(context, 'تم حفظ الملف المختار والتحقق منه', 'Chosen file saved and verified')}: ${target.path}');
+      setState(() => _notice = '${_createdNotice(file, complete: false)}\n${_t(context, 'تم حفظ الملف المختار والتحقق منه', 'Chosen file saved and verified')}: \u2066${target.path}\u2069');
       await _load();
     } catch (error) {
       if (!mounted) return;
@@ -254,9 +254,9 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     final size = file == null ? null : file['sizeBytes'];
     final directory =
         '${_systemCapabilities?['backupDirectory'] ?? _capabilities?['backupDirectory'] ?? ''}';
-    final where = directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}';
+    final where = directory.isEmpty ? '' : '\n${l10n.backupSavedIn('\u2066$directory\u2069')}';
     if (complete) {
-      return '${l10n.createdSuccessfully}${name.isEmpty ? '' : ': $name'}'
+      return '${l10n.createdSuccessfully}${name.isEmpty ? '' : ': \u2066$name\u2069'}'
           '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}$where';
     }
     // The database archive is the smaller thing it is, and the message says
@@ -272,7 +272,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       'لم تُحفظ الملفات الخارجية والترخيص في هذا الأرشيف، ولم تثبت استعادة كاملة.',
       'External files and the licence are not included, and a complete restore has not been verified.',
     );
-    return '$label${name.isEmpty ? '' : ': $name'}'
+    return '$label${name.isEmpty ? '' : ': \u2066$name\u2069'}'
         '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}$where\n$warning';
   }
 
