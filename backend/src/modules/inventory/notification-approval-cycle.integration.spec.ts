@@ -224,4 +224,33 @@ const vmReady =
     expect(await sees(U.author)).toEqual(['DOCUMENT_APPROVED']);
     expect(await sees(U.voucherApprover)).toEqual(['STOCK_VOUCHER_PENDING_APPROVAL']);
   });
+
+  it('voucher: approval needs review first; review raises and approval clears at once; a write-off cannot be approved by its author', async () => {
+    const V2 = '99999999-9999-4999-8999-999999999997';
+    const W2 = '99999999-9999-4999-8999-999999999998';
+    const ins = (id: string, kind: string, no: string, extra: string, extraVal: string) =>
+      prisma.$executeRawUnsafe(`INSERT INTO stock_documents(id,"companyId","branchId",kind,"documentNumber","documentDate","updatedAt","createdBy"${extra}) VALUES ('${id}','${COMPANY}','${BRANCH_A}','${kind}','${no}',current_date,now(),'${REQUESTER}'${extraVal})`);
+    await ins(V2, 'ADJUSTMENT', 'SV-2', ',"voucherKind","counterpartyName"', ",'ISSUE','x'");
+    await ins(W2, 'WRITE_OFF', 'WO-2', '', '');
+    const approver = nu(CHIEF, ['inventory.stock.approve'], ['WAREHOUSE_MANAGER']);
+    const woApprover = nu(MANAGER, ['inventory.writeoff.approve'], ['WAREHOUSE_MANAGER']);
+    const docs: any = new StockDocumentsService(prisma as never, undefined as never, undefined as never, undefined as never, { record: async () => undefined } as never, undefined as never, undefined as never, undefined as never, undefined as never, notif);
+    const swallow = (e: Error) => { if (!/findOne|undefined|Cannot read/.test(String(e.stack))) throw e; };
+    // Approval before review is refused and raises nothing.
+    await expect(docs.transitionVoucher(COMPANY, BRANCH_A, MANAGER, V2, 'APPROVE')).rejects.toThrow(/reviewed before approval/);
+    expect(await sees(approver)).toEqual([]);
+    // Review raises the alert at once, without a scan.
+    await docs.transitionVoucher(COMPANY, BRANCH_A, MANAGER, V2, 'REVIEW').catch(swallow);
+    expect(await sees(approver)).toEqual(['STOCK_VOUCHER_PENDING_APPROVAL']);
+    // Approval clears it at once.
+    await docs.transitionVoucher(COMPANY, BRANCH_A, CHIEF, V2, 'APPROVE').catch(swallow);
+    expect(await sees(approver)).toEqual([]);
+    // Write-off: raised at once by the create hook, author cannot approve, a different person can.
+    await docs.announceApproval(COMPANY, W2, 'REVIEW', REQUESTER, REQUESTER, true);
+    expect(await sees(woApprover)).toEqual(['WRITEOFF_PENDING_APPROVAL']);
+    await expect(docs.approve(COMPANY, REQUESTER, W2)).rejects.toThrow(/cannot approve/);
+    expect(await sees(woApprover)).toEqual(['WRITEOFF_PENDING_APPROVAL']);
+    await docs.approve(COMPANY, MANAGER, W2).catch(swallow);
+    expect(await sees(woApprover)).toEqual([]);
+  });
 });
