@@ -8,8 +8,16 @@ function context(
   query: Record<string, unknown> = {},
   params: Record<string, string> = {},
 ) {
+  // Express 5 rebuilds `request.query` on every read: a write onto the object
+  // it returns is lost. Model that, so the guard cannot rely on mutation.
+  const request = { user, params } as Record<string, unknown>;
+  Object.defineProperty(request, 'query', {
+    get: () => ({ ...query }),
+    configurable: true,
+    enumerable: true,
+  });
   return {
-    switchToHttp: () => ({ getRequest: () => ({ user, query, params }) }),
+    switchToHttp: () => ({ getRequest: () => request }),
   } as ExecutionContext;
 }
 

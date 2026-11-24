@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -96,7 +97,7 @@ export class SalesInvoicesService {
     private readonly ledger: StockLedgerService,
   ) {}
 
-  async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
+  async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true, branchScope: string[] | null = null) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
@@ -104,6 +105,7 @@ export class SalesInvoicesService {
       companyId,
       deletedAt: null,
       documentType: InvoiceDocumentType.INVOICE,
+      ...branchWhere(branchScope),
     };
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
@@ -145,9 +147,9 @@ export class SalesInvoicesService {
     return { pricesIncludeTax: settings.pricesIncludeTax };
   }
 
-  async findOne(companyId: string, id: string, mayReadCost = true) {
+  async findOne(companyId: string, id: string, mayReadCost = true, branchScope: string[] | null = null) {
     const invoice = await this.prisma.salesInvoice.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: {
         customer: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         branch: { select: { code: true, nameEn: true, nameAr: true } },

@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 
@@ -28,11 +29,12 @@ export class CashTransfersService {
   async findAll(
     companyId: string,
     query: { cashAccountId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
+    branchScope: string[] | null = null,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
-    const where: Prisma.CashTransferWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.CashTransferWhereInput = { companyId, deletedAt: null, ...branchWhere(branchScope) };
     if (query.cashAccountId) {
       where.OR = [
         { fromCashAccountId: query.cashAccountId },
@@ -62,9 +64,9 @@ export class CashTransfersService {
     return { items: items.map((row) => this.toResponse(row)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const transfer = await this.prisma.cashTransfer.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: {
         fromCashAccount: { select: { code: true, nameEn: true, nameAr: true } },
         toCashAccount: { select: { code: true, nameEn: true, nameAr: true } },

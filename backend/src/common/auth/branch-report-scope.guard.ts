@@ -38,7 +38,12 @@ export class BranchReportScopeGuard implements CanActivate {
     const scope = warehouseScopeOf(user);
     if (scope === null) return true;
 
-    const query = request.query ?? (request.query = {});
+    // Express 5 builds `request.query` fresh on every read, so a value written
+    // onto it is silently lost before the controller reads it. Replace the
+    // property with a stable object first, then write to that.
+    const stable: Record<string, unknown> = { ...(request.query ?? {}) };
+    Object.defineProperty(request, 'query', { value: stable, writable: true, configurable: true, enumerable: true });
+    const query = stable;
     const requested = typeof query.branchId === 'string' ? query.branchId.trim() : '';
     if (requested) {
       if (!scope.includes(requested)) throw new NotFoundException('Report not found');

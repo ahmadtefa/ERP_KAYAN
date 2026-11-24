@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
   Injectable,
@@ -55,11 +56,12 @@ export class CashVouchersService {
       page?: number;
       pageSize?: number;
     },
+    branchScope: string[] | null = null,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
-    const where: Prisma.CashVoucherWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.CashVoucherWhereInput = { companyId, deletedAt: null, ...branchWhere(branchScope) };
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(CashVoucherKind).includes(kind as CashVoucherKind)) {
@@ -95,9 +97,9 @@ export class CashVouchersService {
     return { items: items.map((row) => this.toResponse(row)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const voucher = await this.prisma.cashVoucher.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: {
         cashAccount: { select: { code: true, nameEn: true, nameAr: true, kind: true } },
         customer: { select: { code: true, nameEn: true, nameAr: true } },

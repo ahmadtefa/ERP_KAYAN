@@ -15,6 +15,7 @@ import { WarehouseModule } from './common/warehouse/warehouse.module';
 import { PrintSettingsModule } from './common/print/print-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { BranchWriteGuard } from './common/guards/branch-write.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -87,6 +88,8 @@ import { SearchModule } from './modules/search/search.module';
     // is a rule about every route, so it must not depend on which modules
     // happen to be imported. (It used to ride in with AccountingModule.)
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // A branch employee may change only their own branch's documents.
+    { provide: APP_GUARD, useClass: BranchWriteGuard },
     // Last: an expired or suspended licence stops business routes, while the
     // licence screen, sign-in and the backup routes stay open (see the guard).
     { provide: APP_GUARD, useClass: LicenseGuard },

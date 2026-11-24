@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Body,
   BadRequestException,
   Controller,
@@ -25,6 +26,7 @@ import {
   UpdateUserDto,
 } from './dto/user.dto';
 import { UsersService } from './users.service';
+import { branchReadScope, branchesWithinScope } from '../../common/auth/branch-read-scope';
 import { ProfilePhotoService } from '../auth/profile-photo.service';
 import { LOGO_UPLOAD_MAX_BYTES, logoMimeForUpload } from '../company/company.service';
 
@@ -64,6 +66,9 @@ export class UsersController {
     @Body() dto: CreateUserDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
+    if (!branchesWithinScope(branchReadScope(user), dto.branchIds)) {
+      throw new ForbiddenException('You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.');
+    }
     return this.users.create(
       user.companyId,
       user.userId,
@@ -80,6 +85,9 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserDto,
   ) {
+    if (!branchesWithinScope(branchReadScope(user), dto.branchIds)) {
+      throw new ForbiddenException('You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.');
+    }
     return this.users.update(
       user.companyId,
       user.userId,

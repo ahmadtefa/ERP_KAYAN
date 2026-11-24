@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import {
   Body,
   Controller,
@@ -44,13 +45,13 @@ export class QuotationsController {
   @Get()
   @RequirePermissions('sales.quotations.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListQuotationsDto) {
-    return this.service.findAll(user.companyId, query);
+    return this.service.findAll(user.companyId, query, branchReadScope(user));
   }
 
   @Get(':id')
   @RequirePermissions('sales.quotations.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Post()
