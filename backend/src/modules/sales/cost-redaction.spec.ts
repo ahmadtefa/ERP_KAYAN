@@ -203,7 +203,7 @@ describe('sales invoice write responses honour cost permission', () => {
     expect(service.post).toHaveBeenLastCalledWith('c','u','i',false,{
       mayIssueExpired: false,
       reason: null,
-    }, { mayDiscloseBalance: false });
+    }, { mayDiscloseBalance: false, mayReadStock: false, mayReadInvoice: false });
     expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',false);
     const allowed = {...principal,permissions:['inventory.cost.read']};
     controller.create(allowed,dto);
@@ -215,7 +215,7 @@ describe('sales invoice write responses honour cost permission', () => {
     expect(service.post).toHaveBeenLastCalledWith('c','u','i',true,{
       mayIssueExpired: false,
       reason: null,
-    }, { mayDiscloseBalance: false });
+    }, { mayDiscloseBalance: false, mayReadStock: false, mayReadInvoice: false });
     expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',true);
   });
 });
