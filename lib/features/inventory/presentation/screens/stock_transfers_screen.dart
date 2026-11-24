@@ -1,3 +1,4 @@
+import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,8 +73,7 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
           title: Text(t('تقرير التحويلات والأرصدة بالطريق', 'Transfers & transit report')),
           content: SizedBox(
             width: 760,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            child: HorizontalScrollFrame(
               child: DataTable(
                 columns: [
                   DataColumn(label: Text(t('رقم', 'Number'))),
@@ -478,8 +478,7 @@ class _SettlementDialogState extends State<_SettlementDialog> {
         title: Text(t('تسوية البضاعة بالطريق', 'Settle goods in transit')),
         content: SizedBox(
           width: 780,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          child: HorizontalScrollFrame(
             child: SingleChildScrollView(
               child: DataTable(
                 columns: [

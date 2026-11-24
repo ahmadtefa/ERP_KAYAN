@@ -1,3 +1,4 @@
+import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
@@ -1552,8 +1553,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       children: [
         Text(l10n.tablePreview, style: theme.textTheme.titleSmall),
         const SizedBox(height: 6),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
+        HorizontalScrollFrame(
           child: DataTable(
             key: ValueKey('quotation-grid-${identityHashCode(table)}'),
             headingRowHeight: 36,
