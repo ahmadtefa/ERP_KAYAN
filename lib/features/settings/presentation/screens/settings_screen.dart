@@ -49,7 +49,7 @@ class SettingsScreen extends ConsumerWidget {
         appCommit != apiCommit;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
     final dirtyLabel = AppBuildInfo.sourceDirty == 'true'
-        ? (isArabic ? ' · مصدر غير نظيف' : ' · dirty source')
+        ? ' · ${l10n.aboutUncommittedBuild}'
         : '';
     final apiStateLabel = runtimeBuild == null
         ? (isArabic ? ' · غير متصل' : ' · unavailable')
@@ -188,24 +188,32 @@ class SettingsScreen extends ConsumerWidget {
               ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: Text(l10n.about),
-                subtitle: Text(
-                  [
-                    l10n.aboutDescription,
-                    '${l10n.version}: $appVersion',
-                    '${isArabic ? 'بناء الواجهة' : 'Client build'}: '
-                        '${_shortCommit(appCommit)}$dirtyLabel',
-                    '${isArabic ? 'بناء الخادم' : 'API build'}: '
-                        '${_shortCommit(apiCommit)}$apiStateLabel',
-                    if (commitMismatch)
-                      isArabic
-                          ? 'تحذير: الواجهة والخادم من مصدرين مختلفين.'
-                          : 'Warning: client and server source commits differ.',
-                  ].join('\n'),
-                  style: commitMismatch
-                      ? TextStyle(color: Theme.of(context).colorScheme.error)
-                      : null,
-                ),
+                subtitle: Text('${l10n.aboutDescription}\n\n${l10n.aboutBody}'),
                 isThreeLine: true,
+              ),
+              ExpansionTile(
+                leading: const Icon(Icons.build_circle_outlined),
+                title: Text(l10n.aboutTechnicalDetails),
+                childrenPadding: const EdgeInsetsDirectional.fromSTEB(72, 0, 16, 12),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    [
+                      '${l10n.version}: $appVersion',
+                      '${isArabic ? 'بناء الواجهة' : 'Client build'}: '
+                          '${_shortCommit(appCommit)}$dirtyLabel',
+                      '${isArabic ? 'بناء الخادم' : 'API build'}: '
+                          '${_shortCommit(apiCommit)}$apiStateLabel',
+                      if (commitMismatch)
+                        isArabic
+                            ? 'تنبيه: الواجهة والخادم مبنيان من نسختين مختلفتين من المصدر.'
+                            : 'Notice: client and server were built from different source commits.',
+                    ].join('\n'),
+                    style: commitMismatch
+                        ? TextStyle(color: Theme.of(context).colorScheme.error)
+                        : null,
+                  ),
+                ],
               ),
             ],
           ),

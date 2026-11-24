@@ -145,7 +145,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aboutDescription =>
-      'KAYAN ERP — cross-platform enterprise resource planning client.';
+      'KAYAN: one system for sales, purchasing, inventory and accounting.';
+
+  @override
+  String get aboutBody =>
+      'KAYAN covers the whole working cycle: quotations, invoices and collection; purchase orders and supplier invoices; stock movements, transfers between branches and warehouses, and stock counts; journal entries and financial reports. It supports several branches and warehouses with per-user permissions, data export and backups to protect your company data, in Arabic and English.';
+
+  @override
+  String get aboutTechnicalDetails => 'Technical details for support';
+
+  @override
+  String get aboutUncommittedBuild => 'built from uncommitted source changes';
 
   @override
   String get quickAccess => 'Quick access';

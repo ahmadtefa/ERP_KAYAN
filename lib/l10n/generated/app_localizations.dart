@@ -359,8 +359,26 @@ abstract class AppLocalizations {
   /// No description provided for @aboutDescription.
   ///
   /// In en, this message translates to:
-  /// **'KAYAN ERP — cross-platform enterprise resource planning client.'**
+  /// **'KAYAN: one system for sales, purchasing, inventory and accounting.'**
   String get aboutDescription;
+
+  /// No description provided for @aboutBody.
+  ///
+  /// In en, this message translates to:
+  /// **'KAYAN covers the whole working cycle: quotations, invoices and collection; purchase orders and supplier invoices; stock movements, transfers between branches and warehouses, and stock counts; journal entries and financial reports. It supports several branches and warehouses with per-user permissions, data export and backups to protect your company data, in Arabic and English.'**
+  String get aboutBody;
+
+  /// No description provided for @aboutTechnicalDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Technical details for support'**
+  String get aboutTechnicalDetails;
+
+  /// No description provided for @aboutUncommittedBuild.
+  ///
+  /// In en, this message translates to:
+  /// **'built from uncommitted source changes'**
+  String get aboutUncommittedBuild;
 
   /// No description provided for @quickAccess.
   ///
