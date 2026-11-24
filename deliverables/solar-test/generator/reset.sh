@@ -1,11 +1,11 @@
 #!/bin/bash
 # fresh throwaway DB + migrations + bootstrap seed + API
 pkill -f "dist/src/main.js" ; sleep 1
-export PGPASSWORD=kayan
+export PGPASSWORD="$KAYAN_PG_PASSWORD"
 P="psql -h 127.0.0.1 -p 55432 -U kayan -d postgres -q"
 $P -c 'drop database if exists kayan_solar_build' -c 'create database kayan_solar_build'
 cd /tmp/kayan/backend
-export DATABASE_URL='postgresql://kayan:kayan@127.0.0.1:55432/kayan_solar_build?schema=public'
+export DATABASE_URL="postgresql://kayan:${KAYAN_PG_PASSWORD}@127.0.0.1:55432/kayan_solar_build?schema=public"
 node scripts/apply-migrations.mjs >/dev/null
 ADMINPW=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)Aa1!
 echo "$ADMINPW" > /tmp/gen/admin.pw

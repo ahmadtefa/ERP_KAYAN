@@ -1,9 +1,10 @@
 import fs from 'node:fs'; import crypto from 'node:crypto'; import {execSync,spawn} from 'node:child_process';
 const APW=fs.readFileSync('/tmp/gen/admin.pw','utf8').trim(); const cr=JSON.parse(fs.readFileSync('/tmp/gen/credentials.json','utf8'));
-const PS='PGPASSWORD=kayan psql -h 127.0.0.1 -p 55432 -U kayan -Atq';
+const PS='PGPASSWORD=\$KAYAN_PG_PASSWORD psql -h 127.0.0.1 -p 55432 -U kayan -Atq';
 const sh=c=>execSync(c,{encoding:'utf8',maxBuffer:1<<28}).trim();
 const out={checks:[]}; const check=(n,ok,d)=>{out.checks.push({n,ok:!!ok,d});console.log(ok?'PASS':'FAIL',n,d??'');};
 const call=async(base,method,path,tok,body)=>{const r=await fetch(base+path,{method,headers:{...(tok?{authorization:'Bearer '+tok}:{}),...(body&&!(body instanceof FormData)?{'content-type':'application/json'}:{})},body:body instanceof FormData?body:body?JSON.stringify(body):undefined});const t=await r.text();let j;try{j=JSON.parse(t)}catch{j=t}return{status:r.status,j}};
+const CIPW=crypto.randomBytes(18).toString('base64url')+'Aa1';
 const SRC='http://127.0.0.1:3999/api/v1', DST='http://127.0.0.1:3998/api/v1';
 const login=async(b,u,p)=>(await call(b,'POST','/auth/login',null,{username:u,password:p})).j.accessToken;
 const tok=await login(SRC,'admin',APW);
@@ -23,14 +24,14 @@ out.srcCounts=counts('kayan_solar_build'); console.log(JSON.stringify(out.srcCou
 const tb0=(await call(SRC,'GET','/reports/trial-balance?from=2000-01-01&to=2099-12-31',tok)).j; const tot=j=>{let d=0,c=0;for(const r of j.rows){d+=Number(r.debit);c+=Number(r.credit)}return{debit:d.toFixed(4),credit:c.toFixed(4),difference:(d-c).toFixed(4),rows:j.rows.length}};out.tbSrc=tot(tb0);
 // 3. restore target
 sh(`${PS} -d postgres -c 'drop database if exists kayan_solar_restore' -c 'create database kayan_solar_restore'`);
-const env={...process.env,DATABASE_URL:'postgresql://kayan:kayan@127.0.0.1:55432/kayan_solar_restore?schema=public'};
+const env={...process.env,DATABASE_URL:`postgresql://kayan:${process.env.KAYAN_PG_PASSWORD}@127.0.0.1:55432/kayan_solar_restore?schema=public`};
 execSync('cd /tmp/kayan/backend && node scripts/apply-migrations.mjs > /dev/null',{env});
 fs.rmSync('/tmp/kbackups2',{recursive:true,force:true}); fs.mkdirSync('/tmp/kbackups2',{recursive:true});
-const api=spawn('node',['dist/src/main.js'],{cwd:'/tmp/kayan/backend',env:{...env,KAYAN_BACKUP_DIR:'/tmp/kbackups2',PORT:'3998',HOST:'127.0.0.1',NODE_ENV:'development',RATE_LIMIT_ENABLED:'false',JWT_ACCESS_SECRET:'restore-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',JWT_REFRESH_SECRET:'restore-refresh-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',JWT_ACCESS_TTL:'3600',JWT_REFRESH_TTL:'604800'},stdio:['ignore','pipe','pipe']});
+const api=spawn('node',['dist/src/main.js'],{cwd:'/tmp/kayan/backend',env:{...env,KAYAN_BACKUP_DIR:'/tmp/kbackups2',PORT:'3998',HOST:'127.0.0.1',NODE_ENV:'development',RATE_LIMIT_ENABLED:'false',JWT_ACCESS_SECRET:crypto.randomBytes(32).toString('hex'),JWT_REFRESH_SECRET:crypto.randomBytes(32).toString('hex'),JWT_ACCESS_TTL:'3600',JWT_REFRESH_TTL:'604800'},stdio:['ignore','pipe','pipe']});
 let log=''; api.stdout.on('data',d=>log+=d); api.stderr.on('data',d=>log+=d);
 for(let i=0;i<60;i++){try{if((await fetch(DST+'/health')).ok)break}catch{}await new Promise(r=>setTimeout(r,1000));}
-const setup=await call(DST,'POST','/setup/initial',null,{companyCode:'RESTORE-CI',companyNameEn:'Disposable restore target',companyNameAr:'شركة اختبار الاسترجاع',facilityKind:'HEADQUARTERS',unitCode:'MAIN',unitNameEn:'Head Office',unitNameAr:'المركز الرئيسي',adminUsername:'restore-ci',adminPassword:'CI-Restore-Password-12345',seedChartOfAccounts:true}); check('fresh destination installation set up',setup.status<300,'HTTP '+setup.status);
-const dtok=await login(DST,'restore-ci','CI-Restore-Password-12345');
+const setup=await call(DST,'POST','/setup/initial',null,{companyCode:'RESTORE-CI',companyNameEn:'Disposable restore target',companyNameAr:'شركة اختبار الاسترجاع',facilityKind:'HEADQUARTERS',unitCode:'MAIN',unitNameEn:'Head Office',unitNameAr:'المركز الرئيسي',adminUsername:'restore-ci',adminPassword:CIPW,seedChartOfAccounts:true}); check('fresh destination installation set up',setup.status<300,'HTTP '+setup.status);
+const dtok=await login(DST,'restore-ci',CIPW);
 const form=new FormData(); form.append('confirm','true'); form.append('file',new Blob([buf]),'KAYAN-SOLAR-TEST.dump');
 const rs=await call(DST,'POST','/backup/full/restore?confirm=true',dtok,form); console.log(JSON.stringify(rs.j).slice(0,500));
 check('dump restores through the real backend route /backup/full/restore',rs.status<300,'HTTP '+rs.status+' '+JSON.stringify(rs.j).slice(0,160));

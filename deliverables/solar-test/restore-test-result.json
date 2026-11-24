@@ -8,17 +8,17 @@
   {
    "n": "program creates the dump via /backup/full/database-archive",
    "ok": true,
-   "d": "kayan-full-2026-11-24-08-53-50-3784ef6c-0750-4e7c-8b5d-a6435b45c898.dump"
+   "d": "kayan-full-2026-11-24-08-55-11-702a90fd-a842-40f7-aa8a-ccf693e95978.dump"
   },
   {
    "n": "program verifies the dump",
    "ok": true,
-   "d": "{\"name\":\"kayan-full-2026-11-24-08-53-50-3784ef6c-0750-4e7c-8b5d-a6435b45c898.dump\",\"sizeBytes\":2471303,\"entries\":731,\"tables\":88,\"constraints\":308,\"archiveContentReadable\":true,\"fullRestoreRehearsed\":"
+   "d": "{\"name\":\"kayan-full-2026-11-24-08-55-11-702a90fd-a842-40f7-aa8a-ccf693e95978.dump\",\"sizeBytes\":2471331,\"entries\":731,\"tables\":88,\"constraints\":308,\"archiveContentReadable\":true,\"fullRestoreRehearsed\":"
   },
   {
    "n": "dump is PostgreSQL custom format",
    "ok": true,
-   "d": "2471303 bytes"
+   "d": "2471331 bytes"
   },
   {
    "n": "pg_restore --list reads it",
@@ -33,7 +33,7 @@
   {
    "n": "dump restores through the real backend route /backup/full/restore",
    "ok": true,
-   "d": "HTTP 201 {\"restored\":true,\"source\":\"KAYAN-SOLAR-TEST.dump\",\"safetyBackup\":\"kayan-safety-2026-11-24-08-53-54-bc1a00eb-029a-4bdf-b07b-87c98bece9ab.dump\",\"checked\":true,\"re"
+   "d": "HTTP 201 {\"restored\":true,\"source\":\"KAYAN-SOLAR-TEST.dump\",\"safetyBackup\":\"kayan-safety-2026-11-24-08-55-15-8ccd7209-cd1e-49bf-8e84-8855f455f8a4.dump\",\"checked\":true,\"re"
   },
   {
    "n": "row counts identical in restored DB",
@@ -43,7 +43,7 @@
   {
    "n": "all test users can sign in after restore",
    "ok": true,
-   "d": "16/16"
+   "d": "15/15"
   },
   {
    "n": "trial balance balances and equals source",
@@ -56,15 +56,15 @@
    "d": "total 500"
   }
  ],
- "sha256": "172e2b97a6fb25713c9da89783707a3df392ce904f61b7646e9ff5b227943222",
- "bytes": 2471303,
+ "sha256": "0f874988b9bbb75b63a79c1cd5c653723de33daa4570cae3f208e246d724402c",
+ "bytes": 2471331,
  "srcCounts": {
   "branches": 5,
   "warehouses": 17,
   "items": 300,
   "customers": 200,
   "suppliers": 50,
-  "users": 16,
+  "users": 15,
   "cost_centers": 10,
   "sales_invoices": 500,
   "sales_invoice_lines": 1382,
@@ -97,7 +97,7 @@
   "items": 300,
   "customers": 200,
   "suppliers": 50,
-  "users": 16,
+  "users": 15,
   "cost_centers": 10,
   "sales_invoices": 500,
   "sales_invoice_lines": 1382,

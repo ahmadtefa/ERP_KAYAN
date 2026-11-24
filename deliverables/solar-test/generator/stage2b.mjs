@@ -12,7 +12,7 @@ async function atAll(){const root=await client('admin',APW); await root('PATCH',
 async function restoreAdmin(){const root=await client('admin',APW); await root('PATCH','/admin/users/'+adminId,{branchIds:allB});}
  const Q=S.qty; const key=(w,i)=>w+':'+i;
 function refresh(wids){ for(const w of wids){ for(const k of Object.keys(Q)) if(k.startsWith(w+':')) delete Q[k];
-  const out=execSync(`PGPASSWORD=kayan psql -h 127.0.0.1 -p 55432 -U kayan -d kayan_solar_build -Atc "select \\"itemId\\",quantity from warehouse_stock_balances where \\"warehouseId\\"='${w}'"`).toString().trim();
+  const out=execSync(`PGPASSWORD=\$KAYAN_PG_PASSWORD psql -h 127.0.0.1 -p 55432 -U kayan -d kayan_solar_build -Atc "select \\"itemId\\",quantity from warehouse_stock_balances where \\"warehouseId\\"='${w}'"`).toString().trim();
   for(const line of out.split('\n').filter(Boolean)){const [i,q]=line.split('|');Q[w+':'+i]=Number(q);} } }
 const WT={ 'HQ-MAIN':['PNL','MNT','PMP','HTL'],'HQ-INV':['INV','BAT','PNL'],'HQ-ACC':['CAB','PRT','CTL','TLS'],'ALX-MAIN':['PNL','MNT','PMP','HTL'],'ALX-BAT':['INV','BAT'],'ALX-ACC':['CAB','PRT','CTL','TLS'],
  'MNS-MAIN':['PNL','INV','BAT','MNT','PMP','HTL'],'MNS-ACC':['CAB','PRT','CTL','TLS'],'AST-MAIN':['PNL','INV','BAT','MNT','PMP','HTL'],'AST-ACC':['CAB','PRT','CTL','TLS'],'HRG-MAIN':['PNL','INV','BAT','MNT','PMP','HTL'],'HRG-ACC':['CAB','PRT','CTL','TLS']};

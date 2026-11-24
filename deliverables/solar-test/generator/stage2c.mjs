@@ -21,7 +21,7 @@ for(let m=1;m<=11;m++){const d=(day)=>`2026-${String(m).padStart(2,'0')}-${Strin
 console.log('journal entries manual',je);
 // thresholds
 let th=0; const wh=Object.entries(S.wh);
-for(const [wc,wid] of wh){ const rows=execSync(`PGPASSWORD=kayan psql -h 127.0.0.1 -p 55432 -U kayan -d kayan_solar_build -Atc "select \\"itemId\\",quantity from warehouse_stock_balances where \\"warehouseId\\"='${wid}' order by quantity limit 40"`).toString().trim().split('\n').filter(Boolean);
+for(const [wc,wid] of wh){ const rows=execSync(`PGPASSWORD=\$KAYAN_PG_PASSWORD psql -h 127.0.0.1 -p 55432 -U kayan -d kayan_solar_build -Atc "select \\"itemId\\",quantity from warehouse_stock_balances where \\"warehouseId\\"='${wid}' order by quantity limit 40"`).toString().trim().split('\n').filter(Boolean);
   for(const [i,r] of rows.entries()){const [iid,q]=r.split('|'); const qn=Number(q); const min=i%3===0?Math.ceil(qn+between(2,10)):Math.max(2,Math.floor(qn/2)); await admin('PUT',`/inventory/item-thresholds/${wid}/${iid}`,{minQuantity:min,reorderQuantity:min*2,maxQuantity:min*6}); th++;}}
 console.log('thresholds',th);
 try{const sc=await admin('POST','/notifications/scan',{}); console.log('scan',JSON.stringify(sc).slice(0,200));}catch(e){console.log('scan err',e.message.slice(0,200))}
