@@ -561,7 +561,8 @@ class _FormSheetState extends State<_FormSheet> {
                     decoration: InputDecoration(
                       isDense: true,
                       prefixIcon: const Icon(Icons.search_rounded),
-                      hintText: MaterialLocalizations.of(context).searchFieldLabel,
+                      hintText: MaterialLocalizations.of(context)
+                          .searchFieldLabel,
                     ),
                     onChanged: (value) => setState(() {
                       _multiSearch[field.key] = value.trim().toLowerCase();
@@ -579,7 +580,9 @@ class _FormSheetState extends State<_FormSheet> {
                       FilterChip(
                         label: Text(option.label),
                         selected:
-                            _multiSelections[field.key]?.contains(option.value) ??
+                            _multiSelections[field.key]?.contains(
+                              option.value,
+                            ) ??
                             false,
                         onSelected:
                             widget.readOnly ||

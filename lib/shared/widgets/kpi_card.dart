@@ -60,8 +60,7 @@ class KpiCard extends StatelessWidget {
                   height: compact ? 26 : 30,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: accent?.softOf(scheme.brightness) ??
-                        tone.background,
+                    color: accent?.softOf(scheme.brightness) ?? tone.background,
                     borderRadius: BorderRadius.circular(AppRadii.md),
                   ),
                   child: Icon(
@@ -73,7 +72,10 @@ class KpiCard extends StatelessWidget {
               const Spacer(),
               if (trend != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: tone.background,
                     borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -104,15 +106,16 @@ class KpiCard extends StatelessWidget {
           Text(
             value,
             maxLines: 2,
-            style: (compact
-                    ? theme.textTheme.titleLarge
-                    : theme.textTheme.headlineSmall)
-                ?.copyWith(
-                  color: scheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
-                  height: 1.15,
-                ),
+            style:
+                (compact
+                        ? theme.textTheme.titleLarge
+                        : theme.textTheme.headlineSmall)
+                    ?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      height: 1.15,
+                    ),
           ),
           if (caption != null && caption!.trim().isNotEmpty) ...[
             const SizedBox(height: 3),
@@ -145,11 +148,7 @@ class KpiCard extends StatelessWidget {
     if (onTap == null) return card;
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppRadii.card,
-        onTap: onTap,
-        child: card,
-      ),
+      child: InkWell(borderRadius: AppRadii.card, onTap: onTap, child: card),
     );
   }
 }

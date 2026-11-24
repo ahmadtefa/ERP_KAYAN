@@ -150,86 +150,82 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                       warehouseSnapshot.data ?? const [],
                     );
                     _loadPictures(_filter(rows, language));
-                    return SingleChildScrollView(
-                      child: ResizableTable(
-                        storageKey: 'item-picker',
-                        rows: _filter(rows, language),
-                        onTap: (row) => Navigator.of(context).pop(_select(row)),
-                        columns: [
+                    return ResizableTable(
+                      storageKey: 'item-picker',
+                      rows: _filter(rows, language),
+                      onTap: (row) => Navigator.of(context).pop(_select(row)),
+                      columns: [
+                        ResizableColumn(
+                          l10n.item,
+                          width: 150,
+                          value: (row) => text(row, 'code'),
+                          leading: (row) =>
+                              ItemThumbnail(bytes: _pictures[text(row, 'id')]),
+                        ),
+                        ResizableColumn(
+                          language == 'ar' ? 'الاسم' : 'Name',
+                          width: 260,
+                          value: (row) =>
+                              language == 'ar' && text(row, 'nameAr').isNotEmpty
+                              ? text(row, 'nameAr')
+                              : text(row, 'nameEn'),
+                        ),
+                        ResizableColumn(
+                          l10n.unit,
+                          width: 90,
+                          value: (row) => text(row, 'unit'),
+                        ),
+                        if (_canSeeStock)
                           ResizableColumn(
-                            l10n.item,
+                            l10n.availableInBranch,
                             width: 150,
-                            value: (row) => text(row, 'code'),
-                            leading: (row) =>
-                                ItemThumbnail(bytes: _pictures[text(row, 'id')]),
-                          ),
-                          ResizableColumn(
-                            language == 'ar' ? 'الاسم' : 'Name',
-                            width: 260,
-                            value: (row) =>
-                                language == 'ar' &&
-                                    text(row, 'nameAr').isNotEmpty
-                                ? text(row, 'nameAr')
-                                : text(row, 'nameEn'),
-                          ),
-                          ResizableColumn(
-                            l10n.unit,
-                            width: 90,
-                            value: (row) => text(row, 'unit'),
-                          ),
-                          if (_canSeeStock)
-                            ResizableColumn(
-                              l10n.availableInBranch,
-                              width: 150,
-                              numeric: true,
-                              value: (row) {
-                                if (!flag(
-                                  row,
-                                  'isStockTracked',
-                                  fallback: true,
-                                )) {
-                                  return '—';
-                                }
-                                return stock[text(row, 'id')] ?? '0.0000';
-                              },
-                            ),
-                          if (_canSeeStock)
-                            ResizableColumn(
-                              l10n.perWarehouse,
-                              width: 210,
-                              value: (row) {
-                                if (!flag(
-                                  row,
-                                  'isStockTracked',
-                                  fallback: true,
-                                )) {
-                                  return '—';
-                                }
-                                return where[text(row, 'id')] ?? '—';
-                              },
-                            ),
-                          ResizableColumn(
-                            l10n.unitPrice,
-                            width: 130,
                             numeric: true,
-                            value: (row) =>
-                                formatAmount(text(row, 'salePrice')),
+                            value: (row) {
+                              if (!flag(
+                                row,
+                                'isStockTracked',
+                                fallback: true,
+                              )) {
+                                return '—';
+                              }
+                              return stock[text(row, 'id')] ?? '0.0000';
+                            },
                           ),
-                        ],
-                        actions: (row) => [
-                          Flexible(
-                            child: TextButton(
-                              onPressed: () =>
-                                  Navigator.of(context).pop(_select(row)),
-                              child: Text(
-                                l10n.selectItem,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                        if (_canSeeStock)
+                          ResizableColumn(
+                            l10n.perWarehouse,
+                            width: 210,
+                            value: (row) {
+                              if (!flag(
+                                row,
+                                'isStockTracked',
+                                fallback: true,
+                              )) {
+                                return '—';
+                              }
+                              return where[text(row, 'id')] ?? '—';
+                            },
+                          ),
+                        ResizableColumn(
+                          l10n.unitPrice,
+                          width: 130,
+                          numeric: true,
+                          value: (row) => formatAmount(text(row, 'salePrice')),
+                        ),
+                      ],
+                      actions: (row) => [
+                        Flexible(
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.of(context).pop(_select(row)),
+                            child: Text(
+                              l10n.selectItem,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -257,13 +253,16 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
     if (ids.isEmpty) return;
     ItemImageDataSource(ref.read(apiClientProvider))
         .thumbnails(ids)
-        .then<void>((pictures) {
-          if (!mounted || _picturesKey != key) return;
-          setState(() => _pictures = pictures);
-        }, onError: (Object _) {
-          // A thumbnail that cannot be fetched is not worth a dialog: the
-          // picker still lists every item, just without pictures.
-        });
+        .then<void>(
+          (pictures) {
+            if (!mounted || _picturesKey != key) return;
+            setState(() => _pictures = pictures);
+          },
+          onError: (Object _) {
+            // A thumbnail that cannot be fetched is not worth a dialog: the
+            // picker still lists every item, just without pictures.
+          },
+        );
   }
 
   List<Json> _filter(List<Json> rows, String language) {

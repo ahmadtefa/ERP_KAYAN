@@ -160,11 +160,7 @@ class BarcodeMatch {
     }
     // The unit may legitimately be absent for a legacy item that never had a
     // packing table; the item's own unit is then the base unit.
-    final unit = text(
-      body,
-      'unit',
-      fallback: text(item, 'unit'),
-    ).trim();
+    final unit = text(body, 'unit', fallback: text(item, 'unit')).trim();
     // A base-unit scan is the ONE case where factor 1 is the truth: the server
     // sends `matched: 'item'` or a factor of exactly 1 for a label that means
     // the item itself. For a non-base unit the factor is what the whole
@@ -416,7 +412,8 @@ class BarcodeScanner {
       // A FormatException is the response that arrived and cannot be trusted,
       // which is a different instruction to the operator than a read that
       // produced nothing: retrying will not help, so do not say "scan again".
-      final message = unknown ??
+      final message =
+          unknown ??
           (error is FormatException
               ? invalidBarcodeDataMessage(code, arabic: arabic)
               : unreadableBarcodeMessage(code, arabic: arabic));
@@ -468,7 +465,10 @@ class BarcodeScanField extends StatelessWidget {
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
         labelText:
-            label ?? (arabic ? 'مسح باركود الصنف أو الوحدة' : 'Scan item or unit barcode'),
+            label ??
+            (arabic
+                ? 'مسح باركود الصنف أو الوحدة'
+                : 'Scan item or unit barcode'),
         prefixIcon: const Icon(Icons.qr_code_scanner, size: 18),
         isDense: compact,
         border: const OutlineInputBorder(),

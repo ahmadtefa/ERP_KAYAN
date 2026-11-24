@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import 'persistent_table_scroll.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/theme/design_tokens.dart';
@@ -143,12 +146,18 @@ class _ResizableTableState extends State<ResizableTable> {
   };
 
   EdgeInsets get _cellPadding => switch (_density) {
-    TableDensity.compact =>
-      const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-    TableDensity.normal =>
-      const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-    TableDensity.spacious =>
-      const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+    TableDensity.compact => const EdgeInsets.symmetric(
+      horizontal: AppSpacing.md,
+      vertical: AppSpacing.xs,
+    ),
+    TableDensity.normal => const EdgeInsets.symmetric(
+      horizontal: AppSpacing.md,
+      vertical: AppSpacing.sm,
+    ),
+    TableDensity.spacious => const EdgeInsets.symmetric(
+      horizontal: AppSpacing.lg,
+      vertical: AppSpacing.md,
+    ),
   };
 
   @override
@@ -156,140 +165,150 @@ class _ResizableTableState extends State<ResizableTable> {
     final theme = Theme.of(context);
     final l10n = context.l10n;
     final hasActions = widget.actions != null;
-    final totalWidth = _widths.fold<double>(0, (sum, value) => sum + value) +
+    final totalWidth =
+        _widths.fold<double>(0, (sum, value) => sum + value) +
         (hasActions ? 150 : 0);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (widget.showToolbar)
-          Padding(
-            padding: const EdgeInsetsDirectional.only(
-              start: AppSpacing.xs,
-              end: AppSpacing.xs,
-              bottom: AppSpacing.sm,
-            ),
-            child: Row(
-              children: [
-                Text(
-                  l10n.rowDensity,
-                  style: theme.textTheme.bodySmall,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bounded = constraints.hasBoundedHeight;
+        return Column(
+          mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.showToolbar)
+              Padding(
+                padding: const EdgeInsetsDirectional.only(
+                  start: AppSpacing.xs,
+                  end: AppSpacing.xs,
+                  bottom: AppSpacing.sm,
                 ),
-                const SizedBox(width: 8),
-                SegmentedButton<TableDensity>(
-                  segments: [
-                    ButtonSegment(
-                      value: TableDensity.compact,
-                      icon: const Icon(Icons.density_small, size: 16),
-                      tooltip: l10n.densityCompact,
+                child: Row(
+                  children: [
+                    Text(l10n.rowDensity, style: theme.textTheme.bodySmall),
+                    const SizedBox(width: 8),
+                    SegmentedButton<TableDensity>(
+                      segments: [
+                        ButtonSegment(
+                          value: TableDensity.compact,
+                          icon: const Icon(Icons.density_small, size: 16),
+                          tooltip: l10n.densityCompact,
+                        ),
+                        ButtonSegment(
+                          value: TableDensity.normal,
+                          icon: const Icon(Icons.density_medium, size: 16),
+                          tooltip: l10n.densityNormal,
+                        ),
+                        ButtonSegment(
+                          value: TableDensity.spacious,
+                          icon: const Icon(Icons.density_large, size: 16),
+                          tooltip: l10n.densitySpacious,
+                        ),
+                      ],
+                      selected: {_density},
+                      showSelectedIcon: false,
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onSelectionChanged: (selection) {
+                        setState(() => _density = selection.first);
+                        _persist();
+                      },
                     ),
-                    ButtonSegment(
-                      value: TableDensity.normal,
-                      icon: const Icon(Icons.density_medium, size: 16),
-                      tooltip: l10n.densityNormal,
-                    ),
-                    ButtonSegment(
-                      value: TableDensity.spacious,
-                      icon: const Icon(Icons.density_large, size: 16),
-                      tooltip: l10n.densitySpacious,
+                    const Spacer(),
+                    Flexible(
+                      child: Text(
+                        l10n.dragColumnHint,
+                        style: theme.textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                      ),
                     ),
                   ],
-                  selected: {_density},
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onSelectionChanged: (selection) {
-                    setState(() => _density = selection.first);
-                    _persist();
-                  },
                 ),
-                const Spacer(),
-                Flexible(
-                  child: Text(
-                    l10n.dragColumnHint,
-                    style: theme.textTheme.bodySmall,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.end,
+              ),
+            _frame(
+              bounded,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.85,
+                    ),
                   ),
+                  borderRadius: AppRadii.control,
                 ),
-              ],
-            ),
-          ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
-            ),
-            borderRadius: AppRadii.control,
-          ),
-          child: ClipRRect(
-            borderRadius: AppRadii.control,
-            child: Scrollbar(
-              controller: _horizontalController,
-              thumbVisibility: true,
-              trackVisibility: true,
-              child: SingleChildScrollView(
-                controller: _horizontalController,
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                width: math.max(totalWidth, 320.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(
-                      color: theme.brightness == Brightness.light
-                          ? AppColors.surfaceSunken
-                          : AppColors.darkSurfaceAlt,
-                      child: Row(
+                child: ClipRRect(
+                  borderRadius: AppRadii.control,
+                  child: PersistentTableScroll(
+                    child: SizedBox(
+                      width: math.max(totalWidth, 320.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          for (var index = 0;
-                              index < widget.columns.length;
-                              index++)
-                            _headerCell(context, index),
-                          if (hasActions)
-                            SizedBox(
-                              width: 150,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                                child: Text(
-                                  l10n.actions,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w700,
+                          Container(
+                            color: theme.brightness == Brightness.light
+                                ? AppColors.surfaceSunken
+                                : AppColors.darkSurfaceAlt,
+                            child: Row(
+                              children: [
+                                for (
+                                  var index = 0;
+                                  index < widget.columns.length;
+                                  index++
+                                )
+                                  _headerCell(context, index),
+                                if (hasActions)
+                                  SizedBox(
+                                    width: 150,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
+                                      child: Text(
+                                        l10n.actions,
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                              ],
+                            ),
+                          ),
+                          for (final row in widget.rows)
+                            _row(context, row, hasActions),
+                          if (widget.rows.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                l10n.noRecords,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium,
                               ),
                             ),
                         ],
                       ),
                     ),
-                    for (final row in widget.rows)
-                      _row(context, row, hasActions),
-                    if (widget.rows.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          l10n.noRecords,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
+
+  Widget _frame(bool bounded, Widget child) =>
+      bounded ? Expanded(child: child) : child;
 
   Widget _headerCell(BuildContext context, int index) {
     final theme = Theme.of(context);
@@ -350,7 +369,10 @@ class _ResizableTableState extends State<ResizableTable> {
         constraints: BoxConstraints(minHeight: _rowHeight),
         decoration: BoxDecoration(
           border: Border(
-            top: BorderSide(color: theme.colorScheme.outlineVariant, width: 0.6),
+            top: BorderSide(
+              color: theme.colorScheme.outlineVariant,
+              width: 0.6,
+            ),
           ),
         ),
         child: Row(
@@ -370,28 +392,29 @@ class _ResizableTableState extends State<ResizableTable> {
                       child: _WithLeading(
                         leading: widget.columns[index].leading?.call(row),
                         child: Text(
-                        widget.columns[index].value(row) ?? '—',
-                        // Numbers never wrap mid-figure; with the
-                        // numeric minimum width they fit whole, and the
-                        // tooltip remains for anything truly huge.
-                        maxLines: widget.columns[index].numeric
-                            ? 1
-                            : (_density == TableDensity.compact ? 1 : 2),
-                        softWrap: !widget.columns[index].numeric,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: widget.columns[index].numeric
-                            ? TextAlign.end
-                            : TextAlign.start,
-                        style: (widget.columns[index].emphasise
-                                ? theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )
-                                : theme.textTheme.bodyMedium)
-                            ?.copyWith(
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
+                          widget.columns[index].value(row) ?? '—',
+                          // Numbers never wrap mid-figure; with the
+                          // numeric minimum width they fit whole, and the
+                          // tooltip remains for anything truly huge.
+                          maxLines: widget.columns[index].numeric
+                              ? 1
+                              : (_density == TableDensity.compact ? 1 : 2),
+                          softWrap: !widget.columns[index].numeric,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: widget.columns[index].numeric
+                              ? TextAlign.end
+                              : TextAlign.start,
+                          style:
+                              (widget.columns[index].emphasise
+                                      ? theme.textTheme.bodyMedium?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        )
+                                      : theme.textTheme.bodyMedium)
+                                  ?.copyWith(
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                         ),
                       ),
                     ),

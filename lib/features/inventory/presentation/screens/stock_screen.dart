@@ -27,7 +27,11 @@ export '../providers/stock_providers.dart'
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key, this.navigationKey, this.autoCreateVoucherKind});
+  const StockScreen({
+    super.key,
+    this.navigationKey,
+    this.autoCreateVoucherKind,
+  });
   final ValueKey<String>? navigationKey;
   final String? autoCreateVoucherKind;
 
@@ -502,59 +506,57 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                 if (movements.isEmpty) {
                   return EmptyView(message: l10n.noMovements);
                 }
-                return SingleChildScrollView(
-                  child: ResizableTable(
-                    storageKey: 'stock-ledger',
-                    rows: movements,
-                    columns: [
+                return ResizableTable(
+                  storageKey: 'stock-ledger',
+                  rows: movements,
+                  columns: [
+                    ResizableColumn(
+                      l10n.invoiceDate,
+                      width: 110,
+                      value: (r) => text(r, 'date').split('T').first,
+                    ),
+                    ResizableColumn(
+                      l10n.reference,
+                      width: 200,
+                      value: (r) =>
+                          '${text(r, 'referenceType')} ${text(r, 'referenceNumber')}',
+                    ),
+                    ResizableColumn(
+                      l10n.direction,
+                      width: 90,
+                      value: (r) => text(r, 'direction').toLowerCase() == 'in'
+                          ? l10n.movementIn
+                          : l10n.movementOut,
+                    ),
+                    ResizableColumn(
+                      l10n.quantity,
+                      width: 110,
+                      numeric: true,
+                      value: (r) => formatQuantity(asString(r['quantity'])),
+                    ),
+                    if (canReadCost)
                       ResizableColumn(
-                        l10n.invoiceDate,
-                        width: 110,
-                        value: (r) => text(r, 'date').split('T').first,
-                      ),
-                      ResizableColumn(
-                        l10n.reference,
-                        width: 200,
-                        value: (r) =>
-                            '${text(r, 'referenceType')} ${text(r, 'referenceNumber')}',
-                      ),
-                      ResizableColumn(
-                        l10n.direction,
-                        width: 90,
-                        value: (r) => text(r, 'direction').toLowerCase() == 'in'
-                            ? l10n.movementIn
-                            : l10n.movementOut,
-                      ),
-                      ResizableColumn(
-                        l10n.quantity,
-                        width: 110,
+                        l10n.unitPrice,
+                        width: 120,
                         numeric: true,
-                        value: (r) => formatQuantity(asString(r['quantity'])),
+                        value: (r) => formatAmount(asString(r['unitCost'])),
                       ),
-                      if (canReadCost)
-                        ResizableColumn(
-                          l10n.unitPrice,
-                          width: 120,
-                          numeric: true,
-                          value: (r) => formatAmount(asString(r['unitCost'])),
-                        ),
-                      if (canReadCost)
-                        ResizableColumn(
-                          l10n.lineTotal,
-                          width: 120,
-                          numeric: true,
-                          value: (r) => formatAmount(asString(r['totalCost'])),
-                        ),
+                    if (canReadCost)
                       ResizableColumn(
-                        l10n.runningBalance,
-                        width: 190,
+                        l10n.lineTotal,
+                        width: 120,
                         numeric: true,
-                        value: (r) => canReadCost
-                            ? '${formatQuantity(asString(r['runningQuantity']))} / ${formatAmount(asString(r['runningValue']))}'
-                            : formatQuantity(asString(r['runningQuantity'])),
+                        value: (r) => formatAmount(asString(r['totalCost'])),
                       ),
-                    ],
-                  ),
+                    ResizableColumn(
+                      l10n.runningBalance,
+                      width: 190,
+                      numeric: true,
+                      value: (r) => canReadCost
+                          ? '${formatQuantity(asString(r['runningQuantity']))} / ${formatAmount(asString(r['runningValue']))}'
+                          : formatQuantity(asString(r['runningQuantity'])),
+                    ),
+                  ],
                 );
               },
             ),

@@ -68,11 +68,7 @@ class SurfaceCard extends StatelessWidget {
                       color: (tone ?? scheme.primary).withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(AppRadii.md),
                     ),
-                    child: Icon(
-                      icon,
-                      size: 16,
-                      color: tone ?? scheme.primary,
-                    ),
+                    child: Icon(icon, size: 16, color: tone ?? scheme.primary),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                 ],

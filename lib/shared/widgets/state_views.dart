@@ -185,8 +185,7 @@ class AsyncStateView<T> extends StatelessWidget {
     return value.when(
       skipLoadingOnRefresh: false,
       loading: () => LoadingView(message: loadingMessage),
-      error: (error, _) =>
-          ErrorView(message: error, onRetry: onRetry),
+      error: (error, _) => ErrorView(message: error, onRetry: onRetry),
       data: (result) {
         final empty = isEmpty?.call(result) ?? false;
         if (empty) {
