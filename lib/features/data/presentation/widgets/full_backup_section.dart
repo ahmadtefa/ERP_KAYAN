@@ -776,6 +776,42 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     return const [];
   }
 
+  /// True when the only thing the server could not do was open the scratch
+  /// database used to rehearse a restore: the program's own database account
+  /// is not allowed to create databases and no restore account is set up.
+  bool get _scratchDatabaseMissing {
+    final restore = _systemCapabilities?['restore'];
+    final checks = restore is Map ? restore['checks'] : null;
+    if (checks is! List) return false;
+    return checks.any(
+      (c) => c is Map && c['name'] == 'scratch-database' && c['ok'] == false,
+    );
+  }
+
+  /// Reasons shown to a person: the scratch-database refusal is replaced by
+  /// plain steps in the screen's language; every other reason is kept as is.
+  List<String> _displayReasons(BuildContext context) {
+    final raw = _restoreReasons;
+    if (!_scratchDatabaseMissing) return raw;
+    final friendly = _t(
+      context,
+      'لا يمكن تجربة الاستعادة على نسخة مؤقتة قبل تنفيذها، لأن حساب قاعدة البيانات الذي يعمل به البرنامج غير مسموح له بإنشاء قواعد بيانات. الحل: أنشئ حساب استعادة مخصصًا يملك صلاحية إنشاء قواعد البيانات فقط، من مجلد backend بالأمر: npm run setup:restore-admin، ثم أضف السطر الذي يطبعه الأمر إلى ملف backend/.env وأعد تشغيل الخادم. لا يتم منح حساب البرنامج صلاحيات أوسع.',
+      'The restore cannot be rehearsed on a temporary copy first, because the database account the program runs with may not create databases. Fix: create a dedicated restore account that may only create databases, from the backend folder: npm run setup:restore-admin, then add the line it prints to backend/.env and restart the server. The program account is not given wider rights.',
+    );
+    var replaced = false;
+    final out = <String>[];
+    for (final r in raw) {
+      if (r.contains('scratch database')) {
+        if (!replaced) out.add(friendly);
+        replaced = true;
+      } else {
+        out.add(r);
+      }
+    }
+    if (!replaced) out.add(friendly);
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -1065,7 +1101,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   List<Widget> _restoreBlocked(BuildContext context) {
     final theme = Theme.of(context);
-    final reasons = _restoreReasons;
+    final reasons = _displayReasons(context);
     return [
       _Notice(
         icon: Icons.lock_outline,

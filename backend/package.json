@@ -24,7 +24,8 @@
     "build:demo": "node scripts/build-demo-backup.mjs",
     "check:api": "node scripts/api-check.mjs",
     "verify:system-backup": "ts-node --transpile-only scripts/verify-system-backup.ts",
-    "scenario:system-backup": "node scripts/scenario-system-backup.mjs"
+    "scenario:system-backup": "node scripts/scenario-system-backup.mjs",
+    "setup:restore-admin": "node scripts/setup-restore-admin.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

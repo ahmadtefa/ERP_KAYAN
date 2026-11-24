@@ -164,3 +164,17 @@ Honest list — these are deliberately absent, not forgotten:
 | Chart of accounts | Is the seeded chart the approved statutory chart? |
 | Cost centres | Required on every line, or optional? |
 | Period locking | Who may reopen a closed period? |
+
+## Full restore: restore-admin account (development machines)
+
+A complete (DUMP) restore is first rehearsed in a scratch database, so the
+server needs an account that may create databases. The runtime account is not
+widened. From `backend/`, with the PostgreSQL administrator password at hand:
+
+    npm run setup:restore-admin
+
+It creates `kayan_restore_admin` (CREATEDB only, no superuser), writes its
+random credential to `~/.kayan/restore-admin.url` (mode 0600, outside the
+repository) and prints one line, `KAYAN_RESTORE_ADMIN_FILE=...`, to add to
+`backend/.env`. Restart the API afterwards. The administrator password is read
+from a hidden prompt or `KAYAN_PG_SUPERUSER_URL` and is never stored.
