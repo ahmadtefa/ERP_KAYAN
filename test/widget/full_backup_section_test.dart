@@ -168,7 +168,7 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('web preserves explicit server archive and never claims chosen local save', (tester) async {
+  if (kIsWeb) testWidgets('web preserves explicit server archive and never claims chosen local save', (tester) async {
     final service = _FakeFullBackupService();
     var chooserCalled = false;
     await _pump(tester, service, choose: () async { chooserCalled = true; return _Target(); });
@@ -179,7 +179,7 @@ void main() {
     expect(chooserCalled, isFalse);
     expect(find.textContaining('Server copy only.'), findsOneWidget);
     expect(find.textContaining('Chosen file saved and verified'), findsNothing);
-  }, skip: !kIsWeb);
+  });
 
   testWidgets('cancel Save As does not create or save a backup', (tester) async {
     final service = _FakeFullBackupService();
