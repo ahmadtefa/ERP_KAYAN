@@ -35,6 +35,15 @@ class AssignUnlocatedDto {
   @IsOptional() @IsString() reason?: string | null;
 }
 
+class ReconcileUnlocatedDto {
+  @IsString() warehouseId!: string;
+  @IsString() fromLocationId!: string;
+  @IsString() itemId!: string;
+  @IsOptional() @IsString() batchId?: string | null;
+  @IsOptional() quantity!: number | string;
+  @IsString() reason!: string;
+}
+
 /**
  * Where inside the warehouse the goods are.
  *
@@ -102,6 +111,12 @@ export class StorageLocationsController {
       { warehouseId: query.warehouseId },
       warehouseScopeOf(user),
       grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      (warehouseId: string) => {
+        if (!user.isSuperAdmin && !user.permissions.includes('inventory.stock.adjust')) return false;
+        const grants = grantsOf(user);
+        if (!grants) return true;
+        return grants.some((g) => g.warehouseId === warehouseId && g.canView && g.canTransfer);
+      },
     );
   }
 
@@ -109,6 +124,19 @@ export class StorageLocationsController {
   @RequirePermissions('inventory.stock.adjust')
   assignUnlocated(@CurrentUser() user: AuthUser, @Body() dto: AssignUnlocatedDto) {
     return this.service.assignUnlocated(
+      user.companyId,
+      user.userId,
+      dto,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      grantsOf(user)?.filter((grant) => grant.canTransfer).map((grant) => grant.warehouseId),
+    );
+  }
+
+  @Post('reconcile-unlocated')
+  @RequirePermissions('inventory.stock.adjust')
+  reconcileUnlocated(@CurrentUser() user: AuthUser, @Body() dto: ReconcileUnlocatedDto) {
+    return this.service.reconcileUnlocated(
       user.companyId,
       user.userId,
       dto,

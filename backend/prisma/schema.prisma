@@ -1966,6 +1966,13 @@ model SalesInvoiceLine {
   unitCost  Decimal @default(0) @db.Decimal(19, 4)
   costTotal Decimal @default(0) @db.Decimal(19, 4)
 
+  /// Which storage locations the goods are taken from when this line is
+  /// posted: [{ storageLocationId, quantity }] in the chosen LINE unit,
+  /// summing to `unitQuantity`; converted to base units once when posted.
+  /// Chosen by the person who sells. Null on legacy rows and on
+  /// lines of items that have no placed stock.
+  locationAllocations Json?
+
   /// The analytical dimension of the line: the department, branch of activity
   /// or project the revenue (and its cost of goods) belongs to. Optional, so
   /// historical invoices keep meaning exactly what they meant before.

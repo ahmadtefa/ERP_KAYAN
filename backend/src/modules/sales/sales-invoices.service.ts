@@ -72,6 +72,8 @@ interface PreparedLine {
   unitName: string | null;
   unitFactor: Prisma.Decimal | null;
   unitQuantity: Prisma.Decimal | null;
+  /// Seller-chosen source locations, quantities in the line's own unit.
+  locationAllocations: Array<{ storageLocationId: string; quantity: string }> | null;
 }
 
 interface PreparedInvoice {
@@ -82,6 +84,60 @@ interface PreparedInvoice {
 
 interface SalesInvoicePreparationOptions {
   pricesExcludeTax?: boolean;
+}
+
+/// The seller's choice of shelves for one line, kept in the line's own unit.
+///
+/// The quantities are typed in the line's own unit, so they must add up to the
+/// line's quantity in that unit; conversion to base units happens only when
+/// the invoice is posted. Every refusal says which line, what was typed and what to
+/// change, and nothing is saved until the line is right.
+export function normalizeLocationAllocations(
+  raw: Array<{ storageLocationId: string; quantity: string }> | undefined,
+  lineQuantity: Prisma.Decimal,
+  lineNumber: number,
+): Array<{ storageLocationId: string; quantity: string }> | null {
+  if (!raw || raw.length === 0) return null;
+  const seen = new Set<string>();
+  let sum = new Prisma.Decimal(0);
+  const parsed = raw.map((entry) => {
+    let q: Prisma.Decimal;
+    try {
+      q = new Prisma.Decimal(entry.quantity);
+    } catch {
+      throw new BadRequestException(
+        `السطر ${lineNumber}: كمية الموقع غير صالحة. اكتب رقمًا أكبر من صفر. / ` +
+          `Line ${lineNumber}: a location quantity is not a number. Enter a number above zero.`,
+      );
+    }
+    if (q.lessThanOrEqualTo(0)) {
+      throw new BadRequestException(
+        `السطر ${lineNumber}: كمية الموقع يجب أن تكون أكبر من صفر. احذف الموقع أو اكتب كمية. / ` +
+          `Line ${lineNumber}: each location quantity must be above zero. Remove that location or enter a quantity.`,
+      );
+    }
+    if (seen.has(entry.storageLocationId)) {
+      throw new BadRequestException(
+        `السطر ${lineNumber}: نفس الموقع مكرر. اجمع الكميتين في صف واحد. / ` +
+          `Line ${lineNumber}: the same location is listed twice. Combine them into one row.`,
+      );
+    }
+    seen.add(entry.storageLocationId);
+    sum = sum.plus(q);
+    return { id: entry.storageLocationId, q };
+  });
+  if (!sum.equals(lineQuantity)) {
+    throw new BadRequestException(
+      `السطر ${lineNumber}: مجموع كميات المواقع ${sum.toFixed(4)} لا يساوي كمية السطر ${lineQuantity.toFixed(4)}. ` +
+        'عدّل كميات المواقع حتى يتساوى المجموع مع الكمية. / ' +
+        `Line ${lineNumber}: the location quantities add up to ${sum.toFixed(4)} but the line quantity is ` +
+        `${lineQuantity.toFixed(4)}. Change the location quantities so they add up to the line quantity.`,
+    );
+  }
+  // Stored exactly as typed, in the line's own unit. The conversion to base
+  // units happens once, when the line is posted, so what the screen reads
+  // back is what it sent and editing never converts twice.
+  return parsed.map((entry) => ({ storageLocationId: entry.id, quantity: entry.q.toFixed(MONEY_SCALE) }));
 }
 
 @Injectable()
@@ -189,6 +245,7 @@ export class SalesInvoicesService {
         // What the user entered in the chosen unit. Legacy rows fall back to
         // the stored quantity, which already is what they typed.
         unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
+        locationAllocations: (l as { locationAllocations?: unknown }).locationAllocations ?? null,
         description: l.description,
         // Internal base-unit quantity used by stock and returns.
         quantity: l.quantity.toFixed(MONEY_SCALE),
@@ -324,6 +381,7 @@ export class SalesInvoicesService {
               unitName: l.unitName,
               unitFactor: l.unitFactor,
               unitQuantity: l.unitQuantity,
+              ...(l.locationAllocations ? { locationAllocations: l.locationAllocations } : {}),
             })),
           },
         },
@@ -439,6 +497,7 @@ export class SalesInvoicesService {
               unitName: line.unitName,
               unitFactor: line.unitFactor,
               unitQuantity: line.unitQuantity,
+              ...(line.locationAllocations ? { locationAllocations: line.locationAllocations } : {}),
             })),
           },
         },
@@ -626,6 +685,29 @@ export class SalesInvoicesService {
   /// anything the request body said. When it is absent a sale simply may not
   /// touch an expired lot: the engine skips those and answers with how many
   /// short the invoice is.
+  /// What the warehouse holds on real locations for one item, per location.
+  private async placedStock(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ code: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+      SELECT l."code" AS "code",
+             SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) AS "quantity"
+        FROM "stock_movements" m
+        JOIN "storage_locations" l ON l."id" = m."storageLocationId"
+       WHERE m."companyId" = ${companyId}::uuid
+         AND m."warehouseId" = ${warehouseId}::uuid
+         AND m."itemId" = ${itemId}::uuid
+       GROUP BY l."code"
+      HAVING SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) > 0
+       ORDER BY l."code"
+    `);
+    const mapped = rows.map((r) => ({ code: r.code, quantity: new Prisma.Decimal(r.quantity) }));
+    return { rows: mapped, total: mapped.reduce((a, r) => a.plus(r.quantity), new Prisma.Decimal(0)) };
+  }
+
   async post(
     companyId: string,
     userId: string,
@@ -785,42 +867,145 @@ export class SalesInvoicesService {
           );
         }
 
-        const issued = await this.batches.issueTx(
-          tx,
-          companyId,
-          userId,
-          {
-            warehouse: warehouseId ? { id: warehouseId, branchId: invoice.branchId } : null,
-            branchId: invoice.branchId,
-            item,
-          },
-          {
-            branchId: invoice.branchId,
-            warehouseId,
-            itemId: item.id,
-            quantity: line.quantity,
-            referenceType: 'SALES_INVOICE',
-            referenceId: invoice.id,
-            referenceNumber: invoice.invoiceNumber,
-            documentDate: invoice.invoiceDate.toISOString().slice(0, 10),
-            // A sale never sells expired stock on the strength of a boolean in
-            // a request. The approval is built here, from the permission the
-            // controller checked, and stamped with the person who holds it.
-            ...(expiredApproval
-              ? { allowExpired: true, expiredApproval }
-              : {}),
-            movementUnits:
-              line.unitName && line.unitQuantity && line.unitFactor
-                ? {
-                    enteredUnit: line.unitName,
-                    enteredQuantity: line.unitQuantity,
-                    unitFactor: line.unitFactor,
-                    baseUnitName: item.unit,
-                  }
-                : undefined,
-          },
-          line.quantity,
+        // Where the goods come from. When the item has placed stock in this
+        // warehouse the seller must say which shelves, otherwise the shelf
+        // balances would drift away from the goods that actually left. An item
+        // with no placed stock sells exactly as before.
+        const enteredAllocations = (line as { locationAllocations?: unknown }).locationAllocations as
+          | Array<{ storageLocationId: string; quantity: string }>
+          | null
+          | undefined;
+        // Typed in the line's unit; stock moves in base units. Converted here,
+        // once. The last row takes the rounding remainder so the parts add up
+        // to the base quantity exactly.
+        const enteredTotal = new Prisma.Decimal(line.unitQuantity ?? line.quantity);
+        const toBase = enteredTotal.isZero() ? new Prisma.Decimal(1) : line.quantity.div(enteredTotal);
+        let usedBase = new Prisma.Decimal(0);
+        const allocations = enteredAllocations?.length
+          ? enteredAllocations.map((entry, i) => {
+              const base =
+                i === enteredAllocations.length - 1
+                  ? line.quantity.minus(usedBase)
+                  : new Prisma.Decimal(entry.quantity).mul(toBase).toDecimalPlaces(MONEY_SCALE);
+              usedBase = usedBase.plus(base);
+              return { storageLocationId: entry.storageLocationId, quantity: base.toFixed(MONEY_SCALE) };
+            })
+          : null;
+        if (enteredAllocations?.length) {
+          const typed = enteredAllocations.reduce((acc, e) => acc.plus(e.quantity), new Prisma.Decimal(0));
+          if (!typed.equals(enteredTotal)) {
+            throw new BadRequestException(
+              `السطر ${line.lineNumber}: مجموع المواقع ${typed.toFixed(MONEY_SCALE)} لا يساوي الكمية ${enteredTotal.toFixed(MONEY_SCALE)}. عدّل السطر ثم رحّل. / ` +
+                `Line ${line.lineNumber}: locations add up to ${typed.toFixed(MONEY_SCALE)} but the quantity is ${enteredTotal.toFixed(MONEY_SCALE)}. Edit the line, then post again.`,
+            );
+          }
+        }
+        const placed = warehouseId
+          ? await this.placedStock(tx, companyId, warehouseId, item.id)
+          : { total: new Prisma.Decimal(0), rows: [] as Array<{ code: string; quantity: Prisma.Decimal }> };
+        if (!allocations?.length && placed.total.greaterThan(0)) {
+          throw new BadRequestException({
+            code: 'SALES_POST_LOCATION_REQUIRED',
+            message:
+              `الصنف ${item.code} له رصيد موزع على مواقع (${placed.rows
+                .map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`)
+                .join('، ')}). افتح السطر ${line.lineNumber} وحدد الموقع والكمية ثم رحّل من جديد؛ بيانات الفاتورة محفوظة. / ` +
+              `Item ${item.code} is stored on locations (${placed.rows
+                .map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`)
+                .join(', ')}). Open line ${line.lineNumber}, choose the location(s) and quantity to take from, then post again. ` +
+              'The invoice data is kept.',
+            errors: {
+              lineNumber: String(line.lineNumber),
+              itemCode: item.code.slice(0, 64),
+              locations: placed.rows.map((r) => ({ code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })),
+            },
+          });
+        }
+        if (allocations?.length && !warehouseId) {
+          throw new BadRequestException(
+            `السطر ${line.lineNumber}: حُدد موقع لكن الفرع بلا مخزن. احذف المواقع من السطر أو أضف مخزنًا للفرع. / ` +
+              `Line ${line.lineNumber} names a location but this branch has no warehouse. Remove the locations from the line or add a warehouse to the branch.`,
+          );
+        }
+        const allocated = (allocations ?? []).reduce(
+          (acc, entry) => acc.plus(entry.quantity),
+          new Prisma.Decimal(0),
         );
+        if (allocations?.length && !allocated.equals(line.quantity)) {
+          throw new BadRequestException(
+            `السطر ${line.lineNumber}: مجموع المواقع ${allocated.toFixed(MONEY_SCALE)} لا يساوي الكمية ${line.quantity.toFixed(MONEY_SCALE)}. ` +
+              'عدّل السطر ثم رحّل. / ' +
+              `Line ${line.lineNumber}: locations add up to ${allocated.toFixed(MONEY_SCALE)} but the quantity is ${line.quantity.toFixed(MONEY_SCALE)}. Edit the line, then post again.`,
+          );
+        }
+
+        const issueFrom = async (storageLocationId: string | null, quantity: Prisma.Decimal) =>
+          this.batches.issueTx(
+            tx,
+            companyId,
+            userId,
+            {
+              warehouse: warehouseId ? { id: warehouseId, branchId: invoice.branchId } : null,
+              branchId: invoice.branchId,
+              item,
+            },
+            {
+              branchId: invoice.branchId,
+              warehouseId,
+              itemId: item.id,
+              quantity,
+              storageLocationId,
+              referenceType: 'SALES_INVOICE',
+              referenceId: invoice.id,
+              referenceNumber: invoice.invoiceNumber,
+              documentDate: invoice.invoiceDate.toISOString().slice(0, 10),
+              ...(expiredApproval ? { allowExpired: true, expiredApproval } : {}),
+              movementUnits:
+                line.unitName && line.unitQuantity && line.unitFactor && !storageLocationId
+                  ? {
+                      enteredUnit: line.unitName,
+                      enteredQuantity: line.unitQuantity,
+                      unitFactor: line.unitFactor,
+                      baseUnitName: item.unit,
+                    }
+                  : undefined,
+            },
+            quantity,
+          );
+        let issued: { unitCost: string; value: string };
+        if (allocations?.length) {
+          let totalValue = new Prisma.Decimal(0);
+          for (const entry of allocations) {
+            let part;
+            try {
+              part = await issueFrom(entry.storageLocationId, new Prisma.Decimal(entry.quantity));
+            } catch (error) {
+              if (error instanceof BadRequestException) {
+                const code = await tx.storageLocation.findFirst({
+                  where: { id: entry.storageLocationId, companyId },
+                  select: { code: true },
+                });
+                const response = error.getResponse();
+                const original = typeof response === 'string' ? response : ((response as { message?: string }).message ?? '');
+                throw new BadRequestException(
+                  `السطر ${line.lineNumber} (${item.code}) من الموقع ${code?.code ?? entry.storageLocationId}: ${original} ` +
+                    'غيّر الكمية أو اختر موقعًا آخر ثم رحّل؛ بيانات الفاتورة محفوظة. / ' +
+                    `Line ${line.lineNumber} (${item.code}) from location ${code?.code ?? entry.storageLocationId}: ${original} ` +
+                    'Lower that quantity or pick another location, then post again. The invoice data is kept.',
+                );
+              }
+              throw error;
+            }
+            totalValue = totalValue.plus(part.value);
+          }
+          const total = totalValue.toDecimalPlaces(MONEY_SCALE);
+          issued = {
+            value: total.toFixed(MONEY_SCALE),
+            unitCost: total.div(line.quantity).toDecimalPlaces(MONEY_SCALE).toFixed(4),
+          };
+        } else {
+          issued = await issueFrom(null, line.quantity);
+        }
 
         // The engine already moved the branch and shelf books. Sales still owns
         // the invoice's cost, so it is read back from what was issued - one
@@ -1020,7 +1205,7 @@ export class SalesInvoicesService {
             referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
           },
-          select: { batchId: true, quantity: true, unitCost: true, totalCost: true },
+          select: { batchId: true, storageLocationId: true, quantity: true, unitCost: true, totalCost: true },
         });
 
         const lotRows = consumed.filter((row) => row.batchId !== null);
@@ -1085,6 +1270,7 @@ export class SalesInvoicesService {
               warehouseId,
               itemId: line.itemId,
               batchId: row.batchId,
+              storageLocationId: row.storageLocationId,
               movementDate: new Date(),
               direction: StockDirection.IN,
               quantity: row.quantity,
@@ -1378,6 +1564,11 @@ export class SalesInvoicesService {
         unitName: resolved.snapshot.unitName,
         unitFactor: resolved.snapshot.unitFactor,
         unitQuantity: resolved.snapshot.unitQuantity,
+        locationAllocations: normalizeLocationAllocations(
+          raw.locationAllocations,
+          quantity,
+          index + 1,
+        ),
       });
     }
 

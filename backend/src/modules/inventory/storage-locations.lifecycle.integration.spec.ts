@@ -272,4 +272,37 @@ const vmReady =
     expect(Object.fromEntries(row.locations.map((l) => [l.code, l.quantity]))).toEqual({ 'A-01': '6.0000', 'B-01': '4.0000' });
     expect(row.unplacedQuantity).toBe('0.0000');
   });
+
+  it('tells the screen per warehouse whether this user may assign or move', async () => {
+    const lot = await receiveLot(10, SHELF);
+    await receiveLot(5, undefined, ITEM, 'L2');
+    await locations.move(COMPANY, USER, { fromLocationId: SHELF, toLocationId: SHELF_B, itemId: ITEM, batchId: lot.batchId as string, quantity: 4 }, null);
+    const r = await locations.itemLocations(COMPANY, ITEM, {}, null, undefined, (w) => w === WAREHOUSE);
+    expect(r.warehouses[0].canAllocate).toBe(true);
+    const denied = await locations.itemLocations(COMPANY, ITEM, {}, null, undefined, () => false);
+    expect(denied.warehouses[0].canAllocate).toBe(false);
+  });
+
+  it('reconciles a legacy deficit in the right direction: bucket up, shelf down, books unchanged', async () => {
+    const lot = await receiveLot(5, SHELF);
+    // the old behaviour: a sale that named no shelf
+    await batches.issue(COMPANY, USER, { branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM, quantity: 2, batchId: lot.batchId as string });
+    let b = await breakdown();
+    expect([b?.locations[0].quantity, b?.unlocated.quantity]).toEqual(['5.0000', '-2.0000']);
+    const before = await balances();
+    await expect(
+      locations.reconcileUnlocated(COMPANY, USER, { warehouseId: WAREHOUSE, fromLocationId: SHELF, itemId: ITEM, batchId: lot.batchId as string, quantity: 3, reason: 'count' }, null),
+    ).rejects.toThrow(/At most 2\.0000/);
+    await expect(
+      locations.reconcileUnlocated(COMPANY, USER, { warehouseId: WAREHOUSE, fromLocationId: SHELF, itemId: ITEM, batchId: lot.batchId as string, quantity: 2, reason: '' }, null),
+    ).rejects.toThrow(/reason/);
+    const r = await locations.reconcileUnlocated(COMPANY, USER, { warehouseId: WAREHOUSE, fromLocationId: SHELF, itemId: ITEM, batchId: lot.batchId as string, quantity: 2, reason: 'sold before shelves existed' }, null);
+    expect(r.remainingUnlocatedDeficit).toBe('0.0000');
+    b = await breakdown();
+    expect([b?.locations[0].quantity, b?.unlocated.quantity, b?.total]).toEqual(['3.0000', '0.0000', '3.0000']);
+    expect(await balances()).toEqual(before);
+    await expect(
+      locations.reconcileUnlocated(COMPANY, USER, { warehouseId: WAREHOUSE, fromLocationId: SHELF, itemId: ITEM, batchId: lot.batchId as string, quantity: 1, reason: 'again' }, null),
+    ).rejects.toThrow(/nothing to correct/);
+  });
 });

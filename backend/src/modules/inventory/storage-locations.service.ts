@@ -530,6 +530,11 @@ export class StorageLocationsService {
     query: { warehouseId?: string } = {},
     scope: WarehouseScope = null,
     warehouseIds?: string[],
+    /// Whether this user may assign or move stock in a warehouse: the same
+    /// answer the assign and move endpoints give (permission plus the
+    /// per-warehouse view and transfer grants). Advice for the screen only;
+    /// the endpoints still enforce it.
+    canAllocate: (warehouseId: string) => boolean = () => true,
   ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
@@ -632,6 +637,7 @@ export class StorageLocationsService {
         warehouseCode: warehouse.code,
         warehouseNameEn: warehouse.nameEn,
         warehouseNameAr: warehouse.nameAr,
+        canAllocate: canAllocate(warehouse.id),
         total: located.plus(unlocated).toFixed(MONEY_SCALE),
         locations,
         unlocated: { quantity: unlocated.toFixed(MONEY_SCALE), lots: unlocatedLots },
@@ -776,6 +782,126 @@ export class StorageLocationsService {
         batchId,
         quantity: quantity.toFixed(MONEY_SCALE),
         remainingUnlocated: unlocated.minus(quantity).toFixed(MONEY_SCALE),
+      };
+    });
+  }
+
+  /// Repairs a legacy pair: a shelf that still shows goods that already left
+  /// (older sales wrote the OUT with no location) and an "unlocated" figure
+  /// that went negative by the same amount.
+  ///
+  /// Direction matters: the unlocated bucket goes UP (an IN with no location)
+  /// and the overstated shelf goes DOWN (an OUT at that shelf). Quantity and
+  /// value in the warehouse and branch books do not change, no journal entry
+  /// or document is created. A person must name the shelf and the reason; the
+  /// server only checks the books really are in that state.
+  async reconcileUnlocated(
+    companyId: string,
+    userId: string,
+    input: {
+      warehouseId: string;
+      fromLocationId: string;
+      itemId: string;
+      batchId?: string | null;
+      quantity: string | number;
+      reason: string;
+    },
+    scope: WarehouseScope,
+    warehouseIds?: string[],
+    transferWarehouseIds?: string[],
+  ) {
+    const quantity = new Prisma.Decimal(input.quantity);
+    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException('Quantity must be positive');
+    if ((input.reason ?? '').trim().length < 3) {
+      throw new BadRequestException(
+        'اكتب سبب التصحيح (3 أحرف على الأقل). / Write the reason for this correction (at least 3 characters).',
+      );
+    }
+    const from = await this.prisma.storageLocation.findFirst({
+      where: { id: input.fromLocationId, companyId, deletedAt: null },
+    });
+    if (!from || from.warehouseId !== input.warehouseId) {
+      throw new BadRequestException('The shelf is not in that warehouse. / الموقع ليس في هذا المخزن.');
+    }
+    if (scope !== null && !scope.includes(from.branchId)) {
+      throw new ForbiddenException('This location belongs to another branch');
+    }
+    if (warehouseIds !== undefined && !warehouseIds.includes(from.warehouseId)) {
+      throw new ForbiddenException('You cannot move stock in this warehouse');
+    }
+    if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(from.warehouseId)) {
+      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
+    }
+    const item = await this.prisma.item.findFirst({
+      where: { id: input.itemId, companyId, deletedAt: null },
+      select: { id: true, code: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+    const batchId = input.batchId ?? null;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${from.warehouseId}:${item.id}`}, 0))`,
+      );
+      const sum = async (located: boolean) => {
+        const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
+          SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+            FROM "stock_movements"
+           WHERE "companyId" = ${companyId}::uuid AND "warehouseId" = ${from.warehouseId}::uuid
+             AND "itemId" = ${item.id}::uuid
+             AND ${located ? Prisma.sql`"storageLocationId" = ${from.id}::uuid` : Prisma.sql`"storageLocationId" IS NULL`}
+             ${batchId ? Prisma.sql`AND "batchId" = ${batchId}::uuid` : Prisma.sql`AND "batchId" IS NULL`}
+        `);
+        return new Prisma.Decimal(rows[0]?.quantity ?? 0);
+      };
+      const shelf = await sum(true);
+      const bucket = await sum(false);
+      const deficit = bucket.isNegative() ? bucket.negated() : new Prisma.Decimal(0);
+      if (deficit.isZero()) {
+        throw new BadRequestException(
+          'لا يوجد عجز في الكمية بدون موقع لهذا الصنف، فلا حاجة للتصحيح. / ' +
+            'The unlocated quantity is not negative for this item, so there is nothing to correct.',
+        );
+      }
+      if (quantity.greaterThan(deficit) || quantity.greaterThan(shelf)) {
+        throw new BadRequestException(
+          `أقصى كمية للتصحيح ${Prisma.Decimal.min(deficit, shelf).toFixed(MONEY_SCALE)} ` +
+            `(العجز ${deficit.toFixed(MONEY_SCALE)}، رصيد الموقع ${shelf.toFixed(MONEY_SCALE)}). / ` +
+            `At most ${Prisma.Decimal.min(deficit, shelf).toFixed(MONEY_SCALE)} can be corrected ` +
+            `(unlocated deficit ${deficit.toFixed(MONEY_SCALE)}, shelf holds ${shelf.toFixed(MONEY_SCALE)}). Lower the quantity or pick the shelf the goods really left.`,
+        );
+      }
+      const bal = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(Prisma.sql`
+        SELECT "quantity", "value" FROM "warehouse_stock_balances"
+         WHERE "companyId" = ${companyId}::uuid AND "warehouseId" = ${from.warehouseId}::uuid
+           AND "itemId" = ${item.id}::uuid FOR UPDATE
+      `);
+      const onHand = bal[0]?.quantity ?? new Prisma.Decimal(0);
+      const unitCost = onHand.isZero()
+        ? new Prisma.Decimal(0)
+        : new Prisma.Decimal(bal[0]!.value).div(onHand).toDecimalPlaces(MONEY_SCALE);
+      const totalCost = unitCost.mul(quantity).toDecimalPlaces(MONEY_SCALE);
+      for (const direction of [StockDirection.IN, StockDirection.OUT]) {
+        await tx.stockMovement.create({
+          data: {
+            companyId, branchId: from.branchId, warehouseId: from.warehouseId, itemId: item.id, batchId,
+            storageLocationId: direction === StockDirection.IN ? null : from.id,
+            movementDate: new Date(), direction, quantity, unitCost, totalCost,
+            referenceType: direction === StockDirection.IN ? 'LOCATION_RECONCILE_IN' : 'LOCATION_RECONCILE_OUT',
+            referenceId: from.id, referenceNumber: null, notes: input.reason.trim(), createdBy: userId,
+          },
+        });
+      }
+      if (batchId) await refreshLotPrimaryLocation(tx, companyId, batchId, userId);
+      await this.audit.record({
+        companyId, userId, action: 'RECONCILE_LOCATION', entity: 'storage_locations', entityId: from.id,
+        after: { item: item.code, batchId, quantity: quantity.toFixed(MONEY_SCALE), reason: input.reason.trim() },
+      });
+      return {
+        itemId: item.id, warehouseId: from.warehouseId, locationId: from.id, batchId,
+        quantity: quantity.toFixed(MONEY_SCALE),
+        remainingUnlocatedDeficit: deficit.minus(quantity).toFixed(MONEY_SCALE),
+        shelfAfter: shelf.minus(quantity).toFixed(MONEY_SCALE),
       };
     });
   }

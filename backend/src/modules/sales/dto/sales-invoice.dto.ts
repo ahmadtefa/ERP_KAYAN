@@ -14,6 +14,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+export class LineLocationAllocationDto {
+  @IsUUID() storageLocationId!: string;
+  /// In the same unit as the line's own `quantity`.
+  @IsString() quantity!: string;
+}
+
 export class SalesInvoiceLineDto {
   @IsOptional() @IsUUID() itemId?: string;
   @IsOptional() @IsBoolean() isAdditionalCharge?: boolean;
@@ -53,6 +59,11 @@ export class SalesInvoiceLineDto {
   /// the line value. The server resolves the other representation itself.
   @IsOptional() @IsString() discountPercent?: string;
   @IsOptional() @IsString() discountAmount?: string;
+
+  /// Where the goods come from, picked by the seller; may split the line over
+  /// several locations. The quantities must add up to `quantity`.
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => LineLocationAllocationDto)
+  locationAllocations?: LineLocationAllocationDto[];
 }
 
 export class CreateSalesInvoiceDto {

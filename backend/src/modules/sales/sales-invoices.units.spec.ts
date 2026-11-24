@@ -54,7 +54,12 @@ function makeService(itemOverride: any = milkItem) {
     costCenter: { findFirst: jest.fn() },
     stockMovement: { create: jest.fn(async () => ({})) },
     stockBalance: { update: jest.fn(async () => ({})) },
-    $queryRaw: jest.fn(async () => [{ quantity: D(50), value: D(375) }]),
+    // The same balance row for every lock read, but no placed stock: the
+    // location query joins storage_locations, and this scenario has no shelves.
+    $queryRaw: jest.fn(async (query?: { sql?: string; strings?: string[] }) =>
+      String(query?.sql ?? (query?.strings ?? []).join('?')).includes('storage_locations')
+        ? []
+        : [{ quantity: D(50), value: D(375) }]),
   };
 
   const prisma = {
@@ -212,6 +217,27 @@ describe('Sales multi-unit — milk scenario', () => {
     expect(line.unitFactor.toFixed(6)).toBe('10.000000');
     // Internal stock quantity is 10 base pieces.
     expect(line.quantity.toFixed(4)).toBe('10.0000');
+  });
+
+  it('stores the typed location split of a carton line exactly as typed, and refuses a split that does not add up', async () => {
+    const { service, tx } = makeService();
+    const L1 = '11111111-1111-4111-8111-1111111111a1';
+    const L2 = '11111111-1111-4111-8111-1111111111a2';
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      ...baseDto,
+      lines: [{ itemId: MILK, quantity: '2', unitName: 'كرتونة', locationAllocations: [
+        { storageLocationId: L1, quantity: '1' }, { storageLocationId: L2, quantity: '1' }] }],
+    } as any);
+    const line = tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0];
+    // 2 cartons = 20 base pieces, but the split is kept in cartons.
+    expect(line.quantity.toFixed(4)).toBe('20.0000');
+    expect(line.locationAllocations).toEqual([
+      { storageLocationId: L1, quantity: '1.0000' }, { storageLocationId: L2, quantity: '1.0000' }]);
+    await expect(service.create(COMPANY, BRANCH, 'user-1', {
+      ...baseDto,
+      lines: [{ itemId: MILK, quantity: '2', unitName: 'كرتونة', locationAllocations: [
+        { storageLocationId: L1, quantity: '1' }] }],
+    } as any)).rejects.toThrow(/add up to 1\.0000 but the line quantity is 2\.0000/);
   });
 
   /// The manual-unit-change case, written where the mistake would actually
