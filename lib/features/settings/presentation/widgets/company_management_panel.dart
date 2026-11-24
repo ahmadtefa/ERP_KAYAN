@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../shared/widgets/form_sheet.dart';
+import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
@@ -32,7 +34,6 @@ class _CompanyManagementPanelState
     return user?.isSuperAdmin == true;
   }
 
-  String _companyValue(String key) => _company?[key]?.toString() ?? '';
 
   @override
   void initState() {
@@ -57,18 +58,6 @@ class _CompanyManagementPanelState
 
   Future<void> _editCompany() async {
     if (_company == null) return;
-    final fields = <String, TextEditingController>{
-      'nameEn': TextEditingController(text: _companyValue('nameEn')),
-      'nameAr': TextEditingController(text: _companyValue('nameAr')),
-      'taxId': TextEditingController(text: _companyValue('taxId')),
-      'commercialRegistration': TextEditingController(
-        text: _companyValue('commercialRegistration'),
-      ),
-      'addressEn': TextEditingController(text: _companyValue('addressEn')),
-      'addressAr': TextEditingController(text: _companyValue('addressAr')),
-      'phone': TextEditingController(text: _companyValue('phone')),
-      'email': TextEditingController(text: _companyValue('email')),
-    };
     final labels = <String, String>{
       'nameEn': tr('Name (English)', 'الاسم بالإنجليزية'),
       'nameAr': tr('Name (Arabic)', 'الاسم بالعربية'),
@@ -79,59 +68,56 @@ class _CompanyManagementPanelState
       'phone': tr('Phone', 'الهاتف'),
       'email': tr('Email', 'البريد الإلكتروني'),
     };
-    final save = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(tr('Company profile', 'بيانات الشركة')),
-        content: SizedBox(
-          width: 520,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final entry in fields.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: TextField(
-                      controller: entry.value,
-                      decoration: InputDecoration(
-                        labelText: labels[entry.key],
-                        border: const OutlineInputBorder(),
-                      ),
-                      maxLines: entry.key.startsWith('address') ? 2 : 1,
-                    ),
-                  ),
-              ],
-            ),
+    const limits = {
+      'nameEn': 200,
+      'nameAr': 200,
+      'taxId': 50,
+      'commercialRegistration': 60,
+      'addressEn': 500,
+      'addressAr': 500,
+      'phone': 40,
+      'email': 254,
+    };
+    await showFormSheet(
+      context,
+      title: tr('Company profile', 'بيانات الشركة'),
+      initial: _company,
+      fields: [
+        for (final entry in labels.entries)
+          FieldSpec(
+            entry.key,
+            entry.value,
+            required: entry.key.startsWith('name'),
+            nullWhenEmpty: !entry.key.startsWith('name'),
+            kind: entry.key.startsWith('address')
+                ? FieldKind.multiline
+                : FieldKind.text,
+            validator: (value) {
+              final max = limits[entry.key]!;
+              if (value.length > max) {
+                return tr(
+                  'Use no more than $max characters',
+                  'الحد الأقصى $max حرفًا',
+                );
+              }
+              if (entry.key == 'email' && !Validators.isEmail(value)) {
+                return tr(
+                  'Enter a valid email',
+                  'أدخل بريدًا إلكترونيًا صحيحًا',
+                );
+              }
+              return null;
+            },
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(tr('Cancel', 'إلغاء')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(tr('Save', 'حفظ')),
-          ),
-        ],
-      ),
-    );
-    if (save == true && mounted) {
-      await _run(() async {
-        final body = {
-          for (final entry in fields.entries)
-            entry.key: entry.value.text.trim(),
-        };
+      ],
+      onSubmit: (body) async {
         _company = await ref
             .read(apiClientProvider)
             .patch('/companies/profile', body: body);
         ref.invalidate(companyBrandingProvider);
-      });
-    }
-    for (final controller in fields.values) {
-      controller.dispose();
-    }
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   Future<void> _chooseLogo() async {
@@ -210,8 +196,11 @@ class _CompanyManagementPanelState
         'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.',
       );
     }
-    if (lower.contains('logo') || lower.contains('image') ||
-        lower.contains('png') || lower.contains('jpeg') || lower.contains('webp')) {
+    if (lower.contains('logo') ||
+        lower.contains('image') ||
+        lower.contains('png') ||
+        lower.contains('jpeg') ||
+        lower.contains('webp')) {
       return tr(
         'Choose a valid PNG, JPEG or WebP image at least 32 × 32 pixels.',
         'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.',

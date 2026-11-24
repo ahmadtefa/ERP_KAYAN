@@ -31,6 +31,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
   final _manager = TextEditingController();
   final _salesManager = TextEditingController();
   final _salesPhone = TextEditingController();
+  final _errors = <String, String>{};
   bool _showTaxId = true;
   bool _loaded = false;
   bool _saving = false;
@@ -52,8 +53,11 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() {
-        _maxDiscount.text =
-            text(settings, 'maxDiscountPercent', fallback: '100.0000');
+        _maxDiscount.text = text(
+          settings,
+          'maxDiscountPercent',
+          fallback: '100.0000',
+        );
         _manager.text = text(settings, 'managerName');
         _salesManager.text = text(settings, 'salesManagerName');
         _salesPhone.text = text(settings, 'salesManagerPhone');
@@ -64,31 +68,68 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
 
   Future<void> _save() async {
     final l10n = context.l10n;
-    final percent = double.tryParse(_maxDiscount.text.trim());
-    if (percent == null || percent < 0 || percent > 100) {
-      // A validation problem is an error, not a note: it blocks the save and
-      // the person has to read it before correcting the field.
-      showMessage(context, l10n.invalidSetting, error: true);
-      return;
+    final raw = _maxDiscount.text.trim();
+    final percent = double.tryParse(raw);
+    final errors = <String, String>{};
+    if (!RegExp(r'^\d{1,3}(\.\d{1,4})?$').hasMatch(raw) ||
+        percent == null ||
+        !percent.isFinite ||
+        percent < 0 ||
+        percent > 100) {
+      errors['maxDiscountPercent'] = l10n.invalidSetting;
     }
+    for (final entry in {
+      'managerName': _manager,
+      'salesManagerName': _salesManager,
+      'salesManagerPhone': _salesPhone,
+    }.entries) {
+      if (entry.value.text.trim().length > 160) {
+        errors[entry.key] = Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الحد الأقصى 160 حرفًا'
+            : 'Use no more than 160 characters';
+      }
+    }
+    setState(() {
+      _errors
+        ..clear()
+        ..addAll(errors);
+    });
+    if (errors.isNotEmpty) return;
     setState(() => _saving = true);
     try {
-      await ref.read(apiClientProvider).patch(
-        '/accounting/settings',
-        body: {
-          'maxDiscountPercent': _maxDiscount.text.trim(),
-          'showTaxIdOnQuotations': _showTaxId,
-          'managerName': _manager.text.trim(),
-          'salesManagerName': _salesManager.text.trim(),
-          'salesManagerPhone': _salesPhone.text.trim(),
-        },
-      );
+      await ref
+          .read(apiClientProvider)
+          .patch(
+            '/accounting/settings',
+            body: {
+              'maxDiscountPercent': _maxDiscount.text.trim(),
+              'showTaxIdOnQuotations': _showTaxId,
+              'managerName': _manager.text.trim(),
+              'salesManagerName': _salesManager.text.trim(),
+              'salesManagerPhone': _salesPhone.text.trim(),
+            },
+          );
       ref.invalidate(companySettingsProvider);
       if (mounted) {
         showMessage(context, l10n.settingsSaved);
       }
     } on Failure catch (error) {
       if (mounted) {
+        if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
+          const fields = {
+            'maxDiscountPercent',
+            'managerName',
+            'salesManagerName',
+            'salesManagerPhone',
+          };
+          setState(() {
+            _errors.addAll({
+              for (final entry in error.fieldErrors.entries)
+                if (fields.contains(entry.key)) entry.key: entry.value,
+            });
+          });
+          if (error.fieldErrors.keys.every(fields.contains)) return;
+        }
         showMessage(context, error, error: true);
       }
     } catch (error) {
@@ -141,12 +182,18 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                       width: 190,
                       child: TextField(
                         controller: _maxDiscount,
+                        onChanged: (_) {
+                          if (_errors.remove('maxDiscountPercent') != null) {
+                            setState(() {});
+                          }
+                        },
                         enabled: canEdit,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
                         decoration: InputDecoration(
                           labelText: l10n.maximumDiscount,
+                          errorText: _errors['maxDiscountPercent'],
                           border: const OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -156,9 +203,15 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                       width: 230,
                       child: TextField(
                         controller: _manager,
+                        onChanged: (_) {
+                          if (_errors.remove('managerName') != null) {
+                            setState(() {});
+                          }
+                        },
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.managerName,
+                          errorText: _errors['managerName'],
                           border: const OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -168,9 +221,15 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                       width: 230,
                       child: TextField(
                         controller: _salesManager,
+                        onChanged: (_) {
+                          if (_errors.remove('salesManagerName') != null) {
+                            setState(() {});
+                          }
+                        },
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.salesManagerName,
+                          errorText: _errors['salesManagerName'],
                           border: const OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -180,9 +239,15 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                       width: 210,
                       child: TextField(
                         controller: _salesPhone,
+                        onChanged: (_) {
+                          if (_errors.remove('salesManagerPhone') != null) {
+                            setState(() {});
+                          }
+                        },
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.salesManagerPhone,
+                          errorText: _errors['salesManagerPhone'],
                           border: const OutlineInputBorder(),
                           isDense: true,
                         ),

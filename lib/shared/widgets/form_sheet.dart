@@ -1,4 +1,5 @@
 import '../../core/error/app_error_text.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -44,7 +45,15 @@ class FieldSpec {
     this.emptyValue,
     this.clearable = false,
     this.obscure = false,
+    this.validator,
+    this.nullWhenEmpty = false,
   });
+
+  /// Additional source-grounded domain constraints, applied before submit.
+  final String? Function(String value)? validator;
+
+  /// Send explicit null to clear a nullable optional API field.
+  final bool nullWhenEmpty;
 
   final String key;
   final String label;
@@ -245,6 +254,8 @@ class _FormSheetState extends State<_FormSheet> {
     final text = value?.trim() ?? '';
     if (field.required && text.isEmpty) return context.l10n.requiredField;
     if (text.isEmpty) return null;
+    final reason = field.validator?.call(text);
+    if (reason != null) return reason;
     switch (field.kind) {
       case FieldKind.decimal:
         // Amounts stay text all the way to the API, so validate the shape
@@ -318,6 +329,8 @@ class _FormSheetState extends State<_FormSheet> {
           final text = _controllers[field.key]!.text.trim();
           if (text.isNotEmpty) {
             result[field.key] = text;
+          } else if (field.nullWhenEmpty) {
+            result[field.key] = null;
           } else if (field.emptyValue != null) {
             result[field.key] = field.emptyValue;
           }
@@ -336,7 +349,8 @@ class _FormSheetState extends State<_FormSheet> {
       // Only structured 400/422 field errors are safe to unwrap here; an
       // unknown transport/process outcome keeps its existing retry lock.
       final cause = caught is UncertainFormSubmission ? caught.cause : caught;
-      final error = cause is ApiFailure &&
+      final error =
+          cause is ApiFailure &&
               const {400, 422}.contains(cause.statusCode) &&
               cause.fieldErrors.isNotEmpty
           ? cause
