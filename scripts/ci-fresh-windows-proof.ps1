@@ -127,8 +127,12 @@ try {
  $keys.SendKeys($probeDir);$keys.SendKeys('{ENTER}');Start-Sleep 3
  Screenshot 'native-open-directory'
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
- $names=@($elements | ForEach-Object {$_.Current.Name})
- if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){
+ # Explorer may hide known extensions in display names. Compare only real
+ # file-list items and accept either shell display form, never labels/filters.
+ $names=@($elements | Where-Object { $_.Current.ControlType -eq [Windows.Automation.ControlType]::ListItem -and $_.Current.ClassName -eq 'UIItem' } | ForEach-Object {$_.Current.Name})
+ $allowedVisible=($names -contains 'visible.json') -or ($names -contains 'visible')
+ $forbiddenVisible=($names -contains 'hidden.txt') -or ($names -contains 'hidden')
+ if(-not $allowedVisible -or $forbiddenVisible){
   @($elements | ForEach-Object { [ordered]@{name=$_.Current.Name;class=$_.Current.ClassName;type=$_.Current.ControlType.ProgrammaticName} }) | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'filter-tree.json')
   throw 'Allowed extension not visible by default or forbidden file visible'
  }
