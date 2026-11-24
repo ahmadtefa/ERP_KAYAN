@@ -474,17 +474,18 @@ void main() {
       // the section in the base step of the same hue.
       await tester.tap(find.byKey(const ValueKey('nav-group-sales')));
       await tester.pumpAndSettle();
-      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
+      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.base);
       final salesIcon = find.descendant(
         of: find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
         matching: find.byIcon(Icons.point_of_sale_outlined, skipOffstage: false),
       );
-      expect(tester.widget<Icon>(salesIcon).color, AppColors.navyDeep);
+      expect(tester.widget<Icon>(salesIcon).color, Colors.white);
       expect(
         find.byWidgetPredicate(
           (w) =>
               w is Text &&
               w.data == 'المبيعات' &&
+              w.style?.letterSpacing == 0.6 &&
               w.style?.color == SectionAccents.sales.base,
         ),
         findsOneWidget,
@@ -504,12 +505,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('nav-group-parties')));
       await tester.pumpAndSettle();
-      expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
+      expect(titleColorOf('العملاء'), SectionAccents.parties.base);
       expect(
         find.byWidgetPredicate(
           (w) =>
               w is Text &&
               w.data == 'العملاء والموردون' &&
+              w.style?.letterSpacing == 0.6 &&
               w.style?.color == SectionAccents.parties.base,
         ),
         findsOneWidget,

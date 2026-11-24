@@ -1,4 +1,5 @@
 import 'package:erp_kayan/app/router/app_router.dart';
+import 'package:erp_kayan/features/settings/presentation/providers/appearance_provider.dart';
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/design_tokens.dart';
@@ -32,7 +33,24 @@ class _Api extends ApiClient {
   }) async => {};
 }
 
+class _TopMode extends AppearanceController {
+  @override Future<Appearance> build() async=>const Appearance(topNavigation:true);
+}
 void main() {
+  testWidgets('top dropdown routes preserve draft guard and narrow fallback', (tester) async {
+    tester.view.physicalSize=const Size(1400,900);tester.view.devicePixelRatio=1;addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
+    var allow=false;final guard=DraftExitGuard();
+    final router=GoRouter(initialLocation:AppRoutes.salesInvoices,routes:[for(final path in [AppRoutes.dashboard,AppRoutes.salesInvoices,AppRoutes.settings]) GoRoute(path:path,onExit:path==AppRoutes.salesInvoices?(context,state)=>guard.canLeave(state.pageKey):null,builder:(context,state){
+      if(path==AppRoutes.salesInvoices) {guard.register(state.pageKey,()async=>allow);}
+      return ErpShell(currentPath:path,guardKey:path==AppRoutes.salesInvoices?state.pageKey:null,child:Text('Screen $path'));
+    })]);addTearDown(router.dispose);
+    await tester.pumpWidget(ProviderScope(overrides:[appearanceProvider.overrideWith(_TopMode.new),draftExitGuardProvider.overrideWithValue(guard),apiClientProvider.overrideWithValue(_Api()),currentUserProvider.overrideWithValue(const AppUser(id:'sales',username:'sales',fullName:'Sales',companyId:'co',permissions:['sales.invoices.read']))],child:MaterialApp.router(routerConfig:router,locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales)));
+    await tester.pumpAndSettle();expect(find.byKey(const Key('top-dropdown-navigation')),findsOneWidget);expect(find.byKey(const ValueKey('top-nav-accounting')),findsNothing);
+    Future<void> home() async {await tester.tap(find.byKey(const ValueKey('top-nav-overview')));await tester.pumpAndSettle();await tester.tap(find.text('لوحة التحكم').last);await tester.pumpAndSettle();}
+    await home();expect(router.routeInformationProvider.value.uri.path,AppRoutes.salesInvoices);allow=true;await home();expect(router.routeInformationProvider.value.uri.path,AppRoutes.dashboard);
+    tester.view.physicalSize=const Size(375,800);await tester.pumpAndSettle();expect(find.byKey(const Key('top-dropdown-navigation')),findsNothing);expect(tester.takeException(),isNull);
+  });
+
   testWidgets(
     'home shortcut respects draft guards and replaces the route stack after approval',
     (tester) async {

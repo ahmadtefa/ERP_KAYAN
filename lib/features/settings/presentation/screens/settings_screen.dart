@@ -15,6 +15,7 @@ import '../widgets/lan_access_card.dart';
 import '../widgets/reset_data_card.dart';
 import '../widgets/document_settings_card.dart';
 import '../widgets/text_scale_card.dart';
+import '../widgets/appearance_card.dart';
 
 final _runtimeBuildInfoProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
   (ref) => ref.read(apiClientProvider).get('/health'),
@@ -106,6 +107,8 @@ class SettingsScreen extends ConsumerWidget {
         const SizedBox(height: 16),
         const UserPhotoCard(),
         const SizedBox(height: 16),
+        const AppearanceCard(),
+        const SizedBox(height:16),
         const TextScaleCard(),
         const SizedBox(height: 16),
         const LanAccessCard(),

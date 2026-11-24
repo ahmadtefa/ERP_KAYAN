@@ -36,10 +36,10 @@ abstract final class AppColors {
   static const accent = Color(0xFF3B82E0);
 
   // Canvas and surfaces — cool, faintly blue light behind white cards.
-  static const background = Color(0xFFF3F6FB);
+  static const background = Color(0xFFF4F4F5);
   static const surface = Color(0xFFFFFFFF);
-  static const surfaceMuted = Color(0xFFF8FAFD);
-  static const surfaceSunken = Color(0xFFEAF0F8);
+  static const surfaceMuted = Color(0xFFFAFAFA);
+  static const surfaceSunken = Color(0xFFEFEFF1);
 
   // Text — navy-tinted ink rather than neutral black.
   static const textPrimary = Color(0xFF16233A);
@@ -49,8 +49,8 @@ abstract final class AppColors {
   static const onNavyMuted = Color(0xFFB7C6DA);
 
   // Lines.
-  static const border = Color(0xFFDCE5F2);
-  static const borderStrong = Color(0xFFB9C8DE);
+  static const border = Color(0xFFDADCE0);
+  static const borderStrong = Color(0xFFB7BBC2);
 
   // Meaning.
   static const success = Color(0xFF12805C);

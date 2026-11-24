@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/settings/presentation/providers/locale_provider.dart';
+import '../features/settings/presentation/providers/appearance_provider.dart';
 import '../features/settings/presentation/providers/text_scale_provider.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../shared/extensions/l10n_extension.dart';
@@ -27,7 +28,7 @@ class ErpApp extends ConsumerWidget {
     return MaterialApp.router(
       onGenerateTitle: (context) => context.l10n.appTitle,
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
+      themeMode: ref.watch(appearanceProvider).value?.light == true ? ThemeMode.light : ThemeMode.dark,
       theme: AppTheme.light(textScale: textScale),
       darkTheme: AppTheme.dark(textScale: textScale),
       routerConfig: router,

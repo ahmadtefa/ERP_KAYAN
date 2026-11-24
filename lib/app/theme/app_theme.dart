@@ -109,7 +109,7 @@ abstract final class AppTheme {
       // it *is* the sidebar, and the two must not disagree about what the
       // program looks like.
       drawerTheme: DrawerThemeData(
-        backgroundColor: AppColors.navy,
+        backgroundColor: isLight ? AppColors.surfaceMuted : AppColors.navy,
         surfaceTintColor: Colors.transparent,
         width: 290,
         shape: const RoundedRectangleBorder(),
@@ -431,7 +431,7 @@ abstract final class AppTheme {
 
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.navy,
+        backgroundColor: isLight ? AppColors.surfaceMuted : AppColors.navy,
         contentTextStyle: const TextStyle(fontFamily: _fontFamily, color: Colors.white, fontSize: 13),
         elevation: 0,
         shape: RoundedRectangleBorder(

@@ -126,6 +126,14 @@ class TokenStore {
     await _delete(_kRefreshToken);
   }
 
+  Future<String?> readAppearance(String key) async {
+    try { return (await SharedPreferences.getInstance()).getString('kayan.appearance.$key'); } catch (_) { return null; }
+  }
+  Future<void> saveAppearance(String key, String value) async {
+    final ok=await (await SharedPreferences.getInstance()).setString('kayan.appearance.$key', value);
+    if(!ok) throw StateError('Could not save appearance preference');
+  }
+
   Future<String?> readLocale() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_kLocale);

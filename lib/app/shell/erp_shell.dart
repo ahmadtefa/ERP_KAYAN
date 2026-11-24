@@ -9,11 +9,15 @@ import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
+import '../../features/settings/presentation/providers/appearance_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
 import '../../shared/widgets/app_error_dialog.dart';
 import '../router/draft_exit_guard.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
+
+Color _sidebarText(BuildContext context) => Theme.of(context).brightness==Brightness.dark ? AppColors.onSidebar : Theme.of(context).colorScheme.onSurface;
+Color _sidebarMuted(BuildContext context) => Theme.of(context).brightness==Brightness.dark ? AppColors.onSidebarMuted : Theme.of(context).colorScheme.onSurfaceVariant;
 
 /// One entry in the navigation.
 ///
@@ -263,6 +267,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final isWide = width >= ErpShell._wideBreakpoint;
+    final topNavigation = isWide && (ref.watch(appearanceProvider).value?.topNavigation ?? false);
     final isExtendedByWidth = width >= ErpShell._extendedBreakpoint;
     final isManuallyCollapsed = ref.watch(_sidebarManuallyCollapsedProvider);
     final isExtended = isExtendedByWidth && !isManuallyCollapsed;
@@ -305,7 +310,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         bottom: false,
         child: Row(
           children: [
-            if (isWide)
+            if (isWide && !topNavigation)
               _Sidebar(
                 items: items,
                 selectedPath: isInputs || isOutputs ? widget.currentPath : items[selectedIndex].path,
@@ -330,6 +335,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     guardKey: widget.guardKey,
                     onOpenMenu: ref.read(_collapsedNavProvider.notifier).close,
                   ),
+                  if(topNavigation) _TopDropdownNavigation(items:items,current:widget.currentPath),
                   Expanded(
                     child: LicenceGate(
                       currentPath: widget.currentPath,
@@ -759,7 +765,7 @@ class _Sidebar extends StatelessWidget {
       // its lit top to its base. The sections' own colours ride on it as
       // lit tiles and edge marks — structure from the navy, identity from
       // the accent — while the work surfaces beside it stay white.
-      decoration: const BoxDecoration(gradient: AppGradients.sidebar),
+      decoration: BoxDecoration(gradient: Theme.of(context).brightness==Brightness.dark ? AppGradients.sidebar : null,color:Theme.of(context).brightness==Brightness.light ? Theme.of(context).colorScheme.surface : null),
       child: Column(
         children: [
           _SidebarBrand(extended: extended, onToggleCollapse: onToggleCollapse),
@@ -874,7 +880,7 @@ class _SidebarBrand extends StatelessWidget {
                 Text(
                   'KAYAN',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: AppColors.onSidebar,
+                    color: _sidebarText(context),
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.6,
                     fontSize: 15,
@@ -883,7 +889,7 @@ class _SidebarBrand extends StatelessWidget {
                 Text(
                   'ERP SUITE',
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.onSidebarMuted,
+                    color: _sidebarMuted(context),
                     letterSpacing: 2.0,
                     fontSize: 9,
                     fontWeight: FontWeight.w600,
@@ -894,7 +900,7 @@ class _SidebarBrand extends StatelessWidget {
           ),
           if (onToggleCollapse != null)
             IconButton(
-              icon: const Icon(Icons.menu_open_rounded, size: 19, color: AppColors.onSidebarMuted),
+              icon: Icon(Icons.menu_open_rounded, size: 19, color: _sidebarMuted(context)),
               tooltip: 'تصغير القائمة الجانبية',
               onPressed: onToggleCollapse,
             ),
@@ -937,7 +943,7 @@ class _GroupLabel extends StatelessWidget {
           child: Icon(
             icon,
             size: 20,
-            color: accent.darkBase,
+            color: accent.of(Theme.of(context).brightness),
           ),
         ))));
     }
@@ -950,14 +956,14 @@ class _GroupLabel extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
       decoration: BoxDecoration(
         color: active
-            ? accent.darkBase.withValues(alpha: 0.18)
+            ? accent.of(Theme.of(context).brightness).withValues(alpha: 0.18)
             : expanded
                 ? Colors.white.withValues(alpha: 0.08)
                 : Colors.white.withValues(alpha: 0.035),
         borderRadius: BorderRadius.circular(AppRadii.md),
         border: BorderDirectional(
           start: BorderSide(
-            color: active || expanded ? accent.darkBase : Colors.transparent,
+            color: active || expanded ? accent.of(Theme.of(context).brightness) : Colors.transparent,
             width: 3,
           ),
         ),
@@ -969,10 +975,10 @@ class _GroupLabel extends StatelessWidget {
             height: 30,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: accent.darkBase.withValues(alpha: active || expanded ? 0.23 : 0.12),
+              color: accent.of(Theme.of(context).brightness).withValues(alpha: active || expanded ? 0.23 : 0.12),
               borderRadius: BorderRadius.circular(AppRadii.md),
             ),
-            child: Icon(icon, size: 19, color: accent.darkBase),
+            child: Icon(icon, size: 19, color: accent.of(Theme.of(context).brightness)),
           ),
           const SizedBox(width: 9),
           Expanded(
@@ -981,14 +987,14 @@ class _GroupLabel extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: active ? accent.darkBase : AppColors.onSidebarMuted,
+                color: active ? accent.of(Theme.of(context).brightness) : _sidebarMuted(context),
                 fontSize: 10.5,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
               ),
             ),
           ),
-          Icon(expanded ? Icons.expand_less_rounded : Icons.chevron_right_rounded, size: 18, color: accent.darkBase),
+          Icon(expanded ? Icons.expand_less_rounded : Icons.chevron_right_rounded, size: 18, color: accent.of(Theme.of(context).brightness)),
         ],
       ),
     ))));
@@ -1011,7 +1017,7 @@ class _NavEntry extends StatelessWidget {
     final accent = item.accent;
     // The sidebar is navy in both themes, so every accent is read in its
     // brighter, dark-surface step here.
-    final accentColor = accent.darkBase;
+    final accentColor = accent.of(Theme.of(context).brightness);
 
     // Every entry wears its section colour in a small icon tile, selected
     // or not; selecting it fills the tile, washes the row, colours the
@@ -1041,7 +1047,7 @@ class _NavEntry extends StatelessWidget {
         // The selected tile uses the light accent step. A white glyph on
         // those pastel fills has insufficient contrast; navy remains legible
         // for every section while retaining the section's colour on the tile.
-        color: selected ? AppColors.navyDeep : accentColor,
+        color: selected ? (Theme.of(context).brightness==Brightness.dark ? AppColors.navyDeep : Colors.white) : accentColor,
       ),
     );
 
@@ -1122,7 +1128,7 @@ class _NavEntry extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: selected ? accentColor : AppColors.onSidebar,
+                color: selected ? accentColor : _sidebarText(context),
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
@@ -1173,8 +1179,8 @@ class _SidebarFooter extends ConsumerWidget {
       child: photo == null
           ? Text(
               initials,
-              style: const TextStyle(
-                color: AppColors.onSidebar,
+              style: TextStyle(
+                color: _sidebarText(context),
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
@@ -1188,8 +1194,8 @@ class _SidebarFooter extends ConsumerWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => Text(
                   initials,
-                  style: const TextStyle(
-                    color: AppColors.onSidebar,
+                  style: TextStyle(
+                    color: _sidebarText(context),
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
@@ -1231,7 +1237,7 @@ class _SidebarFooter extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: AppColors.onSidebar,
+                    color: _sidebarText(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -1241,7 +1247,7 @@ class _SidebarFooter extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.onSidebarMuted,
+                    color: _sidebarMuted(context),
                     fontSize: 10.5,
                   ),
                 ),
@@ -1711,5 +1717,21 @@ class _ModuleDrawer extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Same permission-filtered routes as the sidebar, no second menu inventory.
+class _TopDropdownNavigation extends StatelessWidget {
+  const _TopDropdownNavigation({required this.items,required this.current});
+  final List<_NavItem> items; final String current;
+  @override
+  Widget build(BuildContext context) {
+    final ar=Localizations.localeOf(context).languageCode=='ar';
+    return Material(color:Theme.of(context).colorScheme.surface,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(key:const Key('top-dropdown-navigation'),children:[
+      for(final group in _NavGroup.values) if(items.any((item)=>item.group==group))
+        Padding(padding:const EdgeInsets.symmetric(horizontal:4,vertical:6),child:PopupMenuButton<String>(key:ValueKey('top-nav-${group.name}'),tooltip:_Sidebar._groupLabel(group,ar),onSelected:(path)=>context.go(path),itemBuilder:(context)=>[
+          for(final item in items.where((item)=>item.group==group)) PopupMenuItem(value:item.path,child:Row(children:[Icon(item.icon,color:item.accent.of(Theme.of(context).brightness),size:20),const SizedBox(width:10),Flexible(child:Text(item.label))])),
+        ],child:Padding(padding:const EdgeInsets.all(10),child:Row(children:[Icon(_iconForGroup(group),size:18,color:_accentForGroup(group).of(Theme.of(context).brightness)),const SizedBox(width:6),Text(_Sidebar._groupLabel(group,ar),style:TextStyle(fontWeight:items.any((item)=>item.group==group&&_belongsTo(item.path,current))?FontWeight.w700:FontWeight.w500)),const Icon(Icons.arrow_drop_down,size:18)])))),
+    ])));
   }
 }
