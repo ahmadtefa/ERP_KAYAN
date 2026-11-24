@@ -26,6 +26,15 @@ class MoveStockDto {
   @IsOptional() @IsString() reason?: string | null;
 }
 
+class AssignUnlocatedDto {
+  @IsString() warehouseId!: string;
+  @IsString() toLocationId!: string;
+  @IsString() itemId!: string;
+  @IsOptional() @IsString() batchId?: string | null;
+  @IsOptional() quantity!: number | string;
+  @IsOptional() @IsString() reason?: string | null;
+}
+
 /**
  * Where inside the warehouse the goods are.
  *
@@ -77,6 +86,35 @@ export class StorageLocationsController {
       dto,
       warehouseScopeOf(user),
       grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
+  }
+
+  @Get('item/:itemId')
+  @RequirePermissions('inventory.warehouses.read')
+  itemLocations(
+    @CurrentUser() user: AuthUser,
+    @Param('itemId') itemId: string,
+    @Query() query: { warehouseId?: string },
+  ) {
+    return this.service.itemLocations(
+      user.companyId,
+      itemId,
+      { warehouseId: query.warehouseId },
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+    );
+  }
+
+  @Post('assign-unlocated')
+  @RequirePermissions('inventory.stock.adjust')
+  assignUnlocated(@CurrentUser() user: AuthUser, @Body() dto: AssignUnlocatedDto) {
+    return this.service.assignUnlocated(
+      user.companyId,
+      user.userId,
+      dto,
+      warehouseScopeOf(user),
+      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      grantsOf(user)?.filter((grant) => grant.canTransfer).map((grant) => grant.warehouseId),
     );
   }
 

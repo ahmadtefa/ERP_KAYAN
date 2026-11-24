@@ -557,10 +557,14 @@ describe('storage locations', () => {
     expect(created[0].referenceType).toBe('LOCATION_MOVE_OUT');
     expect(created[1].referenceType).toBe('LOCATION_MOVE_IN');
     expect(created[0].notes).toBe('re-shelving');
-    // The lot keeps its quantity and changes shelf.
+    // The lot keeps its quantity. Its row is re-derived from the ledger (the
+    // shelf holding most of it) instead of being overwritten with the
+    // destination, which was wrong for a partial move; the real-engine proof
+    // is in storage-locations.lifecycle.integration.spec.ts. This stand-in
+    // ledger has no lot rows, so the derived value is null here.
     expect(state.batches[0]).toMatchObject({
       where: { id: LOT, companyId: COMPANY },
-      data: { storageLocationId: 'loc-shelf-2', updatedBy: USER },
+      data: { storageLocationId: null, updatedBy: USER },
     });
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({

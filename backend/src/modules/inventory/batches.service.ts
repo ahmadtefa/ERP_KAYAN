@@ -1,3 +1,4 @@
+import { refreshLotPrimaryLocation } from './lot-primary-location';
 import {
   BadRequestException,
   ConflictException,
@@ -241,10 +242,48 @@ export class BatchesService {
       : [];
     const byId = new Map(locations.map((location) => [location.id, location]));
 
+    // Where each lot on this page really lies, from the ledger. A lot can be
+    // split over shelves or only partly placed, which `storageLocationId`
+    // (set only when the whole lot is on one shelf) cannot say.
+    const batchIds = rows.map((row) => row.id);
+    const placed = batchIds.length
+      ? await this.prisma.$queryRaw<
+          Array<{ batchId: string; storageLocationId: string | null; quantity: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "batchId", "storageLocationId",
+                 SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+            FROM "stock_movements"
+           WHERE "companyId" = ${companyId}::uuid AND "batchId" = ANY(${batchIds}::uuid[])
+           GROUP BY "batchId", "storageLocationId"
+          HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) <> 0
+        `)
+      : [];
+    const placedLocationIds = [...new Set(placed.map((r) => r.storageLocationId).filter((x): x is string => !!x))]
+      .filter((id) => !byId.has(id));
+    if (placedLocationIds.length) {
+      for (const l of await this.prisma.storageLocation.findMany({
+        where: { id: { in: placedLocationIds }, companyId },
+        select: { id: true, code: true, nameEn: true, nameAr: true, kind: true },
+      })) byId.set(l.id, l);
+    }
+
     const today = new Date();
     return {
       items: rows.map((row) => ({
         ...row,
+        locations: placed
+          .filter((r) => r.batchId === row.id && r.storageLocationId)
+          .map((r) => ({
+            locationId: r.storageLocationId,
+            code: byId.get(r.storageLocationId as string)?.code ?? null,
+            nameEn: byId.get(r.storageLocationId as string)?.nameEn ?? null,
+            nameAr: byId.get(r.storageLocationId as string)?.nameAr ?? null,
+            quantity: new Prisma.Decimal(r.quantity).toFixed(MONEY_SCALE),
+          })),
+        unplacedQuantity: placed
+          .filter((r) => r.batchId === row.id && !r.storageLocationId)
+          .reduce((acc, r) => acc.plus(r.quantity), new Prisma.Decimal(0))
+          .toFixed(MONEY_SCALE),
         // The same field name the receive and issue calls accept, so a form
         // that reads a lot back can send the shelf unchanged.
         storageLocation: row.storageLocationId
@@ -801,15 +840,37 @@ export class BatchesService {
       // be surprised by a lot it never agreed to use.
       const expiredEligible = approvalRecorded && input.allowExpired !== false;
 
-      const lotsForFefo = lots.map((lot) => ({
-        batchId: lot.id,
-        batchNumber: lot.batchNumber,
-        expiryDate: lot.expiryDate,
-        productionDate: lot.productionDate,
-        unitCost: lot.unitCost,
-        remainingQuantity: lot.remainingQuantity,
-        status: lot.status,
-      }));
+      // When the caller names the shelf the goods come from, a lot may only
+      // give what is physically on that shelf. A lot's own remaining quantity
+      // is the whole lot, wherever it sits, so it is capped here by the
+      // movement ledger's figure for that shelf.
+      let atLocation: Map<string, Prisma.Decimal> | null = null;
+      if (input.storageLocationId) {
+        await this.requireLocationForIssue(tx, companyId, warehouse.id, input.storageLocationId);
+        atLocation = await this.lotQuantitiesAt(tx, companyId, warehouse.id, item.id, input.storageLocationId);
+      }
+      const lotsForFefo = lots
+        .map((lot) => ({
+          batchId: lot.id,
+          batchNumber: lot.batchNumber,
+          expiryDate: lot.expiryDate,
+          productionDate: lot.productionDate,
+          unitCost: lot.unitCost,
+          remainingQuantity: atLocation
+            ? Prisma.Decimal.min(lot.remainingQuantity, atLocation.get(lot.id) ?? new Prisma.Decimal(0))
+            : lot.remainingQuantity,
+          status: lot.status,
+        }))
+        .filter((lot) => lot.remainingQuantity.greaterThan(0));
+      if (atLocation) {
+        const here = lotsForFefo.reduce((acc, lot) => acc.plus(lot.remainingQuantity), new Prisma.Decimal(0));
+        if (here.lessThan(quantity)) {
+          throw new BadRequestException(
+            `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
+              `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.`,
+          );
+        }
+      }
 
       // Expired lots stay out of the running for anyone who cannot approve
       // them, so a cashier selling an item that happens to have an old lot in
@@ -924,6 +985,9 @@ export class BatchesService {
             createdBy: userId,
           },
         });
+        if (input.storageLocationId) {
+          await refreshLotPrimaryLocation(tx, companyId, allocation.batchId, null);
+        }
         movements.push({
           batchId: allocation.batchId,
           quantity: allocation.quantity.toFixed(MONEY_SCALE),
@@ -1012,6 +1076,18 @@ export class BatchesService {
   ) {
     const shelf = await this.shelf(tx, companyId, warehouse, item.id);
     const onHand = shelf.quantity;
+    if (input.storageLocationId && warehouse.id) {
+      await this.requireLocationForIssue(tx, companyId, warehouse.id, input.storageLocationId);
+      const here = (
+        await this.lotQuantitiesAt(tx, companyId, warehouse.id, item.id, input.storageLocationId)
+      ).get('') ?? new Prisma.Decimal(0);
+      if (here.lessThan(quantity)) {
+        throw new BadRequestException(
+          `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
+            `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.`,
+        );
+      }
+    }
     if (onHand.lessThan(quantity)) {
       throw new BadRequestException(
         `الرصيد غير كافٍ في هذا المخزن: ${onHand.toFixed(MONEY_SCALE)} متاح، ` +
@@ -1025,6 +1101,7 @@ export class BatchesService {
         branchId: warehouse.branchId,
         warehouseId: warehouse.id,
         itemId: item.id,
+        storageLocationId: input.storageLocationId ?? null,
         movementDate: today,
         direction: StockDirection.OUT,
         quantity,
@@ -1772,6 +1849,49 @@ export class BatchesService {
       );
     }
     return item;
+  }
+
+  /// An issue may leave an inactive shelf (the goods are still on it), but
+  /// never a shelf of another warehouse.
+  private async requireLocationForIssue(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    locationId: string,
+  ) {
+    const location = await tx.storageLocation.findFirst({
+      where: { id: locationId, companyId, warehouseId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        'موقع التخزين غير موجود في هذا المخزن. / The storage location is not in this warehouse.',
+      );
+    }
+  }
+
+  /// What one shelf holds of one item, by lot, from the movement ledger.
+  /// Movements with no lot are keyed by the empty string.
+  private async lotQuantitiesAt(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+    locationId: string,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ batchId: string | null; quantity: Prisma.Decimal | null }>>(
+      Prisma.sql`
+        SELECT "batchId",
+               SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+          FROM "stock_movements"
+         WHERE "companyId" = ${companyId}::uuid
+           AND "warehouseId" = ${warehouseId}::uuid
+           AND "itemId" = ${itemId}::uuid
+           AND "storageLocationId" = ${locationId}::uuid
+         GROUP BY "batchId"
+      `,
+    );
+    return new Map(rows.map((r) => [r.batchId ?? '', new Prisma.Decimal(r.quantity ?? 0)]));
   }
 
   private async requireLocation(companyId: string, warehouseId: string, locationId: string) {

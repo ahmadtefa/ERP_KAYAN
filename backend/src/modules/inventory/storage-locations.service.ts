@@ -11,6 +11,7 @@ import { Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseScope } from '../../common/warehouse/warehouse.service';
+import { refreshLotPrimaryLocation } from './lot-primary-location';
 
 const MONEY_SCALE = 4;
 const LOCATION_KINDS = ['ZONE', 'AISLE', 'RACK', 'SHELF', 'BIN'] as const;
@@ -492,13 +493,9 @@ export class StorageLocationsService {
         });
       }
 
-      // The lot keeps its quantity; only its shelf changed.
-      if (input.batchId) {
-        await tx.itemBatch.updateMany({
-          where: { id: input.batchId, companyId },
-          data: { storageLocationId: to.id, updatedBy: userId },
-        });
-      }
+      // The lot keeps its quantity. Its row names the shelf holding most of
+      // it; a partial move must not relabel the whole lot.
+      if (input.batchId) await refreshLotPrimaryLocation(tx, companyId, input.batchId, userId);
 
       await this.audit.record({
         companyId,
@@ -519,6 +516,268 @@ export class StorageLocationsService {
     });
 
     return { ...result, from: from.id, to: to.id, totalCost: result.value };
+  }
+
+  /// Where one item sits, warehouse by warehouse, and how much is in each place.
+  ///
+  /// Read straight from the movement ledger, so it agrees with what
+  /// `stockByLocation` and the stock card show. Quantity only: no cost leaves
+  /// this method. Movements that name no location are reported as `unlocated`,
+  /// not hidden and not assigned to a guessed default.
+  async itemLocations(
+    companyId: string,
+    itemId: string,
+    query: { warehouseId?: string } = {},
+    scope: WarehouseScope = null,
+    warehouseIds?: string[],
+  ) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        warehouseId: string;
+        storageLocationId: string | null;
+        batchId: string | null;
+        quantity: Prisma.Decimal;
+      }>
+    >(Prisma.sql`
+      SELECT "warehouseId", "storageLocationId", "batchId",
+             SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+        FROM "stock_movements"
+       WHERE "companyId" = ${companyId}::uuid
+         AND "itemId" = ${itemId}::uuid
+         AND "warehouseId" IS NOT NULL
+         ${query.warehouseId ? Prisma.sql`AND "warehouseId" = ${query.warehouseId}::uuid` : Prisma.empty}
+       GROUP BY "warehouseId", "storageLocationId", "batchId"
+      HAVING SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) <> 0
+    `);
+
+    const warehouseWhere: Prisma.WarehouseWhereInput = {
+      companyId,
+      deletedAt: null,
+      id: { in: [...new Set(rows.map((r) => r.warehouseId))] },
+    };
+    if (scope !== null) warehouseWhere.branchId = { in: scope };
+    const warehouses = await this.prisma.warehouse.findMany({
+      where: warehouseWhere,
+      select: { id: true, code: true, nameEn: true, nameAr: true },
+    });
+    const visible = new Map(
+      warehouses
+        .filter((w) => warehouseIds === undefined || warehouseIds.includes(w.id))
+        .map((w) => [w.id, w]),
+    );
+
+    const locIds = [...new Set(rows.map((r) => r.storageLocationId).filter((x): x is string => !!x))];
+    const batchIds = [...new Set(rows.map((r) => r.batchId).filter((x): x is string => !!x))];
+    const [locs, batches] = await Promise.all([
+      locIds.length
+        ? this.prisma.storageLocation.findMany({
+            where: { id: { in: locIds }, companyId },
+            select: { id: true, code: true, kind: true, nameEn: true, nameAr: true, parentId: true },
+          })
+        : [],
+      batchIds.length
+        ? this.prisma.itemBatch.findMany({
+            where: { id: { in: batchIds }, companyId },
+            select: { id: true, batchNumber: true, expiryDate: true },
+          })
+        : [],
+    ]);
+    const locById = new Map(locs.map((l) => [l.id, l]));
+    const batchById = new Map(batches.map((b) => [b.id, b]));
+
+    const out = [...visible.values()].map((warehouse) => {
+      const mine = rows.filter((r) => r.warehouseId === warehouse.id);
+      const perLocation = new Map<string, Array<(typeof mine)[number]>>();
+      let unlocated = new Prisma.Decimal(0);
+      const unlocatedLots: Array<{ batchId: string | null; batchNumber: string | null; quantity: string }> = [];
+      for (const row of mine) {
+        const q = new Prisma.Decimal(row.quantity);
+        if (!row.storageLocationId) {
+          unlocated = unlocated.plus(q);
+          unlocatedLots.push({
+            batchId: row.batchId,
+            batchNumber: row.batchId ? (batchById.get(row.batchId)?.batchNumber ?? null) : null,
+            quantity: q.toFixed(MONEY_SCALE),
+          });
+        } else {
+          perLocation.set(row.storageLocationId, [...(perLocation.get(row.storageLocationId) ?? []), row]);
+        }
+      }
+      const locations = [...perLocation.entries()].map(([id, group]) => {
+        const loc = locById.get(id);
+        const total = group.reduce((acc, r) => acc.plus(r.quantity), new Prisma.Decimal(0));
+        return {
+          locationId: id,
+          code: loc?.code ?? null,
+          kind: loc?.kind ?? null,
+          nameEn: loc?.nameEn ?? null,
+          nameAr: loc?.nameAr ?? null,
+          quantity: total.toFixed(MONEY_SCALE),
+          lots: group.map((r) => ({
+            batchId: r.batchId,
+            batchNumber: r.batchId ? (batchById.get(r.batchId)?.batchNumber ?? null) : null,
+            quantity: new Prisma.Decimal(r.quantity).toFixed(MONEY_SCALE),
+          })),
+        };
+      });
+      const located = locations.reduce((acc, l) => acc.plus(l.quantity), new Prisma.Decimal(0));
+      return {
+        warehouseId: warehouse.id,
+        warehouseCode: warehouse.code,
+        warehouseNameEn: warehouse.nameEn,
+        warehouseNameAr: warehouse.nameAr,
+        total: located.plus(unlocated).toFixed(MONEY_SCALE),
+        locations,
+        unlocated: { quantity: unlocated.toFixed(MONEY_SCALE), lots: unlocatedLots },
+      };
+    });
+    return { itemId: item.id, itemCode: item.code, unit: item.unit, warehouses: out };
+  }
+
+  /// Gives goods that already sit in a warehouse, with no shelf recorded, a shelf.
+  ///
+  /// This is a relabel, not a receipt. It writes one OUT with no location and
+  /// one IN at the shelf, same quantity and same cost, so the item's quantity
+  /// and value do not move by a single unit and no balance, receipt, journal
+  /// entry or document number is created.
+  async assignUnlocated(
+    companyId: string,
+    userId: string,
+    input: {
+      warehouseId: string;
+      toLocationId: string;
+      itemId: string;
+      batchId?: string | null;
+      quantity: string | number;
+      reason?: string | null;
+    },
+    scope: WarehouseScope,
+    warehouseIds?: string[],
+    transferWarehouseIds?: string[],
+  ) {
+    const quantity = new Prisma.Decimal(input.quantity);
+    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException('Quantity must be positive');
+    const to = await this.prisma.storageLocation.findFirst({
+      where: { id: input.toLocationId, companyId, deletedAt: null },
+    });
+    if (!to) throw new NotFoundException('Storage location not found');
+    if (to.warehouseId !== input.warehouseId) {
+      throw new BadRequestException(
+        'الموقع ليس في هذا المخزن. / The location is not in that warehouse.',
+      );
+    }
+    if (!to.isActive) throw new BadRequestException('The location must be active');
+    if (scope !== null && !scope.includes(to.branchId)) {
+      throw new ForbiddenException('This location belongs to another branch');
+    }
+    if (warehouseIds !== undefined && !warehouseIds.includes(to.warehouseId)) {
+      throw new ForbiddenException('You cannot move stock in this warehouse');
+    }
+    if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(to.warehouseId)) {
+      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
+    }
+    const item = await this.prisma.item.findFirst({
+      where: { id: input.itemId, companyId, deletedAt: null },
+      select: { id: true, code: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+    const batchId = input.batchId ?? null;
+    if (batchId) {
+      const batch = await this.prisma.itemBatch.findFirst({
+        where: { id: batchId, companyId, itemId: item.id, warehouseId: to.warehouseId },
+        select: { id: true },
+      });
+      if (!batch) throw new BadRequestException('That lot is not in this warehouse for this item');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Two assignments of the same goods queue here instead of both reading
+      // the same unlocated quantity.
+      await tx.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${to.warehouseId}:${item.id}`}, 0))`,
+      );
+      const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
+        SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+          FROM "stock_movements"
+         WHERE "companyId" = ${companyId}::uuid
+           AND "warehouseId" = ${to.warehouseId}::uuid
+           AND "itemId" = ${item.id}::uuid
+           AND "storageLocationId" IS NULL
+           ${batchId ? Prisma.sql`AND "batchId" = ${batchId}::uuid` : Prisma.sql`AND "batchId" IS NULL`}
+      `);
+      const unlocated = new Prisma.Decimal(rows[0]?.quantity ?? 0);
+      if (unlocated.lessThan(quantity)) {
+        throw new BadRequestException(
+          `الكمية بدون موقع ${unlocated.toFixed(MONEY_SCALE)} فقط. / ` +
+            `Only ${unlocated.toFixed(MONEY_SCALE)} has no location, not ${quantity.toFixed(MONEY_SCALE)}.`,
+        );
+      }
+      const bal = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(
+        Prisma.sql`
+          SELECT "quantity", "value" FROM "warehouse_stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "warehouseId" = ${to.warehouseId}::uuid
+             AND "itemId" = ${item.id}::uuid
+           FOR UPDATE
+        `,
+      );
+      const onHand = bal[0]?.quantity ?? new Prisma.Decimal(0);
+      const unitCost = onHand.isZero()
+        ? new Prisma.Decimal(0)
+        : new Prisma.Decimal(bal[0]!.value).div(onHand).toDecimalPlaces(MONEY_SCALE);
+      const totalCost = unitCost.mul(quantity).toDecimalPlaces(MONEY_SCALE);
+      const today = new Date();
+      for (const direction of [StockDirection.OUT, StockDirection.IN]) {
+        await tx.stockMovement.create({
+          data: {
+            companyId,
+            branchId: to.branchId,
+            warehouseId: to.warehouseId,
+            itemId: item.id,
+            batchId,
+            storageLocationId: direction === StockDirection.OUT ? null : to.id,
+            movementDate: today,
+            direction,
+            quantity,
+            unitCost,
+            totalCost,
+            referenceType: direction === StockDirection.OUT ? 'LOCATION_ASSIGN_OUT' : 'LOCATION_ASSIGN_IN',
+            referenceId: to.id,
+            referenceNumber: null,
+            notes: input.reason ?? null,
+            createdBy: userId,
+          },
+        });
+      }
+      if (batchId) await refreshLotPrimaryLocation(tx, companyId, batchId, userId);
+      await this.audit.record({
+        companyId,
+        userId,
+        action: 'ASSIGN_LOCATION',
+        entity: 'storage_locations',
+        entityId: to.id,
+        after: {
+          item: item.code,
+          batchId,
+          quantity: quantity.toFixed(MONEY_SCALE),
+          reason: input.reason ?? null,
+        },
+      });
+      return {
+        itemId: item.id,
+        warehouseId: to.warehouseId,
+        locationId: to.id,
+        batchId,
+        quantity: quantity.toFixed(MONEY_SCALE),
+        remainingUnlocated: unlocated.minus(quantity).toFixed(MONEY_SCALE),
+      };
+    });
   }
 
   /// How much of what sits in each of these locations today.
