@@ -284,3 +284,13 @@ assert.equal(publish.environment, 'windows-production');
 const publisher = fs.readFileSync(path.join(root, 'scripts/publish-verified-windows.mjs'), 'utf8');
 assert.match(publisher, /verify-release-evidence\.mjs/, 'Publisher must independently verify evidence');
 console.log('PASS: workflow trigger inventory, PR evidence notice, main blocker and independent publisher checks');
+
+const security = application.jobs['windows-security-evidence'];
+assert.deepEqual(security.needs, ['acceptance', 'postgres-acceptance', 'backup-restore-17']);
+assert.equal(security.if, proof.if);
+assert.deepEqual(security.permissions, { contents: 'read', actions: 'read' });
+const securitySource = fs.readFileSync(path.join(workflows, '../../scripts/ci-windows-security-evidence.ps1'), 'utf8');
+assert.match(securitySource, /SubmitSamplesConsent -ne 2/);
+assert.match(securitySource, /Get-AuthenticodeSignature/);
+assert.match(securitySource, /Start-MpScan -ScanType CustomScan -ScanPath/);
+assert.doesNotMatch(securitySource, /Set-MpPreference|Add-MpPreference|Submit-Mp|Invoke-WebRequest|Invoke-RestMethod|Unblock-File|Set-ExecutionPolicy/);
