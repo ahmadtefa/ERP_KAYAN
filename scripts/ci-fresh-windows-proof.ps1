@@ -61,7 +61,7 @@ function Wait-Dialog([string]$title) {
   foreach($w in $windows){
    try {
     if($w.Current.ProcessId -eq $probe.Id -and $w.Current.Name -eq $title -and -not $w.Current.IsOffscreen -and $w.Current.IsEnabled){
-     $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
+     $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'File name:')
      $readyEdit=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
      if($readyEdit -and $readyEdit.Current.IsEnabled -and -not $readyEdit.Current.IsOffscreen){return $w}
     }
@@ -76,13 +76,17 @@ function Wait-Dialog([string]$title) {
  throw 'Native dialog absent'
 }
 function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$value){
- $id=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
+ $id=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'File name:')
  $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$id)
  if(-not $edit){throw 'Native filename control absent'}
  $edit.SetFocus()
- $keys.SendKeys('^a')
- $keys.SendKeys($value)
+ $pattern=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+ $pattern.SetValue($value)
  Start-Sleep 1
+ # Commit a real edit notification without Ctrl+A racing modifier state.
+ $keys.SendKeys('{END}')
+ $keys.SendKeys('{BACKSPACE}')
+ $keys.SendKeys($value.Substring($value.Length-1))
  $keys.SendKeys('{TAB}')
  Start-Sleep 1
 }
