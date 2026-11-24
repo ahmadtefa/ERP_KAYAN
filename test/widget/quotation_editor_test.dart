@@ -209,7 +209,10 @@ void main() {
         'validUntil': 'Expiry date rejected by server'}));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, 'Price rejected by server');
+    await tester.scrollUntilVisible(find.text('Expiry date rejected by server'), -300,
+      scrollable: find.byType(Scrollable).first);
     expect(find.text('Expiry date rejected by server'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('quotation-price-0-0')));
     await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100.0');
     await tester.pump();
     expect(find.text('Price rejected by server'), findsNothing);
