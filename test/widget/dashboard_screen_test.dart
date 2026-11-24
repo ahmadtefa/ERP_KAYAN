@@ -1,20 +1,28 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:erp_kayan/app/theme/app_theme.dart';
+import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:erp_kayan/features/notifications/presentation/screens/notification_center_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'test_harness.dart';
 
+
 const _dashboardUser = AppUser(
   id: 'dashboard-test',
   username: 'manager',
   fullName: 'Dashboard test',
   companyId: 'company-1',
-  roles: ['GENERAL_MANAGER'],
+  roles: ['FINANCE_MANAGER'],
   permissions: [
     'dashboard.view',
     'dashboard.sales', 'dashboard.purchases', 'dashboard.revenue',
@@ -98,12 +106,14 @@ Future<void> _pump(
   required Json summary,
   Json? monthly,
   Locale locale = const Locale('en'),
+  AppUser user = _dashboardUser,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       key: UniqueKey(),
       overrides: [
-        currentUserProvider.overrideWithValue(_dashboardUser),
+        currentUserProvider.overrideWithValue(user),
+        notificationFeedProvider.overrideWith((ref) async => <Json>[]),
         dashboardSummaryProvider.overrideWith((ref) async => summary),
         dashboardMonthlyProvider.overrideWith((ref) async => monthly ?? _monthly),
       ],
@@ -115,6 +125,61 @@ Future<void> _pump(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('only ADMIN and FINANCE_MANAGER can render statistics even if API mistakenly sends all fields', (tester) async {
+    for (final role in ['ADMIN', 'FINANCE_MANAGER', 'GENERAL_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER']) {
+      final user = AppUser(id: 'role-test', username: 'fixture', fullName: 'Fixture', companyId: 'company-1',
+        roles: [role], permissions: _dashboardUser.permissions);
+      await _pump(tester, summary: _summary, user: user);
+      expect(find.text('Total sales'), ['ADMIN', 'FINANCE_MANAGER'].contains(role) ? findsOneWidget : findsNothing);
+      expect(find.text('Inventory value'), ['ADMIN', 'FINANCE_MANAGER'].contains(role) ? findsOneWidget : findsNothing);
+    }
+    const technicalOnly = AppUser(id: 'super', username: 'fixture', fullName: 'Fixture', companyId: 'company-1', isSuperAdmin: true);
+    await _pump(tester, summary: _summary, user: technicalOnly);
+    expect(find.text('Total sales'), findsNothing);
+  });
+
+  testWidgets('Arabic ADMIN dashboard renders existing metrics above recent operations', (tester) async {
+    await tester.runAsync(() async {
+      final loader = FontLoader('IBMPlexSansArabic');
+      for (final weight in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+        loader.addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-$weight.ttf').readAsBytesSync())));
+      }
+      await loader.load();
+      var directory = File(Platform.resolvedExecutable).parent;
+      File? iconFile;
+      while (directory.path != directory.parent.path) {
+        final candidate = File('${directory.path}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf');
+        if (candidate.existsSync()) { iconFile = candidate; break; }
+        directory = directory.parent;
+      }
+      if (iconFile == null) throw StateError('Flutter icon font unavailable');
+      final icons = FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(iconFile.readAsBytesSync())));
+      await icons.load();
+    });
+    tester.view.physicalSize = const Size(1366, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final key = GlobalKey();
+    const admin = AppUser(id: 'admin-fixture', username: 'fixture', fullName: 'Synthetic', companyId: 'company-1', roles: ['ADMIN'], isSuperAdmin: true);
+    await tester.pumpWidget(RepaintBoundary(key: key, child: ProviderScope(overrides: [
+      currentUserProvider.overrideWithValue(admin),
+      dashboardSummaryProvider.overrideWith((ref) async => _summary),
+      dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
+      notificationFeedProvider.overrideWith((ref) async => <Json>[]),
+    ], child: MaterialApp(debugShowCheckedModeBanner: false, theme: AppTheme.dark(), locale: const Locale('ar'), localizationsDelegates: AppLocalizations.localizationsDelegates, supportedLocales: AppLocalizations.supportedLocales, home: const Scaffold(body: DashboardScreen())))));
+    await tester.pumpAndSettle();
+    expect(find.text('إجمالي المبيعات'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('إجمالي المبيعات')).dy, lessThan(tester.getTopLeft(find.text('S-100')).dy));
+    await tester.runAsync(() async {
+      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      final dir = Directory(Platform.environment['KAYAN_SHOT_DIR'] ?? Directory.systemTemp.path)..createSync(recursive: true);
+      File('${dir.path}/dashboard-admin-existing-ar.png').writeAsBytesSync(data!.buffer.asUint8List());
+    });
+  });
 
   testWidgets('reuses the existing dashboard at the top and removes navigation/company/quick-action cards', (tester) async {
     tester.view.physicalSize = const Size(1366, 768);

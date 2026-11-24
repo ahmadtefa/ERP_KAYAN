@@ -798,7 +798,7 @@ Set<String> _dashboardSectionsFor(AppUser? user) {
     'recent': 'dashboard.recent',
   };
   final isCompanyManager = user.roles.any(
-    (role) => const {'GENERAL_MANAGER', 'FINANCE_MANAGER'}
+    (role) => const {'ADMIN', 'FINANCE_MANAGER'}
         .contains(role.trim().toUpperCase()),
   );
   if (!isCompanyManager) {

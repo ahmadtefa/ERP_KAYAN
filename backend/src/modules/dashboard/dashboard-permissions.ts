@@ -13,7 +13,7 @@
  * recent documents, which stay independently controlled.
  */
 
-import { mayReadCompanyAggregates } from '../../common/auth/company-aggregate-visibility';
+import { mayReadDashboardStatistics } from '../../common/auth/company-aggregate-visibility';
 
 export const DASHBOARD_SECTIONS = [
   'sales',
@@ -67,7 +67,7 @@ export function dashboardSectionsFor(
 ): Set<DashboardSection> {
   const granted = new Set(user.permissions ?? []);
   const allowed = new Set<DashboardSection>();
-  if (!mayReadCompanyAggregates(user)) {
+  if (!mayReadDashboardStatistics(user)) {
     // The recent-document list is not an aggregate; its individual amounts
     // are independently stripped below according to document permissions.
     if (user.isSuperAdmin || granted.has('dashboard.recent')) allowed.add('recent');

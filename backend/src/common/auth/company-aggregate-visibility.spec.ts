@@ -2,6 +2,7 @@ import { of, lastValueFrom } from 'rxjs';
 import {
   CompanyAggregateVisibilityInterceptor,
   mayReadCompanyAggregates,
+  mayReadDashboardStatistics,
   redactCompanyAggregates,
 } from './company-aggregate-visibility';
 
@@ -14,6 +15,16 @@ describe('company aggregate visibility', () => {
     expect(mayReadCompanyAggregates({ roles: ['ADMIN'] })).toBe(false);
     expect(mayReadCompanyAggregates({ isSuperAdmin: true })).toBe(false);
     expect(mayReadCompanyAggregates({ isSuperAdmin: true, roles: ['GENERAL_MANAGER'] })).toBe(true);
+  });
+
+  it('keeps the dashboard audience separate from broader reports', () => {
+    expect(mayReadDashboardStatistics({ roles: [' admin '] })).toBe(true);
+    expect(mayReadDashboardStatistics({ roles: ['FINANCE_MANAGER'] })).toBe(true);
+    for (const role of ['GENERAL_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER']) {
+      expect(mayReadDashboardStatistics({ roles: [role], isSuperAdmin: true })).toBe(false);
+    }
+    expect(mayReadCompanyAggregates({ roles: ['ADMIN'] })).toBe(false);
+    expect(mayReadCompanyAggregates({ roles: ['GENERAL_MANAGER'] })).toBe(true);
   });
 
   it('removes aggregate totals and statistics recursively, preserving permitted detail rows', () => {

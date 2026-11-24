@@ -13,6 +13,12 @@ export function mayReadCompanyAggregates(user: AggregateVisibilityPrincipal): bo
   return roles.has('GENERAL_MANAGER') || roles.has('FINANCE_MANAGER');
 }
 
+/** Dashboard-only audience. Does not widen report or other aggregate access. */
+export function mayReadDashboardStatistics(user: AggregateVisibilityPrincipal): boolean {
+  const roles = new Set((user.roles ?? []).map((role) => role.trim().toUpperCase()));
+  return roles.has('ADMIN') || roles.has('FINANCE_MANAGER');
+}
+
 const AGGREGATE_KEYS = new Set([
   'totals', 'summary', 'statistics', 'aggregates', 'metrics',
   'grandtotal', 'overalltotal', 'hasdata', 'documentsinperiod',
