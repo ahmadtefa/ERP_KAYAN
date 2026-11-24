@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -19,6 +20,10 @@ class _ReturnLineDraft {
 
   final Json source;
   final TextEditingController quantity;
+
+  /// Why this line's quantity was refused, shown under the field.
+  String? error;
+  final GlobalKey key = GlobalKey();
 
   /// A return must use the same unit the original invoice line used. Legacy
   /// lines have no snapshot and fall back to the item's base unit with a
@@ -172,23 +177,29 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       return;
     }
     final lines = <Json>[];
+    final included = <_ReturnLineDraft>[];
+    setState(() {
+      for (final draft in _lines) {
+        draft.error = null;
+      }
+    });
     for (var index = 0; index < _lines.length; index++) {
       final draft = _lines[index];
       final raw = draft.quantity.text.trim();
       if (raw.isEmpty) continue;
       final quantity = Decimal.tryParse(raw);
       if (quantity == null || quantity <= Decimal.zero) {
-        showMessage(context, l10n.mustBePositive, error: true);
+        _flagLine(draft, l10n.mustBePositive);
         return;
       }
       if (quantity > draft.remaining) {
-        showMessage(
-          context,
+        _flagLine(
+          draft,
           '${l10n.remainingToReturn}: ${draft.remaining.toString()}',
-          error: true,
         );
         return;
       }
+      included.add(draft);
       lines.add({
         'originalLineId': text(draft.source, 'id'),
         'quantity': raw,
@@ -223,10 +234,56 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
         context.go(widget.kind.returnsRoute);
       }
     } catch (error) {
-      if (mounted) showAppError(context, error);
+      if (!mounted) return;
+      var marked = false;
+      if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
+        final pattern = RegExp(r'^lines\.(\d+)\.quantity$');
+        final rest = <String, String>{};
+        _ReturnLineDraft? first;
+        setState(() {
+          for (final entry in error.fieldErrors.entries) {
+            final match = pattern.firstMatch(entry.key);
+            final index = match == null ? -1 : int.parse(match.group(1)!);
+            if (index >= 0 && index < included.length) {
+              included[index].error = entry.value;
+              first ??= included[index];
+            } else {
+              rest[entry.key] = entry.value;
+            }
+          }
+        });
+        marked = first != null;
+        if (marked) _scrollToLine(first!);
+        if (rest.isNotEmpty) {
+          showAppError(
+            context,
+            ApiFailure(
+              error.message,
+              statusCode: error.statusCode,
+              fieldErrors: rest,
+            ),
+          );
+        }
+      }
+      if (!marked && !(error is ApiFailure && error.fieldErrors.isNotEmpty)) {
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  void _flagLine(_ReturnLineDraft draft, String reason) {
+    setState(() => draft.error = reason);
+    showMessage(context, reason, error: true);
+    _scrollToLine(draft);
+  }
+
+  void _scrollToLine(_ReturnLineDraft draft) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = draft.key.currentContext;
+      if (target != null && target.mounted) Scrollable.ensureVisible(target);
+    });
   }
 
   @override
@@ -361,6 +418,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
         : text(line.source, 'description', fallback: l10n.invoiceLines);
     final code = text(line.source, 'itemCode');
     return Card(
+      key: line.key,
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -388,6 +446,9 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
               child: TextField(
                 controller: line.quantity,
                 enabled: line.remaining > Decimal.zero && !_saving && !_saved,
+                onChanged: (_) {
+                  if (line.error != null) setState(() => line.error = null);
+                },
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
@@ -395,6 +456,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                 decoration: InputDecoration(
                   labelText: l10n.quantityToReturn,
                   helperText: line.unitName,
+                  errorText: line.error,
                   isDense: true,
                 ),
               ),
