@@ -1,8 +1,10 @@
 import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/domain/entities/app_user.dart';
@@ -56,7 +58,12 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
     ]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}
   List<Json> _visible(List<Json> rows)=>rows.where((r)=>_query.isEmpty||'${r['documentNumber']} ${r['reason']} ${r['status']}'.toLowerCase().contains(_query)).toList();
   String _status(String s)=>switch(s){'DRAFT'=>t('مسودة','Draft'),'REVIEWED'=>t('قيد المراجعة','Reviewed'),'PENDING_APPROVAL'=>t('بانتظار الاعتماد','Pending approval'),'APPROVED'=>t('معتمد','Approved'),'DISPATCHING'=>t('جارٍ التسليم','Dispatching'),'RECEIVING'=>t('جارٍ الاستلام','Receiving'),'SETTLING'=>t('جارٍ التسوية','Settling'),'PARTIALLY_DISPATCHED'=>t('تسليم جزئي','Partially dispatched'),'DISPATCHED'=>t('تم التسليم','Dispatched'),'PARTIALLY_RECEIVED'=>t('استلام جزئي','Partially received'),'RECEIVED'=>t('تم الاستلام','Received'),'SETTLEMENT_PENDING'=>t('إعدام بانتظار الاعتماد','Write-off approval pending'),'SETTLED'=>t('تمت التسوية','Settled'),'CLOSED'=>t('مغلق','Closed'),'REJECTED'=>t('مرفوض','Rejected'),'CANCELLED'=>t('ملغى','Cancelled'),_=>s};
-  Future<void> _create() async {try{final api=ref.read(apiClientProvider);final warehouses=await api.getList('/inventory/warehouses');final items=await api.getList('/inventory/items');final batches=await api.getList('/inventory/batches');if(!mounted)return;final body=await showDialog<Json>(context:context,barrierDismissible:false,builder:(_)=>_CreateTransferDialog(ar:ar,warehouses:warehouses,items:items,batches:batches,api:api));if(body==null||!mounted)return;setState(()=>_busy=true);await api.post('/inventory/stock-transfers',body:body,idempotencyKey:'create-${DateTime.now().microsecondsSinceEpoch}');await ref.read(stockTransfersProvider.notifier).reload();}catch(e){if(mounted)_msg(e.toString());}finally{if(mounted)setState(()=>_busy=false);}}
+  Future<void> _create() async {try{final api=ref.read(apiClientProvider);final warehouses=await api.getList('/inventory/warehouses');final items=await api.getList('/inventory/items');final batches=await api.getList('/inventory/batches');if(!mounted)return;String? lastBody;String lastKey='';
+    // The dialog sends the request itself, so a refusal leaves it open with
+    // everything typed. The same body keeps the same key (a retry after an
+    // uncertain answer cannot double-create); a changed body gets a new one.
+    Future<Object?> submit(Json body) async {final encoded=jsonEncode(body);if(encoded!=lastBody){lastBody=encoded;lastKey='create-${DateTime.now().microsecondsSinceEpoch}';}try{await api.post('/inventory/stock-transfers',body:body,idempotencyKey:lastKey);return null;}catch(e){return e;}}
+    final created=await showDialog<bool>(context:context,barrierDismissible:false,builder:(_)=>_CreateTransferDialog(ar:ar,warehouses:warehouses,items:items,batches:batches,api:api,submit:submit));if(created!=true||!mounted)return;setState(()=>_busy=true);await ref.read(stockTransfersProvider.notifier).reload();}catch(e){if(mounted)_msg(e.toString());}finally{if(mounted)setState(()=>_busy=false);}}
   Future<void> _details(Json row) async {final changed=await showDialog<bool>(context:context,builder:(_)=>_TransferDialog(id:text(row,'id'),ar:ar));if(changed==true&&mounted)await ref.read(stockTransfersProvider.notifier).reload();}
   Future<void> _report() async {
     try {
@@ -116,7 +123,9 @@ class _DraftLine {
 }
 
 class _CreateTransferDialog extends StatefulWidget {
-  const _CreateTransferDialog({required this.ar, required this.warehouses, required this.items, required this.batches, required this.api});
+  const _CreateTransferDialog({required this.ar, required this.warehouses, required this.items, required this.batches, required this.api, required this.submit});
+  /// Sends the request; returns null on success or the error.
+  final Future<Object?> Function(Json body) submit;
   final bool ar;
   final List<Json> warehouses, items, batches;
   final ApiClient api;
@@ -128,7 +137,9 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
   final List<_DraftLine> _lines=[_DraftLine()];
   late final List<Json> _items=List<Json>.of(widget.items);
   String? _from,_to;
-  bool _scanning=false;
+  bool _scanning=false, _sending=false;
+  final _errors=<String,String>{};
+  void _clear(String key){if(_errors.remove(key)!=null)setState((){});}
   bool get ar=>widget.ar;
   String t(String a,String e)=>ar?a:e;
   @override void dispose(){_reason.dispose();_notes.dispose();_barcode.dispose();for(final line in _lines){line.dispose();}super.dispose();}
@@ -136,9 +147,9 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
   @override Widget build(BuildContext context)=>AlertDialog(
     title:Text(t('طلب تحويل مخزني','Request stock transfer')),
     content:SizedBox(width:920,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_from=v)),
+      DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse'),errorText:_errors['sourceWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('sourceWarehouseId');setState(()=>_from=v);}),
       const SizedBox(height:8),
-      DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse')),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v)=>setState(()=>_to=v)),
+      DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse'),errorText:_errors['destinationWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('destinationWarehouseId');setState(()=>_to=v);}),
       const SizedBox(height:12),
       BarcodeScanField(controller:_barcode,arabic:ar,enabled:!_scanning,label:t('مسح لإضافة صنف أو وحدة','Scan to add item or unit'),onSubmitted:_scan),
       const SizedBox(height:10),
@@ -150,18 +161,18 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
         final selectedUnits=units.isNotEmpty?units:<Json>[{'unit':item?['unit']??''}];
         final lots=widget.batches.where((b)=>b['warehouseId']==_from&&b['itemId']==line.itemId&&(double.tryParse('${b['remainingQuantity']}')??0)>0).toList();
         return Padding(padding:const EdgeInsets.only(bottom:12),child:Wrap(spacing:8,runSpacing:8,children:[
-          SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item')),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v)=>setState(() {line.itemId=v;line.batchId=null;line.unitName=null;}))),
-          SizedBox(width:115,child:TextField(controller:line.quantity,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity')))),
-          if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit')),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}'))).toList(),onChanged:(v)=>setState(()=>line.unitName=v))),
+          SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item'),errorText:_errors['lines.$index.itemId']),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v){_errors.remove('lines.$index.itemId');setState(() {line.itemId=v;line.batchId=null;line.unitName=null;});})),
+          SizedBox(width:115,child:TextField(controller:line.quantity,onChanged:(_)=>_clear('lines.$index.quantity'),keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity'),errorText:_errors['lines.$index.quantity']))),
+          if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(isExpanded:true,initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit'),errorText:_errors['lines.$index.unitName']),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v){_errors.remove('lines.$index.unitName');setState(()=>line.unitName=v);})),
           if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),
           IconButton(tooltip:t('حذف البند','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),
         ]));
       }),
       Align(alignment:AlignmentDirectional.centerStart,child:TextButton.icon(onPressed:()=>setState(()=>_lines.add(_DraftLine())),icon:const Icon(Icons.add),label:Text(t('إضافة صنف','Add item')))),
-      TextField(controller:_reason,decoration:InputDecoration(labelText:t('سبب التحويل','Transfer reason'))),
-      TextField(controller:_notes,decoration:InputDecoration(labelText:t('ملاحظات','Notes'))),
+      TextField(controller:_reason,onChanged:(_)=>_clear('reason'),decoration:InputDecoration(labelText:t('سبب التحويل','Transfer reason'),errorText:_errors['reason'])),
+      TextField(controller:_notes,onChanged:(_)=>_clear('notes'),decoration:InputDecoration(labelText:t('ملاحظات','Notes'),errorText:_errors['notes'])),
     ]))),
-    actions:[TextButton(onPressed:()=>Navigator.pop(context),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:_save,child:Text(t('إنشاء الطلب','Create request')))],
+    actions:[TextButton(onPressed:_sending?null:()=>Navigator.pop(context,false),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:_sending?null:_save,child:Text(t('إنشاء الطلب','Create request')))],
   );
   Future<void> _scan(String raw) async {
     if(_scanning||raw.trim().isEmpty)return;
@@ -186,11 +197,35 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
       });
     } finally { if(mounted)setState(()=>_scanning=false); }
   }
-  void _save(){
-    if(_from==null||_to==null||_from==_to||_reason.text.trim().isEmpty)return;
+  Future<void> _save() async {
+    final required=t('مطلوب','Required');
+    final found=<String,String>{};
+    if(_from==null)found['sourceWarehouseId']=required;
+    if(_to==null)found['destinationWarehouseId']=required;
+    if(_from!=null&&_from==_to)found['destinationWarehouseId']=t('المخزن المصدر والوجهة يجب أن يختلفا','Source and destination must differ');
+    if(_reason.text.trim().isEmpty)found['reason']=required;
     final lines=<Json>[];
-    for(final line in _lines){final q=double.tryParse(line.quantity.text);if(line.itemId==null||q==null||q<=0)return;lines.add({'itemId':line.itemId,'quantity':line.quantity.text,'unitName':line.unitName,'batchId':line.batchId});}
-    Navigator.pop(context,{'sourceWarehouseId':_from,'destinationWarehouseId':_to,'transferDate':DateTime.now().toIso8601String().substring(0,10),'reason':_reason.text.trim(),'notes':_notes.text.trim(),'lines':lines});
+    for(var i=0;i<_lines.length;i++){
+      final line=_lines[i];final q=double.tryParse(line.quantity.text);
+      if(line.itemId==null)found['lines.$i.itemId']=required;
+      if(q==null||q<=0)found['lines.$i.quantity']=t('أدخل كمية أكبر من صفر','Enter a quantity above zero');
+      lines.add({'itemId':line.itemId,'quantity':line.quantity.text,'unitName':line.unitName,'batchId':line.batchId});
+    }
+    if(found.isNotEmpty){setState((){_errors..clear()..addAll(found);});return;}
+    final body={'sourceWarehouseId':_from,'destinationWarehouseId':_to,'transferDate':DateTime.now().toIso8601String().substring(0,10),'reason':_reason.text.trim(),'notes':_notes.text.trim(),'lines':lines};
+    setState((){_errors.clear();_sending=true;});
+    final error=await widget.submit(body);
+    if(!mounted)return;
+    if(error==null){Navigator.pop(context,true);return;}
+    setState(()=>_sending=false);
+    if(error is ApiFailure&&const{400,422}.contains(error.statusCode)&&error.fieldErrors.isNotEmpty){
+      final known=<String>{'sourceWarehouseId','destinationWarehouseId','reason','notes',for(var i=0;i<_lines.length;i++)for(final f in const['itemId','quantity','unitName'])'lines.$i.$f'};
+      final rest=<String,String>{};
+      setState((){for(final e in error.fieldErrors.entries){if(known.contains(e.key)){_errors[e.key]=e.value;}else{rest[e.key]=e.value;}}});
+      if(rest.isNotEmpty)await showAppError(context,ApiFailure(error.message,statusCode:error.statusCode,fieldErrors:rest));
+      return;
+    }
+    await showAppError(context,error);
   }
 }
 
