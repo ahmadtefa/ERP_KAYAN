@@ -178,7 +178,7 @@ const vmReady =
           let body = ''; for await (const chunk of req) body += chunk;
           data = await service.receive(COMPANY, USER, JSON.parse(body));
         } else if (path.startsWith('/inventory/locations/item/')) {
-          data = await locations.itemLocations(COMPANY, ITEM, {}, null);
+          data = await locations.itemLocations(COMPANY, ITEM, {}, null, undefined, () => true);
         } else if (path === '/inventory/locations/assign-unlocated') {
           let body = ''; for await (const chunk of req) body += chunk;
           data = await locations.assignUnlocated(COMPANY, USER, JSON.parse(body), null);

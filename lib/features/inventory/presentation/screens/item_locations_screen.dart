@@ -52,6 +52,7 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
     Json source,
     Json lot, {
     required bool assign,
+    bool reconcile = false,
   }) async {
     final api = ref.read(apiClientProvider);
     final warehouseId = text(warehouse, 'warehouseId');
@@ -91,14 +92,20 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
     String? error;
     bool busy = false;
     bool uncertain = false;
-    final maximum = Decimal.tryParse(text(lot, 'quantity')) ?? Decimal.zero;
+    final rawMaximum = Decimal.tryParse(text(lot, 'quantity')) ?? Decimal.zero;
+    final maximum = reconcile ? rawMaximum.abs() : rawMaximum;
     final done = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
           title: Text(
-            assign
+            reconcile
+                ? _t(
+                    'تصحيح توزيع تاريخي بعد التحقق الفعلي',
+                    'Correct historical allocation after physical verification',
+                  )
+                : assign
                 ? _t('تعيين موقع للرصيد الموجود', 'Assign existing stock')
                 : _t('نقل بين المواقع', 'Move between locations'),
           ),
@@ -123,7 +130,12 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
                       initialValue: target,
                       isExpanded: true,
                       decoration: InputDecoration(
-                        labelText: _t('الموقع الجديد', 'Destination location'),
+                        labelText: reconcile
+                            ? _t(
+                                'الموقع الذي صُرفت منه البضاعة فعليًا',
+                                'Verified physical source location',
+                              )
+                            : _t('الموقع الجديد', 'Destination location'),
                       ),
                       items: [
                         for (final row in choices)
@@ -184,6 +196,12 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
                       controller: reason,
                       enabled: !busy,
                       maxLength: 500,
+                      validator: (v) => reconcile && (v ?? '').trim().length < 3
+                          ? _t(
+                              'اكتب سبب التصحيح بعد مراجعة الحركة أو الجرد.',
+                              'Enter the correction reason after reviewing the movement or physical count.',
+                            )
+                          : null,
                       decoration: InputDecoration(
                         labelText: _t('سبب الحركة', 'Reason'),
                       ),
@@ -213,14 +231,18 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
                       update(() => busy = true);
                       try {
                         await api.post(
-                          assign
+                          reconcile
+                              ? '/inventory/locations/reconcile-unlocated'
+                              : assign
                               ? '/inventory/locations/assign-unlocated'
                               : '/inventory/locations/move-stock',
                           body: {
-                            if (assign) 'warehouseId': warehouseId,
-                            if (!assign)
-                              'fromLocationId': text(source, 'locationId'),
-                            'toLocationId': target,
+                            if (assign || reconcile) 'warehouseId': warehouseId,
+                            if (!assign || reconcile)
+                              'fromLocationId': reconcile
+                                  ? target
+                                  : text(source, 'locationId'),
+                            if (!reconcile) 'toLocationId': target,
                             'itemId': widget.itemId,
                             if (lot['batchId'] != null)
                               'batchId': lot['batchId'],
@@ -395,20 +417,29 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
                       '${asString(lot['batchNumber']) ?? _t('بدون دفعة', 'No batch')}: ${formatQuantity(asString(lot['quantity']))}',
                     ),
                   ),
-                  if ((ref
+                  if (warehouse['canAllocate'] == true &&
+                      (ref
                               .read(currentUserProvider)
                               ?.can('inventory.stock.adjust') ??
                           false) &&
-                      (asNum(lot['quantity']) ?? 0) > 0)
+                      ((asNum(lot['quantity']) ?? 0) > 0 ||
+                          unlocated && (asNum(lot['quantity']) ?? 0) < 0))
                     TextButton(
                       onPressed: () => _relocate(
                         warehouse,
                         location,
                         lot,
                         assign: unlocated,
+                        reconcile:
+                            unlocated && (asNum(lot['quantity']) ?? 0) < 0,
                       ),
                       child: Text(
-                        unlocated
+                        unlocated && (asNum(lot['quantity']) ?? 0) < 0
+                            ? _t(
+                                'تصحيح توزيع سابق',
+                                'Correct historical allocation',
+                              )
+                            : unlocated
                             ? _t('تعيين الموقع', 'Assign location')
                             : _t('نقل', 'Move'),
                       ),

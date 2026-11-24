@@ -182,6 +182,58 @@ void main() {
       expect(api.posted.single['toLocationId'], 'dest');
     },
   );
+  testWidgets(
+    'historical deficit correction requires physical source and reason',
+    (tester) async {
+      final data = Map<String, dynamic>.from(
+        jsonDecode(File('test/fixtures/item_locations.json').readAsStringSync())
+            as Map,
+      );
+      final unknown = (data['warehouses'] as List).first['unlocated'] as Map;
+      unknown['quantity'] = '-2.0000';
+      (unknown['lots'] as List).first['quantity'] = '-2.0000';
+      final api = _Api(data);
+      await pump(tester, api);
+      await tester.tap(find.text('Correct historical allocation'));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified physical source location'), findsOneWidget);
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('DEST • Destination').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Quantity'),
+        '2',
+      );
+      await tester.tap(find.text('Save allocation'));
+      await tester.pumpAndSettle();
+      expect(api.posted, isEmpty);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Reason'),
+        'Physical movement checked',
+      );
+      await tester.tap(find.text('Save allocation'));
+      await tester.pumpAndSettle();
+      expect(api.posted.single['fromLocationId'], 'dest');
+      expect(api.posted.single.containsKey('toLocationId'), false);
+      expect(api.posted.single['quantity'], '2');
+    },
+  );
+
+  testWidgets(
+    'warehouse capability denies assignment despite general adjust permission',
+    (tester) async {
+      final data = Map<String, dynamic>.from(
+        jsonDecode(File('test/fixtures/item_locations.json').readAsStringSync())
+            as Map,
+      );
+      (data['warehouses'] as List).first['canAllocate'] = false;
+      await pump(tester, _Api(data));
+      expect(find.text('Assign location'), findsNothing);
+      expect(find.text('Move'), findsNothing);
+    },
+  );
+
   testWidgets('uncertain relocation blocks duplicate save and keeps input', (
     tester,
   ) async {

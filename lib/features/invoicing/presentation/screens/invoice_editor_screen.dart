@@ -1,3 +1,5 @@
+import 'line_location_picker.dart';
+
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
@@ -60,6 +62,7 @@ class _LineDraft {
        taxRate = TextEditingController(text: taxRate),
        discountValue = TextEditingController(text: discountValue);
 
+  List<Json> locationAllocations = [];
   String? itemId;
   String? description;
 
@@ -180,6 +183,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   Map<String, Uint8List> _itemPictures = const {};
   String _itemPicturesKey = '';
 
+  String? _warehouseId;
   String? _partyId;
   String? _supplierReference;
   String? _notes;
@@ -213,10 +217,12 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       for (final cost in _landedCosts)
         [cost.description.text, cost.amount.text, cost.taxRate.text],
     ],
+    'warehouseId': _warehouseId,
     'lines': [
       for (final line in _lines)
         [
           line.itemId,
+          line.locationAllocations,
           line.unitName,
           line.costCenterId,
           line.quantity.text,
@@ -228,6 +234,54 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         ],
     ],
   });
+
+  Future<void> _pickLocations(_LineDraft line) async {
+    if (line.itemId == null) return;
+    try {
+      final result = await pickLineLocations(
+        context,
+        ref.read(apiClientProvider),
+        itemId: line.itemId!,
+        lineQuantity: line.quantity.text.trim(),
+        unitName: line.unitName,
+        unitFactor: asString(
+          lineUnitsOf(
+                itemForInvoiceLine(
+                  ref.read(activeItemsProvider).value ?? const [],
+                  line.itemId,
+                ),
+              )
+              .where((u) => text(u, 'unit') == line.unitName)
+              .firstOrNull?['factor'],
+        ),
+        warehouseId: _warehouseId,
+        initial: line.locationAllocations,
+      );
+      if (result == null || !mounted) return;
+      final warehouse = asString(result['warehouseId']);
+      if (_warehouseId != null &&
+          warehouse != _warehouseId &&
+          _lines.any(
+            (other) =>
+                !identical(other, line) && other.locationAllocations.isNotEmpty,
+          )) {
+        showMessage(
+          context,
+          Localizations.localeOf(context).languageCode == 'ar'
+              ? 'الفاتورة تصرف من مستودع واحد. احذف توزيع المواقع من السطور الأخرى قبل تغيير المستودع.'
+              : "An invoice issues from one warehouse. Clear other lines' allocations before changing the warehouse.",
+          error: true,
+        );
+        return;
+      }
+      setState(() {
+        _warehouseId = warehouse;
+        line.locationAllocations = listOf(result['locationAllocations']);
+      });
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+    }
+  }
 
   Future<bool> _confirmExit() async {
     if (_saving || _loadingExisting || _confirmingExit) return false;
@@ -282,6 +336,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         if (mounted) Navigator.of(context).pop();
         return;
       }
+      _warehouseId = asString(invoice['warehouseId']);
       for (final line in _lines) {
         line.dispose();
       }
@@ -339,6 +394,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
               ..unitName = text(row, 'unitName').isEmpty
                   ? null
                   : text(row, 'unitName')
+              ..locationAllocations = listOf(row['locationAllocations'])
               ..description = text(row, 'description')
               ..unitPriceEdited = true
               ..costCenterId = text(row, 'costCenterId').isEmpty
@@ -604,6 +660,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     // below prices the chosen unit rather than whatever the line held a moment
     // ago. The box itself holds the CHOSEN unit: `quantityAfterScan` adds one
     // to the number already there, and never multiplies by the factor.
+    if (!sameSelection) line.locationAllocations = [];
     line.itemId = match.itemId;
     line.unitName = unit;
     line.quantity.text = plainQuantity(
@@ -699,9 +756,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final marked = <String, String>{};
     var others = false;
     final header = <String, String>{};
-    for (final charge in _landedCosts) { charge.errors.clear(); }
+    for (final charge in _landedCosts) {
+      charge.errors.clear();
+    }
     for (final entry in failure.fieldErrors.entries) {
-      final chargeMatch = RegExp(r'^landedCostCharges\.(\d+)\.(description|amount|taxRate)$').firstMatch(entry.key);
+      final chargeMatch = RegExp(
+        r'^landedCostCharges\.(\d+)\.(description|amount|taxRate)$',
+      ).firstMatch(entry.key);
       if (chargeMatch != null) {
         final index = int.parse(chargeMatch.group(1)!);
         if (index < _sentCharges.length) {
@@ -717,11 +778,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         header['date'] = entry.value;
         continue;
       }
-      final salesCharge = RegExp(r'^lines\.(\d+)\.(description|unitPrice|taxRate)$').firstMatch(entry.key);
-      if (widget.kind.isSales && _salesChargeStart != null && salesCharge != null) {
+      final salesCharge = RegExp(
+        r'^lines\.(\d+)\.(description|unitPrice|taxRate)$',
+      ).firstMatch(entry.key);
+      if (widget.kind.isSales &&
+          _salesChargeStart != null &&
+          salesCharge != null) {
         final index = int.parse(salesCharge.group(1)!) - _salesChargeStart!;
         if (index >= 0 && index < _sentCharges.length) {
-          final field = salesCharge.group(2) == 'unitPrice' ? 'amount' : salesCharge.group(2)!;
+          final field = salesCharge.group(2) == 'unitPrice'
+              ? 'amount'
+              : salesCharge.group(2)!;
           _sentCharges[index].errors[field] = entry.value;
           continue;
         }
@@ -751,10 +818,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         if (target != null && target.mounted) Scrollable.ensureVisible(target);
       });
     } else if (marked.isNotEmpty) {
-      final first = (marked.keys.toList()
-            ..sort((a, b) => int.parse(a.split('.').first)
-                .compareTo(int.parse(b.split('.').first))))
-          .first;
+      final first =
+          (marked.keys.toList()..sort(
+                (a, b) =>
+                    int.parse(a.split('.').first)
+                        .compareTo(int.parse(b.split('.').first)),
+              ))
+              .first;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final target = _lineErrorKeys[first]?.currentContext;
         if (target != null && target.mounted) Scrollable.ensureVisible(target);
@@ -804,11 +874,15 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final rateText = charge.taxRate.text.trim();
       final rate = rateText.isEmpty ? Decimal.zero : Decimal.tryParse(rateText);
       if (rate == null || rate < Decimal.zero || rate > Decimal.fromInt(100)) {
-        charge.errors['taxRate'] = Localizations.localeOf(context).languageCode == 'ar'
+        charge.errors['taxRate'] =
+            Localizations.localeOf(context).languageCode == 'ar'
             ? 'نسبة ضريبة المصروف يجب أن تكون بين ٠ و١٠٠'
             : 'Charge tax rate must be between 0 and 100';
       }
-      if (charge.errors.isNotEmpty) { invalidCharge = true; continue; }
+      if (charge.errors.isNotEmpty) {
+        invalidCharge = true;
+        continue;
+      }
       final roundedAmount = amount!.round(scale: moneyScale);
       landedCost += roundedAmount;
       _sentCharges.add(charge);
@@ -831,6 +905,23 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.mustBePositive, error: true);
         return;
       }
+      if (widget.kind.isSales && line.locationAllocations.isNotEmpty) {
+        final sum = line.locationAllocations.fold(
+          Decimal.zero,
+          (total, row) =>
+              total + (Decimal.tryParse(text(row, 'quantity')) ?? Decimal.zero),
+        );
+        if (sum != parsed) {
+          showMessage(
+            context,
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'تغيّرت كمية السطر. افتح مواقع الصرف وعدّل التوزيع ليطابق الكمية الجديدة.'
+                : 'The line quantity changed. Open Source locations and update its allocation to match.',
+            error: true,
+          );
+          return;
+        }
+      }
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
@@ -838,6 +929,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'description': line.description,
         if (line.unitName != null && line.unitName!.trim().isNotEmpty)
           'unitName': line.unitName!.trim(),
+        if (widget.kind.isSales && line.locationAllocations.isNotEmpty)
+          'locationAllocations': line.locationAllocations,
         'quantity': quantity,
         'unitPrice': price,
         // The form always shows a tax field: blank or whitespace is an
@@ -877,6 +970,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     setState(() => _saving = true);
     try {
       final body = <String, dynamic>{
+        if (_warehouseId != null) 'warehouseId': _warehouseId,
         'invoiceDate': _invoiceDate,
         if (widget.kind.isSales) 'customerId': _partyId,
         if (!widget.kind.isSales) 'supplierId': _partyId,
@@ -995,33 +1089,35 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                     KeyedSubtree(
                       key: _headerKey,
                       child: _Header(
-                      key: ValueKey(
-                        '${widget.invoiceId ?? 'new'}-$_loadingExisting',
+                        key: ValueKey(
+                          '${widget.invoiceId ?? 'new'}-$_loadingExisting',
+                        ),
+                        kind: widget.kind,
+                        errors: _headerErrors,
+                        invoiceDate: _invoiceDate,
+                        onDateChanged: (value) => setState(() {
+                          _headerErrors.remove('date');
+                          _invoiceDate = value;
+                        }),
+                        partyId: _partyId,
+                        onPartyChanged: (value) => setState(() {
+                          _headerErrors.remove('party');
+                          _partyId = value;
+                        }),
+                        supplierReference: _supplierReference,
+                        onSupplierReferenceChanged: (value) =>
+                            setState(() => _supplierReference = value),
+                        notes: _notes,
+                        onNotesChanged: (value) =>
+                            setState(() => _notes = value),
+                        discountKind: _documentDiscountKind,
+                        discountController: _documentDiscount,
+                        onDiscountKindChanged: (value) =>
+                            setState(() => _documentDiscountKind = value),
+                        onDiscountChanged: () => setState(() {}),
+                        parties: partiesAsync.value ?? const [],
                       ),
-                      kind: widget.kind,
-                      errors: _headerErrors,
-                      invoiceDate: _invoiceDate,
-                      onDateChanged: (value) => setState(() {
-                        _headerErrors.remove('date');
-                        _invoiceDate = value;
-                      }),
-                      partyId: _partyId,
-                      onPartyChanged: (value) => setState(() {
-                        _headerErrors.remove('party');
-                        _partyId = value;
-                      }),
-                      supplierReference: _supplierReference,
-                      onSupplierReferenceChanged: (value) =>
-                          setState(() => _supplierReference = value),
-                      notes: _notes,
-                      onNotesChanged: (value) => setState(() => _notes = value),
-                      discountKind: _documentDiscountKind,
-                      discountController: _documentDiscount,
-                      onDiscountKindChanged: (value) =>
-                          setState(() => _documentDiscountKind = value),
-                      onDiscountChanged: () => setState(() {}),
-                      parties: partiesAsync.value ?? const [],
-                    )),
+                    ),
                     ...[
                       const SizedBox(height: 12),
                       Row(
@@ -1073,13 +1169,18 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                 key: ValueKey('landed-cost-description-$index'),
                                 controller: _landedCosts[index].description,
                                 decoration: InputDecoration(
-                                  errorText: _landedCosts[index].errors['description'],
+                                  errorText:
+                                      _landedCosts[index].errors['description'],
                                   errorMaxLines: 3,
                                   labelText: l10n.description,
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('description'); }),
+                                onChanged: (_) => setState(() {
+                                  _landedCosts[index].errors.remove(
+                                    'description',
+                                  );
+                                }),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1093,13 +1194,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                       decimal: true,
                                     ),
                                 decoration: InputDecoration(
-                                  errorText: _landedCosts[index].errors['amount'],
+                                  errorText:
+                                      _landedCosts[index].errors['amount'],
                                   errorMaxLines: 3,
                                   labelText: l10n.amount,
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('amount'); }),
+                                onChanged: (_) => setState(() {
+                                  _landedCosts[index].errors.remove('amount');
+                                }),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1112,7 +1216,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                       decimal: true,
                                     ),
                                 decoration: InputDecoration(
-                                  errorText: _landedCosts[index].errors['taxRate'],
+                                  errorText:
+                                      _landedCosts[index].errors['taxRate'],
                                   errorMaxLines: 3,
                                   labelText:
                                       Localizations.localeOf(context)
@@ -1123,7 +1228,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                                   border: const OutlineInputBorder(),
                                   isDense: true,
                                 ),
-                                onChanged: (_) => setState(() { _landedCosts[index].errors.remove('taxRate'); }),
+                                onChanged: (_) => setState(() {
+                                  _landedCosts[index].errors.remove('taxRate');
+                                }),
                               ),
                             ),
                             IconButton(
@@ -1188,6 +1295,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                         _lineErrors.clear();
                         _lines.removeAt(index).dispose();
                       }),
+                      onPickLocations: _pickLocations,
                       onItemDefaults: _applyItemDefaults,
                       lineErrors: _lineErrors,
                       lineKey: _lineKey,
@@ -1428,6 +1536,7 @@ class _LinesTable extends StatelessWidget {
     required this.onChanged,
     required this.onAdd,
     required this.onRemove,
+    required this.onPickLocations,
     required this.onItemDefaults,
     required this.lineErrors,
     required this.lineKey,
@@ -1452,6 +1561,7 @@ class _LinesTable extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onAdd;
   final void Function(int index) onRemove;
+  final void Function(_LineDraft line) onPickLocations;
   final void Function(_LineDraft line, Json item) onItemDefaults;
 
   @override
@@ -1520,6 +1630,7 @@ class _LinesTable extends StatelessWidget {
                                   onChanged: (value) {
                                     if (lines[index].itemId != value) {
                                       lines[index].unitName = null;
+                                      lines[index].locationAllocations = [];
                                     }
                                     lines[index].itemId = value;
                                     final item = items.firstWhere(
@@ -1545,6 +1656,7 @@ class _LinesTable extends StatelessWidget {
                                   if (picked == null) return;
                                   final itemId = text(picked, 'id');
                                   if (lines[index].itemId != itemId) {
+                                    lines[index].locationAllocations = [];
                                     lines[index].unitName = null;
                                   }
                                   lines[index].itemId = itemId;
@@ -1653,6 +1765,9 @@ class _LinesTable extends StatelessWidget {
                                     ? null
                                     : (value) {
                                         if (value == null) return;
+                                        if (lines[index].unitName != value) {
+                                          lines[index].locationAllocations = [];
+                                        }
                                         lines[index].unitName = value;
                                         final line = lines[index];
                                         if (maySuggestUnitPrice(
@@ -1685,22 +1800,24 @@ class _LinesTable extends StatelessWidget {
                           child: KeyedSubtree(
                             key: lineKey(index, 'quantity'),
                             child: TextFormField(
-                            key: ValueKey('line-quantity-$index'),
-                            controller: lines[index].quantity,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
+                              key: ValueKey('line-quantity-$index'),
+                              controller: lines[index].quantity,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                errorText: lineErrors['$index.quantity'],
+                                labelText: l10n.quantity,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              onChanged: (_) {
+                                onLineEdited(index, 'quantity');
+                                onChanged();
+                              },
                             ),
-                            decoration: InputDecoration(
-                              errorText: lineErrors['$index.quantity'],
-                              labelText: l10n.quantity,
-                              isDense: true,
-                              border: const OutlineInputBorder(),
-                            ),
-                            onChanged: (_) {
-                              onLineEdited(index, 'quantity');
-                              onChanged();
-                            },
-                          )),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         // What the quantity above means in base units. Shown,
@@ -1726,24 +1843,26 @@ class _LinesTable extends StatelessWidget {
                           child: KeyedSubtree(
                             key: lineKey(index, 'unitPrice'),
                             child: TextFormField(
-                            key: ValueKey('line-price-$index'),
-                            controller: lines[index].unitPrice,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
+                              key: ValueKey('line-price-$index'),
+                              controller: lines[index].unitPrice,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                errorText: lineErrors['$index.unitPrice'],
+                                labelText: l10n.unitPrice,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              onChanged: (_) {
+                                onLineEdited(index, 'unitPrice');
+                                lines[index].unitPriceAutomatic = false;
+                                lines[index].unitPriceEdited = true;
+                                onChanged();
+                              },
                             ),
-                            decoration: InputDecoration(
-                              errorText: lineErrors['$index.unitPrice'],
-                              labelText: l10n.unitPrice,
-                              isDense: true,
-                              border: const OutlineInputBorder(),
-                            ),
-                            onChanged: (_) {
-                              onLineEdited(index, 'unitPrice');
-                              lines[index].unitPriceAutomatic = false;
-                              lines[index].unitPriceEdited = true;
-                              onChanged();
-                            },
-                          )),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -1751,23 +1870,25 @@ class _LinesTable extends StatelessWidget {
                           child: KeyedSubtree(
                             key: lineKey(index, 'taxRate'),
                             child: TextFormField(
-                            key: ValueKey('line-tax-rate-$index'),
-                            controller: lines[index].taxRate,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
+                              key: ValueKey('line-tax-rate-$index'),
+                              controller: lines[index].taxRate,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                errorText: lineErrors['$index.taxRate'],
+                                labelText: l10n.taxRate,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              onChanged: (_) {
+                                onLineEdited(index, 'taxRate');
+                                lines[index].taxRateEdited = true;
+                                onChanged();
+                              },
                             ),
-                            decoration: InputDecoration(
-                              errorText: lineErrors['$index.taxRate'],
-                              labelText: l10n.taxRate,
-                              isDense: true,
-                              border: const OutlineInputBorder(),
-                            ),
-                            onChanged: (_) {
-                              onLineEdited(index, 'taxRate');
-                              lines[index].taxRateEdited = true;
-                              onChanged();
-                            },
-                          )),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
@@ -1786,6 +1907,19 @@ class _LinesTable extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (kind.isSales && lines[index].itemId != null)
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: TextButton.icon(
+                          onPressed: () => onPickLocations(lines[index]),
+                          icon: const Icon(Icons.location_on_outlined),
+                          label: Text(
+                            language == 'ar'
+                                ? 'مواقع الصرف (${lines[index].locationAllocations.length})'
+                                : 'Source locations (${lines[index].locationAllocations.length})',
+                          ),
+                        ),
+                      ),
                     // The item, unit and quantity in one sentence, under the
                     // controls that hold them. A scanned label changes three
                     // fields at once, and this is the line that says which
@@ -1855,30 +1989,31 @@ class _LinesTable extends StatelessWidget {
                             child: KeyedSubtree(
                               key: lineKey(index, 'discount'),
                               child: TextFormField(
-                              key: ValueKey('line-discount-value-$index'),
-                              controller: lines[index].discountValue,
-                              enabled:
-                                  lines[index].discountKind !=
-                                  DiscountKind.none,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: InputDecoration(
-                                errorText: lineErrors['$index.discount'],
-                                labelText:
-                                    lines[index].discountKind ==
-                                        DiscountKind.percent
-                                    ? l10n.discountPercentValue
-                                    : l10n.discountAmountValue,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
+                                key: ValueKey('line-discount-value-$index'),
+                                controller: lines[index].discountValue,
+                                enabled:
+                                    lines[index].discountKind !=
+                                    DiscountKind.none,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  errorText: lineErrors['$index.discount'],
+                                  labelText:
+                                      lines[index].discountKind ==
+                                          DiscountKind.percent
+                                      ? l10n.discountPercentValue
+                                      : l10n.discountAmountValue,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                onChanged: (_) {
+                                  onLineEdited(index, 'discount');
+                                  onChanged();
+                                },
                               ),
-                              onChanged: (_) {
-                                onLineEdited(index, 'discount');
-                                onChanged();
-                              },
-                            )),
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

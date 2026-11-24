@@ -50,7 +50,8 @@
             "quantity": "5.0000"
           }
         ]
-      }
+      },
+      "canAllocate": true
     }
   ]
 }
