@@ -68,6 +68,7 @@ Map<String, dynamic> batchOperationBody({
   required String quantity,
   String? unitCost,
   String? reason,
+  String? batchNumber,
   String? productionDate,
   String? expiryDate,
   String? storageLocationId,
@@ -103,6 +104,9 @@ Map<String, dynamic> batchOperationBody({
     if (trimmed.isNotEmpty) body['reason'] = trimmed;
   }
   if (operation == BatchOperation.receive) {
+    if (batchNumber != null && batchNumber.trim().isNotEmpty) {
+      body['batchNumber'] = batchNumber.trim();
+    }
     if (productionDate != null && productionDate.trim().isNotEmpty) {
       body['productionDate'] = productionDate.trim();
     }
@@ -173,6 +177,7 @@ class _BatchOperationDialog extends ConsumerStatefulWidget {
 
 class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   final _form = GlobalKey<FormState>();
+  final _batchNumber = TextEditingController();
   final _quantity = TextEditingController();
   final _unitCost = TextEditingController();
   final _reason = TextEditingController();
@@ -217,6 +222,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
 
   @override
   void dispose() {
+    _batchNumber.dispose();
     _quantity.dispose();
     _unitCost.dispose();
     _reason.dispose();
@@ -245,7 +251,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     }
     final parsed = num.tryParse(value);
     if (parsed == null) return _label('رقم غير صالح', 'Invalid number');
-    if (!allowZero && parsed <= 0) return _label('يجب أن يكون أكبر من صفر', 'Must be greater than zero');
+    if (!allowZero && parsed <= 0) {
+      return _label('يجب أن يكون أكبر من صفر', 'Must be greater than zero');
+    }
     return null;
   }
 
@@ -268,7 +276,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   Future<void> _submit() async {
     if (_busy || !(_form.currentState?.validate() ?? false)) return;
     final user = ref.read(currentUserProvider);
-    final branchId = user?.branchId ?? text(widget.batch ?? const {}, 'branchId');
+    final branchId =
+        user?.branchId ?? text(widget.batch ?? const {}, 'branchId');
     if (branchId.isEmpty) {
       _fail(_label('لا يوجد فرع للمستخدم', 'The user has no branch'));
       return;
@@ -286,10 +295,12 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     }
     if (operation == BatchOperation.transfer &&
         (_toWarehouseId == null || _toWarehouseId == _warehouseId)) {
-      setState(() => _fieldErrors['toWarehouseId'] = _label(
-        'اختر مستودعًا مختلفًا للتحويل',
-        'Choose a different destination warehouse',
-      ));
+      setState(
+        () => _fieldErrors['toWarehouseId'] = _label(
+          'اختر مستودعًا مختلفًا للتحويل',
+          'Choose a different destination warehouse',
+        ),
+      );
       return;
     }
     final Map<String, dynamic> body;
@@ -308,6 +319,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
         quantity: _quantity.text,
         unitCost: _unitCost.text,
         reason: _reason.text,
+        batchNumber: _batchNumber.text,
         productionDate: _productionDate.text,
         expiryDate: _expiryDate.text,
         storageLocationId: _locationId,
@@ -335,8 +347,15 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           error.fieldErrors.forEach((key, message) {
             final field = key == 'fromWarehouseId' ? 'warehouseId' : key;
             if (const {
-              'itemId', 'warehouseId', 'toWarehouseId', 'quantity', 'unitCost',
-              'productionDate', 'expiryDate', 'storageLocationId', 'reason',
+              'itemId',
+              'warehouseId',
+              'toWarehouseId',
+              'quantity',
+              'unitCost',
+              'productionDate',
+              'expiryDate',
+              'storageLocationId',
+              'reason',
             }.contains(field)) {
               _fieldErrors[field] = message;
             } else {
@@ -437,6 +456,26 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                       ),
                     ),
                   ),
+                if (operation == BatchOperation.receive)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: TextFormField(
+                      controller: _batchNumber,
+                      forceErrorText: _fieldErrors['batchNumber'],
+                      onChanged: (_) => _clearField('batchNumber'),
+                      decoration: InputDecoration(
+                        labelText: _label('رقم الدفعة', 'Batch number'),
+                      ),
+                      validator: (value) {
+                        final item = widget.items
+                            .where((row) => text(row, 'id') == _itemId)
+                            .firstOrNull;
+                        return item?['requiresBatch'] == true
+                            ? _required(value)
+                            : null;
+                      },
+                    ),
+                  ),
                 // The item is fixed whenever the dialog was opened from a row,
                 // because a lot belongs to exactly one item.
                 if (widget.batch == null)
@@ -463,7 +502,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     }),
                     validator: _required,
                   ),
-                if (widget.batch == null && operation != BatchOperation.transfer)
+                if (widget.batch == null &&
+                    operation != BatchOperation.transfer)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _warehouseField(
@@ -521,13 +561,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _unitCost,
-                    forceErrorText: _fieldErrors['unitCost'],
-                    onChanged: (_) => _clearField('unitCost'),
+                      forceErrorText: _fieldErrors['unitCost'],
+                      onChanged: (_) => _clearField('unitCost'),
                       decoration: InputDecoration(
-                        labelText: _label(
-                          'تكلفة الوحدة',
-                          'Unit cost',
-                        ),
+                        labelText: _label('تكلفة الوحدة', 'Unit cost'),
                       ),
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
@@ -542,8 +579,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _productionDate,
-                    forceErrorText: _fieldErrors['productionDate'],
-                    onChanged: (_) => _clearField('productionDate'),
+                      forceErrorText: _fieldErrors['productionDate'],
+                      onChanged: (_) => _clearField('productionDate'),
                       decoration: InputDecoration(
                         labelText: _label(
                           'تاريخ الإنتاج (اختياري)',
@@ -559,8 +596,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _expiryDate,
-                    forceErrorText: _fieldErrors['expiryDate'],
-                    onChanged: (_) => _clearField('expiryDate'),
+                      forceErrorText: _fieldErrors['expiryDate'],
+                      onChanged: (_) => _clearField('expiryDate'),
                       decoration: InputDecoration(
                         labelText: _label(
                           'تاريخ الانتهاء (اختياري)',
@@ -588,8 +625,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _reason,
-                    forceErrorText: _fieldErrors['reason'],
-                    onChanged: (_) => _clearField('reason'),
+                      forceErrorText: _fieldErrors['reason'],
+                      onChanged: (_) => _clearField('reason'),
                       decoration: InputDecoration(
                         labelText: operation == BatchOperation.writeOff
                             ? _label('السبب', 'Reason')
@@ -658,6 +695,29 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
               'Storage location (optional)',
             ),
             errorText: _fieldErrors['storageLocationId'],
+            helperText: shelves.isLoading
+                ? _label('جارٍ تحميل المواقع...', 'Loading locations...')
+                : shelves.hasError
+                ? _label(
+                    'تعذر تحميل المواقع. اضغط لإعادة المحاولة.',
+                    'Could not load locations. Tap refresh to retry.',
+                  )
+                : rows.isEmpty
+                ? _label(
+                    'لا توجد مواقع في هذا المستودع. أنشئ موقعًا ثم حدّث القائمة.',
+                    'No locations in this warehouse. Create one, then refresh.',
+                  )
+                : null,
+            helperMaxLines: 2,
+            suffixIcon: IconButton(
+              tooltip: _label(
+                'تحديث مواقع التخزين',
+                'Refresh storage locations',
+              ),
+              onPressed: () =>
+                  ref.invalidate(batchShelvesOfProvider(warehouseId)),
+              icon: const Icon(Icons.refresh),
+            ),
           ),
           items: [
             for (final row in rows)
@@ -689,7 +749,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           ? value
           : null,
       isExpanded: true,
-      decoration: InputDecoration(labelText: label, errorText: _fieldErrors[fieldKey]),
+      decoration: InputDecoration(
+        labelText: label,
+        errorText: _fieldErrors[fieldKey],
+      ),
       items: [
         for (final row in widget.warehouses)
           DropdownMenuItem(
@@ -709,7 +772,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     );
   }
 
-  String _itemName(Json row) => _arabic ? text(row, 'nameAr') : text(row, 'nameEn');
+  String _itemName(Json row) =>
+      _arabic ? text(row, 'nameAr') : text(row, 'nameEn');
   String _locationName(Json row) =>
       _arabic ? text(row, 'nameAr') : text(row, 'nameEn');
 }
@@ -718,14 +782,15 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
 ///
 /// Both are read through the resources the rest of the app already uses, so a
 /// grant decision made on the server is not second-guessed here.
-final batchOperationWarehousesProvider =
-    FutureProvider<List<Json>>((ref) async {
-      final user = ref.watch(currentUserProvider);
-      if (user?.branchId == null) return const [];
-      return ref
-          .read(apiClientProvider)
-          .getList('/inventory/warehouses', query: {'branchId': user!.branchId});
-    });
+final batchOperationWarehousesProvider = FutureProvider<List<Json>>((
+  ref,
+) async {
+  final user = ref.watch(currentUserProvider);
+  if (user?.branchId == null) return const [];
+  return ref
+      .read(apiClientProvider)
+      .getList('/inventory/warehouses', query: {'branchId': user!.branchId});
+});
 
 /// A first guess at the shelves, before a warehouse is known.
 ///
@@ -744,10 +809,12 @@ final batchOperationLocationsProvider = FutureProvider<List<Json>>((ref) async {
 /// so offering every shelf in the company would let the operator pick one the
 /// server then rejects - after they have filled the form. Asking the server for
 /// that warehouse's shelves means the list cannot offer an invalid choice.
-final batchShelvesOfProvider =
-    FutureProvider.family<List<Json>, String>((ref, warehouseId) async {
-      if (warehouseId.isEmpty) return const [];
-      return ref
-          .read(apiClientProvider)
-          .getList('/inventory/locations', query: {'warehouseId': warehouseId});
-    });
+final batchShelvesOfProvider = FutureProvider.family<List<Json>, String>((
+  ref,
+  warehouseId,
+) async {
+  if (warehouseId.isEmpty) return const [];
+  return ref
+      .read(apiClientProvider)
+      .getList('/inventory/locations', query: {'warehouseId': warehouseId});
+});

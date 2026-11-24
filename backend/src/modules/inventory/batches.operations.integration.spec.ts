@@ -1,3 +1,7 @@
+import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { StorageLocationsService } from './storage-locations.service';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -160,6 +164,43 @@ const vmReady =
   afterEach(async () => {
     await db.close();
   });
+
+  (process.env.KAYAN_LOCATION_UI === '1' ? it : it.skip)('real Flutter receipt over HTTP persists location and shows its stock balance', async () => {
+    const locations = new StorageLocationsService(pglitePrisma(db) as never, {} as never);
+    const server = createServer(async (req, res) => {
+      try {
+        const url = new URL(req.url!, 'http://localhost');
+        const path = url.pathname.replace('/api/v1', '');
+        let data: unknown;
+        if (path === '/inventory/batches/receive') {
+          let body = ''; for await (const chunk of req) body += chunk;
+          data = await service.receive(COMPANY, USER, JSON.parse(body));
+        } else if (path === '/inventory/batches') {
+          data = await service.list(COMPANY, {});
+        } else if (path === '/inventory/locations') {
+          data = await locations.list(COMPANY, { warehouseId: url.searchParams.get('warehouseId') ?? undefined });
+        } else if (path === '/inventory/items') {
+          data = (await db.query('SELECT * FROM items')).rows;
+        } else if (path === '/inventory/warehouses') {
+          data = (await db.query('SELECT * FROM warehouses ORDER BY code')).rows;
+        } else { data = []; }
+        res.setHeader('Content-Type', 'application/json');res.end(JSON.stringify(data));
+      } catch (e) {res.statusCode=500;res.end(JSON.stringify({message:String(e)}));}
+    });
+    await new Promise<void>(resolve => server.listen(3219, '127.0.0.1', resolve));
+    try {
+      const output = await promisify(execFile)(process.env.FLUTTER_BIN ?? 'flutter', ['test', 'test/widget/location_http_receipt_test.dart'], {
+        cwd: join(process.cwd(), '..'), timeout: 90000, maxBuffer: 4*1024*1024,
+      }).catch(e => {console.log(e.stdout, e.stderr);throw e;
+      });
+      console.log(output.stdout);
+      const persisted = (await db.query<{location:string; quantity:string}>(`SELECT "storageLocationId" AS location, "remainingQuantity"::text AS quantity FROM item_batches WHERE "batchNumber"='UI-ISOLATED-RECEIPT'`)).rows[0];
+      expect(persisted).toEqual({location:SHELF, quantity:'3.0000'});
+      const rows = await locations.list(COMPANY, {warehouseId:WAREHOUSE});
+      expect(rows.items[0].stock).toEqual({items:1, quantity:'3.0000'});
+      console.log('ISOLATED_UI_HTTP_DB_PROOF', JSON.stringify({persisted, stock:rows.items[0].stock}));
+    } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
+  }, 150000);
 
   describe('receive', () => {
     it('stores the dates, the shelf and the cost that will be frozen', async () => {

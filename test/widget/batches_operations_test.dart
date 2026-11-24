@@ -83,6 +83,8 @@ class _BatchApi extends ApiClient {
         FakeTokenStore(),
       );
 
+  bool locationsAvailable = true;
+  bool requiresBatch = false;
   final List<Json>? lots;
   final Object? failPost;
 
@@ -109,6 +111,7 @@ class _BatchApi extends ApiClient {
         {
           'id': 'item-1',
           'code': 'I-1',
+          'requiresBatch': requiresBatch,
           'nameEn': 'Cable',
           'nameAr': 'كابل',
           'unit': 'm',
@@ -117,12 +120,18 @@ class _BatchApi extends ApiClient {
     }
     if (path == '/inventory/warehouses') {
       return [
-        {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'الرئيسي'},
+        {
+          'id': 'wh-1',
+          'code': 'MAIN',
+          'nameEn': 'Main store',
+          'nameAr': 'الرئيسي',
+        },
         {'id': 'wh-2', 'code': 'SEC', 'nameEn': 'Second', 'nameAr': 'الثاني'},
       ];
     }
     if (path == '/inventory/locations') {
       shelfQueries.add(query);
+      if (!locationsAvailable) return [];
       return [
         {
           'id': 'loc-1',
@@ -274,12 +283,7 @@ void main() {
         tester,
         _BatchApi(
           lots: [
-            _lot(
-              production: null,
-              expiry: null,
-              days: null,
-              location: null,
-            ),
+            _lot(production: null, expiry: null, days: null, location: null),
           ],
         ),
       );
@@ -293,18 +297,15 @@ void main() {
       expect(
         dashes.where((widget) => widget.style?.fontSize != 10.5),
         hasLength(3),
-        reason: 'production, expiry and location are body cells; the fourth '
+        reason:
+            'production, expiry and location are body cells; the fourth '
             'dash is the small caption in the Days column',
       );
       expect(find.textContaining('null'), findsNothing);
     });
 
     testWidgets('Arabic reads the Arabic location name', (tester) async {
-      await pump(
-        tester,
-        _BatchApi(),
-        locale: const Locale('ar'),
-      );
+      await pump(tester, _BatchApi(), locale: const Locale('ar'));
       expect(find.text('ممر أ رف ١'), findsOneWidget);
     });
   });
@@ -448,6 +449,59 @@ void main() {
       expect(body['batchId'], 'lot-1');
     });
 
+    testWidgets(
+      'receive refreshes locations created after an earlier empty dialog',
+      (tester) async {
+        final api = _BatchApi()..locationsAvailable = false;
+        await pump(tester, api);
+        await tapText(tester, 'Receive');
+        await tapText(tester, 'Cancel');
+        // Another screen creates the first location while this session stays open.
+        api.locationsAvailable = true;
+        await tapText(tester, 'Receive');
+        await pickDropdownItem(
+          tester,
+          'Storage location (optional)',
+          'A-01 • Aisle A shelf 1',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Quantity'),
+          '1',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Unit cost'),
+          '4.25',
+        );
+        await tapText(tester, 'Receive');
+        expect(api.posted.single.$2['storageLocationId'], 'loc-1');
+      },
+    );
+
+    testWidgets(
+      'required batch number is collected rather than supplied outside the form',
+      (tester) async {
+        final api = _BatchApi()..requiresBatch = true;
+        await pump(tester, api);
+        await tapText(tester, 'Receive');
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Quantity'),
+          '1',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Unit cost'),
+          '4.25',
+        );
+        await tapText(tester, 'Receive');
+        expect(api.posted, isEmpty);
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Batch number'),
+          'MANUAL-LOT-1',
+        );
+        await tapText(tester, 'Receive');
+        expect(api.posted.single.$2['batchNumber'], 'MANUAL-LOT-1');
+      },
+    );
+
     testWidgets('receive collects cost, dates and the shelf', (tester) async {
       final api = _BatchApi();
       await pump(tester, api);
@@ -496,13 +550,15 @@ void main() {
       expect(
         shelfWarehouses,
         contains('wh-1'),
-        reason: 'the dialog never asked the server for this warehouse\'s '
+        reason:
+            'the dialog never asked the server for this warehouse\'s '
             'shelves, so the list could only have come from the prefetch',
       );
       expect(
         shelfWarehouses.whereType<String>().toSet(),
         {'wh-1'},
-        reason: 'offering another warehouse\'s shelf would let the operator '
+        reason:
+            'offering another warehouse\'s shelf would let the operator '
             'pick one the server rejects',
       );
     });
@@ -512,7 +568,10 @@ void main() {
       await pump(tester, api);
 
       await tapText(tester, 'Issue');
-      await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Quantity'),
+        '',
+      );
       await tapText(tester, 'Issue');
 
       expect(api.posted, isEmpty);
@@ -540,7 +599,9 @@ void main() {
       expect(api.posted, isEmpty);
       expect(find.text('Format YYYY-MM-DD'), findsOneWidget);
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Expiry date (optional)'), '2027-02-30');
+        find.widgetWithText(TextFormField, 'Expiry date (optional)'),
+        '2027-02-30',
+      );
       await tapText(tester, 'Receive');
       expect(api.posted, isEmpty);
       expect(find.text('Invalid date'), findsOneWidget);
@@ -591,30 +652,39 @@ void main() {
       expect(
         find.textContaining('Not enough of lot LOT-A'),
         findsOneWidget,
-        reason: 'the refusal names the lot and the balance; a generic '
+        reason:
+            'the refusal names the lot and the balance; a generic '
             '"something went wrong" would not',
       );
       expect(api.listCalls, isNot(0));
     });
 
-    testWidgets('server quantity error stays under quantity and clears on edit', (tester) async {
-      final api = _BatchApi(failPost: const ApiFailure(
-        'Validation failed', statusCode: 422,
-        fieldErrors: {'quantity': 'Quantity exceeds the lot balance'},
-      ));
-      await pump(tester, api);
-      await tapText(tester, 'Issue');
-      final qty = find.widgetWithText(TextFormField, 'Quantity');
-      await tester.enterText(qty, '99');
-      await tapText(tester, 'Issue');
-      expect(find.text('Quantity exceeds the lot balance'), findsOneWidget);
-      expect(tester.widget<TextFormField>(qty).forceErrorText,
-        'Quantity exceeds the lot balance');
-      expect(find.byType(AlertDialog), findsOneWidget);
-      await tester.enterText(qty, '2');
-      await tester.pump();
-      expect(find.text('Quantity exceeds the lot balance'), findsNothing);
-    });
+    testWidgets(
+      'server quantity error stays under quantity and clears on edit',
+      (tester) async {
+        final api = _BatchApi(
+          failPost: const ApiFailure(
+            'Validation failed',
+            statusCode: 422,
+            fieldErrors: {'quantity': 'Quantity exceeds the lot balance'},
+          ),
+        );
+        await pump(tester, api);
+        await tapText(tester, 'Issue');
+        final qty = find.widgetWithText(TextFormField, 'Quantity');
+        await tester.enterText(qty, '99');
+        await tapText(tester, 'Issue');
+        expect(find.text('Quantity exceeds the lot balance'), findsOneWidget);
+        expect(
+          tester.widget<TextFormField>(qty).forceErrorText,
+          'Quantity exceeds the lot balance',
+        );
+        expect(find.byType(AlertDialog), findsOneWidget);
+        await tester.enterText(qty, '2');
+        await tester.pump();
+        expect(find.text('Quantity exceeds the lot balance'), findsNothing);
+      },
+    );
 
     testWidgets('the dialog stays open while the call is in flight', (
       tester,

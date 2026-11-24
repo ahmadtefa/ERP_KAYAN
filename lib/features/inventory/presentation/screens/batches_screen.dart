@@ -104,6 +104,10 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
     try {
       items = await ref.read(itemsProvider.future);
       warehouses = await ref.read(batchOperationWarehousesProvider.future);
+      // Locations can be created on another screen after a receipt was closed.
+      // Do not reuse an empty (or outdated) picker for the rest of the session.
+      ref.invalidate(batchOperationLocationsProvider);
+      ref.invalidate(batchShelvesOfProvider);
       locations = await ref.read(batchOperationLocationsProvider.future);
     } catch (error) {
       if (!mounted) return;
@@ -271,9 +275,8 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
             ColumnSpec(
               _arabic ? 'الأيام' : 'Days',
               numeric: true,
-              value: (r) => r['daysToExpiry'] == null
-                  ? '—'
-                  : asString(r['daysToExpiry']),
+              value: (r) =>
+                  r['daysToExpiry'] == null ? '—' : asString(r['daysToExpiry']),
               tone: (r) {
                 final days = asNum(r['daysToExpiry']);
                 if (days == null) return AppTone.neutral;
@@ -282,10 +285,7 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
                 return AppTone.neutral;
               },
             ),
-            ColumnSpec(
-              l10n.status,
-              value: (r) => text(r, 'status'),
-            ),
+            ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
           ],
         ),
       ),
