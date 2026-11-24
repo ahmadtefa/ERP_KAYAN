@@ -561,6 +561,7 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                   Expanded(
                     child: TextField(
                       controller: _nameEn,
+                      onChanged: (_) => _clear('name'),
                       decoration: InputDecoration(labelText: t('الاسم بالإنجليزية', 'Name (English)')),
                     ),
                   ),
@@ -821,8 +822,12 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                     decoration: InputDecoration(
                       labelText: t('الدور (اختياري)', 'Role (optional)'),
                       helperText: t('يُشترط أيضًا', 'Also required'),
+                      errorText: _errors['level.$index.roleCode'],
                     ),
-                    onChanged: (value) => level.roleCode = value,
+                    onChanged: (value) {
+                      level.roleCode = value;
+                      _clear('level.$index.roleCode');
+                    },
                   ),
                 ),
               ],
@@ -939,7 +944,9 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
           e.fieldErrors.forEach((key, message) {
             final match = levelKey.firstMatch(key);
             if (match != null) {
-              final field = match.group(2) == 'permission' ? 'permission' : 'name';
+              final sourceField = match.group(2)!;
+              final field = sourceField == 'nameAr' || sourceField == 'nameEn'
+                  ? 'name' : sourceField;
               _errors['level.${match.group(1)}.$field'] = message;
             } else if (key == 'nameAr' || key == 'nameEn') {
               _errors['name'] = message;
