@@ -335,4 +335,27 @@ void main() {
     expect(tester.takeException(),isNull);
   });
 
+  testWidgets('a refused account shows each reason under its field and can be corrected', (tester) async {
+    final source = _ChartSource()..createError = const ApiFailure('x',statusCode:400,code:'VALIDATION_FAILED',
+      fieldErrors:{'code':'رقم الحساب مستخدم بالفعل','nameEn':'الاسم الإنجليزي طويل'});
+    await _open(tester, source);
+    await tester.tap(find.text('New account')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(find.text('رقم الحساب مستخدم بالفعل'),findsOneWidget);
+    expect(find.text('الاسم الإنجليزي طويل'),findsOneWidget);
+    expect(find.byType(AlertDialog),findsOneWidget); // the account dialog itself, no error dialog on top
+    expect(find.textContaining('The save result is uncertain'),findsNothing);
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English')).controller!.text,'New asset');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNotNull);
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English'), 'New asset 2');
+    await tester.pump();
+    expect(find.text('الاسم الإنجليزي طويل'),findsNothing);
+    expect(find.text('رقم الحساب مستخدم بالفعل'),findsOneWidget);
+    source.createError = null;
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(source.createAttempts,2);
+    expect(source.accounts.where((a) => a.nameEn == 'New asset 2'),hasLength(1));
+  });
 }
