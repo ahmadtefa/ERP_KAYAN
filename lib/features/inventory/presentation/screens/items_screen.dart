@@ -115,7 +115,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec('nameEn', 'Name (English)', maxLength: 200),
         FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
         FieldSpec('unit', l10n.unit, maxLength: 20),
-        FieldSpec('barcode', 'Barcode', maxLength: 60),
+        FieldSpec('barcode', 'Barcode', maxLength: 60, nullWhenEmpty: isEdit),
         if (canManageSalePrice)
           FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         if (canManagePurchasePrice)
@@ -154,6 +154,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec(
           'notes',
           l10n.description,
+          nullWhenEmpty: isEdit,
           maxLength: 1000,
           kind: FieldKind.multiline,
           maxLines: 2,
@@ -596,6 +597,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             FieldSpec(
               'unit',
               l10n.unitsBarcodesFieldUnit,
+              maxLength: 40,
               required: true,
               helper: isBase ? l10n.unitsBarcodesBaseCannotRenameHelper : null,
             ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../operations/ops_auto_create.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -243,7 +244,9 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
     final arabic = _arabic;
     List<Json> branchRows;
     try {
-      branchRows = await ref.read(apiClientProvider).getList('/company/branches');
+      branchRows = await ref
+          .read(apiClientProvider)
+          .getList('/company/branches');
     } catch (error) {
       if (mounted) showAppError(context, error);
       return;
@@ -289,7 +292,12 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
         searchable: true,
         options: branchOptions,
       ),
-      FieldSpec('address', arabic ? 'العنوان' : 'Address', maxLines: 2),
+      FieldSpec(
+        'address',
+        arabic ? 'العنوان' : 'Address',
+        nullWhenEmpty: isEdit,
+        maxLines: 2,
+      ),
       FieldSpec(
         'isDefault',
         arabic ? 'المستودع الافتراضي للفرع' : 'Default for the branch',

@@ -191,10 +191,16 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         if (!isEdit) FieldSpec('code', l10n.assetCode, maxLength: 50),
         FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
         FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
-        FieldSpec('category', l10n.assetCategory, maxLength: 60),
+        FieldSpec(
+          'category',
+          l10n.assetCategory,
+          nullWhenEmpty: isEdit,
+          maxLength: 60,
+        ),
         FieldSpec(
           'description',
           l10n.description,
+          nullWhenEmpty: isEdit,
           maxLength: 500,
           kind: FieldKind.multiline,
         ),
@@ -246,7 +252,12 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           required: true,
           options: _options(accounts, type: 'expense'),
         ),
-        FieldSpec('location', l10n.assetLocation, maxLength: 200),
+        FieldSpec(
+          'location',
+          l10n.assetLocation,
+          nullWhenEmpty: isEdit,
+          maxLength: 200,
+        ),
         FieldSpec(
           'purchaseInvoiceLineId',
           _t('بند فاتورة الشراء (اختياري)', 'Purchase invoice line (optional)'),
@@ -269,7 +280,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         final chosenLine = values['purchaseInvoiceLineId']?.toString() ?? '';
         values.removeWhere(
           (key, value) =>
-              value == null || (value is String && value.trim().isEmpty),
+              (!isEdit && value == null) ||
+              (value is String && value.trim().isEmpty),
         );
         if (isEdit &&
             chosenLine.isEmpty &&

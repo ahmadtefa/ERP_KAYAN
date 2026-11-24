@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/settings/presentation/widgets/document_settings_card.dart';
@@ -113,4 +118,48 @@ void main() {
       );
     },
   );
+  testWidgets('document settings inline error render proof', (tester) async {
+    await tester.runAsync(() async {
+      final font = FontLoader('Roboto')
+        ..addFont(
+          Future.value(
+            ByteData.sublistView(
+              File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                  .readAsBytesSync(),
+            ),
+          ),
+        );
+      await font.load();
+    });
+    tester.view.physicalSize = const Size(1100, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await openSettings(tester, superAdmin: true);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Maximum discount %'),
+      'NaN',
+    );
+    await tester.tap(find.text('Save settings'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      final boundary = tester.binding.renderViews.first.child!;
+      // The whole test view is captured through the first repaint boundary.
+      RenderRepaintBoundary? found;
+      void visit(RenderObject r) {
+        if (found != null) return;
+        if (r is RenderRepaintBoundary) {
+          found = r;
+          return;
+        }
+        r.visitChildren(visit);
+      }
+
+      visit(boundary);
+      final image = await found!.toImage();
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      File('${Directory.systemTemp.path}/document-settings-inline.png')
+          .writeAsBytesSync(bytes!.buffer.asUint8List());
+    });
+  });
 }

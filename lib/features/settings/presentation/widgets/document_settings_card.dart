@@ -193,6 +193,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                         ),
                         decoration: InputDecoration(
                           labelText: l10n.maximumDiscount,
+                          errorMaxLines: 3,
                           errorText: _errors['maxDiscountPercent'],
                           border: const OutlineInputBorder(),
                           isDense: true,
@@ -211,6 +212,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.managerName,
+                          errorMaxLines: 3,
                           errorText: _errors['managerName'],
                           border: const OutlineInputBorder(),
                           isDense: true,
@@ -229,6 +231,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.salesManagerName,
+                          errorMaxLines: 3,
                           errorText: _errors['salesManagerName'],
                           border: const OutlineInputBorder(),
                           isDense: true,
@@ -247,6 +250,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
                         enabled: canEdit,
                         decoration: InputDecoration(
                           labelText: l10n.salesManagerPhone,
+                          errorMaxLines: 3,
                           errorText: _errors['salesManagerPhone'],
                           border: const OutlineInputBorder(),
                           isDense: true,
