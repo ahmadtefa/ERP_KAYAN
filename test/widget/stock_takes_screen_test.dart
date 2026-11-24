@@ -406,6 +406,55 @@ void main() {
     expect(find.text('ITEM-1 — Coffee'), findsOneWidget);
   });
 
+  testWidgets('partial count requires item selection and preserves notes in its request', (tester) async {
+    final api = _StockTakesApi();
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
+    await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Partial')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Open count')).onPressed, isNull);
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.enterText(find.widgetWithText(TextField, 'Notes'), '  physical partial check  ');
+    await tester.tap(find.text('Open count'));
+    await tester.pumpAndSettle();
+    expect(api.bodies['/inventory/stock-takes'], {
+      'warehouseId': 'wh-1', 'scope': 'PARTIAL', 'itemIds': ['item-1'], 'notes': 'physical partial check',
+    });
+  });
+
+  testWidgets('cancelling a new stock take sends nothing', (tester) async {
+    final api = _StockTakesApi();
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
+    await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(api.posts, isEmpty);
+    expect(find.text('Open a new stock take'), findsNothing);
+  });
+
+  testWidgets('finish requires all frozen lines while save allows a partial count', (tester) async {
+    final api = _StockTakesApi();
+    (api.detail['lines'] as List).add({
+      'id': 'line-2', 'itemId': 'item-2', 'itemCode': 'ITEM-2', 'itemNameEn': 'Tea',
+      'unit': 'piece', 'systemQuantity': '4', 'countedQuantity': null,
+    });
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byWidgetPredicate((widget) => widget is TextFormField && widget.key.toString().contains('count-line-1-')), '0');
+    await tester.tap(find.text('Finish & review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter the counted quantity before finishing.'), findsOneWidget);
+    expect(api.posts, isEmpty);
+    await tester.tap(find.text('Save count'));
+    await tester.pumpAndSettle();
+    expect(api.bodies['/inventory/stock-takes/st-1/count'], {
+      'lines': [{'lineId': 'line-1', 'countedQuantity': 0.0}], 'finish': false,
+    });
+  });
+
   testWidgets('saves counted quantities to the session count endpoint', (
     tester,
   ) async {

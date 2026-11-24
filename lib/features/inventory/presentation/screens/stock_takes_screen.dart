@@ -195,7 +195,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
       var warehouseId = text(warehouses.first, 'id');
       var scope = 'FULL';
       final selected = <String>{};
-      final notes = TextEditingController();
+      var notes = '';
       final draft = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
@@ -252,7 +252,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                   else
                     const Spacer(),
                   TextField(
-                    controller: notes,
+                    onChanged: (value) => notes = value,
                     decoration: InputDecoration(labelText: _arabic ? 'ملاحظات' : 'Notes'),
                   ),
                 ],
@@ -265,7 +265,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                   'warehouseId': warehouseId,
                   'scope': scope,
                   if (scope == 'PARTIAL') 'itemIds': selected.toList(),
-                  if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim(),
+                  if (notes.trim().isNotEmpty) 'notes': notes.trim(),
                 }),
                 child: Text(_arabic ? 'فتح الجرد' : 'Open count'),
               ),
@@ -273,7 +273,6 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
           ),
         ),
       );
-      notes.dispose();
       if (draft == null || !mounted) return;
       final created = await client.post('/inventory/stock-takes', body: draft);
       await ref.read(stockTakesProvider.notifier).refreshQuietly();
