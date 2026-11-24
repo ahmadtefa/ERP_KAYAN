@@ -95,6 +95,8 @@ model Company {
   notifications  Notification[]
   notificationSettings NotificationSetting[]
   printPriceSettings   PrintPriceSetting[]
+  approvalPolicies     ApprovalPolicy[]
+  approvalDecisions    ApprovalDecision[]
   warehouseBalances   WarehouseStockBalance[]
   stockTakeSessions   StockTakeSession[]
   userWarehouseAccess UserWarehouseAccess[]
@@ -770,6 +772,134 @@ model CompanySetting {
   @@map("company_settings")
 }
 
+// ------------------------------------------------------ approval policies
+
+/// One configurable approval rule, scoped to what it governs.
+///
+/// A company that configures nothing gets the historical behaviour: a stock
+/// transfer moves DRAFT -> REVIEWED -> APPROVED and the review/approval doors
+/// are guarded by `inventory.transfer.review` / `.approve`. Introducing this
+/// table therefore changes nothing until somebody writes a rule, which is the
+/// property that lets it ship to installations that already have data.
+///
+/// When rules *do* exist for an operation, they replace those two doors with
+/// the configured sequence of levels. Every level must be satisfied, in
+/// order, before the document leaves `APPROVED`.
+model ApprovalPolicy {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+
+  /// What this policy governs. Today `STOCK_TRANSFER`; the column exists so
+  /// the same engine can govern issue, write-off and discount later without
+  /// a second table.
+  operation String @db.VarChar(48)
+
+  nameEn String @db.VarChar(120)
+  nameAr String @db.VarChar(120)
+
+  /// Rules are evaluated in ascending priority; the first whose conditions
+  /// all match decides the sequence. A policy with no matching rule means
+  /// "no approval chain", which is the default behaviour.
+  priority Int @default(100)
+
+  isActive Boolean @default(true)
+
+  // ── conditions. null/empty means "does not care" ──────────────────────
+
+  /// Restrict to one branch; null means every branch of the company.
+  branchId String? @db.Uuid
+
+  /// Restrict to a source or destination shelf. Both null means every
+  /// warehouse.
+  sourceWarehouseId      String? @db.Uuid
+  destinationWarehouseId String? @db.Uuid
+
+  /// Inclusive lower bounds. A transfer below the amount (when set) or below
+  /// the quantity does not match this rule.
+  minimumAmount   Decimal? @db.Decimal(19, 4)
+  minimumQuantity Decimal? @db.Decimal(19, 4)
+
+  /// When true, the chain always applies. When false the rule applies only
+  /// when it has at least one active level, so a half-configured rule is
+  /// inert rather than silently demanding nothing.
+  alwaysRequire Boolean @default(false)
+
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  levels    ApprovalLevel[]
+  decisions ApprovalDecision[]
+
+  @@index([companyId, operation, isActive, priority])
+  @@map("approval_policies")
+}
+
+/// One step in a policy's sequence. The person whose decision closes the
+/// level must hold `permission`; `roleCode` narrows it further to a role.
+model ApprovalLevel {
+  id       String @id @default(uuid()) @db.Uuid
+  policyId String @db.Uuid
+
+  /// 1-based, unique within the policy. Levels are decided in this order.
+  level Int
+
+  nameEn String @db.VarChar(120)
+  nameAr String @db.VarChar(120)
+
+  /// The permission that lets a person act on this level. Required: a level
+  /// that anybody could close would not be an approval.
+  permission String @db.VarChar(120)
+
+  /// Optional role restriction; null means "anybody holding the permission".
+  roleCode String? @db.VarChar(48)
+
+  /// When true the level is skipped once an earlier level has been decided by
+  /// someone with enough authority. Reserved for later use; stored so a
+  /// company can express intent now.
+  optional Boolean @default(false)
+
+  policy ApprovalPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, level])
+  @@map("approval_levels")
+}
+
+/// One recorded decision on one document's chain.
+///
+/// Append-only by convention: the history of who decided what, when and why
+/// is the audit trail the company is buying, so nothing here is updated or
+/// deleted. `level` is the level the decision closes; `APPROVE` at the last
+/// level completes the chain.
+model ApprovalDecision {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  policyId  String? @db.Uuid
+
+  /// The document under approval, e.g. `StockTransfer`.
+  entityType String @db.VarChar(48)
+  entityId   String @db.Uuid
+
+  level Int
+
+  /// APPROVE | REJECT | RETURN
+  decision String @db.VarChar(16)
+  reason   String?
+
+  actorId       String  @db.Uuid
+  actorRoleCode String? @db.VarChar(48)
+
+  createdAt DateTime @default(now())
+
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  policy  ApprovalPolicy?  @relation(fields: [policyId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, entityType, entityId, level])
+  @@index([companyId, createdAt])
+  @@map("approval_decisions")
+}
+
 // ------------------------------------------------------------ cash & banks
 
 enum CashAccountKind {
@@ -1071,6 +1201,14 @@ model StockTransfer {
   rejectedBy             String?  @db.Uuid
   rejectedAt             DateTime?
   rejectionReason        String?
+  /// When the requester opened a configured approval chain, and who did it.
+  /// Null on a transfer that used the historical review/approve doors.
+  submittedBy            String?  @db.Uuid
+  submittedAt            DateTime?
+  /// Who sent the request back to its author for amendment, when and why.
+  returnedBy             String?  @db.Uuid
+  returnedAt             DateTime?
+  returnReason           String?
   settlementDocumentId   String?  @db.Uuid
   settlementRequestedBy  String?  @db.Uuid
   settlementApprovedBy   String?  @db.Uuid

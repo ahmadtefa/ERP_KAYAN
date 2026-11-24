@@ -47,9 +47,29 @@ for (const name of reviewed) {
   }
 }
 const restoreSafety = read('work-restore-safety.yml');
-assert.deepEqual(restoreSafety.on.push.branches, ['work/restore-recovery-20261123']);
+// Pinned: the workflow may run only for the Work delivery branch and the
+// Arena session branch that continues it. Each addition is a deliberate edit.
+assert.deepEqual(restoreSafety.on.push.branches, [
+  'work/restore-recovery-20261123',
+  'arena/98e79137-erp-kayan',
+]);
 assert.deepEqual(restoreSafety.permissions, { contents: 'read' });
-assert.deepEqual(Object.keys(restoreSafety.jobs).sort(), ['flutter', 'postgres-linux', 'postgres-windows']);
+// windows-app builds the Flutter desktop application alone for this branch:
+// no installer, no install, no environment, no publish. It exists because the
+// handover recorded that no Windows application build had been proven here.
+assert.deepEqual(Object.keys(restoreSafety.jobs).sort(),
+  ['flutter', 'postgres-linux', 'postgres-windows', 'windows-app']);
+const windowsApp = restoreSafety.jobs['windows-app'];
+assert.equal(windowsApp.environment, undefined);
+assert.equal(windowsApp['continue-on-error'], undefined);
+assert.deepEqual(windowsApp.permissions, undefined, 'the job inherits contents: read');
+const windowsAppSteps = windowsApp.steps.map(step => String(step.run || '')).join('\n');
+assert.match(windowsAppSteps, /data\/app\.so/,
+  'the release payload, not just the runner shell, must be verified');
+assert.match(windowsAppSteps, /flutter build windows --release --no-pub/,
+  'the Windows job must build the application, not an installer');
+assert.doesNotMatch(windowsAppSteps, /build-installer\.ps1|ISCC|gh release|upload-artifact/,
+  'the Windows application job must not build an installer or publish anything');
 for (const job of Object.values(restoreSafety.jobs)) {
   assert.equal(job.environment, undefined);
   assert.equal(job['continue-on-error'], undefined);

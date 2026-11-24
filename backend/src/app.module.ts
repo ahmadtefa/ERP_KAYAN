@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { validateEnvironment } from './common/config/validate-environment';
+import { ApprovalsModule } from './common/approvals/approvals.module';
 import { CompanySettingsModule } from './common/settings/company-settings.module';
 import { AuditModule } from './common/audit/audit.module';
 import { LicensingModule } from './modules/licensing/licensing.module';
@@ -45,6 +46,8 @@ import { SearchModule } from './modules/search/search.module';
     LicensingModule,
     // Global: every posting path reads the company's policies from here.
     CompanySettingsModule,
+    // Global: the configured approval chains for the operations that have them.
+    ApprovalsModule,
     // Global: every module that moves goods asks which warehouse it moved in.
     WarehouseModule,
     PrintSettingsModule,

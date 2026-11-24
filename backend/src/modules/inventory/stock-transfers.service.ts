@@ -3,6 +3,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, StockDocumentKind } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  ApprovalActor,
+  ApprovalsService,
+} from '../../common/approvals/approvals.service';
+import { ApprovalChain } from '../../common/approvals/approval-chain';
 import { StockDocumentsService } from './stock-documents.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -11,6 +16,8 @@ import {
   STOCK_TRANSFER_DISPATCH_REQUIRED,
   STOCK_TRANSFER_RECEIPT_REQUIRED,
   STOCK_TRANSFER_RECEIVED,
+  STOCK_TRANSFER_LEVEL_PENDING,
+  STOCK_TRANSFER_RETURNED,
   STOCK_TRANSFER_REVIEW_REQUIRED,
   STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED,
   dedupeKey,
@@ -26,6 +33,7 @@ export class StockTransfersService {
     private readonly documents: StockDocumentsService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly approvals: ApprovalsService,
   ) {}
 
   async list(companyId: string, query: { status?: string; q?: string; sourceWarehouseId?: string; destinationWarehouseId?: string } = {}) {
@@ -71,7 +79,11 @@ export class StockTransfersService {
     const date = this.day(input.transferDate);
     const hash = this.hash({ ...input, idempotencyKey: key });
     const result = await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`stock-transfer-create:${companyId}:${key}`}, 0))`);
+      // The lock function returns void, which the typed query API cannot
+      // deserialize: every transfer creation answered 500 until this was run
+      // as a statement whose result is discarded. The lock itself is held
+      // until the transaction ends, which is the whole point of it.
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`stock-transfer-create:${companyId}:${key}`}, 0))`);
       const prior = await tx.stockTransfer.findFirst({ where: { companyId, idempotencyKey: key } });
       if (prior) {
         const recorded = await tx.stockTransferAction.findFirst({ where: { transferId: prior.id, requestKey: `CREATE:${key}` } });
@@ -123,20 +135,271 @@ export class StockTransfersService {
     return created;
   }
 
+  /// Submit a draft. Under a configured chain this is the requester's own
+  /// act — it opens the chain rather than deciding anything — so the
+  /// "requester cannot review their own transfer" rule does not apply here;
+  /// it applies to every decision, which is where the separation matters.
+  async submit(companyId: string, userId: string, id: string, key: string) {
+    const row = await this.findOne(companyId, id);
+    const chain = await this.chainFor(companyId, row);
+    if (chain.source === 'LEGACY') {
+      if (row.createdBy === userId) {
+        throw new BadRequestException('The requester cannot review their own transfer');
+      }
+      return this.transition(companyId, userId, id, key, ['DRAFT'], 'REVIEWED', {
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+      });
+    }
+    return this.transition(companyId, userId, id, key, ['DRAFT'], 'PENDING_APPROVAL', {
+      submittedBy: userId,
+      submittedAt: new Date(),
+    });
+  }
+
+  /// Kept for clients written against the two-door flow. It means "submit for
+  /// review", and under a configured chain that is exactly `submit`.
   async review(companyId: string, userId: string, id: string, key: string) {
-    const row = await this.findOne(companyId, id);
-    if (row.createdBy === userId) throw new BadRequestException('The requester cannot review their own transfer');
-    return this.transition(companyId, userId, id, key, ['DRAFT'], 'REVIEWED', { reviewedBy: userId, reviewedAt: new Date() });
+    return this.submit(companyId, userId, id, key);
   }
-  async approve(companyId: string, userId: string, id: string, key: string) {
+
+  /// Decide the pending level of the configured chain.
+  ///
+  /// When the chain becomes complete the transfer moves to APPROVED, which is
+  /// the only state from which dispatch is allowed. Until then it stays in
+  /// PENDING_APPROVAL and dispatch is refused.
+  async approve(
+    companyId: string,
+    userId: string,
+    id: string,
+    key: string,
+    actor?: ApprovalActor,
+    reason?: string | null,
+    expectedLevel?: number | null,
+  ) {
     const row = await this.findOne(companyId, id);
-    if (row.createdBy === userId) throw new BadRequestException('The requester cannot approve their own transfer');
-    if (row.reviewedBy === userId) throw new BadRequestException('The reviewer cannot also approve the transfer');
-    return this.transition(companyId, userId, id, key, ['REVIEWED'], 'APPROVED', { approvedBy: userId, approvedAt: new Date() });
+    const chain = await this.chainFor(companyId, row);
+    if (chain.source === 'LEGACY') {
+      if (row.createdBy === userId) throw new BadRequestException('The requester cannot approve their own transfer');
+      if (row.reviewedBy === userId) throw new BadRequestException('The reviewer cannot also approve the transfer');
+      return this.transition(companyId, userId, id, key, ['REVIEWED'], 'APPROVED', {
+        approvedBy: userId,
+        approvedAt: new Date(),
+      });
+    }
+    if (!actor) throw new BadRequestException('An approval actor is required for a configured chain');
+    const result = await this.approvals.decide(actor, {
+      entityType: 'StockTransfer',
+      entityId: id,
+      chain,
+      requesterId: row.createdBy,
+      decision: 'APPROVE',
+      reason: reason ?? null,
+      expectedLevel: expectedLevel ?? null,
+    });
+    if (result.state.isComplete) {
+      return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'APPROVED', {
+        approvedBy: userId,
+        approvedAt: new Date(),
+      });
+    }
+    const updated = await this.findOne(companyId, id);
+    await this.notifyNextStages(updated);
+    return updated;
   }
-  async reject(companyId: string, userId: string, id: string, key: string, reason: string) {
+
+  /// Refuse the request. The chain is marked as stopped and the transfer goes
+  /// back to REJECTED; the requester sees the reason and the history keeps it.
+  async reject(companyId: string, userId: string, id: string, key: string, reason: string, actor?: ApprovalActor) {
     if (!reason?.trim()) throw new BadRequestException('A rejection reason is required');
-    return this.transition(companyId, userId, id, key, ['REVIEWED'], 'REJECTED', { rejectedBy: userId, rejectedAt: new Date(), rejectionReason: reason.trim() });
+    const row = await this.findOne(companyId, id);
+    const chain = await this.chainFor(companyId, row);
+    if (chain.source === 'LEGACY') {
+      if (row.createdBy === userId) throw new BadRequestException('The requester cannot reject their own transfer');
+      return this.transition(companyId, userId, id, key, ['REVIEWED'], 'REJECTED', {
+        rejectedBy: userId, rejectedAt: new Date(), rejectionReason: reason.trim(),
+      });
+    }
+    if (!actor) throw new BadRequestException('An approval actor is required to reject a configured chain');
+    await this.approvals.decide(actor, {
+      entityType: 'StockTransfer', entityId: id, chain,
+      requesterId: row.createdBy, decision: 'REJECT', reason: reason.trim(),
+    });
+    return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'REJECTED', {
+      rejectedBy: userId, rejectedAt: new Date(), rejectionReason: reason.trim(),
+    });
+  }
+
+  /// Send an in-flight request back to its author for amendment.
+  ///
+  /// This is the third outcome the company asked for, and it is deliberately
+  /// distinct from rejection: RETURN leaves the document editable and
+  /// resubmittable, and it keeps the reason on the record. The transfer lands
+  /// in DRAFT so the requester can fix the quantities and submit again; the
+  /// chain restarts from level 1 in a fresh sequence, and the earlier
+  /// decisions stay in the history.
+  async returnForAmendment(
+    companyId: string,
+    userId: string,
+    id: string,
+    key: string,
+    reason: string,
+    actor: ApprovalActor,
+  ) {
+    if (!reason?.trim()) throw new BadRequestException('A return reason is required');
+    const row = await this.findOne(companyId, id);
+    if (!['PENDING_APPROVAL', 'SUBMITTED', 'REVIEWED'].includes(row.status)) {
+      throw new ConflictException(`A transfer cannot be returned from ${row.status}`);
+    }
+    const chain = await this.chainFor(companyId, row);
+    if (chain.source === 'LEGACY') {
+      if (row.createdBy === userId) throw new BadRequestException('The requester cannot return their own transfer');
+      return this.transition(companyId, userId, id, key, [row.status], 'DRAFT', {
+        returnedBy: userId, returnedAt: new Date(), returnReason: reason.trim(),
+      });
+    }
+    await this.approvals.decide(actor, {
+      entityType: 'StockTransfer', entityId: id, chain,
+      requesterId: row.createdBy, decision: 'RETURN', reason: reason.trim(),
+    });
+    return this.transition(companyId, userId, id, key, [row.status], 'DRAFT', {
+      returnedBy: userId, returnedAt: new Date(), returnReason: reason.trim(),
+    });
+  }
+
+  /// The chain that governs this transfer, given its own facts.
+  ///
+  /// The amount a threshold is compared against is the value of the goods
+  /// being moved, because that is what a manager is authorising. A line's
+  /// `unitCost` is filled in at dispatch, so a draft transfer would otherwise
+  /// value every request at zero and silently dodge its own approval rule.
+  /// Before dispatch the item's own cost is used, then its sale price, and
+  /// only if the company has priced the item nowhere is the line worth zero.
+  async chainFor(
+    companyId: string,
+    row: {
+      sourceBranchId: string;
+      destinationBranchId: string;
+      sourceWarehouseId: string;
+      destinationWarehouseId: string;
+      lines: Array<{
+        itemId: string;
+        requestedQuantity: Prisma.Decimal;
+        unitCost: Prisma.Decimal | null;
+      }>;
+    },
+  ): Promise<ApprovalChain> {
+    const quantity = row.lines.reduce(
+      (sum, line) => sum.add(line.requestedQuantity),
+      new Prisma.Decimal(0),
+    );
+    const needsItemPrice = row.lines.some(
+      (line) => (line.unitCost ?? new Prisma.Decimal(0)).isZero(),
+    );
+    const itemPrices = new Map<string, Prisma.Decimal>();
+    if (needsItemPrice) {
+      const items = await this.prisma.item.findMany({
+        where: { companyId, id: { in: [...new Set(row.lines.map((line) => line.itemId))] } },
+        select: { id: true, purchasePrice: true },
+      });
+      for (const item of items) {
+        // Only a purchase price is a cost. The selling price is what we hope to
+        // get for the goods, not what they are worth on the shelf, and using it
+        // would let a cheap-to-buy/expensive-to-sell item be valued upward into
+        // an approval rule it should never have needed - or, for a loss leader,
+        // downward out of one it should.
+        if (item.purchasePrice !== null) {
+          itemPrices.set(item.id, new Prisma.Decimal(item.purchasePrice));
+        }
+      }
+    }
+    // A line we cannot price is not a line worth zero: zero is a claim, and it
+    // is the claim that makes an amount threshold quietly stop applying.
+    let amountUnderstated = false;
+    const amount = row.lines.reduce((sum, line) => {
+      const recordedCost = line.unitCost ?? new Prisma.Decimal(0);
+      let unit = recordedCost;
+      if (recordedCost.isZero()) {
+        const known = itemPrices.get(line.itemId);
+        if (known === undefined) {
+          amountUnderstated = true;
+          return sum;
+        }
+        unit = known;
+      }
+      return sum.add(line.requestedQuantity.mul(unit));
+    }, new Prisma.Decimal(0));
+    return this.approvals.chainFor(companyId, 'STOCK_TRANSFER', {
+      branchIds: [row.sourceBranchId, row.destinationBranchId],
+      sourceWarehouseId: row.sourceWarehouseId,
+      destinationWarehouseId: row.destinationWarehouseId,
+      amount: amount.toFixed(4),
+      amountUnderstated,
+      quantity: quantity.toString(),
+    });
+  }
+
+  /// The approval path for one transfer, as the screen shows it.
+  ///
+  /// Every level states who may close it and whether it already has been, so a
+  /// person holding no authority sees a path with no buttons rather than
+  /// buttons that fail. That is enforcement *and* explanation from one source.
+  async approvalPath(companyId: string, id: string) {
+    const row = await this.findOne(companyId, id);
+    const chain = await this.chainFor(companyId, row);
+    if (chain.source === 'LEGACY') {
+      return {
+        source: 'LEGACY' as const,
+        policy: null,
+        levels: [] as unknown[],
+        decisions: await this.approvals.decisions(companyId, 'StockTransfer', id),
+        status: row.status,
+      };
+    }
+    const { decisions, state } = await this.approvals.stateFor(
+      companyId,
+      chain,
+      'StockTransfer',
+      id,
+    );
+    return {
+      source: 'POLICY' as const,
+      policy: {
+        id: chain.policyId,
+        nameEn: chain.policyNameEn,
+        nameAr: chain.policyNameAr,
+      },
+      status: row.status,
+      complete: state.isComplete,
+      stopped: state.stopped
+        ? { level: state.stopped.level, decision: state.stopped.decision, reason: state.stopped.reason }
+        : null,
+      levels: chain.levels.map((level) => {
+        const recorded = decisions.find(
+          (decision) => decision.level === level.level && decision.decision === 'APPROVE',
+        );
+        return {
+          level: level.level,
+          nameEn: level.nameEn,
+          nameAr: level.nameAr,
+          permission: level.permission,
+          roleCode: level.roleCode,
+          optional: level.optional,
+          state: recorded
+            ? 'APPROVED'
+            : state.stopped && state.stopped.level === level.level
+              ? state.stopped.decision === 'RETURN'
+                ? 'RETURNED'
+                : 'REJECTED'
+              : state.pendingLevel === level.level
+                ? 'PENDING'
+                : 'WAITING',
+          decidedBy: recorded ? recorded.actorId : null,
+          decidedAt: recorded ? recorded.createdAt : null,
+          reason: recorded ? recorded.reason : null,
+        };
+      }),
+    };
   }
 
   async dispatch(companyId: string, userId: string, id: string, key: string, lines?: StageLineInput[]) {
@@ -487,6 +750,43 @@ export class StockTransfersService {
 
   private async notifyNextStages(transfer: Awaited<ReturnType<StockTransfersService['findOne']>>) {
     const stages: string[] = [];
+    // A configured chain announces the level that is actually waiting, not the
+    // generic "awaiting approval". That is what makes the alert land in front
+    // of the right person: the kind carries the level's own permission.
+    const chain = await this.chainFor(transfer.companyId, transfer);
+    if (transfer.status === 'PENDING_APPROVAL' && chain.source === 'POLICY') {
+      const current = await this.approvals.stateFor(
+        transfer.companyId,
+        chain,
+        'StockTransfer',
+        transfer.id,
+      );
+      const level = chain.levels.find((candidate) => candidate.level === current.state.pendingLevel);
+      for (const type of level ? [STOCK_TRANSFER_LEVEL_PENDING] : []) {
+        await this.notifyStage(transfer, type, level ?? undefined);
+      }
+      return;
+    }
+    // A returned request is the requester's own news, and it must reach them
+    // rather than the approvers who have just finished with it.
+    if (transfer.status === 'DRAFT' && transfer.returnedAt) {
+      await this.notifications.raise({
+        companyId: transfer.companyId,
+        branchId: transfer.sourceBranchId,
+        warehouseId: transfer.sourceWarehouseId,
+        type: STOCK_TRANSFER_RETURNED,
+        titleAr: 'تحويل أُعيد للتعديل',
+        titleEn: 'Transfer returned for amendment',
+        bodyAr: `أُعيد التحويل ${transfer.documentNumber} للتعديل: ${transfer.returnReason ?? ''}`,
+        bodyEn: `Transfer ${transfer.documentNumber} was returned for amendment: ${transfer.returnReason ?? ''}`,
+        entityType: 'StockTransfer',
+        entityId: transfer.id,
+        entityRef: transfer.documentNumber,
+        actionPath: `/inventory/stock-transfers?transferId=${encodeURIComponent(transfer.id)}`,
+        dedupe: dedupeKey({ type: STOCK_TRANSFER_RETURNED, entityId: transfer.id }),
+      });
+      return;
+    }
     if (transfer.status === 'DRAFT') stages.push(STOCK_TRANSFER_REVIEW_REQUIRED);
     if (transfer.status === 'REVIEWED') stages.push(STOCK_TRANSFER_APPROVAL_REQUIRED);
     if (['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(transfer.status) &&
@@ -516,6 +816,7 @@ export class StockTransfersService {
   private async notifyStage(
     transfer: Awaited<ReturnType<StockTransfersService['findOne']>>,
     type: string,
+    level?: { level: number; nameEn: string; nameAr: string; permission: string },
   ) {
     const destinationStage = type === STOCK_TRANSFER_RECEIPT_REQUIRED ||
       type === STOCK_TRANSFER_SETTLEMENT_APPROVAL_REQUIRED ||
@@ -556,6 +857,12 @@ export class StockTransfersService {
         bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} لديه فروق بانتظار اعتماد التسوية.`,
         bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, has differences awaiting settlement approval.`,
       },
+      [STOCK_TRANSFER_LEVEL_PENDING]: {
+        titleAr: level ? `اعتماد التحويل — ${level.nameAr}` : 'اعتماد تحويل',
+        titleEn: level ? `Transfer approval — ${level.nameEn}` : 'Transfer approval',
+        bodyAr: `التحويل ${documentNumber} من ${fromName} إلى ${toName} بتاريخ ${date} بانتظار المستوى ${level?.level ?? ''} من الاعتماد.`,
+        bodyEn: `Transfer ${documentNumber} from ${fromName} to ${toName}, dated ${date}, is awaiting approval level ${level?.level ?? ''}.`,
+      },
       [STOCK_TRANSFER_CLOSE_REQUIRED]: {
         titleAr: 'تحويل مكتمل بانتظار الإغلاق', titleEn: 'Completed transfer awaiting closure',
         bodyAr: `اكتمل استلام وتسوية التحويل ${documentNumber} بين ${fromName} و${toName} بتاريخ ${date}؛ يمكن إغلاقه.`,
@@ -574,6 +881,9 @@ export class StockTransfersService {
       entityId: transfer.id,
       entityRef: documentNumber,
       actionPath: `/inventory/stock-transfers?transferId=${encodeURIComponent(transfer.id)}`,
+      // A configured level names the permission that may close it, so the
+      // alert names that permission rather than the kind's default.
+      permission: level?.permission ?? null,
       // A transfer's current task is one deduplicated alert, even if the
       // shipment arrives in several dispatch/receipt batches.
       dedupe: dedupeKey({ type, entityId: transfer.id }),

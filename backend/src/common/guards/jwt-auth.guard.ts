@@ -95,8 +95,17 @@ export class JwtAuthGuard implements CanActivate {
     if (typeof payload.sessionHash !== 'string' || !/^[a-f0-9]{64}$/.test(payload.sessionHash)) {
       throw new UnauthorizedException('Session is unavailable; sign in again');
     }
+    // The row must still be live. Sign-out and refresh rotation revoke it by
+    // setting `revokedAt`; without this condition the access token minted
+    // alongside it kept working for its full lifetime after sign-out, which
+    // made "sign out" a client-side gesture only.
     const session = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash: payload.sessionHash, userId: payload.sub },
+      where: {
+        tokenHash: payload.sessionHash,
+        userId: payload.sub,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       select: { id: true },
     });
     if (!session) throw new UnauthorizedException('Session is unavailable; sign in again');

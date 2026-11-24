@@ -60,8 +60,14 @@ export class AuthController {
   @Post('logout')
   async logout(
     @CurrentUser() user: AuthUser,
-    @Headers('x-refresh-token') refreshToken?: string,
+    @Body() body?: { refreshToken?: unknown },
+    @Headers('x-refresh-token') headerToken?: string,
   ) {
+    // The session to end is named by the body (what the desktop program
+    // sends) or, for older clients, the header. An absent token is not an
+    // error: it means "end every session of this account".
+    const fromBody = typeof body?.refreshToken === 'string' ? body.refreshToken : undefined;
+    const refreshToken = fromBody?.trim() || headerToken?.trim() || undefined;
     await this.auth.logout(user.userId, refreshToken);
     return { success: true };
   }

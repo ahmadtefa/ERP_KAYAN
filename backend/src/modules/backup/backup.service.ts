@@ -170,6 +170,13 @@ export const TABLES: TableSpec[] = [
   },
   { model: 'costCenter', scope: 'company' },
   { model: 'notificationSetting', scope: 'company' },
+  // An approval chain is configuration a company wrote, so it belongs in the
+  // company's own backup. The levels hang from the policy and travel with it;
+  // decisions are restored after the policies they point at, because the
+  // policy link is nullable but the foreign key still has to resolve.
+  { model: 'approvalPolicy', scope: 'company' },
+  { model: 'approvalLevel', scope: 'child', parent: 'approvalPolicy', foreignKey: 'policyId' },
+  { model: 'approvalDecision', scope: 'company' },
   { model: 'budget', scope: 'company' },
   { model: 'companySetting', scope: 'company' },
   { model: 'printPriceSetting', scope: 'company' },

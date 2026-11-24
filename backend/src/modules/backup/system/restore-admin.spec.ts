@@ -69,16 +69,33 @@ describe('restore-admin: the limited-privilege restore account', () => {
   });
 
   it('refuses a credential file other users can read', async () => {
+    // The permission bits this test sets mean nothing on Windows: there is no
+    // POSIX mode, `chmodSync(0o644)` is a no-op, and `restore-admin.ts`
+    // deliberately skips the check there rather than pretend. Asserting the
+    // POSIX outcome on a Windows runner made the whole backend suite - and so
+    // the Windows build - fail on a rule that was never in force, which is the
+    // one thing this job must not do: a real failure and a platform
+    // difference have to look different.
+    const posix = process.platform !== 'win32';
     const dir = mkdtempSync(join(tmpdir(), 'kayan-restore-admin-'));
     try {
       const file = join(dir, 'admin-url');
       writeFileSync(file, 'postgresql://restore_admin:pw@localhost:5432/postgres');
-      chmodSync(file, 0o644);
+      if (posix) chmodSync(file, 0o644);
       process.env.KAYAN_RESTORE_ADMIN_FILE = file;
       const status = await restoreAdminStatus();
       expect(status.configured).toBe(true);
-      expect(status.usable).toBe(false);
-      expect(status.reason).toMatch(/readable by other users/);
+      if (posix) {
+        expect(status.usable).toBe(false);
+        expect(status.reason).toMatch(/readable by other users/);
+      } else {
+        // On Windows the credential is read rather than refused for its mode
+        // bits. Whether it is *usable* still depends on the runtime server
+        // check that follows, so the honest assertion is that the refusal is
+        // no longer the permission one - and that nothing secret is returned.
+        expect(status.reason ?? '').not.toMatch(/readable by other users/);
+        expect(JSON.stringify(status)).not.toContain('pw@');
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

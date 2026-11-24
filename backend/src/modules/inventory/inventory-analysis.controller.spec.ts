@@ -2,6 +2,19 @@ import { ForbiddenException } from "@nestjs/common";
 
 import { AuthUser } from "../../common/decorators/current-user.decorator";
 import { InventoryAnalysisController } from "./inventory-analysis.controller";
+import { PERMISSIONS } from "../../../prisma/permissions";
+import { seededRoles } from "../../../prisma/role-catalogue";
+
+/** What the seeded role really holds after prefix expansion, so these
+ * tests exercise the shipped role and not a hand-written guess at it. */
+const rolePermissions = (code: string): string[] => {
+  const role = seededRoles(PERMISSIONS.map(([name]) => name)).find(
+    (entry) => entry.code === code,
+  );
+  if (!role) throw new Error(`Unknown seeded role ${code}`);
+  return role.permissions;
+};
+
 
 const whA = "warehouse-a";
 const whB = "warehouse-b";
@@ -223,5 +236,78 @@ describe("inventory report grants", () => {
     expect(() => controller.run(user(), "audit-trail", {})).toThrow(
       ForbiddenException,
     );
+  });
+
+  it("shows a storekeeper quantities and locations but no cost or price column", async () => {
+    // STOREKEEPER holds inventory.reports.* and inventory.export, and neither
+    // inventory.cost.read nor a price grant. Every money column must be gone
+    // from the payload itself, not zeroed or nulled.
+    const storekeeper = user([grant(whA)], {
+      permissions: rolePermissions("STOREKEEPER"),
+    });
+    const report = (await controller.run(
+      storekeeper,
+      "valuation-by-warehouse",
+      {},
+    )) as {
+      rows: Array<Record<string, unknown>>;
+      opening: Record<string, unknown>;
+      totals?: Record<string, unknown>;
+    };
+    expect(report.rows[0]).toEqual({
+      warehouseCode: "MAIN",
+      quantity: "4.0000",
+    });
+    expect(report.opening).toEqual({ quantity: "4.0000" });
+    expect(report.totals).toBeUndefined();
+    expect(JSON.stringify(report)).not.toContain("25.0000");
+    expect(JSON.stringify(report)).not.toContain("6.2500");
+  });
+
+  it("shows a stock auditor counts without cost, and denies export", async () => {
+    const auditor = user([grant(whA)], {
+      permissions: rolePermissions("STOCK_AUDITOR"),
+    });
+    const report = (await controller.run(
+      auditor,
+      "count-variances",
+      {},
+    )) as { rows: Array<Record<string, unknown>> };
+    expect(report.rows[0]).toHaveProperty("quantity");
+    expect(report.rows[0]).not.toHaveProperty("unitCost");
+    expect(report.rows[0]).not.toHaveProperty("varianceValue");
+    expect(report.rows[0]).not.toHaveProperty("value");
+
+    // Knowing the numbers is not permission to take them out of the system.
+    await expect(
+      controller.exportCsv(
+        auditor,
+        "count-variances",
+        {},
+        { setHeader: jest.fn(), send: jest.fn() } as never,
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it("requires inventory.export by name, independently of the report permission", async () => {
+    const response = { setHeader: jest.fn(), send: jest.fn() };
+    const reportsOnly = user(undefined, {
+      permissions: ["inventory.stock.read", ...reportPermissions],
+    });
+    await expect(
+      controller.exportCsv(reportsOnly, "item-movement", {}, response as never),
+    ).rejects.toThrow(ForbiddenException);
+    expect(service.run).not.toHaveBeenCalled();
+
+    // The storekeeper role really does carry inventory.export; the denial above
+    // is the missing permission and not a broken report permission.
+    expect(rolePermissions("STOREKEEPER")).toContain("inventory.export");
+    await controller.exportCsv(
+      user(undefined, { permissions: rolePermissions("STOREKEEPER") }),
+      "item-movement",
+      {},
+      response as never,
+    );
+    expect(response.send).toHaveBeenCalled();
   });
 });

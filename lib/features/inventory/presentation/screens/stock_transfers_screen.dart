@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -53,7 +54,7 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
       if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('طلب تحويل','Request transfer'))),
     ]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}
   List<Json> _visible(List<Json> rows)=>rows.where((r)=>_query.isEmpty||'${r['documentNumber']} ${r['reason']} ${r['status']}'.toLowerCase().contains(_query)).toList();
-  String _status(String s)=>switch(s){'DRAFT'=>t('مسودة','Draft'),'REVIEWED'=>t('قيد المراجعة','Reviewed'),'APPROVED'=>t('معتمد','Approved'),'DISPATCHING'=>t('جارٍ التسليم','Dispatching'),'RECEIVING'=>t('جارٍ الاستلام','Receiving'),'SETTLING'=>t('جارٍ التسوية','Settling'),'PARTIALLY_DISPATCHED'=>t('تسليم جزئي','Partially dispatched'),'DISPATCHED'=>t('تم التسليم','Dispatched'),'PARTIALLY_RECEIVED'=>t('استلام جزئي','Partially received'),'RECEIVED'=>t('تم الاستلام','Received'),'SETTLEMENT_PENDING'=>t('إعدام بانتظار الاعتماد','Write-off approval pending'),'SETTLED'=>t('تمت التسوية','Settled'),'CLOSED'=>t('مغلق','Closed'),'REJECTED'=>t('مرفوض','Rejected'),'CANCELLED'=>t('ملغى','Cancelled'),_=>s};
+  String _status(String s)=>switch(s){'DRAFT'=>t('مسودة','Draft'),'REVIEWED'=>t('قيد المراجعة','Reviewed'),'PENDING_APPROVAL'=>t('بانتظار الاعتماد','Pending approval'),'APPROVED'=>t('معتمد','Approved'),'DISPATCHING'=>t('جارٍ التسليم','Dispatching'),'RECEIVING'=>t('جارٍ الاستلام','Receiving'),'SETTLING'=>t('جارٍ التسوية','Settling'),'PARTIALLY_DISPATCHED'=>t('تسليم جزئي','Partially dispatched'),'DISPATCHED'=>t('تم التسليم','Dispatched'),'PARTIALLY_RECEIVED'=>t('استلام جزئي','Partially received'),'RECEIVED'=>t('تم الاستلام','Received'),'SETTLEMENT_PENDING'=>t('إعدام بانتظار الاعتماد','Write-off approval pending'),'SETTLED'=>t('تمت التسوية','Settled'),'CLOSED'=>t('مغلق','Closed'),'REJECTED'=>t('مرفوض','Rejected'),'CANCELLED'=>t('ملغى','Cancelled'),_=>s};
   Future<void> _create() async {try{final api=ref.read(apiClientProvider);final warehouses=await api.getList('/inventory/warehouses');final items=await api.getList('/inventory/items');final batches=await api.getList('/inventory/batches');if(!mounted)return;final body=await showDialog<Json>(context:context,barrierDismissible:false,builder:(_)=>_CreateTransferDialog(ar:ar,warehouses:warehouses,items:items,batches:batches,api:api));if(body==null||!mounted)return;setState(()=>_busy=true);await api.post('/inventory/stock-transfers',body:body,idempotencyKey:'create-${DateTime.now().microsecondsSinceEpoch}');await ref.read(stockTransfersProvider.notifier).reload();}catch(e){if(mounted)_msg(e.toString());}finally{if(mounted)setState(()=>_busy=false);}}
   Future<void> _details(Json row) async {final changed=await showDialog<bool>(context:context,builder:(_)=>_TransferDialog(id:text(row,'id'),ar:ar));if(changed==true&&mounted)await ref.read(stockTransfersProvider.notifier).reload();}
   Future<void> _report() async {
@@ -202,8 +203,66 @@ class _TransferDialogState extends ConsumerState<_TransferDialog>{
     _verticalScroll.dispose();
     super.dispose();
   }
-  Json? row;bool loading=true,busy=false;bool get ar=>widget.ar;String t(String a,String e)=>ar?a:e;@override void initState(){super.initState();_load();}Future<void> _load()async{try{final x=await ref.read(apiClientProvider).getObject('/inventory/stock-transfers/${widget.id}');if(mounted)setState(()=>row=x);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}finally{if(mounted)setState(()=>loading=false);}}
-  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · $status'),const SizedBox(height:10),Flexible(child:Scrollbar(controller:_horizontalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_horizontalScroll,scrollDirection:Axis.horizontal,child:Scrollbar(controller:_verticalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_verticalScroll,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList()))))))])),actions:[if(status=='DRAFT'&&(user?.can('inventory.transfer.review')??false))_action('review',t('مراجعة','Review')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.approve')??false))_action('approve',t('اعتماد','Approve')),if(status=='REVIEWED'&&(user?.can('inventory.transfer.review')??false))_action('reject',t('رفض','Reject')),if(['APPROVED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','DISPATCHING'].contains(status)&&(status!='PARTIALLY_RECEIVED'||lines.any((line)=>(double.tryParse('${line['requestedQuantity']}')??0)>(double.tryParse('${line['dispatchedQuantity']}')??0)))&&(user?.can('inventory.transfer.dispatch')??false))_action('dispatch',t('تسليم','Dispatch')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','RECEIVING'].contains(status)&&(user?.can('inventory.transfer.receive')??false))_action('receive',t('استلام','Receive')),if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','SETTLING'].contains(status)&&(user?.can('inventory.transfer.settle')??false))_action('settle',t('تسوية الفروق','Settle differences')),if(status=='SETTLEMENT_PENDING'&&(user?.can('inventory.transfer.settle.approve')??false))_action('settle/approve',t('اعتماد الإعدام','Approve write-off')),if(['RECEIVED','SETTLED'].contains(status)&&(user?.can('inventory.transfer.close')??false))_action('close',t('إغلاق','Close')),if(!['CLOSED','CANCELLED','REJECTED','SETTLEMENT_PENDING'].contains(status)&&(user?.can('inventory.transfer.cancel')??false))_action('cancel',t('إلغاء/عكس','Cancel/reverse')),TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done')))]);}
+  Json? row;bool loading=true,busy=false;bool get ar=>widget.ar;String t(String a,String e)=>ar?a:e;@override void initState(){super.initState();_load();}Json? approvalPath;Future<void> _load()async{try{final api=ref.read(apiClientProvider);final x=await api.getObject('/inventory/stock-transfers/${widget.id}');Json? p;try{p=await api.getObject('/inventory/stock-transfers/${widget.id}/approvals');}catch(_){p=null;}if(mounted)setState((){row=x;approvalPath=p;});}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}finally{if(mounted)setState(()=>loading=false);}}
+  @override Widget build(BuildContext context){final user=ref.watch(currentUserProvider);final status=text(row??{},'status');final lines=(row?['lines'] as List? ??const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();return AlertDialog(title:Text(row==null?t('التحويل','Transfer'):text(row!,'documentNumber')),content:SizedBox(width:800,child:loading?const Center(child:CircularProgressIndicator()):row==null?Text(t('تعذر تحميل التحويل','Could not load transfer')):Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${text(row!,'reason')} · $status'),const SizedBox(height:10),_approvalPath(),Flexible(child:Scrollbar(controller:_horizontalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_horizontalScroll,scrollDirection:Axis.horizontal,child:Scrollbar(controller:_verticalScroll,thumbVisibility:true,child:SingleChildScrollView(controller:_verticalScroll,child:DataTable(columns:[DataColumn(label:Text(t('الصنف','Item'))),DataColumn(label:Text(t('مطلوب','Requested'))),DataColumn(label:Text(t('سُلّم','Dispatched'))),DataColumn(label:Text(t('استُلم','Received'))),DataColumn(label:Text(t('مرتجع','Returned'))),DataColumn(label:Text(t('مفقود/تالف','Short/damaged')))],rows:lines.map((l){final i=l['item'] as Map? ??const{};return DataRow(cells:[DataCell(Text(ar?'${i['nameAr']??i['nameEn']}':'${i['nameEn']??i['nameAr']}')),DataCell(Text('${l['requestedQuantity']}')),DataCell(Text('${l['dispatchedQuantity']}')),DataCell(Text('${l['receivedQuantity']}')),DataCell(Text('${l['returnedQuantity']}')),DataCell(Text('${l['reportedShortage']} / ${l['reportedDamage']}'))]);}).toList()))))))])),actions:_actions(user,status,lines));}
+  /// The buttons, derived from the document's own state and the caller's
+  /// permissions.
+  ///
+  /// A configured chain is decided level by level, so "Approve" is offered
+  /// only when the pending level names a permission this person holds. The
+  /// backend enforces the same rules; hiding a button is courtesy, not the
+  /// control.
+  List<Widget> _actions(AppUser? user,String status,List<Json> lines){
+    bool can(String permission)=>user?.can(permission)??false;
+    final configured=approvalPath?['source']=='POLICY';
+    final levels=(approvalPath?['levels'] as List? ?? const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
+    Map<String,dynamic>? pending;
+    for(final level in levels){if(level['state']=='PENDING'){pending=level;break;}}
+    final pendingPermission=pending?['permission'] as String?;
+    final pendingRole=pending?['roleCode'] as String?;
+    final mayDecide=pending!=null&&pendingPermission!=null&&can(pendingPermission)&&(pendingRole==null||(user?.hasRole(pendingRole)??false));
+    return [
+      if(status=='DRAFT'&&!configured&&can('inventory.transfer.review'))_action('review',t('مراجعة','Review')),
+      if(status=='DRAFT'&&can('inventory.transfer.create'))_action('submit',t('إرسال للاعتماد','Submit for approval')),
+      if(status=='PENDING_APPROVAL'&&mayDecide)_action('approve',t('اعتماد المستوى','Approve level')),
+      if(status=='PENDING_APPROVAL'&&mayDecide)_action('return',t('إرجاع للتعديل','Return for amendment')),
+      if(['PENDING_APPROVAL','REVIEWED'].contains(status)&&can('inventory.transfer.review'))_action('reject',t('رفض','Reject')),
+      if(status=='REVIEWED'&&can('inventory.transfer.approve'))_action('approve',t('اعتماد','Approve')),
+      if(['APPROVED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','DISPATCHING'].contains(status)&&(status!='PARTIALLY_RECEIVED'||lines.any((line)=>(double.tryParse('${line['requestedQuantity']}')??0)>(double.tryParse('${line['dispatchedQuantity']}')??0)))&&can('inventory.transfer.dispatch'))_action('dispatch',t('تسليم','Dispatch')),
+      if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','RECEIVING'].contains(status)&&can('inventory.transfer.receive'))_action('receive',t('استلام','Receive')),
+      if(['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED','SETTLING'].contains(status)&&can('inventory.transfer.settle'))_action('settle',t('تسوية الفروق','Settle differences')),
+      if(status=='SETTLEMENT_PENDING'&&can('inventory.transfer.settle.approve'))_action('settle/approve',t('اعتماد الإعدام','Approve write-off')),
+      if(['RECEIVED','SETTLED'].contains(status)&&can('inventory.transfer.close'))_action('close',t('إغلاق','Close')),
+      if(!['CLOSED','CANCELLED','REJECTED','SETTLEMENT_PENDING'].contains(status)&&can('inventory.transfer.cancel'))_action('cancel',t('إلغاء/عكس','Cancel/reverse')),
+      TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done'))),
+    ];
+  }
+
+  /// The path this request is following, so a person can see who closed each
+  /// level, when, and why — and why an action they expected is not offered.
+  Widget _approvalPath(){
+    final source=approvalPath?['source'];
+    if(source!='POLICY')return const SizedBox.shrink();
+    final levels=(approvalPath?['levels'] as List? ?? const[]).whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList();
+    if(levels.isEmpty)return const SizedBox.shrink();
+    return Container(
+      margin:const EdgeInsets.only(bottom:10),
+      padding:const EdgeInsets.all(8),
+      decoration:BoxDecoration(border:Border.all(color:Theme.of(context).dividerColor),borderRadius:BorderRadius.circular(6)),
+      child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text(t('مسار الاعتماد','Approval path'),style:Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height:6),
+        ...levels.map((level){
+          final state='${level['state']}';
+          final label=switch(state){'APPROVED'=>t('معتمد','Approved'),'REJECTED'=>t('مرفوض','Rejected'),'RETURNED'=>t('أُعيد للتعديل','Returned'),'PENDING'=>t('بانتظار القرار','Pending'),_=>t('في الانتظار','Waiting')};
+          return Padding(
+            padding:const EdgeInsets.symmetric(vertical:2),
+            child:Text('${level['level']}. ${ar?level['nameAr']:level['nameEn']} — $label${level['reason']!=null?' · ${level['reason']}':''}',style:Theme.of(context).textTheme.bodySmall),
+          );
+        }),
+      ]),
+    );
+  }
   Widget _action(String action,String label)=>TextButton(onPressed:busy?null:()=>_run(action),child:Text(label));
   Future<void> _run(String action) async {
     final api = ref.read(apiClientProvider);
@@ -233,8 +292,12 @@ class _TransferDialogState extends ConsumerState<_TransferDialog>{
       if (selected == null || !mounted) return;
       body = {'lines': selected};
     }
-    if (action == 'reject') {
-      final reason = await _ask(t('سبب الرفض', 'Rejection reason'));
+    if (action == 'reject' || action == 'return') {
+      final reason = await _ask(
+        action == 'reject'
+            ? t('سبب الرفض', 'Rejection reason')
+            : t('سبب الإرجاع للتعديل', 'Reason for returning it'),
+      );
       if (reason == null || !mounted) return;
       body = {'reason': reason};
     }

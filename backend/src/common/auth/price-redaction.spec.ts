@@ -33,4 +33,35 @@ describe('API price redaction', () => {
     expect(redactPriceFields(payload, { sale: true, purchase: true, cost: false })).toEqual({});
     expect(redactPriceFields(payload, { sale: true, purchase: true, cost: true })).toEqual(payload);
   });
+
+  it('hides caller-named report columns alongside the shared cost set', () => {
+    const report = {
+      rows: [{ quantity: '4', unitCost: '6', value: '25', difference: '9', purchasePrice: '2' }],
+      opening: { quantity: '4', value: '25' },
+      totals: { value: '25' },
+    };
+    expect(redactPriceFields(report, { sale: false, purchase: false, cost: false }, null, {
+      costKeys: ['value', 'difference'],
+      purchaseKeys: ['purchasePrice'],
+    })).toEqual({
+      rows: [{ quantity: '4' }],
+      opening: { quantity: '4' },
+      totals: {},
+    });
+    // The caller's names extend the hidden set; they do not force a cost
+    // column out of a response the user is allowed to read.
+    expect(redactPriceFields(report, { sale: false, purchase: false, cost: true }, null, {
+      costKeys: ['value', 'difference'],
+    })).toEqual({
+      rows: [{ quantity: '4', unitCost: '6', value: '25', difference: '9' }],
+      opening: { quantity: '4', value: '25' },
+      totals: { value: '25' },
+    });
+  });
+
+  it('leaves the payload untouched when the caller names nothing', () => {
+    const payload = { rows: [{ quantity: '4', unitCost: '6' }] };
+    expect(redactPriceFields(payload, { sale: true, purchase: true, cost: true }))
+      .toEqual(payload);
+  });
 });

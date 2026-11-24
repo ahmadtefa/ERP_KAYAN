@@ -45,6 +45,10 @@ jobs:
         run: node --test ../scripts/windows-candidate-preflight.test.mjs
       - name: Verify the build-only path can only build and inspect
         run: node --test ../scripts/windows-build-only.test.mjs
+      # The packaging command the Windows paths depend on did not exist, so the
+      # build failed before producing an artifact. Keep it defined.
+      - name: Verify the clean backend build command exists
+        run: node --test ../scripts/build-clean-contract.test.mjs
       - name: Verify complete removal cannot delete what it does not own
         run: node --test ../scripts/remove-everything-safety.test.mjs
       # A wrong Inno constant is a total build failure, and it cost a thirteen

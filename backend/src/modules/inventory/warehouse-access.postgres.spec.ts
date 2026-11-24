@@ -5,7 +5,12 @@ import { WarehouseAccessService } from './warehouse-access.service';
 const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
 (run ? describe : describe.skip)('warehouse access on isolated PostgreSQL', () => {
   jest.setTimeout(90_000);
-  const companyId = randomUUID();
+  const fixtureCompanyId = randomUUID();
+  /** Resolved in beforeAll: this suite's own company, or one already present. */
+  let companyId: string = fixtureCompanyId;
+  /** True when this suite created the company and may therefore remove it. */
+  let ownsCompany = false;
+  const suffix = fixtureCompanyId.slice(0, 8);
   const branchA = randomUUID();
   const branchB = randomUUID();
   const warehouseA = randomUUID();
@@ -17,15 +22,27 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
-    const suffix = companyId.slice(0, 8);
-    await prisma.company.create({ data: { id: companyId, code: `WA-${suffix}`, nameEn: 'Access test', nameAr: 'اختبار الصلاحيات' } });
+    // A partial unique index allows one live company per database, and another
+    // suite may already have made one. This suite needs a company to scope rows
+    // to, not one of its own, so an existing company is borrowed and left as
+    // it was found.
+    const live = await prisma.company.findFirst({
+      where: { deletedAt: null },
+      select: { id: true },
+    });
+    if (live) {
+      companyId = live.id;
+    } else {
+      ownsCompany = true;
+      await prisma.company.create({ data: { id: companyId, code: `WA-${suffix}`, nameEn: 'Access test', nameAr: 'اختبار الصلاحيات' } });
+    }
     await prisma.branch.createMany({ data: [
-      { id: branchA, companyId, code: 'A', nameEn: 'A', nameAr: 'أ' },
-      { id: branchB, companyId, code: 'B', nameEn: 'B', nameAr: 'ب' },
+      { id: branchA, companyId, code: `WA-A-${suffix}`, nameEn: 'A', nameAr: 'أ' },
+      { id: branchB, companyId, code: `WA-B-${suffix}`, nameEn: 'B', nameAr: 'ب' },
     ] });
     await prisma.warehouse.createMany({ data: [
-      { id: warehouseA, companyId, branchId: branchA, code: 'A', nameEn: 'A', nameAr: 'أ' },
-      { id: warehouseB, companyId, branchId: branchB, code: 'B', nameEn: 'B', nameAr: 'ب' },
+      { id: warehouseA, companyId, branchId: branchA, code: `WA-WA-${suffix}`, nameEn: 'A', nameAr: 'أ' },
+      { id: warehouseB, companyId, branchId: branchB, code: `WA-WB-${suffix}`, nameEn: 'B', nameAr: 'ب' },
     ] });
     await prisma.user.create({ data: {
       id: userId, companyId, username: `wa-${suffix}`, fullNameEn: 'Test', fullNameAr: 'اختبار', passwordHash: 'not-a-login',
@@ -41,7 +58,7 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.warehouse.deleteMany({ where: { companyId } });
     await prisma.branch.deleteMany({ where: { companyId } });
-    await prisma.company.deleteMany({ where: { id: companyId } });
+    if (ownsCompany) await prisma.company.deleteMany({ where: { id: companyId } });
     await prisma.$disconnect();
   });
 

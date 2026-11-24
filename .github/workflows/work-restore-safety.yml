@@ -2,7 +2,7 @@ name: Work restore safety (no Installer)
 
 on:
   push:
-    branches: ['work/restore-recovery-20261123']
+    branches: ['work/restore-recovery-20261123', 'arena/98e79137-erp-kayan']
   workflow_dispatch:
 
 permissions:
@@ -59,6 +59,18 @@ jobs:
         run: node ../scripts/ci-workflow-safety.test.cjs
       - name: Changed production files lint
         run: npx eslint src/common/maintenance/*.ts src/app.module.ts src/main.ts src/common/prisma/prisma.service.ts src/modules/backup/backup.service.ts src/modules/backup/backup.controller.ts src/modules/backup/full-backup.controller.ts src/modules/backup/system/complete-backup.controller.ts src/modules/backup/system/restore-authority.ts src/modules/backup/system/database-identity.ts src/modules/backup/system/restore-state.ts src/modules/backup/system/move-restore-directory.ts src/modules/backup/system/dump-recovery-coordinator.ts src/modules/backup/full-backup.service.ts src/modules/backup/backup-schedule.service.ts src/modules/backup/system/pg-support.ts src/modules/backup/system/restore-journal.ts src/modules/backup/system/restore-lock.ts src/modules/backup/system/restore-tool.ts src/modules/backup/system/system-restore.service.ts src/modules/notifications/expiry-alert.scheduler.ts
+      - name: Price and inventory-report redaction
+        run: >-
+          npx jest --runInBand
+          common/auth/price-redaction.spec.ts
+          modules/inventory/inventory-analysis.controller.spec.ts
+      # Company, branch and warehouse isolation against the real database:
+      # a branch id typed by a client must not read another branch's stock,
+      # ledger or documents.
+      - name: Company, branch and warehouse isolation on PostgreSQL
+        env:
+          KAYAN_WAREHOUSE_ACCESS_PG: '1'
+        run: npx jest --runInBand modules/inventory/isolation.postgres.spec.ts
       - name: Focused regression tests
         run: npx jest --runInBand common/maintenance/maintenance.spec.ts common/maintenance/startup-coordination.spec.ts modules/backup/full-backup-recovery-safety.spec.ts modules/backup/full-backup.service.spec.ts modules/backup/system/restore-journal.spec.ts modules/backup/system/system-restore-maintenance.spec.ts modules/backup/system/dump-recovery-coordinator.spec.ts modules/backup/system/move-restore-directory.spec.ts modules/backup/system/system-restore-files.spec.ts modules/backup/backup-schedule-safety.spec.ts modules/notifications/expiry-alert.scheduler.spec.ts
       - name: JSON and DUMP real PostgreSQL regression
@@ -66,6 +78,14 @@ jobs:
           KAYAN_COMPANY_BACKUP_PG: '1'
           KAYAN_REAL_PG_TESTS: '1'
         run: npx jest --runInBand modules/backup/company-backup.postgres.spec.ts modules/backup/system/restore-multiprocess.postgres.spec.ts modules/backup/full-backup-real-pg.spec.ts modules/backup/system/restore-authority.postgres.spec.ts
+      - name: Sign-out, refresh rotation and password sessions on PostgreSQL
+        env:
+          KAYAN_AUTH_SESSION_PG: '1'
+        run: >-
+          npx jest --runInBand
+          modules/auth/auth.logout.postgres.spec.ts
+          modules/auth/auth.refresh-rotation.postgres.spec.ts
+          modules/auth/auth.password-sessions.postgres.spec.ts
       - name: Independent APIs and killed DUMP owner
         run: node --test scripts/restore-multiprocess.test.cjs
       - name: Complete archive through the production API
@@ -95,6 +115,11 @@ jobs:
           done
           if [ "$ready" != true ]; then cat "$RUNNER_TEMP/kayan-full-http-api.log"; exit 1; fi
           node scripts/scenario-system-backup.mjs http://127.0.0.1:3001/api/v1
+          # Prices, cost and warehouse scope, through the same production API.
+          # Only synthetic data: the scenario creates its own branch, shelves
+          # and account and removes them afterwards.
+          ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 \
+            node scripts/scenario-price-isolation.mjs http://127.0.0.1:3001/api/v1
 
   postgres-windows:
     runs-on: windows-2025
@@ -138,6 +163,110 @@ jobs:
             & "$bin\pg_ctl.exe" -D $data -m immediate -w stop
           }
 
+  # The handover recorded that the Windows delivery path was never proven for
+  # this head: the only Windows evidence was a Backend build, and the workflow
+  # named "build only" actually builds the whole Setup. This job builds the
+  # Flutter desktop application alone, from this exact commit, and records what
+  # it produced. It is not an installer, not an installed-product test and not
+  # release evidence.
+  windows-app:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify checkout is the exact source head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw 'Checkout does not match the event source head.' }
+          Write-Host "Source commit: $actual"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      # Syntax first: every bundled script must at least parse on the same
+      # Windows PowerShell host Inno Setup invokes. The Work branch is the
+      # source the installer is built from, so this has to hold here too.
+      - name: Parse every bundled Windows PowerShell script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -LiteralPath 'distribution/windows' -Filter '*.ps1' -File -Recurse)
+          if ($files.Count -eq 0) { throw 'No Windows PowerShell runtime scripts were found.' }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $detail = ($errors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join '; '
+              throw "PowerShell syntax error in $($file.FullName): $detail"
+            }
+          }
+          Write-Host "PowerShell parser passed for $($files.Count) bundled scripts."
+      - name: Build Windows application (not Setup)
+        run: flutter build windows --release --no-pub
+      - name: Verify output exists and record its hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = 'build/windows/x64/runner/Release'
+          $exe = "$release/erp_kayan.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows executable not found.' }
+          $file = Get-Item -LiteralPath $exe
+          if ($file.Length -eq 0) { throw 'Windows executable is empty.' }
+
+          # erp_kayan.exe is only the C++ runner shell. In a release build the
+          # application itself is the engine DLL and the AOT snapshot, so a
+          # present-but-empty exe must not be recorded as a working build.
+          foreach ($required in @('flutter_windows.dll', 'data/icudtl.dat', 'data/app.so')) {
+            $path = Join-Path $release $required
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing release component: $required" }
+            $size = (Get-Item -LiteralPath $path).Length
+            if ($size -eq 0) { throw "Release component is empty: $required" }
+            Write-Host ("{0,12}  {1}" -f $size, $required)
+          }
+
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Application executable bytes: $($file.Length)"
+          Write-Host "Application executable SHA256: $hash"
+          Write-Host "::notice title=Windows application build::erp_kayan.exe built from $env:GITHUB_SHA ($($file.Length) bytes, SHA256 $hash)"
+          Write-Host 'Not an installer, not an installed-product test, and not release evidence.'
+      # The documented packaging command the installer script depends on did
+      # not exist, so the Windows build failed before producing an artifact.
+      # This runs it on Windows, in the same order build-installer.ps1 does.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies for the packaging command
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+      - name: Clean backend build (the packaging precondition)
+        working-directory: backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # A stale file from an earlier commit must not survive into a package.
+          [void](New-Item -ItemType Directory -Force -Path 'dist')
+          Set-Content -LiteralPath 'dist/stale-from-an-earlier-commit.js' -Value 'stale'
+          npm run build:clean
+          if ($LASTEXITCODE -ne 0) { throw 'The packaging command npm run build:clean failed.' }
+          if (-not (Test-Path -LiteralPath 'dist/src/main.js' -PathType Leaf)) { throw 'build:clean did not produce dist/src/main.js.' }
+          if (Test-Path -LiteralPath 'dist/stale-from-an-earlier-commit.js') { throw 'build:clean left a stale file in dist.' }
+          Write-Host 'build:clean removed the stale file and produced a clean compile.'
+
   flutter:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -152,5 +281,16 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
-      - run: flutter analyze
+      - name: Analyze
+        run: |
+          set +e
+          flutter analyze > "$RUNNER_TEMP/analyze.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/analyze.log"
+          # Surface each diagnostic as an annotation so a failure is readable
+          # without downloading the raw log.
+          grep -E '^\s*(error|warning|info)\s+•' "$RUNNER_TEMP/analyze.log" | while IFS= read -r line; do
+            echo "::error title=flutter analyze::$line"
+          done
+          exit "$status"
       - run: flutter test

@@ -82,8 +82,12 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<Result<void>> signOut() async {
+    // Read the refresh token before clearing: it names the session to end on
+    // the server. Without it the server ends every session of the account,
+    // which would sign this person out of their other machines too.
+    final refreshToken = await _tokenStore.readRefreshToken();
     try {
-      await _remote.logout();
+      await _remote.logout(refreshToken: refreshToken);
     } catch (_) {
       // Network failure during logout must not prevent local sign-out.
     } finally {

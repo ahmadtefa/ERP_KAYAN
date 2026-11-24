@@ -537,6 +537,20 @@ export class ResetService {
             });
             return count;
           });
+          await step('approvalDecision', async () => {
+            const { count } = await tx.approvalDecision.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // Policies cascade their levels, but the decisions above are named
+          // first so the audit trail of a reset is not emptied by the parent.
+          await step('approvalPolicy', async () => {
+            const { count } = await tx.approvalPolicy.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('budget', async () => {
             const { count } = await tx.budget.deleteMany({
               where: { companyId: me.companyId },

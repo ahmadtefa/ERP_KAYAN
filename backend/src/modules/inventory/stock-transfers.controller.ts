@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Headers, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
@@ -57,22 +57,87 @@ export class StockTransfersController {
     return this.present(user, this.service.create(user.companyId, user.userId, { ...body, idempotencyKey }, warehouseScopeOf(user)));
   }
 
+  /// Opens the configured chain, or performs the historical review step when
+  /// the company has no policy. Under a chain this is the requester's own act,
+  /// so the permission needed is the one that lets them create the request —
+  /// the separation rule bites on decisions, not on submitting your own work.
+  @Post(':id/submit')
+  @RequirePermissions('inventory.transfer.create')
+  async submit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Headers('idempotency-key') key: string) {
+    await this.assertPair(user, id, 'transfer');
+    return this.present(user, this.service.submit(user.companyId, user.userId, id, key));
+  }
+
   @Post(':id/review')
   @RequirePermissions('inventory.transfer.review')
   async review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Headers('idempotency-key') key: string) {
-    await this.assertPair(user, id, 'approve'); return this.present(user, this.service.review(user.companyId, user.userId, id, key));
+    await this.assertPair(user, id, 'approve');
+    const chain = await this.service.chainFor(user.companyId, await this.service.findOne(user.companyId, id));
+    // Under a configured chain, submitting is the requester's own act and is
+    // served by /submit; this door keeps its historical meaning.
+    if (chain.source === 'POLICY') {
+      throw new ConflictException(
+        'This transfer uses a configured approval chain; the requester submits it, then each level is decided with /approve',
+      );
+    }
+    return this.present(user, this.service.review(user.companyId, user.userId, id, key));
   }
 
   @Post(':id/approve')
   @RequirePermissions('inventory.transfer.approve')
-  async approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Headers('idempotency-key') key: string) {
-    await this.assertPair(user, id, 'approve'); return this.present(user, this.service.approve(user.companyId, user.userId, id, key));
+  async approve(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Headers('idempotency-key') key: string,
+    @Body() body: { reason?: string; level?: number } = {},
+  ) {
+    await this.assertPair(user, id, 'approve');
+    return this.present(
+      user,
+      this.service.approve(user.companyId, user.userId, id, key, this.actor(user), body.reason, body.level),
+    );
   }
 
   @Post(':id/reject')
   @RequirePermissions('inventory.transfer.review')
-  async reject(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { reason: string }, @Headers('idempotency-key') key: string) {
-    await this.assertPair(user, id, 'approve'); return this.present(user, this.service.reject(user.companyId, user.userId, id, key, body.reason));
+  async reject(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Headers('idempotency-key') key: string,
+  ) {
+    await this.assertPair(user, id, 'approve');
+    return this.present(
+      user,
+      this.service.reject(user.companyId, user.userId, id, key, body.reason, this.actor(user)),
+    );
+  }
+
+  /// Send the request back to its author for amendment. A rejection ends the
+  /// request; this leaves it editable and resubmittable.
+  @Post(':id/return')
+  @RequirePermissions('inventory.transfer.review')
+  async returnForAmendment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Headers('idempotency-key') key: string,
+  ) {
+    await this.assertPair(user, id, 'approve');
+    return this.present(
+      user,
+      this.service.returnForAmendment(user.companyId, user.userId, id, key, body.reason, this.actor(user)),
+    );
+  }
+
+  /// The approval path this transfer is following: the configured levels, who
+  /// closed each one and what remains. Shown on the screen beside the buttons
+  /// so a person can see why an action is offered or missing.
+  @Get(':id/approvals')
+  @RequirePermissions('inventory.transfer.read')
+  async approvals(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertPair(user, id, 'view');
+    return this.service.approvalPath(user.companyId, id);
   }
 
   @Post(':id/dispatch')
@@ -112,6 +177,15 @@ export class StockTransfersController {
     const row = await this.assertPair(user, id, 'transfer');
     assertWarehouseAccess(user, row.destinationWarehouseId, 'transfer');
     return this.present(user, this.service.cancel(user.companyId, user.userId, id, key));
+  }
+
+  private actor(user: AuthUser) {
+    return {
+      userId: user.userId,
+      companyId: user.companyId,
+      permissions: user.permissions,
+      roles: user.roles ?? [],
+    };
   }
 
   private async present(user: AuthUser, value: unknown): Promise<unknown> {

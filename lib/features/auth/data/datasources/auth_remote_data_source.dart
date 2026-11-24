@@ -9,7 +9,11 @@ abstract class AuthRemoteDataSource {
 
   Future<Map<String, dynamic>> currentUser();
 
-  Future<void> logout();
+  /// Ends the session. With the refresh token the server revokes exactly that
+  /// session and the person's other devices stay signed in; without it the
+  /// request identifies no particular session, so the server ends all of the
+  /// account's live sessions.
+  Future<void> logout({String? refreshToken});
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -36,7 +40,15 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   Future<Map<String, dynamic>> currentUser() => _client.get(_me);
 
   @override
-  Future<void> logout() async {
-    await _client.post(_logout);
+  Future<void> logout({String? refreshToken}) async {
+    // The token names the session to end. It is sent in the body of a POST -
+    // never in the address, which ends up in history and logs - and it is
+    // omitted when absent so the API ends every session of the account.
+    await _client.post(
+      _logout,
+      body: refreshToken == null || refreshToken.isEmpty
+          ? null
+          : {'refreshToken': refreshToken},
+    );
   }
 }

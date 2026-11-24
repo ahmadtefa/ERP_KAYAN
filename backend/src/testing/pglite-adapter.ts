@@ -300,6 +300,9 @@ export function pglitePrisma(db: PgliteLike) {
     stockTransfer: {
       lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
     },
+    approvalPolicy: {
+      levels: { model: 'approvalLevel', table: 'approval_levels', foreignKey: 'policyId' },
+    },
   };
 
   /// The relations the posting walks. Prisma loads them with a second query;
@@ -322,6 +325,9 @@ export function pglitePrisma(db: PgliteLike) {
         foreignKey: 'id',
         parentField: 'customerId',
       },
+    },
+    approvalPolicy: {
+      levels: { model: 'approvalLevel', table: 'approval_levels', foreignKey: 'policyId' },
     },
     stockTransfer: {
       lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
@@ -445,6 +451,28 @@ export function pglitePrisma(db: PgliteLike) {
         return Number(rows[0]?.n ?? 0);
       },
       create: async (args: Row) => createWithChildren(model, table, { ...(args.data as Row) }),
+      createMany: async (args: Row) => {
+        const rows = (args.data as Row[]) ?? [];
+        for (const row of rows) await createWithChildren(model, table, { ...row });
+        return { count: rows.length };
+      },
+      findUniqueOrThrow: async (args: Row = {}) => {
+        const rows = await self.findMany({ ...args, take: 1 });
+        if (!rows[0]) throw new Error(`${model} not found`);
+        return rows[0];
+      },
+      deleteMany: async (args: Row = {}) => {
+        const params: unknown[] = [];
+        const where = whereToSql(table, args.where as Row, params);
+        const result = await db.query(`DELETE FROM "${table}"${where} RETURNING id`, params);
+        return { count: result.rows.length };
+      },
+      delete: async (args: Row = {}) => {
+        const params: unknown[] = [];
+        const where = whereToSql(table, args.where as Row, params);
+        const result = await db.query(`DELETE FROM "${table}"${where} RETURNING *`, params);
+        return result.rows[0] ?? {};
+      },
       update: async (args: Row) => {
         const params: unknown[] = [];
         const sets: string[] = [];
@@ -710,6 +738,9 @@ export function pglitePrisma(db: PgliteLike) {
     stockTransfer: plainModel('stockTransfer', 'stock_transfers'),
     stockTransferLine: plainModel('stockTransferLine', 'stock_transfer_lines'),
     stockTransferAction: plainModel('stockTransferAction', 'stock_transfer_actions'),
+    approvalPolicy: plainModel('approvalPolicy', 'approval_policies'),
+    approvalLevel: plainModel('approvalLevel', 'approval_levels'),
+    approvalDecision: plainModel('approvalDecision', 'approval_decisions'),
     salesInvoice: plainModel('salesInvoice', 'sales_invoices'),
     salesInvoiceLine: plainModel('salesInvoiceLine', 'sales_invoice_lines'),
     journalEntry: plainModel('journalEntry', 'journal_entries'),

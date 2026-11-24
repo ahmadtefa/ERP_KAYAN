@@ -71,7 +71,7 @@ describe('ResetService', () => {
     'storageLocation',
     'notification',
     'notificationSetting',
-    'printPriceSetting',
+    'printPriceSetting',    'approvalDecision',    'approvalPolicy',
     'budget',
     'quotationTermTemplate',
     'quotationColumnTemplate',

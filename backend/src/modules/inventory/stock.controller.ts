@@ -6,6 +6,7 @@ import {
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
 import { grantsOf } from '../../common/warehouse/warehouse-access';
+import { scopedBranchId, visibleWarehouseIds, warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import { StockService } from './stock.service';
 
 interface StockQuery {
@@ -30,11 +31,14 @@ export class StockController {
     return this.service.balances(
       user.companyId,
       {
-        branchId: query.branchId,
+        // A `branchId` typed by the client is checked against the caller's
+        // assignment; without one, a single-branch account is pinned to it.
+        branchId: scopedBranchId(user, query.branchId),
         itemId: query.itemId,
         onlyInStock: query.onlyInStock === 'true',
       },
       canReadCost(user),
+      visibleWarehouseIds(user),
     );
   }
 
@@ -50,10 +54,10 @@ export class StockController {
     return this.service.byWarehouse(
       user.companyId,
       {
-        branchId: query.branchId,
+        branchId: scopedBranchId(user, query.branchId),
         itemIds: itemIds.length ? itemIds : undefined,
       },
-      grantsOf(user)?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      visibleWarehouseIds(user),
     );
   }
 
@@ -68,7 +72,11 @@ export class StockController {
       user.companyId,
       itemId,
       mayReadCosts,
-      grants?.filter((grant) => grant.canView).map((grant) => grant.warehouseId),
+      visibleWarehouseIds(user),
+      // An item exists once for the whole company, so the ledger is the one
+      // place where "which branch" has to be decided by the caller's
+      // assignment rather than by a filter the client chooses.
+      warehouseScopeOf(user),
     );
   }
 }

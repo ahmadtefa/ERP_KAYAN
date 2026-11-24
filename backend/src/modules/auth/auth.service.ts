@@ -423,9 +423,13 @@ export class AuthService {
   }
 
   async logout(userId: string, refreshToken?: string): Promise<void> {
+    // Replayed sign-outs are harmless: only a live row is stamped, so the
+    // revocation time of an already-ended session does not move. Without
+    // `revokedAt: null` a second sign-out rewrote the timestamp and the audit
+    // trail could no longer say when the session actually ended.
     if (refreshToken) {
       await this.prisma.refreshToken.updateMany({
-        where: { userId, tokenHash: this.hashToken(refreshToken) },
+        where: { userId, tokenHash: this.hashToken(refreshToken), revokedAt: null },
         data: { revokedAt: new Date() },
       });
     } else {

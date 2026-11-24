@@ -19,10 +19,18 @@ export class StockService {
     companyId: string,
     filters: { branchId?: string; itemId?: string; onlyInStock?: boolean },
     mayReadCost = true,
+    warehouseIds?: string[],
   ) {
     const where: Prisma.StockBalanceWhereInput = { companyId };
     if (filters.branchId) where.branchId = filters.branchId;
     if (filters.itemId) where.itemId = filters.itemId;
+    // `stock_balances` has no warehouse dimension, so a caller restricted to
+    // particular shelves is answered from the per-warehouse table instead of
+    // being shown the branch total. Returning the total would overstate what
+    // they hold; returning nothing would hide their own shelves.
+    if (warehouseIds !== undefined) {
+      return this.balancesByWarehouse(companyId, filters, mayReadCost, warehouseIds);
+    }
 
     const rows = await this.prisma.stockBalance.findMany({
       where,
@@ -58,6 +66,76 @@ export class StockService {
       };
     });
 
+    return filters.onlyInStock
+      ? mapped.filter((m) => !new Prisma.Decimal(m.quantity).isZero())
+      : mapped;
+  }
+
+  /// Branch totals, split by the warehouses the caller may see.
+  ///
+  /// A warehouse-restricted account asks for "stock"; the honest answer is what
+  /// sits on their own shelves, not the branch figure that includes shelves
+  /// they were never granted. The ledger is the only per-warehouse source, and
+  /// it is the same signed-movement sum `/stock/by-warehouse` uses.
+  private async balancesByWarehouse(
+    companyId: string,
+    filters: { branchId?: string; itemId?: string; onlyInStock?: boolean },
+    mayReadCost: boolean,
+    warehouseIds: string[],
+  ) {
+    if (warehouseIds.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<
+      Array<{ warehouseId: string; itemId: string; quantity: unknown }>
+    >(Prisma.sql`
+      SELECT "warehouseId", "itemId",
+             SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS quantity
+        FROM stock_movements
+       WHERE "companyId" = ${companyId}::uuid
+         AND "warehouseId" = ANY(${warehouseIds}::uuid[])
+         AND (${filters.branchId ?? null}::uuid IS NULL OR "branchId" = ${filters.branchId ?? null}::uuid)
+         AND (${filters.itemId ?? null}::uuid IS NULL OR "itemId" = ${filters.itemId ?? null}::uuid)
+       GROUP BY "warehouseId", "itemId"
+       ORDER BY "itemId", "warehouseId"
+    `);
+    const itemIds = [...new Set(rows.map((row) => row.itemId))];
+    if (itemIds.length === 0) return [];
+    const [items, warehouses] = await Promise.all([
+      this.prisma.item.findMany({
+        where: { id: { in: itemIds }, companyId, deletedAt: null },
+        select: { id: true, code: true, nameEn: true, nameAr: true, unit: true },
+      }),
+      this.prisma.warehouse.findMany({
+        where: { id: { in: warehouseIds }, companyId },
+        select: { id: true, code: true, nameEn: true, nameAr: true },
+      }),
+    ]);
+    const itemOf = new Map(items.map((item) => [item.id, item]));
+    const warehouseOf = new Map(warehouses.map((w) => [w.id, w]));
+    const mapped = rows
+      .filter((row) => itemOf.has(row.itemId))
+      .map((row) => {
+        const item = itemOf.get(row.itemId)!;
+        const warehouse = warehouseOf.get(row.warehouseId);
+        const quantity = new Prisma.Decimal(String(row.quantity ?? 0));
+        return {
+          itemId: item.id,
+          itemCode: item.code,
+          itemNameEn: item.nameEn,
+          itemNameAr: item.nameAr,
+          unit: item.unit,
+          branchId: filters.branchId ?? null,
+          warehouseId: row.warehouseId,
+          warehouseCode: warehouse?.code ?? null,
+          warehouseNameEn: warehouse?.nameEn ?? null,
+          warehouseNameAr: warehouse?.nameAr ?? null,
+          quantity: quantity.toFixed(MONEY_SCALE),
+          // Cost never appears here: the warehouse balance view redacts value
+          // through the same report rules, and a second source of value would
+          // be a second place to leak it.
+          value: null,
+          averageCost: null,
+        };
+      });
     return filters.onlyInStock
       ? mapped.filter((m) => !new Prisma.Decimal(m.quantity).isZero())
       : mapped;
@@ -140,6 +218,7 @@ export class StockService {
     itemId: string,
     mayReadCost = true,
     warehouseIds?: string[],
+    branchIds?: string[] | null,
   ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
@@ -151,6 +230,10 @@ export class StockService {
       where: {
         companyId,
         itemId,
+        // An item carries no branch of its own, so an account bound to
+        // branches must be shown only the movements inside them. `null` is a
+        // company-wide account and adds no condition.
+        ...(branchIds ? { branchId: { in: branchIds } } : {}),
         ...(warehouseIds !== undefined ? { warehouseId: { in: warehouseIds } } : {}),
       },
       orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],

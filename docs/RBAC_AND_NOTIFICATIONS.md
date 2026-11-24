@@ -157,6 +157,8 @@ One table, one catalogue of kinds (`notification-kinds.ts`), two scanners.
 | `INVOICE_OVERDUE` | A posted customer invoice past its date with money on it | `sales.invoices.read` |
 | `PAYABLE_DUE` / `PAYABLE_OVERDUE` | A supplier bill falling due within 7 days, or past it | `purchases.invoices.read` |
 | `ADMIN_ALERT` | Role/user changes, password resets, restores, resets | `admin.audit.read` |
+| `STOCK_TRANSFER_LEVEL_PENDING` | A configured approval chain is waiting on a level | that level's own permission |
+| `STOCK_TRANSFER_RETURNED` | A request was sent back to its author for amendment | `inventory.transfer.create` |
 
 Properties that make it safe to leave running:
 
@@ -195,4 +197,5 @@ and a refresh that does not need a restart. Arabic, English and RTL throughout.
 | Notification kinds | `backend/src/modules/notifications/notification-kinds.ts` |
 | Scanners | `…/notifications.service.ts` (`scanStock`, `scanBusiness`) |
 | Automatic runs | `…/notifications/expiry-alert.scheduler.ts` |
+| Configurable approval chains | `docs/APPROVALS.md`, `backend/src/common/approvals/` |
 | Upgrade proof | `backend/scripts/verify-rbac-upgrade.mjs` |

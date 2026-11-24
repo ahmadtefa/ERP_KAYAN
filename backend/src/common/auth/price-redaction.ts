@@ -9,6 +9,20 @@ export interface PriceVisibility {
   cost: boolean;
 }
 
+/** Field names a specific response shape hides on top of the shared sets.
+ * The inventory reports name the same figure differently per report - a
+ * valuation column is `value`, a reconciliation difference is `difference` -
+ * so the caller supplies those names instead of each controller re-implementing
+ * its own recursive walk. Passing them here keeps one redaction routine and
+ * avoids a local copy that quietly hides less than the shared sets do.
+ */
+export interface RedactionOptions {
+  /** Extra keys removed when cost visibility is denied. */
+  costKeys?: Iterable<string>;
+  /** Extra keys removed when purchase-price visibility is denied. */
+  purchaseKeys?: Iterable<string>;
+}
+
 const SALE_KEYS = new Set([
   'salePrice', 'sellingPrice', 'salesValue', 'invoiceDiscountAmount',
 ]);
@@ -34,12 +48,15 @@ export function redactPriceFields<T>(
   value: T,
   visibility: PriceVisibility,
   amountSide: 'sale' | 'purchase' | null = null,
+  options: RedactionOptions = {},
 ): T {
   if (Array.isArray(value)) {
-    return value.map((entry) => redactPriceFields(entry, visibility, amountSide)) as T;
+    return value.map((entry) => redactPriceFields(entry, visibility, amountSide, options)) as T;
   }
   if (value === null || typeof value !== 'object' || value instanceof Date) return value;
   const result: Record<string, unknown> = {};
+  const extraCost = extraKeys(options.costKeys);
+  const extraPurchase = extraKeys(options.purchaseKeys);
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const hiddenProfit = PROFIT_KEYS.has(key) && (!visibility.sale || !visibility.cost);
     const hiddenSaleAmount = amountSide === 'sale' && (
@@ -52,9 +69,18 @@ export function redactPriceFields<T>(
     );
     const hidden = hiddenProfit ||
       (!visibility.sale && (SALE_KEYS.has(key) || hiddenSaleAmount)) ||
-      (!visibility.purchase && (PURCHASE_KEYS.has(key) || hiddenPurchaseAmount)) ||
-      (!visibility.cost && COST_KEYS.has(key));
-    if (!hidden) result[key] = redactPriceFields(child, visibility, amountSide);
+      (!visibility.purchase && (PURCHASE_KEYS.has(key) || hiddenPurchaseAmount || extraPurchase.has(key))) ||
+      (!visibility.cost && (COST_KEYS.has(key) || extraCost.has(key)));
+    if (!hidden) result[key] = redactPriceFields(child, visibility, amountSide, options);
   }
   return result as T;
 }
+
+/** Building a Set on every node would be wasteful; an array is already cheap
+ * to scan and most callers pass nothing at all. */
+function extraKeys(keys: Iterable<string> | undefined): ReadonlySet<string> {
+  if (!keys) return EMPTY_KEYS;
+  return keys instanceof Set ? keys : new Set(keys);
+}
+
+const EMPTY_KEYS: ReadonlySet<string> = new Set<string>();

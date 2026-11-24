@@ -1,0 +1,51 @@
+{
+ "format": "kayan-solar-json-delivery",
+ "version": 1,
+ "deliveredAt": "2026-11-24T08:48:23.066Z",
+ "bundleFile": "KAYAN-SOLAR-2026-11-24.json",
+ "sourceCompanyId": "2f9ac477-f86b-4317-8f45-eb9c53022fbf",
+ "sourceCompanyCode": "KAYAN",
+ "compatibility": {
+  "targetCommit": "471c4c85",
+  "note": "The master-data backup module and the database schema are byte-identical between this dataset and commit 471c4c85. Verified with git diff on backend/src/modules/master-data-backup and backend/prisma.",
+  "archiveFormat": "kayan-master-data-backup",
+  "archiveVersion": 1
+ },
+ "contents": [
+  {
+   "kind": "items",
+   "records": 1000,
+   "archiveFormat": "kayan-master-data-backup",
+   "archiveVersion": 1
+  },
+  {
+   "kind": "customers",
+   "records": 500,
+   "archiveFormat": "kayan-master-data-backup",
+   "archiveVersion": 1
+  },
+  {
+   "kind": "suppliers",
+   "records": 100,
+   "archiveFormat": "kayan-master-data-backup",
+   "archiveVersion": 1
+  }
+ ],
+ "notIncluded": [
+  "users and their passwords",
+  "roles and permissions",
+  "purchase invoices",
+  "sales invoices",
+  "journal entries and balances",
+  "stock movements, lots and batches",
+  "stock transfers and their approvals",
+  "cash vouchers",
+  "warehouses, branches and cost centres"
+ ],
+ "constraint": "The official JSON restore format supports exactly three kinds: items, customers, suppliers. It is a master-data format, not a full-database format. Transactions, balances, users, permissions and approvals cannot be restored through it at all.",
+ "restoreSteps": [
+  "1. Set companyId in each archive to the target installation company id.",
+  "2. POST /master-data-backups/{kind}/preview with { backup: archive }.",
+  "3. POST /master-data-backups/{kind}/restore with { backup, previewFingerprint }."
+ ]
+}
