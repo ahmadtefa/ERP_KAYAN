@@ -262,6 +262,8 @@ describe('notifications', () => {
           state.purchaseOrders.filter((row) => matches(row, args.where)),
         ),
       },
+      stockTakeSession: { findMany: jest.fn(async () => [] as Row[]) },
+      stockDocument: { findMany: jest.fn(async () => [] as Row[]) },
       journalEntry: {
         findMany: jest.fn(async (args: Row = {}) =>
           state.journalEntries.filter((row) => matches(row, args.where)),
