@@ -692,6 +692,13 @@ async function main() {
     });
     const restoredBody = await restored.json().catch(() => null);
     check('the company backup restores', restored.status === 200 || restored.status === 201, `status ${restored.status} ${JSON.stringify(restoredBody)?.slice(0, 200)}`);
+    // A restore replaces the company's data and sign-in sessions are never
+    // restored (backup.service: they "should not come back to life"), so the
+    // session the first token was bound to is gone. Sign in again, as a real
+    // client must, before reading the restored documents.
+    const reSignedIn = await api('/auth/login', { method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true });
+    check('sign in again after the restore', reSignedIn.status === 201, `status ${reSignedIn.status}`);
+    token = reSignedIn.data?.accessToken ?? token;
     const afterRestore = await must('read the quotation after the restore', `/sales/quotations/${quotation.id}`);
     check('the quotation survives the round trip with its totals and snapshot',
       near(afterRestore?.totalAmount, 1700.31) && afterRestore?.status === 'converted'
