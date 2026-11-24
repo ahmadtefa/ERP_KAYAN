@@ -10,11 +10,14 @@ import '../../../reports/presentation/report_providers.dart';
 /// from counting the first page of invoice lists on the client - so the
 /// dashboard always agrees with the reports behind it.
 final dashboardSummaryProvider = FutureProvider<Json>((ref) async {
+  // Drop cached financial data whenever identity, company, branch or grants change.
+  if (ref.watch(currentUserProvider) == null) return <String, dynamic>{};
   return ref.read(apiClientProvider).getObject('/dashboard/summary');
 });
 
 /// Month-by-month totals behind the dashboard charts.
 final dashboardMonthlyProvider = FutureProvider<Json>((ref) async {
+  if (ref.watch(currentUserProvider) == null) return <String, dynamic>{};
   return ref.read(apiClientProvider).getObject(
         '/dashboard/monthly',
         query: const {'months': '12'},
