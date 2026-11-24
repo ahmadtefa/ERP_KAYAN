@@ -138,4 +138,57 @@ void main() {
       expect(find.text('Opening balance draft'), findsNothing);
     },
   );
+
+  testWidgets('every invalid line is marked under its own field and editing clears only that reason', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _Api();
+    const user = AppUser(
+      id: 'user',
+      username: 'test',
+      fullName: 'Test',
+      companyId: 'company',
+      isSuperAdmin: true,
+      branchId: 'branch',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showOpeningBalanceDraft(context, api, user),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add line'));
+    await tester.pumpAndSettle();
+    // Two empty lines: no account and no amount on either.
+    await tester.tap(find.text('Save draft for review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose an account'), findsNWidgets(2));
+    expect(
+      find.text('Enter an amount in debit or credit, not both or neither'),
+      findsWidgets,
+    );
+    expect(api.saved, isNull);
+    // Fixing one field clears only that field's reason.
+    final debitFields = find.widgetWithText(TextField, 'Debit');
+    await tester.enterText(debitFields.first, '5');
+    await tester.pumpAndSettle();
+    expect(find.text('Choose an account'), findsNWidgets(2));
+    expect(
+      find.text('Enter an amount in debit or credit, not both or neither'),
+      findsNWidgets(2),
+    );
+  });
 }

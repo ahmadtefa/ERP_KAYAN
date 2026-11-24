@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -221,6 +222,18 @@ class _DraftDialogState extends State<_DraftDialog> {
     action();
   });
 
+  /// Reasons shown under the field they are about, keyed `branchId`,
+  /// `asOfDate`, or `lines.N.accountId|debit|credit|quantity|unitCost`.
+  final Map<String, String> _errors = {};
+
+  String _lineKey(_DraftLine line, String field) =>
+      'lines.${_lines.indexOf(line)}.$field';
+
+  /// Editing a field clears only its own reason.
+  void _clearError(String? key) {
+    if (key != null) _errors.remove(key);
+  }
+
   Future<bool> _leaveForRoute() async {
     if (_saving || _confirmingExit) return false;
     if (_dirty) {
@@ -275,34 +288,77 @@ class _DraftDialogState extends State<_DraftDialog> {
     final date = _date.text.trim();
     final parsed = DateTime.tryParse(date);
     final branch = _branch;
-    if (branch == null ||
-        parsed == null ||
-        parsed.toIso8601String().substring(0, 10) != date) {
-      showMessage(
-        context,
-        _label('اختر الفرع وتاريخًا صحيحًا', 'Choose a branch and valid date'),
-        error: true,
+    final found = <String, String>{};
+    if (branch == null) {
+      found['branchId'] = _label('اختر الفرع', 'Choose a branch');
+    }
+    if (parsed == null || parsed.toIso8601String().substring(0, 10) != date) {
+      found['asOfDate'] = _label(
+        'اكتب تاريخًا صحيحًا بصيغة YYYY-MM-DD',
+        'Enter a valid date as YYYY-MM-DD',
       );
-      return;
     }
     final lines = <_Record>[];
     for (final line in _lines) {
       final debit = _debit(line);
       final credit = line.itemId == null ? _number(line.credit) : Decimal.zero;
-      if (line.accountId == null ||
-          debit == null ||
-          credit == null ||
-          (debit == Decimal.zero) == (credit == Decimal.zero)) {
-        showMessage(
-          context,
-          _label(
-            'اختر حسابًا وأدخل مبلغًا مدينًا أو دائنًا لكل سطر',
-            'Choose an account and enter one debit or credit amount per line',
-          ),
-          error: true,
+      final inventory = line.itemId != null;
+      var lineOk = true;
+      if (line.accountId == null) {
+        found[_lineKey(line, 'accountId')] = _label(
+          'اختر الحساب',
+          'Choose an account',
         );
-        return;
+        lineOk = false;
       }
+      if (inventory) {
+        if (_number(line.quantity) == null) {
+          found[_lineKey(line, 'quantity')] = _label(
+            'اكتب كمية صحيحة',
+            'Enter a valid quantity',
+          );
+          lineOk = false;
+        }
+        if (_number(line.unitCost) == null) {
+          found[_lineKey(line, 'unitCost')] = _label(
+            'اكتب تكلفة صحيحة',
+            'Enter a valid unit cost',
+          );
+          lineOk = false;
+        }
+        if (lineOk && debit == Decimal.zero) {
+          found[_lineKey(line, 'quantity')] = _label(
+            'الكمية والتكلفة لازم تعطي قيمة أكبر من صفر',
+            'Quantity and cost must give a value above zero',
+          );
+          lineOk = false;
+        }
+      } else {
+        if (debit == null) {
+          found[_lineKey(line, 'debit')] = _label(
+            'اكتب مبلغًا صحيحًا',
+            'Enter a valid amount',
+          );
+          lineOk = false;
+        }
+        if (credit == null) {
+          found[_lineKey(line, 'credit')] = _label(
+            'اكتب مبلغًا صحيحًا',
+            'Enter a valid amount',
+          );
+          lineOk = false;
+        }
+        if (debit != null &&
+            credit != null &&
+            (debit == Decimal.zero) == (credit == Decimal.zero)) {
+          found[_lineKey(line, 'amount')] = _label(
+            'اكتب مبلغًا في المدين أو الدائن، وليس الاثنين',
+            'Enter an amount in debit or credit, not both or neither',
+          );
+          lineOk = false;
+        }
+      }
+      if (!lineOk || debit == null || credit == null) continue;
       lines.add({
         'accountId': line.accountId,
         'debit': debit.toStringAsFixed(4),
@@ -318,6 +374,15 @@ class _DraftDialogState extends State<_DraftDialog> {
           'description': line.description.text.trim(),
       });
     }
+    if (found.isNotEmpty || branch == null) {
+      setState(() {
+        _errors
+          ..clear()
+          ..addAll(found);
+      });
+      return;
+    }
+    setState(_errors.clear);
     final body = {
       'branchId': branch,
       'currency': widget.currency,
@@ -338,7 +403,40 @@ class _DraftDialogState extends State<_DraftDialog> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted) showMessage(context, error, error: true);
+      if (!mounted) return;
+      if (error is ApiFailure &&
+          const {400, 422}.contains(error.statusCode) &&
+          error.fieldErrors.isNotEmpty) {
+        // Nothing was saved: put each reason under its field and keep the
+        // person's input.
+        final known = RegExp(
+          r'^(branchId|asOfDate|lines\.\d+\.(accountId|debit|credit|quantity|unitCost))$',
+        );
+        final rest = <String, String>{};
+        setState(() {
+          _errors.clear();
+          error.fieldErrors.forEach((key, message) {
+            if (known.hasMatch(key)) {
+              _errors[key] = message;
+            } else {
+              rest[key] = message;
+            }
+          });
+        });
+        if (rest.isNotEmpty) {
+          showMessage(
+            context,
+            ApiFailure(
+              error.message,
+              statusCode: error.statusCode,
+              fieldErrors: rest,
+            ),
+            error: true,
+          );
+        }
+      } else {
+        showMessage(context, error, error: true);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -351,13 +449,17 @@ class _DraftDialogState extends State<_DraftDialog> {
     ValueChanged<String?>? change, {
     String valueKey = 'id',
     bool optional = false,
+    String? errorKey,
   }) {
     final byId = {for (final row in records) row[valueKey] as String: row};
     return DropdownButtonFormField<String>(
       key: ValueKey((label, value)),
       isExpanded: true,
       initialValue: value ?? (optional ? '' : null),
-      decoration: InputDecoration(labelText: label),
+      decoration: InputDecoration(
+        labelText: label,
+        errorText: errorKey == null ? null : _errors[errorKey],
+      ),
       items: [
         if (optional)
           DropdownMenuItem(value: '', child: Text(_label('بدون', 'None'))),
@@ -374,18 +476,30 @@ class _DraftDialogState extends State<_DraftDialog> {
       ],
       onChanged: _saving || change == null
           ? null
-          : (selected) =>
-                _change(() => change(selected == '' ? null : selected)),
+          : (selected) => _change(() {
+              _clearError(errorKey);
+              change(selected == '' ? null : selected);
+            }),
     );
   }
 
-  Widget _money(String label, TextEditingController controller) => TextField(
-    controller: controller,
-    enabled: !_saving,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    decoration: InputDecoration(labelText: label),
-    onChanged: (_) => _change(() {}),
-  );
+  Widget _money(
+    String label,
+    TextEditingController controller, {
+    List<String> errorKeys = const [],
+  }) {
+    String? error;
+    for (final key in errorKeys) {
+      error ??= _errors[key];
+    }
+    return TextField(
+      controller: controller,
+      enabled: !_saving,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(labelText: label, errorText: error),
+      onChanged: (_) => _change(() => errorKeys.forEach(_clearError)),
+    );
+  }
 
   void _chooseAccount(_DraftLine line, List<_Record> accounts, String code) {
     for (final account in accounts) {
@@ -440,6 +554,7 @@ class _DraftDialogState extends State<_DraftDialog> {
               accounts,
               line.accountId,
               (id) => line.accountId = id,
+              errorKey: _lineKey(line, 'accountId'),
             ),
             if (line.supplierId == null &&
                 line.itemId == null &&
@@ -484,16 +599,35 @@ class _DraftDialogState extends State<_DraftDialog> {
               children: [
                 Expanded(
                   child: line.itemId == null
-                      ? _money(l10n.debit, line.debit)
-                      : _money(_label('الكمية', 'Quantity'), line.quantity),
+                      ? _money(
+                          l10n.debit,
+                          line.debit,
+                          errorKeys: [
+                            _lineKey(line, 'debit'),
+                            _lineKey(line, 'amount'),
+                          ],
+                        )
+                      : _money(
+                          _label('الكمية', 'Quantity'),
+                          line.quantity,
+                          errorKeys: [_lineKey(line, 'quantity')],
+                        ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: line.itemId == null
-                      ? _money(l10n.credit, line.credit)
+                      ? _money(
+                          l10n.credit,
+                          line.credit,
+                          errorKeys: [
+                            _lineKey(line, 'credit'),
+                            _lineKey(line, 'amount'),
+                          ],
+                        )
                       : _money(
                           _label('تكلفة الوحدة', 'Unit cost'),
                           line.unitCost,
+                          errorKeys: [_lineKey(line, 'unitCost')],
                         ),
                 ),
                 IconButton(
@@ -501,6 +635,9 @@ class _DraftDialogState extends State<_DraftDialog> {
                   onPressed: _saving || _lines.length == 1
                       ? null
                       : () => _change(() {
+                          _errors.removeWhere(
+                            (key, _) => key.startsWith('lines.'),
+                          );
                           _lines.remove(line);
                           _removed.add(line);
                         }),
@@ -564,6 +701,7 @@ class _DraftDialogState extends State<_DraftDialog> {
                           _branch = branch;
                           _warehouse = null;
                         },
+                  errorKey: 'branchId',
                 ),
                 TextField(
                   controller: _date,
@@ -573,6 +711,7 @@ class _DraftDialogState extends State<_DraftDialog> {
                       'تاريخ الأرصدة (YYYY-MM-DD)',
                       'Opening date (YYYY-MM-DD)',
                     ),
+                    errorText: _errors['asOfDate'],
                     suffixIcon: IconButton(
                       tooltip: _label('اختر التاريخ', 'Choose date'),
                       icon: const Icon(Icons.calendar_today_outlined),
@@ -587,6 +726,7 @@ class _DraftDialogState extends State<_DraftDialog> {
                               );
                               if (date != null && mounted) {
                                 _change(() {
+                                  _errors.remove('asOfDate');
                                   _date.text = date.toIso8601String().substring(
                                     0,
                                     10,
@@ -596,7 +736,7 @@ class _DraftDialogState extends State<_DraftDialog> {
                             },
                     ),
                   ),
-                  onChanged: (_) => _change(() {}),
+                  onChanged: (_) => _change(() => _errors.remove('asOfDate')),
                 ),
                 if (warehouses.isNotEmpty || _warehouse != null)
                   _picker(
