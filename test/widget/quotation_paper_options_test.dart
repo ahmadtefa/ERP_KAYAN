@@ -140,6 +140,25 @@ void main() {
     });
   });
 
+  testWidgets('reopened quotation restores chosen background and paper switches', (tester) async {
+    final api=_FakeApiClient()..objectResponse={
+      'id':'quotation-id','quotationDate':'2026-11-24','currency':'EGP','customer':{'id':'c'},
+      'design':{'backgroundId':'11111111-1111-4111-8111-111111111111','backgroundName':'saved-letterhead.pdf','hideHeader':true,'hideFooter':true},
+      'tables':[{'title':'Test','lines':[{'description':'Service','quantity':'1','unitPrice':'100'}]}],
+    };
+    tester.view.physicalSize=const Size(1400,900);tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(ProviderScope(overrides:[
+      apiClientProvider.overrideWithValue(api),itemsProvider.overrideWith((ref)async=>[]),customersProvider.overrideWith((ref)async=>[{'id':'c','nameEn':'Customer'}]),
+    ],child:MaterialApp.router(localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
+      routerConfig:GoRouter(initialLocation:'/edit',routes:[GoRoute(path:'/edit',builder:(c,s)=>QuotationEditorScreen(quotationId:'quotation-id',navigationKey:s.pageKey))]))));
+    await tester.pumpAndSettle();
+    final header=find.byKey(const ValueKey('quotation-hide-header'));await tester.ensureVisible(header);await tester.pumpAndSettle();
+    expect(tester.widget<FilterChip>(header).selected,isTrue);
+    expect(tester.widget<FilterChip>(find.byKey(const ValueKey('quotation-hide-footer'))).selected,isTrue);
+    expect(find.textContaining('saved-letterhead.pdf'),findsOneWidget);
+  });
+
   testWidgets('saving without a customer marks the customer field and keeps input', (tester) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;

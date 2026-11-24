@@ -298,6 +298,17 @@ jobs:
             throw new Error('Credit service and actual posting require all 17 real PostgreSQL and HTTP cases, no skips.');
           }
           NODE
+      - name: Prove uploaded quotation background survives reopen and both output routes
+        if: matrix.suite == 'backend'
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
+        run: |
+          npm test -- --runInBand src/modules/sales/quotation-background-http.integration.spec.ts --json --outputFile="$RUNNER_TEMP/quotation-background.json"
+          node - "$RUNNER_TEMP/quotation-background.json" <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (r.numPassedTests !== 1 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('Quotation background HTTP regression must run, not skip.');
+          NODE
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash

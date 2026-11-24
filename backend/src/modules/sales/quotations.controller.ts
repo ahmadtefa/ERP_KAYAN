@@ -150,15 +150,28 @@ export class QuotationsController {
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
-    const html = await this.service.printHtml(
-      user.companyId,
-      id,
-      lang,
-      query.auto === '1' || query.auto === 'true',
+    const document = await this.service.printDocument(
+      user.companyId, id, lang, false,
     );
-    response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
-    response.send(html);
+    if (document.backgroundPdf) {
+      // Browser HTML cannot paint a PDF page as a CSS background. Print the
+      // same composed document as Download PDF, inline in the browser viewer.
+      const file = await this.pdf.render(document.html, {
+        fullBleed: true, pageNumberColor: document.pageNumberInk,
+        pageNumberY: QUOTATION_PAGE_NUMBER.y,
+        pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+        backgroundPdf: document.backgroundPdf,
+      });
+      response.type('application/pdf');
+      response.setHeader('Content-Disposition', `inline; filename="${quotationDocumentFileName(document.quotationNumber, id)}"`);
+      response.send(file);
+      return;
+    }
+    response.type('text/html; charset=utf-8');
+    response.send(query.auto === '1' || query.auto === 'true'
+      ? document.html.replace('</body>', '<script>window.addEventListener("load",()=>window.print())</script></body>')
+      : document.html);
   }
 
   /// A finished corporate document: brand header, company legal details, the

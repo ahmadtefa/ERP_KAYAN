@@ -1211,6 +1211,8 @@ export class QuotationsService {
       showTaxId: quotation.showTaxId,
       subject: quotation.subject,
       columns: this.columnsOf(quotation.columns),
+      design: quotation.design && typeof quotation.design === 'object' && !Array.isArray(quotation.design)
+        ? quotation.design : {},
       issuedAt: quotation.issuedAt?.toISOString() ?? null,
       sentAt: quotation.sentAt?.toISOString() ?? null,
       acceptedAt: quotation.acceptedAt?.toISOString() ?? null,
