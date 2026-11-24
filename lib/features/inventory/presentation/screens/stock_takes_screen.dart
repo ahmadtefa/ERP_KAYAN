@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -456,6 +457,11 @@ class _StockTakeDetailDialog extends StatefulWidget {
 class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   late Json _session;
   final Map<String, String> _counts = {};
+
+  /// Why a counted quantity was refused, by line id. Shown under that line's
+  /// field; the typed figures are never cleared by a refusal.
+  final Map<String, String> _lineErrors = {};
+  List<String> _payloadLineIds = const [];
   bool _busy = false;
 
   /// The scan box, plus which line the last accepted scan found and in which
@@ -725,11 +731,34 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     } catch (error) {
       if (mounted) {
         if (suffix == 'post') await widget.onChanged(suffix);
-        if (mounted) showMessage(context, error, error: true);
+        if (mounted) {
+          final left = suffix == 'count' ? _placeServerErrors(error) : error;
+          if (left != null) showMessage(context, left, error: true);
+        }
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Puts a 400/422 refusal's per-line reasons under the counted-quantity
+  /// fields. Returns what could not be placed (null when everything was).
+  Object? _placeServerErrors(Object error) {
+    if (error is! ApiFailure || error.fieldErrors.isEmpty) return error;
+    final rest = <String, String>{};
+    setState(() {
+      error.fieldErrors.forEach((key, reason) {
+        final m = RegExp(r'^lines\.(\d+)\.').firstMatch(key);
+        final index = m == null ? -1 : int.parse(m.group(1)!);
+        if (index >= 0 && index < _payloadLineIds.length) {
+          _lineErrors[_payloadLineIds[index]] = reason;
+        } else {
+          rest[key] = reason;
+        }
+      });
+    });
+    if (rest.isEmpty) return null;
+    return ApiFailure(error.message, statusCode: error.statusCode, code: error.code, fieldErrors: rest, userAction: error.userAction, requestId: error.requestId, cause: error.cause);
   }
 
   Future<void> _approveWithConfirmation() async {
@@ -790,41 +819,42 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
 
   Future<void> _save({required bool finish}) async {
     final payload = <Map<String, dynamic>>[];
+    final ids = <String>[];
+    final errors = <String, String>{};
     for (final line in listOf(_session['lines'])) {
-      final raw = _counts[text(line, 'id')] ?? text(line, 'countedQuantity');
+      final id = text(line, 'id');
+      final raw = _counts[id] ?? text(line, 'countedQuantity');
       if (raw.trim().isEmpty) {
-        if (finish) {
-          showMessage(
-            context,
-            _t(
-              'لا يمكن إنهاء الجرد قبل إدخال كمية كل صنف. الصنف الناقص: ${text(line, 'itemCode')}.',
-              'Enter a counted quantity for every item before finishing. Missing: ${text(line, 'itemCode')}.',
-            ),
-            error: true,
-          );
-          return;
-        }
+        if (finish) errors[id] = _t('أدخل الكمية المعدودة قبل الإنهاء.', 'Enter the counted quantity before finishing.');
         continue;
       }
       final value = double.tryParse(raw.trim());
       if (value == null || !value.isFinite || value < 0) {
-        showMessage(context, _t('أدخل كمية صحيحة غير سالبة للصنف ${text(line, 'itemCode')}.', 'Enter a valid non-negative quantity for ${text(line, 'itemCode') }.'), error: true);
-        return;
+        errors[id] = _t('أدخل رقمًا صحيحًا لا يقل عن صفر.', 'Enter a number that is zero or more.');
+        continue;
       }
       // The figure and the unit it was counted in travel together. Without
       // the unit the server must read 1 carton as 1 piece, and the frozen
       // system figure it is compared with is in pieces.
-      final unit = _scanUnits[text(line, 'id')];
+      final unit = _scanUnits[id];
+      ids.add(id);
       payload.add({
-        'lineId': text(line, 'id'),
+        'lineId': id,
         'countedQuantity': value,
         if (unit != null && unit.isNotEmpty) 'unitName': unit,
       });
     }
+    setState(() {
+      _lineErrors
+        ..clear()
+        ..addAll(errors);
+    });
+    if (errors.isNotEmpty) return;
     if (payload.isEmpty) {
       showMessage(context, _t('أدخل كمية معدودة واحدة على الأقل.', 'Enter at least one counted quantity.'), error: true);
       return;
     }
+    _payloadLineIds = ids;
     await _act('count', body: {'lines': payload, 'finish': finish}, success: finish ? _t('تم إنهاء العد وإرساله للمراجعة.', 'Count finished and sent for review.') : _t('تم حفظ العد.', 'Count saved.'));
   }
 
@@ -915,8 +945,12 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                                   // next to "قطعة" is not mistaken for a carton.
                                   suffixText: _scanUnits[id],
                                   filled: _lastScannedLineId == id,
+                                  errorText: _lineErrors[id],
                                 ),
-                                onChanged: (value) => _counts[id] = value,
+                                onChanged: (value) {
+                                  _counts[id] = value;
+                                  if (_lineErrors.containsKey(id)) setState(() => _lineErrors.remove(id));
+                                },
                               )),
                               // What the counted figure means in base units: the
                               // exact number the frozen system figure is compared

@@ -1,4 +1,5 @@
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -20,6 +21,7 @@ class _StockTakesApi extends ApiClient {
       );
 
   bool failList;
+  ApiFailure? failCount;
 
   /// A list of sessions that are all still being counted. The approval tests
   /// need a session in REVIEW next to the ones being counted, but the test
@@ -206,6 +208,7 @@ class _StockTakesApi extends ApiClient {
     posts.add(path);
     bodies[path] = body;
     if (path == '/inventory/stock-takes') return {'id': 'st-new'};
+    if (path.endsWith('/count') && failCount != null) throw failCount!;
     if (path.endsWith('/count')) return Map<String, dynamic>.from(detail);
     return const {};
   }
@@ -425,6 +428,34 @@ void main() {
       ],
       'finish': false,
     });
+  });
+
+  testWidgets('a refused count names the line, keeps the typed figure, and clears on edit', (tester) async {
+    final api = _StockTakesApi()
+      ..failCount = const ApiFailure('x', statusCode: 400, code: 'VALIDATION_FAILED', fieldErrors: {'lines.0.countedQuantity': 'الكمية أكبر من المسموح'});
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).last, '8');
+    await tester.tap(find.text('Save count'));
+    await tester.pumpAndSettle();
+    expect(find.text('الكمية أكبر من المسموح'), findsOneWidget);
+    expect(find.text('8'), findsWidgets);
+    await tester.enterText(find.byType(TextFormField).last, '7');
+    await tester.pump();
+    expect(find.text('الكمية أكبر من المسموح'), findsNothing);
+  });
+
+  testWidgets('an invalid or missing count is marked on its own line and nothing is sent', (tester) async {
+    final api = _StockTakesApi();
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).last, '-3');
+    await tester.tap(find.text('Save count'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a number that is zero or more.'), findsOneWidget);
+    expect(api.posts.where((x) => x.endsWith('/count')), isEmpty);
   });
 
   testWidgets('does not offer approval while a stock take is still being counted', (
