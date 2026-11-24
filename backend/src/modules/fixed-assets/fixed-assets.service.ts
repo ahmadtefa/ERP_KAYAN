@@ -1,3 +1,4 @@
+import { fieldError } from '../../common/validation/field-errors';
 import {
   BadRequestException,
   ConflictException,
@@ -1322,26 +1323,26 @@ export class FixedAssetsService {
       where: { companyId, deletedAt: null, id: { in: expectations.map(([id]) => id) } },
       select: { id: true, code: true, type: true, isPostable: true, isActive: true },
     });
+    const fieldOf: Record<string, string> = {
+      asset: 'assetAccountId',
+      'accumulated depreciation': 'accumulatedAccountId',
+      'depreciation expense': 'expenseAccountId',
+    };
     for (const [id, type, role] of expectations) {
       const account = accounts.find((a) => a.id === id);
+      const field = fieldOf[role];
       if (!account) {
-        throw new BadRequestException(`The ${role} account does not exist in this company`);
+        throw fieldError(field, 'القيمة المختارة غير صالحة، اختر من القائمة');
       }
       if (account.type !== type) {
-        throw new BadRequestException(
-          `The ${role} account (${account.code}) must be an ${type} account`,
-        );
+        throw fieldError(field, 'نوع الحساب المختار غير مناسب لهذا الحقل');
       }
       if (!account.isPostable || !account.isActive) {
-        throw new BadRequestException(
-          `The ${role} account (${account.code}) cannot receive postings`,
-        );
+        throw fieldError(field, 'هذا الحساب غير نشط أو لا يقبل قيودًا');
       }
     }
     if (ids.assetAccountId === ids.accumulatedAccountId) {
-      throw new BadRequestException(
-        'The asset and accumulated depreciation accounts must be different accounts',
-      );
+      throw fieldError('accumulatedAccountId', 'يجب أن يختلف عن حساب الأصل');
     }
   }
 
@@ -1368,7 +1369,7 @@ export class FixedAssetsService {
       where: { id, companyId, deletedAt: null },
       select: { id: true },
     });
-    if (!center) throw new BadRequestException('The cost center does not exist in this company');
+    if (!center) throw fieldError('costCenterId', 'القيمة المختارة غير صالحة، اختر من القائمة');
   }
 
   private async assertExists(
@@ -1386,20 +1387,18 @@ export class FixedAssetsService {
             where: { id, companyId, deletedAt: null },
             select: { id: true },
           });
-    if (!found) throw new BadRequestException(`The ${what} does not exist in this company`);
+    if (!found) throw fieldError(what === 'supplier' ? 'supplierId' : 'purchaseInvoiceId', 'القيمة المختارة غير صالحة، اختر من القائمة');
   }
 
   private assertEconomics(cost: Prisma.Decimal, salvageValue: Prisma.Decimal) {
     if (cost.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('Asset cost must be greater than zero');
+      throw fieldError('cost', 'القيمة يجب أن تكون أكبر من صفر');
     }
     if (salvageValue.lessThan(0)) {
-      throw new BadRequestException('Salvage value cannot be negative');
+      throw fieldError('salvageValue', 'القيمة يجب ألا تقل عن 0');
     }
     if (salvageValue.greaterThanOrEqualTo(cost)) {
-      throw new BadRequestException(
-        'Salvage value must be less than cost; otherwise there is nothing to depreciate',
-      );
+      throw fieldError('salvageValue', 'قيمة الخردة يجب أن تكون أقل من التكلفة');
     }
   }
 
@@ -1409,14 +1408,14 @@ export class FixedAssetsService {
       if (!parsed.isFinite()) throw new Error('not finite');
       return parsed;
     } catch {
-      throw new BadRequestException(`The ${field} amount is not a valid number: ${value}`);
+      throw fieldError(field, 'القيمة يجب أن تكون رقمًا');
     }
   }
 
   private date(value: string, field: string): Date {
     const parsed = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
     if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException(`The ${field} is not a valid date: ${value}`);
+      throw fieldError(field, 'التاريخ غير صحيح');
     }
     return parsed;
   }

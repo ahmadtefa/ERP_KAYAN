@@ -79,3 +79,15 @@ export function fieldError(field: string, reason: string): BadRequestException {
     code: 'VALIDATION_FAILED',
   });
 }
+
+/// Several refused fields at once (a rule that spans two inputs, such as
+/// "an Arabic or an English name"), in the same body shape.
+export function fieldErrorsOf(errors: Record<string, string>): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    message: Object.entries(errors).map(([f, t]) => `${f}: ${t}`),
+    errors,
+    code: 'VALIDATION_FAILED',
+  });
+}

@@ -143,9 +143,15 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(invoiceListProvider(widget.kind));
         if (e is ApiFailure && e.code == 'CUSTOMER_CREDIT_LIMIT_EXCEEDED') {
-          await showAppPlainError(context, _t(
+          final summary = e.creditSummary;
+          final explanation = _t(
             'ترحيل الفاتورة يتجاوز حد ائتمان العميل. يلزم موافقة مستخدم آخر لديه صلاحية الموافقة على تجاوز حد الائتمان. الفاتورة ما زالت مسودة.',
-            'Posting exceeds the customer credit limit. Another user with credit-approval permission must approve it. The invoice is still a draft.'));
+            'Posting exceeds the customer credit limit. Another user with credit-approval permission must approve it. The invoice is still a draft.');
+          final figures = summary == null ? '' : '\n\n${_t('حد الائتمان', 'Credit limit')}: ${summary.creditLimit}'
+            '\n${_t('الرصيد الحالي', 'Current balance')}: ${summary.currentBalance}'
+            '\n${_t('المتبقي من الفاتورة', 'Invoice outstanding')}: ${summary.invoiceAmount}'
+            '\n${_t('الرصيد بعد الترحيل', 'Balance after posting')}: ${summary.projectedBalance}';
+          await showAppPlainError(context, '$explanation$figures');
         } else {
           showMessage(context, e, error: true);
         }

@@ -258,6 +258,19 @@ const ready =
       for (const k of ['currentBalance', 'projectedBalance', 'invoiceAmount', 'creditLimit', 'customerId']) expect(body[k]).toBeUndefined();
     }
     expect(JSON.parse(hidden.text).message).not.toMatch(/\d{3,}/);
+    // structured figures: only the permitted viewer, only the four whitelisted keys
+    const branchLimited = await raw('branchA');
+    expect(branchLimited.status).toBe(409);
+    expect(JSON.parse(branchLimited.text).creditSummary).toBeUndefined();
+    expect(branchLimited.text).not.toContain('1000.0000');
+    expect(branchLimited.text).not.toContain('1200.0000');
+    const ps = JSON.parse(permitted.text).creditSummary;
+    expect(Object.keys(ps).sort()).toEqual(['creditLimit', 'currentBalance', 'invoiceAmount', 'projectedBalance']);
+    expect(ps.creditLimit).toBe('1000.0000');
+    expect(ps.invoiceAmount).toBe('1200.0000');
+    expect(Number(ps.projectedBalance)).toBeGreaterThan(1000);
+    expect(JSON.parse(hidden.text).creditSummary).toBeUndefined();
+    expect(hidden.text).not.toMatch(/1000|1200/);
     // a bad body is refused by the pipe with a per-field error, never a 500
     for (const body of [{}, { reason: 123 }, { reason: 'ab' }, { reason: 'x'.repeat(501) }, { reason: 'fine reason', extra: 1 }]) {
       const r = await fetch(`${base}/api/v1/sales/invoices/${INV_C}/credit-approval`, { method: 'POST', headers: { authorization: `Bearer ${who.branchA.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });

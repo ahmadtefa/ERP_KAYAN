@@ -362,6 +362,7 @@ class ApiClient {
           statusCode: status,
           code: code,
           fieldErrors: fieldErrors,
+          creditSummary: CreditSummary.fromProblem(data is Map ? data['creditSummary'] : null, code),
           userAction: data is Map && data['userAction'] is String
               ? data['userAction'] as String
               : null,

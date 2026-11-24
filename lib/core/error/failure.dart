@@ -30,6 +30,7 @@ class ApiFailure extends Failure {
     this.statusCode,
     this.code,
     this.fieldErrors = const {},
+    this.creditSummary,
     this.userAction,
     this.requestId,
     super.cause,
@@ -40,6 +41,7 @@ class ApiFailure extends Failure {
   /// A validated, non-secret machine-readable reason from the server.
   final String? code;
   final Map<String, String> fieldErrors;
+  final CreditSummary? creditSummary;
   final String? userAction;
   final String? requestId;
 }
@@ -94,4 +96,25 @@ class IncompleteSignInFailure extends Failure {
 /// same rules independently.
 class ValidationFailure extends Failure {
   const ValidationFailure(super.message, {super.cause});
+}
+
+/// The server supplies this only when its customer-card disclosure rule allows.
+/// Decimal strings preserve accounting precision and never parse English text.
+class CreditSummary {
+  const CreditSummary({required this.creditLimit, required this.currentBalance,
+    required this.invoiceAmount, required this.projectedBalance});
+  final String creditLimit;
+  final String currentBalance;
+  final String invoiceAmount;
+  final String projectedBalance;
+  static CreditSummary? fromProblem(Object? value, String? code) {
+    if (code != 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' || value is! Map) return null;
+    const keys = ['creditLimit', 'currentBalance', 'invoiceAmount', 'projectedBalance'];
+    final decimal = RegExp(r'^-?\d{1,15}(\.\d{1,4})?$');
+    if (!keys.every((key) => value[key] is String && decimal.hasMatch(value[key] as String))) return null;
+    return CreditSummary(creditLimit: value['creditLimit'] as String,
+      currentBalance: value['currentBalance'] as String,
+      invoiceAmount: value['invoiceAmount'] as String,
+      projectedBalance: value['projectedBalance'] as String);
+  }
 }

@@ -1,4 +1,4 @@
-import { fieldError } from '../../common/validation/field-errors';
+import { fieldError, fieldErrorsOf } from '../../common/validation/field-errors';
 import {
   BadRequestException,
   ConflictException,
@@ -646,11 +646,11 @@ export class PartiesService {
   ) {
     const dto = body as Record<string, unknown>;
     const code = String(dto.code ?? '').trim();
-    if (!code) throw new BadRequestException('code is required');
+    if (!code) throw fieldError('code', 'هذا الحقل مطلوب');
 
     const nameEn = String(dto.nameEn ?? '').trim();
     const nameAr = String(dto.nameAr ?? '').trim();
-    if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+    if (!nameEn && !nameAr) throw fieldErrorsOf({ nameAr: 'اكتب الاسم بالعربية أو بالإنجليزية', nameEn: 'اكتب الاسم بالعربية أو بالإنجليزية' });
 
     const model = this.model(kind);
     const existing = await model.findFirst({
@@ -707,7 +707,7 @@ export class PartiesService {
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
       const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
-      if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English name');
+      if (!nameEn && !nameAr) throw fieldErrorsOf({ nameAr: 'اكتب الاسم بالعربية أو بالإنجليزية', nameEn: 'اكتب الاسم بالعربية أو بالإنجليزية' });
       dto.nameEn = nameEn || nameAr;
       dto.nameAr = nameAr || nameEn;
     }
@@ -786,7 +786,7 @@ export class PartiesService {
     if (value === undefined || value === null || value === '') return 0;
     const days = Number(value);
     if (!Number.isInteger(days) || days < 0 || days > 3650) {
-      throw new BadRequestException('paymentTermDays must be a whole number of days between 0 and 3650');
+      throw fieldError('paymentTermDays', 'القيمة يجب أن تكون رقمًا صحيحًا بين 0 و3650');
     }
     return days;
   }

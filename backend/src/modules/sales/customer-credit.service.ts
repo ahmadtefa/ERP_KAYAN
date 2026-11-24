@@ -54,6 +54,14 @@ export class CustomerCreditService {
       currentBalance: check.balance.toFixed(SCALE),
       invoiceAmount: check.remaining.toFixed(SCALE),
       projectedBalance: check.projected.toFixed(SCALE),
+      // The same figures as one object the problem-details filter forwards.
+      // Only this permitted branch ever builds it.
+      creditSummary: {
+        creditLimit: check.creditLimit.toFixed(SCALE),
+        currentBalance: check.balance.toFixed(SCALE),
+        invoiceAmount: check.remaining.toFixed(SCALE),
+        projectedBalance: check.projected.toFixed(SCALE),
+      },
     });
   }
 

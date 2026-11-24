@@ -106,6 +106,17 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         if (typeof b.code === 'string' && /^[A-Z0-9_]{3,64}$/.test(b.code)) {
           extra = { ...extra, code: b.code };
         }
+        // Credit figures for a permitted viewer: forwarded only for the credit
+        // refusal code, only these four keys, only plain decimal strings.
+        if (b.code === 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' && b.creditSummary && typeof b.creditSummary === 'object') {
+          const src = b.creditSummary as Record<string, unknown>;
+          const out: Record<string, string> = {};
+          for (const k of ['creditLimit', 'currentBalance', 'invoiceAmount', 'projectedBalance']) {
+            const v = src[k];
+            if (typeof v === 'string' && /^-?\d{1,15}(\.\d{1,4})?$/.test(v)) out[k] = v;
+          }
+          if (Object.keys(out).length === 4) extra = { ...extra, creditSummary: out };
+        }
         if (b.license && typeof b.license === 'object') {
           extra = { ...extra, license: b.license };
         }
