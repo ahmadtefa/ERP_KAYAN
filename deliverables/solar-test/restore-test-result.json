@@ -1,0 +1,128 @@
+{
+ "checks": [
+  {
+   "n": "backup capabilities available",
+   "ok": true,
+   "d": "{\"available\":true,\"pgDump\":\"/usr/bin/pg_dump\",\"pgRestore\":\"/usr/bin/pg_restore\",\"version\":\"pg_dump (PostgreSQL) 14.24 (Ubuntu 14.24-0ubuntu0.22.04.1)\",\"serverVe"
+  },
+  {
+   "n": "program creates the dump via /backup/full/database-archive",
+   "ok": true,
+   "d": "kayan-full-2026-11-24-08-53-50-3784ef6c-0750-4e7c-8b5d-a6435b45c898.dump"
+  },
+  {
+   "n": "program verifies the dump",
+   "ok": true,
+   "d": "{\"name\":\"kayan-full-2026-11-24-08-53-50-3784ef6c-0750-4e7c-8b5d-a6435b45c898.dump\",\"sizeBytes\":2471303,\"entries\":731,\"tables\":88,\"constraints\":308,\"archiveContentReadable\":true,\"fullRestoreRehearsed\":"
+  },
+  {
+   "n": "dump is PostgreSQL custom format",
+   "ok": true,
+   "d": "2471303 bytes"
+  },
+  {
+   "n": "pg_restore --list reads it",
+   "ok": true,
+   "d": "88 table-data entries"
+  },
+  {
+   "n": "fresh destination installation set up",
+   "ok": true,
+   "d": "HTTP 201"
+  },
+  {
+   "n": "dump restores through the real backend route /backup/full/restore",
+   "ok": true,
+   "d": "HTTP 201 {\"restored\":true,\"source\":\"KAYAN-SOLAR-TEST.dump\",\"safetyBackup\":\"kayan-safety-2026-11-24-08-53-54-bc1a00eb-029a-4bdf-b07b-87c98bece9ab.dump\",\"checked\":true,\"re"
+  },
+  {
+   "n": "row counts identical in restored DB",
+   "ok": true,
+   "d": "all 25 tables equal"
+  },
+  {
+   "n": "all test users can sign in after restore",
+   "ok": true,
+   "d": "16/16"
+  },
+  {
+   "n": "trial balance balances and equals source",
+   "ok": true,
+   "d": "{\"debit\":\"823731473.8247\",\"credit\":\"823731473.8247\",\"difference\":\"0.0000\",\"rows\":26}"
+  },
+  {
+   "n": "restored API serves sales invoices",
+   "ok": true,
+   "d": "total 500"
+  }
+ ],
+ "sha256": "172e2b97a6fb25713c9da89783707a3df392ce904f61b7646e9ff5b227943222",
+ "bytes": 2471303,
+ "srcCounts": {
+  "branches": 5,
+  "warehouses": 17,
+  "items": 300,
+  "customers": 200,
+  "suppliers": 50,
+  "users": 16,
+  "cost_centers": 10,
+  "sales_invoices": 500,
+  "sales_invoice_lines": 1382,
+  "purchase_invoices": 200,
+  "purchase_invoice_lines": 761,
+  "stock_transfers": 100,
+  "stock_transfer_lines": 278,
+  "stock_movements": 4288,
+  "warehouse_stock_balances": 840,
+  "journal_entries": 1331,
+  "journal_lines": 5877,
+  "accounts": 46,
+  "cash_vouchers": 543,
+  "approval_policies": 1,
+  "notifications": 1200,
+  "item_warehouse_settings": 480,
+  "roles": 17,
+  "item_categories": 10,
+  "opening_balances": 5
+ },
+ "tbSrc": {
+  "debit": "823731473.8247",
+  "credit": "823731473.8247",
+  "difference": "0.0000",
+  "rows": 26
+ },
+ "dstCounts": {
+  "branches": 5,
+  "warehouses": 17,
+  "items": 300,
+  "customers": 200,
+  "suppliers": 50,
+  "users": 16,
+  "cost_centers": 10,
+  "sales_invoices": 500,
+  "sales_invoice_lines": 1382,
+  "purchase_invoices": 200,
+  "purchase_invoice_lines": 761,
+  "stock_transfers": 100,
+  "stock_transfer_lines": 278,
+  "stock_movements": 4288,
+  "warehouse_stock_balances": 840,
+  "journal_entries": 1331,
+  "journal_lines": 5877,
+  "accounts": 46,
+  "cash_vouchers": 543,
+  "approval_policies": 1,
+  "notifications": 1200,
+  "item_warehouse_settings": 480,
+  "roles": 17,
+  "item_categories": 10,
+  "opening_balances": 5
+ },
+ "tbDst": {
+  "debit": "823731473.8247",
+  "credit": "823731473.8247",
+  "difference": "0.0000",
+  "rows": 26
+ },
+ "apiSalesTotal": 500
+}
