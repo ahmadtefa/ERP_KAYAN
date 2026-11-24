@@ -6,10 +6,10 @@ $out=Join-Path $PWD 'build/security-evidence'
 New-Item -ItemType Directory -Force $out | Out-Null
 $setup=(Resolve-Path (Join-Path $CandidateDir 'KAYAN-ERP-Setup.exe')).Path
 $hash=(Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
-$expected='b3d09669d25f6af6614a621c4d2295744a42aed5f4de85bb0236e778f76b046e'
+$expected='0b78c58049c3bb42f999472fd5daa2bad79d77634c2986ce51a9c77899b57c6b'
 if($hash -ne $expected){throw 'Exact candidate hash mismatch'}
 $signature=Get-AuthenticodeSignature $setup
-$evidence=[ordered]@{candidateSource='1f4aad594ba4c053a94500153dd968a0f89411ea';sha256=$hash;signatureStatus=$signature.Status.ToString();signatureMessage=$signature.StatusMessage;scanResult='not-run';sampleUploaded=$false;settingsChanged=$false;notMalwareFreeProof=$true;checkedUtc=[DateTime]::UtcNow.ToString('o')}
+$evidence=[ordered]@{candidateSource='a4963194f57e09bbabfb43e1f2286f4b0cbc1721';sha256=$hash;signatureStatus=$signature.Status.ToString();signatureMessage=$signature.StatusMessage;scanResult='not-run';sampleUploaded=$false;settingsChanged=$false;notMalwareFreeProof=$true;checkedUtc=[DateTime]::UtcNow.ToString('o')}
 try {
  $status=Get-MpComputerStatus
  $preference=Get-MpPreference

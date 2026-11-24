@@ -5,8 +5,8 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 $root=Join-Path $env:ProgramFiles 'KAYAN ERP'
 $data=Join-Path $env:ProgramData 'KAYAN-ERP'
 if ((Test-Path $root) -or (Test-Path $data) -or (Get-Service KayanERPPostgreSQL -ErrorAction SilentlyContinue)) { throw 'Existing installation refused' }
-$expected='1f4aad594ba4c053a94500153dd968a0f89411ea'
-$hash='b3d09669d25f6af6614a621c4d2295744a42aed5f4de85bb0236e778f76b046e'
+$expected='a4963194f57e09bbabfb43e1f2286f4b0cbc1721'
+$hash='0b78c58049c3bb42f999472fd5daa2bad79d77634c2986ce51a9c77899b57c6b'
 $setup=(Resolve-Path (Join-Path $CandidateDir 'KAYAN-ERP-Setup.exe')).Path
 $identity=Get-Content (Join-Path $CandidateDir 'identity.json') -Raw | ConvertFrom-Json
 if ($identity.sourceCommit -ne $expected -or $identity.sha256 -ne $hash -or (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Candidate identity mismatch' }
@@ -61,9 +61,8 @@ function Wait-Dialog([string]$title) {
   foreach($w in $windows){
    try {
     if($w.Current.ProcessId -eq $probe.Id -and $w.Current.Name -eq $title -and -not $w.Current.IsOffscreen -and $w.Current.IsEnabled){
-     $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'File name:')
-     $readyEdit=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
-     if($readyEdit -and $readyEdit.Current.IsEnabled -and -not $readyEdit.Current.IsOffscreen){return $w}
+     $readyEdit=Find-FileNameEdit $w
+     if($readyEdit){return $w}
     }
    } catch {}
   }
@@ -75,10 +74,21 @@ function Wait-Dialog([string]$title) {
  @($tree | ForEach-Object { [ordered]@{name=$_.Current.Name;class=$_.Current.ClassName;pid=$_.Current.ProcessId;type=$_.Current.ControlType.ProgrammaticName} }) | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'dialog-tree.json')
  throw 'Native dialog absent'
 }
+function Find-FileNameEdit([Windows.Automation.AutomationElement]$dialog){
+ # The same label belongs to a Text label, ComboBox and its editable child.
+ # Require the actual focusable Edit with a writable ValuePattern.
+ $type=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
+ $edits=$dialog.FindAll([Windows.Automation.TreeScope]::Descendants,$type)
+ foreach($candidate in $edits){
+  if($candidate.Current.Name -ne 'File name:' -or -not $candidate.Current.IsEnabled -or $candidate.Current.IsOffscreen -or -not $candidate.Current.IsKeyboardFocusable){continue}
+  $pattern=$null
+  if($candidate.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -and -not $pattern.Current.IsReadOnly){return $candidate}
+ }
+ return $null
+}
 function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$value){
- $id=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'File name:')
- $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$id)
- if(-not $edit){throw 'Native filename control absent'}
+ $edit=Find-FileNameEdit $dialog
+ if(-not $edit){throw 'Native writable filename Edit absent'}
  $edit.SetFocus()
  $pattern=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
  $pattern.SetValue($value)
