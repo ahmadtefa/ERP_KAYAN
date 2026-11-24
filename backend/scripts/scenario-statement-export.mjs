@@ -44,6 +44,10 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+// The party statement labels its closing line "رصيد ختامي" while other
+// statements say "الرصيد الختامي"; the check is that the line exists and
+// carries the screen's closing balance.
+const closingLabel = /^(ال)?رصيد (ال)?ختامي$/;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function api(path, options = {}) {
@@ -462,7 +466,7 @@ async function main() {
   );
   check(
     'the CSV closes on the same balance as the screen',
-    csvRows.some((row) => row.includes('الرصيد الختامي') && row.includes(customerStatement.closingBalance)),
+    csvRows.some((row) => closingLabel.test(String(row[0] ?? '')) && row.includes(customerStatement.closingBalance)),
     `looking for ${customerStatement.closingBalance}`,
   );
   check(
@@ -775,7 +779,7 @@ async function main() {
     'the CSV closes on the same balance as the screen after the old vouchers',
     csvAfterRows.some(
       (row) =>
-        row.includes('الرصيد الختامي') && row.includes(statementAfter.closingBalance),
+        closingLabel.test(String(row[0] ?? '')) && row.includes(statementAfter.closingBalance),
     ),
     `looking for ${statementAfter.closingBalance}`,
   );

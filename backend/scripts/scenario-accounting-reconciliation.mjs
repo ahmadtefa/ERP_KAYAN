@@ -52,11 +52,21 @@ function check(name, ok, detail) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+let financeToken = '';
+let stampF = '';
+let financePassword = '';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers ?? {}) };
   if (token && !options.noAuth) headers.Authorization = `Bearer ${token}`;
+  // Company-wide totals are returned only to the finance and general manager
+  // roles (technical administration is not a financial role, even for a super
+  // admin), so report and export reads use the finance manager's session.
+  // Writes and every assertion value are unchanged.
+  if (financeToken && !options.noAuth && /^\/(reports|exports\/|auth\/download-ticket)/.test(path)) {
+    headers.Authorization = `Bearer ${financeToken}`;
+  }
   if (options.json !== undefined) headers['Content-Type'] = 'application/json';
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(`${API}${path}`, {
@@ -162,6 +172,29 @@ async function main() {
   token = login.data?.accessToken ?? '';
   check('sign in as the administrator', login.status < 300 && Boolean(token), `status ${login.status}`);
   if (!token) return false;
+
+  const roleList = await api('/admin/roles');
+  const financeRole = roleList.data?.items?.find((r) => r.code === 'FINANCE_MANAGER');
+  check('the finance manager role is seeded', Boolean(financeRole?.id), `roles ${roleList.data?.items?.length}`);
+  const branchList = await api('/company/branches');
+  const branchRows = branchList.data?.items ?? branchList.data ?? [];
+  stampF = Date.now().toString(36);
+  financePassword = `Finance@${stampF}9x`;
+  const financeCreated = financeRole?.id
+    ? await api('/admin/users', {
+        method: 'POST',
+        json: {
+          username: `e2e-finance-${stampF}`, fullNameEn: `Finance ${stampF}`, fullNameAr: `مالية ${stampF}`,
+          password: financePassword, roleIds: [financeRole.id], branchIds: branchRows.map((b) => b.id),
+        },
+      })
+    : { status: 0 };
+  check('create a finance manager user', financeCreated.status < 300, `status ${financeCreated.status}`);
+  const financeLogin = await api('/auth/login', {
+    method: 'POST', noAuth: true, json: { username: `e2e-finance-${stampF}`, password: financePassword },
+  });
+  financeToken = financeLogin.data?.accessToken ?? '';
+  check('the finance manager can sign in', financeLogin.status === 201 && Boolean(financeToken), `status ${financeLogin.status}`);
 
   await must('set the VAT rate to 14% for known figures', '/accounting/settings', {
     method: 'PATCH',
@@ -1761,6 +1794,12 @@ async function main() {
       noAuth: true,
     });
     if (relogin.data?.accessToken) token = relogin.data.accessToken;
+    // The restore ends every session, the finance manager's included.
+    const financeRelogin = await api('/auth/login', {
+      method: 'POST', noAuth: true, json: { username: `e2e-finance-${stampF}`, password: financePassword },
+    });
+    financeToken = financeRelogin.data?.accessToken ?? '';
+    check('the finance manager signs in again after the restore', Boolean(financeToken), `status ${financeRelogin.status}`);
     const restoredTrial = await yearTrial();
     check(
       'after restore, the books are the same books (2024 cash 148,351; loss 1,150 in retained)',
