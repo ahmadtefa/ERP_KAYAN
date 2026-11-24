@@ -30,6 +30,8 @@ import {
   STOCK_VOUCHER_PENDING_APPROVAL,
   SALES_ORDER_PENDING_APPROVAL,
   PURCHASE_ORDER_PENDING_APPROVAL,
+  STOCKTAKE_PENDING_APPROVAL,
+  WRITEOFF_PENDING_APPROVAL,
   assertKnownKind,
   dedupeKey,
   notificationKind,
@@ -1229,6 +1231,8 @@ export class NotificationsService {
       STOCK_VOUCHER_PENDING_APPROVAL,
       SALES_ORDER_PENDING_APPROVAL,
       PURCHASE_ORDER_PENDING_APPROVAL,
+      STOCKTAKE_PENDING_APPROVAL,
+      WRITEOFF_PENDING_APPROVAL,
       JOURNAL_PENDING_APPROVAL,
       INVOICE_OVERDUE,
       PAYABLE_DUE,
@@ -1303,6 +1307,73 @@ export class NotificationsService {
           titleAr: `أمر الشراء ${order.orderNumber} في انتظار الاعتماد`,
           bodyEn: `${order.supplier?.nameEn ?? 'The supplier'} — ${order.totalAmount}.`,
           bodyAr: `${order.supplier?.nameAr ?? 'المورد'} — ${order.totalAmount}.`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+
+    // ── stock counts, write-offs and stock vouchers waiting for approval ──
+    if (enabled(STOCKTAKE_PENDING_APPROVAL)) {
+      const sessions = await this.prisma.stockTakeSession.findMany({
+        where: { companyId, status: 'REVIEW' },
+        select: { id: true, branchId: true, code: true },
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+      });
+      for (const session of sessions) {
+        const dedupe = dedupeKey({ type: STOCKTAKE_PENDING_APPROVAL, entityId: session.id });
+        stillTrue(STOCKTAKE_PENDING_APPROVAL, dedupe);
+        await this.raise({
+          companyId,
+          type: STOCKTAKE_PENDING_APPROVAL,
+          branchId: session.branchId,
+          entityType: 'StockTakeSession',
+          entityId: session.id,
+          entityRef: session.code,
+          actionPath: `/inventory/stock-takes?session=${session.id}`,
+          titleEn: `Stock count ${session.code} is waiting for approval`,
+          titleAr: `الجرد ${session.code} في انتظار اعتماد الفروق`,
+          dedupe,
+        });
+        raised += 1;
+      }
+    }
+    if (enabled(WRITEOFF_PENDING_APPROVAL) || enabled(STOCK_VOUCHER_PENDING_APPROVAL)) {
+      const documents = await this.prisma.stockDocument.findMany({
+        where: {
+          companyId,
+          status: 'DRAFT',
+          deletedAt: null,
+          approvedAt: null,
+          OR: [{ kind: 'WRITE_OFF' }, { voucherKind: { not: null }, reviewedAt: { not: null } }],
+        },
+        select: { id: true, branchId: true, documentNumber: true, kind: true },
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+      });
+      for (const document of documents) {
+        const writeOff = String(document.kind) === 'WRITE_OFF';
+        const type = writeOff ? WRITEOFF_PENDING_APPROVAL : STOCK_VOUCHER_PENDING_APPROVAL;
+        if (!enabled(type)) continue;
+        const dedupe = dedupeKey({ type, entityId: document.id });
+        stillTrue(type, dedupe);
+        await this.raise({
+          companyId,
+          type,
+          branchId: document.branchId,
+          entityType: 'StockDocument',
+          entityId: document.id,
+          entityRef: document.documentNumber,
+          actionPath: writeOff
+            ? `/inventory/write-offs?document=${document.id}`
+            : `/inventory/documents?document=${document.id}`,
+          titleEn: writeOff
+            ? `Write-off ${document.documentNumber} is waiting for approval`
+            : `Stock voucher ${document.documentNumber} is waiting for approval`,
+          titleAr: writeOff
+            ? `مستند الإعدام ${document.documentNumber} في انتظار الاعتماد`
+            : `إذن المخزن ${document.documentNumber} في انتظار الاعتماد`,
           dedupe,
         });
         raised += 1;

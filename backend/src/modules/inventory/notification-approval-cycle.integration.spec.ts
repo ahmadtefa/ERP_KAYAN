@@ -178,4 +178,17 @@ const vmReady =
     expect(await sees(U.salesMgr)).toEqual([]);
     expect(await sees(U.author)).toEqual(['DOCUMENT_APPROVED']);
   });
+
+  it('stock count, write-off and voucher scans run against the real schema and reach the right approvers', async () => {
+    const STK = '99999999-9999-4999-8999-999999999993';
+    await prisma.$executeRawUnsafe(`INSERT INTO stock_take_sessions(id,"companyId","branchId","warehouseId",code,status,"updatedAt") VALUES ('${STK}','${COMPANY}','${BRANCH_A}','${FROM}','ST-1','REVIEW',now())`).catch(async () =>
+      prisma.$executeRawUnsafe(`INSERT INTO stock_take_sessions(id,"companyId","branchId","warehouseId",code,status) VALUES ('${STK}','${COMPANY}','${BRANCH_A}','${FROM}','ST-1','REVIEW')`));
+    const U: any = {
+      countApprover: nu(MANAGER, ['inventory.stocktake.approve'], ['WAREHOUSE_MANAGER']),
+      other: nu(CHIEF, ['inventory.stock.read'], ['STOREKEEPER']),
+    };
+    await notif.scanBusiness(COMPANY);
+    expect(await sees(U.countApprover)).toEqual(['STOCKTAKE_PENDING_APPROVAL']);
+    expect(await sees(U.other)).toEqual([]);
+  });
 });

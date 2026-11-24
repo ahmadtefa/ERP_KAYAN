@@ -43,6 +43,8 @@ export const STOCK_TRANSFER_RETURNED = 'STOCK_TRANSFER_RETURNED';
 export const JOURNAL_PENDING_APPROVAL = 'JOURNAL_PENDING_APPROVAL';
 /// Sales and purchase orders each name their own approval permission, so each
 /// has its own kind: the alert must reach the people who can actually approve.
+export const STOCKTAKE_PENDING_APPROVAL = 'STOCKTAKE_PENDING_APPROVAL';
+export const WRITEOFF_PENDING_APPROVAL = 'WRITEOFF_PENDING_APPROVAL';
 export const SALES_ORDER_PENDING_APPROVAL = 'SALES_ORDER_PENDING_APPROVAL';
 export const PURCHASE_ORDER_PENDING_APPROVAL = 'PURCHASE_ORDER_PENDING_APPROVAL';
 /// The requester's own news: what was decided about the document they sent.
@@ -186,6 +188,22 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     permission: 'inventory.transfer.create',
     personal: true,
     entityType: 'StockTransfer',
+  },
+  {
+    type: STOCKTAKE_PENDING_APPROVAL,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.stocktake.approve',
+    entityType: 'StockTakeSession',
+    repeatAfterHours: 24,
+  },
+  {
+    type: WRITEOFF_PENDING_APPROVAL,
+    module: 'inventory',
+    severity: 'WARNING',
+    permission: 'inventory.writeoff.approve',
+    entityType: 'StockDocument',
+    repeatAfterHours: 24,
   },
   {
     type: SALES_ORDER_PENDING_APPROVAL,
