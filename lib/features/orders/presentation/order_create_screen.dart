@@ -115,6 +115,39 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
   }
 
   void _changed() { if (!_dirty) setState(() => _dirty = true); }
+
+  /// Reasons the server gave per field (`orderDate`, `lines.0.quantity`, ...).
+  /// A field's reason is shown under it until that field is edited.
+  final _serverErrors = <String, String>{};
+  String? _srv(String key) => _serverErrors[key];
+  void _edited(String key) {
+    _changed();
+    if (_serverErrors.remove(key) != null) setState(() {});
+  }
+
+  /// Places a 400's per-field reasons on the fields and scrolls to the first;
+  /// whatever cannot be placed is still shown as a message.
+  void _placeServerErrors(ApiFailure error) {
+    final known = <String>{
+      widget.kind.isSales ? 'customerId' : 'supplierId', 'orderDate', 'notes',
+      for (var i = 0; i < _lines.length; i++)
+        for (final f in const ['itemId', 'quantity', 'unitName', 'unitPrice', 'discountPercent', 'taxRate']) 'lines.$i.$f',
+    };
+    final rest = <String, String>{};
+    setState(() {
+      _serverErrors.clear();
+      for (final entry in error.fieldErrors.entries) {
+        if (known.contains(entry.key)) { _serverErrors[entry.key] = entry.value; } else { rest[entry.key] = entry.value; }
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _form.currentState?.validate();
+    });
+    if (rest.isNotEmpty) {
+      showMessage(context, ApiFailure(error.message, statusCode: error.statusCode, fieldErrors: rest), error: true);
+    }
+  }
   Future<bool> _confirmExit() async {
     if (_busy || _confirming) return false;
     if (!_dirty || _pending != null) return true;
@@ -182,6 +215,10 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
       if (error is ApiFailure && const {400, 422}.contains(error.statusCode)) {
         await _store!.complete(_scope!);
         if (mounted) setState(() => _pending = null);
+        if (mounted && error.fieldErrors.isNotEmpty) {
+          _placeServerErrors(error);
+          return;
+        }
       }
       if (mounted) showMessage(context, error, error: true);
     } catch (error) {
@@ -207,17 +244,17 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
           if (parties.hasError || items.hasError)
             Text(tr('تعذر تحميل الجهات أو الأصناف. أعد فتح الشاشة للمحاولة.', 'Could not load parties or items. Reopen the screen to retry.')),
           if (parties.isLoading || items.isLoading) const LinearProgressIndicator(),
-          Form(key: _form, child: IgnorePointer(ignoring: disabled, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Form(key: _form, autovalidateMode: AutovalidateMode.onUserInteraction, child: IgnorePointer(ignoring: disabled, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             DropdownButtonFormField<String>(
               key: ValueKey('party-$_party-${parties.hasValue}'),
               initialValue: (parties.value ?? <Json>[]).any((row) => text(row, 'id') == _party) ? _party : null, isExpanded: true,
               decoration: InputDecoration(labelText: widget.kind.isSales ? tr('العميل', 'Customer') : tr('المورد', 'Supplier')),
               items: [for (final party in parties.value ?? <Json>[])
                 DropdownMenuItem(value: text(party, 'id'), child: Text('${text(party, 'code')} — ${text(party, _ar ? 'nameAr' : 'nameEn')}', overflow: TextOverflow.ellipsis))],
-              onChanged: (value) { setState(() => _party = value); _changed(); },
-              validator: (value) => value == null ? tr('مطلوب', 'Required') : null,
+              onChanged: (value) { setState(() => _party = value); _edited(widget.kind.isSales ? 'customerId' : 'supplierId'); },
+              validator: (value) => value == null ? tr('مطلوب', 'Required') : _srv(widget.kind.isSales ? 'customerId' : 'supplierId'),
             ),
-            TextFormField(controller: _date, onChanged: (_) => _changed(),
+            TextFormField(controller: _date, onChanged: (_) => _edited('orderDate'),
               decoration: InputDecoration(labelText: tr('تاريخ الأمر (YYYY-MM-DD)', 'Order date (YYYY-MM-DD)')),
               validator: (value) {
                 final raw = (value ?? '').trim();
@@ -226,9 +263,9 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
                     '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}' != raw) {
                   return tr('تاريخ غير صالح', 'Invalid date');
                 }
-                return null;
+                return _srv('orderDate');
               }),
-            TextFormField(controller: _notes, onChanged: (_) => _changed(), decoration: InputDecoration(labelText: tr('ملاحظات', 'Notes'))),
+            TextFormField(controller: _notes, onChanged: (_) => _edited('notes'), validator: (_) => _srv('notes'), decoration: InputDecoration(labelText: tr('ملاحظات', 'Notes'))),
             const SizedBox(height: 12),
             for (final line in _lines) _lineEditor(line, items.value ?? <Json>[]),
             Align(alignment: AlignmentDirectional.centerStart, child: TextButton.icon(
@@ -246,6 +283,7 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
   Widget _lineEditor(_OrderLine line, List<Json> items) {
     final item = items.where((row) => text(row, 'id') == line.itemId).firstOrNull;
     final units = lineUnitsOf(item);
+    final at = 'lines.${_lines.indexOf(line)}';
     return Card(key: ObjectKey(line), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
       DropdownButtonFormField<String>(
         key: ValueKey('item-${line.itemId}-${items.isNotEmpty}'),
@@ -253,24 +291,24 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
         decoration: InputDecoration(labelText: tr('الصنف', 'Item')),
         items: [for (final row in items) DropdownMenuItem(value: text(row, 'id'),
           child: Text('${text(row, 'code')} — ${text(row, _ar ? 'nameAr' : 'nameEn')}', overflow: TextOverflow.ellipsis))],
-        onChanged: (value) { setState(() { line.itemId = value; line.unitName = null; }); _changed(); },
-        validator: (value) => value == null ? tr('مطلوب', 'Required') : null),
+        onChanged: (value) { setState(() { line.itemId = value; line.unitName = null; }); _edited('$at.itemId'); },
+        validator: (value) => value == null ? tr('مطلوب', 'Required') : _srv('$at.itemId')),
       if (item != null) DropdownButtonFormField<String>(
         key: ValueKey('unit-${line.itemId}-${line.unitName}'),
         initialValue: units.any((unit) => text(unit, 'unit') == line.unitName) ? line.unitName : null,
         validator: (_) => line.unitName != null && !units.any((unit) => text(unit, 'unit') == line.unitName)
-          ? tr('اختر وحدة صالحة', 'Select an active unit') : null,
+          ? tr('اختر وحدة صالحة', 'Select an active unit') : _srv('$at.unitName'),
         decoration: InputDecoration(labelText: tr('الوحدة (الافتراضية إن تُركت فارغة)', 'Unit (default if blank)')),
         items: [for (final unit in units) DropdownMenuItem(value: text(unit, 'unit'), child: Text(text(unit, 'unit')))],
-        onChanged: (value) { setState(() => line.unitName = value); _changed(); }),
-      TextFormField(controller: line.quantity, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-        decoration: InputDecoration(labelText: tr('الكمية', 'Quantity')), validator: (v) => _number(v, required: true, positive: true)),
-      TextFormField(controller: line.price, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-        decoration: InputDecoration(labelText: tr('السعر (فارغ لاستخدام السعر الافتراضي)', 'Price (blank uses default)')), validator: _number),
-      TextFormField(controller: line.discount, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-        decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true)),
-      TextFormField(controller: line.tax, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-        decoration: InputDecoration(labelText: tr('الضريبة % (الفارغ صفر)', 'Tax % (blank is zero)')), validator: (v) => _number(v, percent: true)),
+        onChanged: (value) { setState(() => line.unitName = value); _edited('$at.unitName'); }),
+      TextFormField(controller: line.quantity, onChanged: (_) => _edited('$at.quantity'), keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: tr('الكمية', 'Quantity')), validator: (v) => _number(v, required: true, positive: true) ?? _srv('$at.quantity')),
+      TextFormField(controller: line.price, onChanged: (_) => _edited('$at.unitPrice'), keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: tr('السعر (فارغ لاستخدام السعر الافتراضي)', 'Price (blank uses default)')), validator: (v) => _number(v) ?? _srv('$at.unitPrice')),
+      TextFormField(controller: line.discount, onChanged: (_) => _edited('$at.discountPercent'), keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true) ?? _srv('$at.discountPercent')),
+      TextFormField(controller: line.tax, onChanged: (_) => _edited('$at.taxRate'), keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: tr('الضريبة % (الفارغ صفر)', 'Tax % (blank is zero)')), validator: (v) => _number(v, percent: true) ?? _srv('$at.taxRate')),
       if (_lines.length > 1) Align(alignment: AlignmentDirectional.centerEnd, child: TextButton(
         onPressed: () { setState(() => _lines.remove(line)); WidgetsBinding.instance.addPostFrameCallback((_) => line.dispose()); _changed(); }, child: Text(tr('حذف الصنف', 'Remove item')))),
     ])));
