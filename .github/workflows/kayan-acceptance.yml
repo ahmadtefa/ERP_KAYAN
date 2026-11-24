@@ -61,6 +61,8 @@ jobs:
           }
           NODE
           exit 0
+      - name: Verify browser manual backup keeps explicit server-only behavior
+        run: flutter test --no-pub --platform chrome test/widget/full_backup_section_test.dart --plain-name 'web preserves explicit server archive'
       - name: Run acceptance tests and capture real exit codes
         shell: bash
         run: |
@@ -272,6 +274,19 @@ jobs:
           src/modules/auth/auth.logout.postgres.spec.ts
           src/modules/auth/auth.refresh-rotation.postgres.spec.ts
           src/modules/auth/auth.password-sessions.postgres.spec.ts
+      - name: Prove credit checks and actual posting execute on real PostgreSQL
+        if: matrix.suite == 'backend'
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
+        run: |
+          npm test -- --runInBand src/modules/sales/customer-credit.integration.spec.ts src/modules/sales/sales-invoice-credit-post.integration.spec.ts --json --outputFile="$RUNNER_TEMP/credit-post.json"
+          node - "$RUNNER_TEMP/credit-post.json" <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (r.numPassedTestSuites !== 2 || r.numPassedTests !== 11 || r.numPendingTests !== 0 || r.numFailedTests !== 0) {
+            throw new Error('Credit service and actual posting require all 11 real PostgreSQL cases, no skips.');
+          }
+          NODE
       - name: Run backend suite (except isolated licence signing and store tests)
         if: matrix.suite == 'backend'
         shell: bash
