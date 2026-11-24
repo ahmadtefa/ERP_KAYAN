@@ -97,6 +97,12 @@ function Find-FileNameEdit([Windows.Automation.AutomationElement]$dialog){
  }
  return $null
 }
+function Invoke-DialogPrimary([Windows.Automation.AutomationElement]$dialog){
+ $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1')
+ $primary=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+ if(-not $primary -or -not $primary.Current.IsEnabled){throw 'Native primary action absent'}
+ $primary.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
 function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$value){
  $edit=Find-FileNameEdit $dialog
  if(-not $edit){throw 'Native writable filename Edit absent'}
@@ -121,7 +127,7 @@ try {
  $names=@($elements | ForEach-Object {$_.Current.Name})
  if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
  Screenshot 'native-open-filter'
- Set-FileName $w 'visible.json';$keys.SendKeys('{ENTER}')
+ Set-FileName $w 'visible.json';Invoke-DialogPrimary $w
  Wait-Stage 'cancel';$w=Wait-Dialog 'Save As';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
  Wait-Stage 'passed'
 }catch{Screenshot 'native-error';throw}finally{if(-not $probe.HasExited){Stop-Process -Id $probe.Id -Force}}
