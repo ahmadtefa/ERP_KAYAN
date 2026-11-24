@@ -1110,6 +1110,59 @@ class _StockVoucherCreateScreenState
     if (!_dirty) setState(() => _dirty = true);
   }
 
+  /// Reasons the server gave per field (`reason`, `lines.0.quantity`, ...),
+  /// shown under the field until that field is edited.
+  final _serverErrors = <String, String>{};
+  String? _srv(String key) => _serverErrors[key];
+  void _edited(String key) {
+    _changed();
+    if (_serverErrors.remove(key) != null) setState(() {});
+  }
+
+  /// Returns true when every reason was placed on a field or shown, so the
+  /// caller does not also open the generic dialog.
+  bool _placeServerErrors(Object error) {
+    if (error is! ApiFailure ||
+        error.fieldErrors.isEmpty ||
+        !const {400, 422}.contains(error.statusCode)) {
+      return false;
+    }
+    final known = <String>{
+      'toWarehouseId',
+      'documentDate',
+      'counterpartyName',
+      'reason',
+      for (var i = 0; i < _lines.length; i++)
+        for (final f in const ['quantity', 'unitCost'])
+          'lines.$i.$f',
+    };
+    final rest = <String, String>{};
+    setState(() {
+      _serverErrors.clear();
+      for (final entry in error.fieldErrors.entries) {
+        if (known.contains(entry.key)) {
+          _serverErrors[entry.key] = entry.value;
+        } else {
+          rest[entry.key] = entry.value;
+        }
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _form.currentState?.validate();
+    });
+    if (rest.isNotEmpty) {
+      showAppError(
+        context,
+        ApiFailure(
+          error.message,
+          statusCode: error.statusCode,
+          fieldErrors: rest,
+        ),
+      );
+    }
+    return true;
+  }
+
   Future<bool> _confirmExit() async {
     if (_busy || _confirming) return false;
     if (!_dirty || _pending != null) return true;
@@ -1221,7 +1274,12 @@ class _StockVoucherCreateScreenState
         Navigator.of(context).pop(id);
       }
     } catch (error) {
-      if (mounted) showAppError(context, error);
+      if (error is ApiFailure && const {400, 422}.contains(error.statusCode)) {
+        // The server refused the content: the request is final, not uncertain.
+        await _store?.complete(_scope!);
+        if (mounted) setState(() => _pending = null);
+      }
+      if (mounted && !_placeServerErrors(error)) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1358,6 +1416,7 @@ class _StockVoucherCreateScreenState
                   ),
                 Form(
                   key: _form,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: IgnorePointer(
                     ignoring: disabled,
                     child: Column(
@@ -1381,15 +1440,15 @@ class _StockVoucherCreateScreenState
                           ],
                           onChanged: (v) {
                             setState(() => _warehouse = v);
-                            _changed();
+                            _edited('toWarehouseId');
                           },
                           validator: (v) => v == null
                               ? _label(context, 'مطلوب', 'Required')
-                              : null,
+                              : _srv('toWarehouseId'),
                         ),
                         TextFormField(
                           controller: _date,
-                          onChanged: (_) => _changed(),
+                          onChanged: (_) => _edited('documentDate'),
                           decoration: InputDecoration(
                             labelText: _label(
                               context,
@@ -1404,7 +1463,7 @@ class _StockVoucherCreateScreenState
                                         .hasMatch(raw) &&
                                     date != null &&
                                     date.toIso8601String().startsWith(raw)
-                                ? null
+                                ? _srv('documentDate')
                                 : _label(
                                     context,
                                     'تاريخ غير صالح',
@@ -1414,7 +1473,7 @@ class _StockVoucherCreateScreenState
                         ),
                         TextFormField(
                           controller: _party,
-                          onChanged: (_) => _changed(),
+                          onChanged: (_) => _edited('counterpartyName'),
                           decoration: InputDecoration(
                             labelText: _label(context, 'الجهة', 'Counterparty'),
                           ),
@@ -1426,17 +1485,17 @@ class _StockVoucherCreateScreenState
                                   'مطلوب (حتى 200 حرف)',
                                   'Required (up to 200 characters)',
                                 )
-                              : null,
+                              : _srv('counterpartyName'),
                         ),
                         TextFormField(
                           controller: _reason,
-                          onChanged: (_) => _changed(),
+                          onChanged: (_) => _edited('reason'),
                           decoration: InputDecoration(
                             labelText: _label(context, 'السبب', 'Reason'),
                           ),
                           validator: (v) => (v ?? '').trim().isEmpty
                               ? _label(context, 'مطلوب', 'Required')
-                              : null,
+                              : _srv('reason'),
                         ),
                         if (widget.kind == 'ISSUE' || centers.isNotEmpty)
                           DropdownButtonFormField<String>(
@@ -1519,6 +1578,7 @@ class _StockVoucherCreateScreenState
                           Builder(
                             key: ObjectKey(line),
                             builder: (context) {
+                              final at = 'lines.${_lines.indexOf(line)}';
                               final item = items
                                   .where(
                                     (row) => text(row, 'id') == line.itemId,
@@ -1660,7 +1720,8 @@ class _StockVoucherCreateScreenState
                                         ),
                                       TextFormField(
                                         controller: line.quantity,
-                                        onChanged: (_) => _changed(),
+                                        onChanged: (_) =>
+                                            _edited('$at.quantity'),
                                         keyboardType: TextInputType.number,
                                         decoration: InputDecoration(
                                           labelText: line.unitName == null
@@ -1676,7 +1737,8 @@ class _StockVoucherCreateScreenState
                                                 ),
                                         ),
                                         validator: (v) =>
-                                            _number(v, positive: true),
+                                            _number(v, positive: true) ??
+                                            _srv('$at.quantity'),
                                       ),
                                       if (_baseEquivalent(line, item)
                                           case final equivalent?)
@@ -1705,7 +1767,8 @@ class _StockVoucherCreateScreenState
                                       if (widget.kind == 'RECEIPT')
                                         TextFormField(
                                           controller: line.cost,
-                                          onChanged: (_) => _changed(),
+                                          onChanged: (_) =>
+                                              _edited('$at.unitCost'),
                                           keyboardType: TextInputType.number,
                                           decoration: InputDecoration(
                                             labelText: _label(
@@ -1714,7 +1777,8 @@ class _StockVoucherCreateScreenState
                                               'Base unit cost',
                                             ),
                                           ),
-                                          validator: _number,
+                                          validator: (v) =>
+                                              _number(v) ?? _srv('$at.unitCost'),
                                         ),
                                       TextFormField(
                                         initialValue: line.notes,
