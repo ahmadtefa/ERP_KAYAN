@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AccountingModule } from '../accounting/accounting.module';
 import { ExportModule } from '../export/export.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { PartiesModule } from '../parties/parties.module';
+import { CustomerCreditService } from './customer-credit.service';
 import { PriceListsController } from './price-lists.controller';
 import { PriceListsService } from './price-lists.service';
 import { SalesInvoicesController } from './sales-invoices.controller';
@@ -22,7 +24,7 @@ import { QuotationsService } from './quotations.service';
 @Module({
   // InventoryModule supplies BatchesService: posting a sale issues its goods
   // from the lots they live in, so the sales module needs the lot engine.
-  imports: [AccountingModule, ExportModule, InventoryModule],
+  imports: [AccountingModule, ExportModule, InventoryModule, PartiesModule],
   controllers: [
     SalesInvoicesController,
     SalesOrdersController,
@@ -34,6 +36,7 @@ import { QuotationsService } from './quotations.service';
     QuotationBackgroundsController,
   ],
   providers: [
+    CustomerCreditService,
     SalesInvoicesService,
     SalesOrdersService,
     PriceListsService,

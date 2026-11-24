@@ -1,5 +1,5 @@
 import { branchReadScope } from '../../common/auth/branch-read-scope';
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Optional, Param, Post, Put, Query } from '@nestjs/common';
 import {
   AuthUser,
   CurrentUser,
@@ -12,10 +12,14 @@ import {
   ListInvoicesDto,
 } from './dto/sales-invoice.dto';
 import { SalesInvoicesService } from './sales-invoices.service';
+import { CustomerCreditService } from './customer-credit.service';
 
 @Controller('sales/invoices')
 export class SalesInvoicesController {
-  constructor(private readonly service: SalesInvoicesService) {}
+  constructor(
+    private readonly service: SalesInvoicesService,
+    @Optional() private readonly credit?: CustomerCreditService,
+  ) {}
 
   private redact(user: AuthUser, response: unknown) {
     return redactPriceFields(response, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'sale');
@@ -87,6 +91,15 @@ export class SalesInvoicesController {
       mayIssueExpired,
       reason: body?.expiredIssueReason ?? null,
     }).then((result) => this.redact(user, result));
+  }
+
+  /// Signs for one over-limit draft invoice. The permission is separate from
+  /// posting, so who may approve is an assignment, not a side effect.
+  @Post(':id/credit-approval')
+  @RequirePermissions('sales.credit.approve')
+  approveCredit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { reason?: string }) {
+    if (!this.credit) throw new NotFoundException('Credit approval is not available');
+    return this.credit.approve(user.companyId, user.userId, id, body?.reason ?? '');
   }
 
   @Post(':id/reverse')
