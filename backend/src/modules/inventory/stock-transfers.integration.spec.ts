@@ -110,6 +110,7 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
       'STOCK_TRANSFER_REVIEW_REQUIRED',
       'STOCK_TRANSFER_APPROVAL_REQUIRED',
       'STOCK_TRANSFER_DISPATCH_REQUIRED',
+      'DOCUMENT_APPROVED',
       'STOCK_TRANSFER_RECEIPT_REQUIRED',
       'STOCK_TRANSFER_RECEIPT_REQUIRED',
       'STOCK_TRANSFER_RECEIVED',
@@ -118,7 +119,12 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     ]);
     expect(raised[0].dedupe).toBe(raised[1].dedupe);
     const storedRows = [...storedNotifications.values()];
-    expect(storedRows).toHaveLength(6);
+    expect(storedRows).toHaveLength(7);
+    const decision = storedRows.find(event=>event.type==='DOCUMENT_APPROVED')!;
+    expect(decision.recipientUserId).toBe(USER_A);
+    expect(decision.entityId).toBe(row.id);
+    expect(decision.actionPath).toBe(`/inventory/stock-transfers?transferId=${row.id}`);
+    expect(decision.status).toBe('CLOSED');
     const senderReceipt = storedRows.find(event=>event.type==='STOCK_TRANSFER_RECEIVED')!;
     expect(senderReceipt.warehouseId).toBe(FROM);
     expect(senderReceipt.branchId).toBe(BRANCH_A);
