@@ -56,13 +56,19 @@ $keys=New-Object -ComObject WScript.Shell
 function Wait-Stage([string]$want){for($i=0;$i -lt 90;$i++){if(Test-Path "$probeDir/stage.txt"){$s=Get-Content "$probeDir/stage.txt" -Raw;if($s -like 'failed:*'){throw $s};if($s -eq $want){return}};Start-Sleep 1};throw "Probe stage timeout: $want"}
 function Wait-Dialog {
  for($i=0;$i -lt 30;$i++){
-  $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+  $classCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty,'#32770')
+  $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,$classCondition)
   foreach($w in $windows){if($w.Current.ClassName -eq '#32770'){return $w}}
+  if(Test-Path "$probeDir/stage.txt"){$stage=Get-Content "$probeDir/stage.txt" -Raw;if($stage -like 'failed:*'){Screenshot 'dialog-helper-failed';throw $stage}}
   Start-Sleep 1
- };throw 'Native dialog absent'
+ }
+ Screenshot 'dialog-discovery-timeout'
+ $tree=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+ @($tree | ForEach-Object { [ordered]@{name=$_.Current.Name;class=$_.Current.ClassName;pid=$_.Current.ProcessId;type=$_.Current.ControlType.ProgrammaticName} }) | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'dialog-tree.json')
+ throw 'Native dialog absent'
 }
 try {
- Wait-Stage 'save';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
+ Wait-Stage 'save';Start-Sleep 3;Screenshot 'before-dialog-discovery';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Screenshot 'native-save-as'
  $keys.SendKeys('%n');$keys.SendKeys((Join-Path $probeDir 'chosen.dump'));$keys.SendKeys('{ENTER}')
  Wait-Stage 'open';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
