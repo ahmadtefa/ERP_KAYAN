@@ -15,3 +15,5 @@ generator/ holds the scripts used (stage1, 2a, 2b, 2c, fixcap, stage3).
 
 Generator scripts take DB and user passwords from the environment (KAYAN_PG_PASSWORD) or generate them randomly; none are stored here.
 Note: an earlier commit on this branch (766ccc27) contained throwaway local-only literals in the generator (local test DB password, CI restore-user password, build JWT secrets). They were removed from the current files in the following commit but remain in branch history. Not real accounts.
+
+JSON: `KAYAN-SOLAR-TEST.json` is the program's company backup (`GET /backup/download`, format kayan-backup v1, ~20 MB, under the 64 MB restore limit). Restore: `POST /backup/restore?replace=true` into an installation with the same company code (KAYAN-SOLAR). Verified: see json-restore-test-result.json (generator/stage4.mjs).
