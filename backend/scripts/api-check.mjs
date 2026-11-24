@@ -71,7 +71,7 @@ async function call(path, options = {}, attempt = 0) {
 
 async function main() {
   // ─────────────────────────────────────────────────────────── 1. sign in
-  const login = await call('/auth/login', {
+  let login = await call('/auth/login', {
     method: 'POST',
     json: { username: USERNAME, password: PASSWORD },
     noAuth: true,
@@ -244,6 +244,23 @@ async function main() {
     `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 240)}`,
   );
 
+  // A database restore ends every sign-in session on purpose (the service
+  // deletes refresh_tokens afterwards so no earlier credential outlives the
+  // data it was issued for). So the earlier token must now be refused, and the
+  // program must answer a fresh sign-in.
+  const staleAfter = await call('/auth/me');
+  check(
+    'a database restore ends the sessions that existed before it',
+    !databaseRestoreSupported || staleAfter.status === 401,
+    `status ${staleAfter.status}`,
+  );
+  const loginAfter = await call('/auth/login', {
+    method: 'POST',
+    json: { username: USERNAME, password: PASSWORD },
+    noAuth: true,
+  });
+  token = loginAfter.data?.accessToken ?? token;
+  login = loginAfter;
   // The program still answers after the attempted restore.
   const after = await call('/auth/me');
   check('the program still answers after the database restore attempt', after.status === 200, `status ${after.status}`);
@@ -279,6 +296,10 @@ async function main() {
       `status ${asSecond.status}`,
     );
   }
+
+  // Rotation ends the session the first access token was bound to, so every
+  // later request in this scenario carries the renewed token.
+  if (secondToken) token = secondToken;
 
   // Rotation: the refresh token that was just spent must not work twice.
   const replayed = await call('/auth/refresh', {
