@@ -101,7 +101,7 @@ class MonthlyBarsChart extends StatelessWidget {
                         salesColor:salesColor,purchaseColor:purchaseColor,resultColor:resultColor,
                         showSales:showSales,showPurchases:showPurchases,showResult:showResult,
                         gridColor:scheme.outlineVariant,labelColor:scheme.onSurface,labelStyle:labelStyle),
-                    )),Positioned(left:76,right:10,top:10,bottom:34,child:Row(children:[
+                    )),Positioned(left:76,right:10,top:10,bottom:34,child:Row(textDirection:TextDirection.ltr,children:[
                       for(final row in months) Expanded(child:Tooltip(message:tooltip(row),
                         triggerMode:TooltipTriggerMode.tap,waitDuration:const Duration(milliseconds:150),
                         textStyle:labelStyle.copyWith(color:scheme.onSurface),
