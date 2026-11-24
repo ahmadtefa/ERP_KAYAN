@@ -40,8 +40,8 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
     {} as never,
     audit as never,
     {} as never,
-    ledger as never,
-  );
+    ledger as never, { assertCanPost: async () => undefined } as never,
+    );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
   return { service, numbers, posting, warehouses, audit, tx, ledger };
 }
@@ -204,7 +204,7 @@ describe('SalesInvoicesService.prepareLines tax-price options', () => {
     const settings = { get: jest.fn().mockResolvedValue({ pricesIncludeTax: true, maxDiscountPercent: '100' }) };
     const service = new SalesInvoicesService(
       {} as never, {} as never, {} as never, {} as never, settings as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never, {} as never, { assertCanPost: async () => undefined } as never,
     );
     const input = [
       { description: 'Sale', quantity: '1', unitPrice: '114', taxRate: '14' },
@@ -236,8 +236,8 @@ describe('SalesInvoicesService.prepareLines tax-price options', () => {
       {} as never,
       {} as never,
           {} as never,
-          {} as never,
-        );
+          {} as never, { assertCanPost: async () => undefined } as never,
+    );
     const lines = [{ description: 'Taxable service', quantity: '1', unitPrice: '120', taxRate: '20' }];
     const inclusive = await (service as any).prepareLines(
       COMPANY_ID, lines, null, {}, undefined, {} as never,
@@ -266,8 +266,8 @@ describe('SalesInvoicesService line tax defaults', () => {
       prisma as never, {} as never, {} as never, {} as never, settings as never,
       {} as never, { resolvePrice: jest.fn() } as never, {} as never,
           {} as never,
-          {} as never,
-        );
+          {} as never, { assertCanPost: async () => undefined } as never,
+    );
     const lines = await (service as any).prepareLines(COMPANY_ID, [
       { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100' },
       { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: null },

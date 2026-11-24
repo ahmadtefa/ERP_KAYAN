@@ -97,7 +97,7 @@ export class SalesInvoicesService {
     private readonly audit: AuditService,
     private readonly batches: BatchesService,
     private readonly ledger: StockLedgerService,
-    @Optional() private readonly credit?: CustomerCreditService,
+    private readonly credit: CustomerCreditService,
   ) {}
 
   async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true, branchScope: string[] | null = null) {
@@ -632,6 +632,7 @@ export class SalesInvoicesService {
     id: string,
     mayReadCost = true,
     expiry?: { mayIssueExpired: boolean; reason?: string | null },
+    creditView: { mayDiscloseBalance: boolean } = { mayDiscloseBalance: false },
   ) {
     const expiredApproval =
       expiry?.mayIssueExpired === true
@@ -656,7 +657,7 @@ export class SalesInvoicesService {
       // A customer over their credit limit cannot be invoiced without a signed
       // approval for this very invoice. Checked before the claim so the
       // invoice being posted is not already counted in the balance.
-      await this.credit?.assertCanPost(tx, companyId, id);
+      await this.credit.assertCanPost(tx, companyId, id, creditView.mayDiscloseBalance);
       // Claim the document before anything else happens. Two people pressing
       // Post at the same moment: the row lock lets exactly one of them win, and
       // the other is told the invoice has already been posted - instead of both

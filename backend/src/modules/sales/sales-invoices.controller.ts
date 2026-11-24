@@ -90,6 +90,9 @@ export class SalesInvoicesController {
     return this.service.post(user.companyId, user.userId, id, canReadCost(user), {
       mayIssueExpired,
       reason: body?.expiredIssueReason ?? null,
+    }, {
+      // The credit figures are the customer card's company-wide figures.
+      mayDiscloseBalance: user.isSuperAdmin === true || (user.permissions ?? []).includes('parties.customers.read'),
     }).then((result) => this.redact(user, result));
   }
 
@@ -99,7 +102,7 @@ export class SalesInvoicesController {
   @RequirePermissions('sales.credit.approve')
   approveCredit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { reason?: string }) {
     if (!this.credit) throw new NotFoundException('Credit approval is not available');
-    return this.credit.approve(user.companyId, user.userId, id, body?.reason ?? '');
+    return this.credit.approve(user.companyId, user.userId, id, body?.reason ?? '', branchReadScope(user));
   }
 
   @Post(':id/reverse')

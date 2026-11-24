@@ -24,7 +24,7 @@ const vmReady =
   const invoice = (id: string, no: string, total: number, status: string, type = 'INVOICE', cust = CUST, paid = 0) =>
     run(`INSERT INTO sales_invoices(id,"companyId","branchId","invoiceNumber","invoiceDate","customerId","updatedAt",status,"documentType","totalAmount","paidAmount") VALUES ('${id}','${COMPANY}','${BRANCH}','${no}',current_date,'${cust}',now(),'${status}','${type}',${total},${paid})`);
   const draft = (n: number) => `d0000000-0000-4000-8000-00000000000${n}`;
-  const post = (id: string) => prisma.$transaction((tx: any) => credit.assertCanPost(tx, COMPANY, id));
+  const post = (id: string) => prisma.$transaction((tx: any) => credit.assertCanPost(tx, COMPANY, id, true));
   const setLimit = (v: number) => run(`UPDATE customers SET "creditLimit"=${v} WHERE id='${CUST}'`);
 
   beforeAll(async () => {
@@ -64,7 +64,7 @@ const vmReady =
 
   it('an approval is for one invoice and dies when the amount or customer changes', async () => {
     await expect(credit.approve(COMPANY, MGR, draft(3), 'x')).rejects.toThrow(/reason/);
-    await expect(credit.approve(COMPANY, MGR, draft(4), 'fine now')).rejects.toThrow(/needs no approval/);
+    await expect(credit.approve(COMPANY, MGR, draft(4), 'fine now')).rejects.toThrow(/does not need credit approval/);
     await credit.approve(COMPANY, MGR, draft(3), 'Approved by finance, large order');
     expect(audited.some((a) => a.action === 'CREDIT_LIMIT_OVERRIDE' && a.userId === MGR && a.entityId === draft(3))).toBe(true);
     await post(draft(3));
@@ -88,5 +88,56 @@ const vmReady =
     await post(draft(6)); // -100 + 1000 = 900 <= 1000
     await setLimit(0);
     await post(draft(3));
+  });
+
+  it('self-approval is refused; approval does not survive an edit-and-revert or a larger exposure; figures are withheld without scope; branch scope applies', async () => {
+    await setLimit(1000);
+    const OTHER_BRANCH = '22222222-2222-4222-8222-222222222299';
+    await run(`INSERT INTO branches(id,"companyId",code,"nameEn","nameAr","updatedAt") VALUES ('${OTHER_BRANCH}','${COMPANY}','B','B','ب',now())`);
+    const CREATOR = '33333333-3333-4333-8333-333333333399';
+    await run('DELETE FROM cash_vouchers');
+    const bal = (await new PartiesService(prisma as never, { record: async () => undefined } as never).balanceFigures(COMPANY, 'customer', CUST)).netBalance;
+    const total = 1000 - Number(bal) + 50; // always over the limit
+    await invoice(draft(7), 'D-7', total, 'DRAFT');
+    await run(`UPDATE sales_invoices SET "createdBy"='${CREATOR}' WHERE id='${draft(7)}'`);
+    // without permission to read the card the failure is confidential
+    const hidden = await prisma.$transaction((tx: any) => credit.assertCanPost(tx, COMPANY, draft(7), false)).catch((e: any) => e);
+    expect(hidden.response).toEqual({ code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED', message: 'This invoice needs credit approval before it can be posted.' });
+    const shown = await prisma.$transaction((tx: any) => credit.assertCanPost(tx, COMPANY, draft(7), true)).catch((e: any) => e);
+    expect(shown.response.currentBalance).toBeDefined();
+    // the creator cannot sign for it; an approver outside the branch scope cannot see it
+    await expect(credit.approve(COMPANY, CREATOR, draft(7), 'my own exception')).rejects.toThrow(/cannot approve/);
+    await expect(credit.approve(COMPANY, MGR, draft(7), 'second pair of eyes', [OTHER_BRANCH])).rejects.toThrow(/not found/i);
+    // the approver needs no posting right: approve() only needs the invoice and a reason
+    await credit.approve(COMPANY, MGR, draft(7), 'second pair of eyes', [BRANCH]);
+    await post(draft(7));
+    // edited and edited back: the row's updatedAt moved, so the approval is gone
+    await run(`UPDATE sales_invoices SET "updatedAt"=now() + interval '1 second' WHERE id='${draft(7)}'`);
+    await expect(post(draft(7))).rejects.toMatchObject({ response: { code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' } });
+    // re-approve, then the customer's exposure grows: not covered any more
+    await credit.approve(COMPANY, MGR, draft(7), 'approved again', null);
+    await post(draft(7));
+    await invoice('e0000000-0000-4000-8000-000000000009', 'P-9', 25, 'POSTED');
+    await expect(post(draft(7))).rejects.toMatchObject({ response: { code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' } });
+    // a smaller exposure stays covered
+    await run(`UPDATE sales_invoices SET status='DRAFT', "totalAmount"=1 WHERE id='e0000000-0000-4000-8000-000000000009'`);
+    await post(draft(7));
+  });
+
+  it('two postings for one customer at the same time: exactly one passes the check', async () => {
+    await setLimit(1000);
+    await run(`UPDATE sales_invoices SET status='DRAFT' WHERE "customerId"='${CUST}' AND status='POSTED' AND "documentType"='INVOICE'`);
+    await run(`UPDATE sales_invoices SET "deletedAt"=now() WHERE "customerId"='${CUST}'`);
+    await invoice('e1000000-0000-4000-8000-000000000001', 'Q-1', 700, 'DRAFT');
+    await invoice('e1000000-0000-4000-8000-000000000002', 'Q-2', 700, 'DRAFT');
+    // same sequence as post(): check, then claim, inside one transaction
+    const attempt = (id: string) =>
+      prisma.$transaction(async (tx: any) => {
+        await credit.assertCanPost(tx, COMPANY, id, true);
+        await tx.salesInvoice.updateMany({ where: { id, status: 'DRAFT' }, data: { status: 'POSTED' } });
+        await new Promise((r) => setTimeout(r, 400));
+      }).then(() => 'posted', (e: any) => e.response?.code ?? String(e));
+    const results = await Promise.all([attempt('e1000000-0000-4000-8000-000000000001'), attempt('e1000000-0000-4000-8000-000000000002')]);
+    expect(results.sort()).toEqual(['CUSTOMER_CREDIT_LIMIT_EXCEEDED', 'posted']);
   });
 });
