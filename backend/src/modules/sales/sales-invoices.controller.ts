@@ -11,6 +11,7 @@ import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
 } from './dto/sales-invoice.dto';
+import { salesPostingError } from './sales-posting-error';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { CustomerCreditService } from './customer-credit.service';
 import { CreditApprovalDto } from './dto/credit-approval.dto';
@@ -95,7 +96,7 @@ export class SalesInvoicesController {
     }, {
       // The credit figures are the customer card's company-wide figures.
       mayDiscloseBalance: mayDiscloseCreditFigures(user),
-    }).then((result) => this.redact(user, result));
+    }).then((result) => this.redact(user, result)).catch((error: unknown) => { throw salesPostingError(error); });
   }
 
   /// Signs for one over-limit draft invoice. The permission is separate from

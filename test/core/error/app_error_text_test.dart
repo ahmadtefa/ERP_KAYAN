@@ -30,6 +30,23 @@ void main() {
       );
     },
   );
+  for (final code in [
+    'SALES_POST_BRANCH_STOCK', 'SALES_POST_LOT_STOCK', 'SALES_POST_WAREHOUSE_STOCK',
+    'SALES_POST_ACCOUNT_MISSING', 'SALES_POST_ACCOUNT_UNAVAILABLE', 'SALES_POST_PERIOD_CLOSED',
+    'SALES_POST_WAREHOUSE_REQUIRED', 'SALES_POST_ITEM_UNAVAILABLE', 'SALES_POST_UNBALANCED',
+    'SALES_POST_STATE_CHANGED', 'SALES_POST_RULE_REJECTED',
+  ]) {
+    test('bounded actionable sales posting reason $code in both languages', () {
+      for (final isArabic in [true, false]) {
+        final result = AppErrorMessageResolver(isArabic: isArabic).resolve(ApiFailure('synthetic private SQL password=do-not-show', statusCode: 400, code: code));
+        expect(result.businessMessage, contains(code));
+        expect(result.businessMessage, isNot(contains('private')));
+        expect(result.businessMessage, isNot(contains('البيانات المرسلة غير صالحة')));
+      }
+      final server = AppErrorMessageResolver(isArabic: false).resolve(ApiFailure('private', statusCode: 500, code: code));
+      expect(server.businessMessage ?? '', isNot(contains(code)));
+    });
+  }
   const arabic = AppErrorMessageResolver(isArabic: true);
   const english = AppErrorMessageResolver(isArabic: false);
 

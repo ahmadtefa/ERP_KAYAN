@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
@@ -21,6 +26,7 @@ class _CommittedThenFailedApi extends ApiClient {
   bool responseLost=true;
   bool serverFailure=false;
   bool stockShortfall=false;
+  String? postingCode;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
     loads++;
@@ -31,6 +37,7 @@ class _CommittedThenFailedApi extends ApiClient {
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     posts++;
+    if (postingCode != null) throw ApiFailure('synthetic-private-do-not-display', statusCode:400, code:postingCode);
     if (stockShortfall) throw const ApiFailure('الرصيد غير كافٍ في الدفعات المتاحة: ينقص 2.0000. / Not enough stock in the available lots: 2.0000 short.', statusCode: 400);
     status = path.endsWith('/reverse') ? 'reversed' : 'posted';
     if (responseLost && serverFailure) throw const ApiFailure('بيانات مصطنعة خاصة لا تعرض', statusCode: 503);
@@ -58,6 +65,29 @@ void main() {
       expect(api.status, 'draft');
     });
   }
+  testWidgets('structured sales refusal is actionable Arabic with support code and keeps draft', (tester) async {
+    tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.runAsync(() async {
+      final font=FontLoader('IBMPlexSansArabic');
+      font.addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())));await font.load();
+      final icon=FontLoader('MaterialIcons');var dir=File(Platform.resolvedExecutable).parent;
+      while(dir.path!=dir.parent.path) { final file=File('${dir.path}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf');
+        if(file.existsSync()) {icon.addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));await icon.load();break;} dir=dir.parent; }
+    });
+    final shot=GlobalKey();
+    final api=_CommittedThenFailedApi('draft')..postingCode='SALES_POST_BRANCH_STOCK';
+    await tester.pumpWidget(RepaintBoundary(key:shot,child:ProviderScope(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],child:MaterialApp(theme:AppTheme.light(),locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales))))));
+    await tester.pumpAndSettle();await tester.tap(find.byTooltip('ترحيل'));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(FilledButton,'ترحيل'));await tester.pumpAndSettle();
+    expect(find.textContaining('مخزون الفرع غير كافٍ'),findsOneWidget);expect(find.textContaining('SALES_POST_BRANCH_STOCK'),findsOneWidget);
+    expect(find.textContaining('synthetic-private'),findsNothing);expect(api.status,'draft');expect(api.posts,1);
+    final output=Platform.environment['KAYAN_SCREENSHOT_DIR'];
+    if(output!=null) { await tester.runAsync(() async {
+      final boundary=shot.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
+      Directory(output).createSync(recursive:true);File('$output/sales-post-safe-reason-ar.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+    }); }
+  });
   testWidgets('successful invoice posting refreshes previously cached reports', (tester) async {
     tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);

@@ -215,10 +215,42 @@ const ready =
     expect(ok.json).toEqual({ invoiceId: INV_A, approved: true });
     expect(await status(INV_A)).toBe('DRAFT');
     expect((await call('approver', 'POST', `/sales/invoices/${INV_A}/post`, {})).status).toBe(403);
-    const posted = await call('creator', 'POST', `/sales/invoices/${INV_A}/post`, {});
+    const posted = await call('creator', 'POST', `/sales/invoices/${INV_A}/post`);
     expect(posted.status).toBe(201);
     expect(await status(INV_A)).toBe('POSTED');
     expect(Number((await q(`SELECT count(*)::int AS n FROM journal_entries WHERE "sourceId"='${INV_A}'`))[0].n)).toBe(1);
+  });
+
+  it('approved bodyless post reports branch-stock category and rolls back all effects, then succeeds after actual stock receipt', async () => {
+    const STOCK_INV = '77777777-7777-4777-8777-000000000004';
+    await draft(STOCK_INV, 'SI-STOCK', BR_A, 1200, who.creator.id);
+    expect((await call('approver', 'POST', `/sales/invoices/${STOCK_INV}/credit-approval`, { reason: 'Synthetic branch stock scenario' })).status).toBe(201);
+    const before = (await q(`SELECT quantity::text AS q, value::text AS v FROM stock_balances WHERE "companyId"='${CO}' AND "branchId"='${BR_A}' AND "itemId"='${ITEM}'`))[0];
+    await run(`UPDATE stock_balances SET quantity=0,value=0 WHERE "companyId"='${CO}' AND "branchId"='${BR_A}' AND "itemId"='${ITEM}'`);
+    const refused = await call('creator', 'POST', `/sales/invoices/${STOCK_INV}/post`);
+    expect(refused.status).toBe(400);
+    expect(refused.json.code).toBe('SALES_POST_BRANCH_STOCK');
+    expect(JSON.stringify(refused.json)).not.toMatch(/Milk|Buyer|IT-1|1200/);
+    expect(await status(STOCK_INV)).toBe('DRAFT');
+    expect(Number((await q(`SELECT count(*)::int AS n FROM journal_entries WHERE "sourceId"='${STOCK_INV}'`))[0].n)).toBe(0);
+    expect(Number((await q(`SELECT count(*)::int AS n FROM stock_movements WHERE "referenceId"='${STOCK_INV}'`))[0].n)).toBe(0);
+    await run(`UPDATE stock_balances SET quantity=${before.q},value=${before.v} WHERE "companyId"='${CO}' AND "branchId"='${BR_A}' AND "itemId"='${ITEM}'`);
+    expect((await call('creator', 'POST', `/sales/invoices/${STOCK_INV}/post`)).status).toBe(201);
+    expect(await status(STOCK_INV)).toBe('POSTED');
+  });
+
+  it('approved posting reports a missing accounting account and remains a clean draft', async () => {
+    const id = '77777777-7777-4777-8777-000000000005';
+    await draft(id, 'SI-ACCOUNT', BR_A, 1200, who.creator.id);
+    expect((await call('approver', 'POST', `/sales/invoices/${id}/credit-approval`, {reason:'Synthetic accounting fixture'})).status).toBe(201);
+    await run(`UPDATE accounts SET code='SYN-HIDDEN-AR' WHERE "companyId"='${CO}' AND code='1103'`);
+    try {
+      const result=await call('creator','POST',`/sales/invoices/${id}/post`);
+      expect(result.status).toBe(400);expect(result.json.code).toBe('SALES_POST_ACCOUNT_MISSING');
+      expect(await status(id)).toBe('DRAFT');
+      expect(Number((await q(`SELECT count(*)::int AS n FROM journal_entries WHERE "sourceId"='${id}'`))[0].n)).toBe(0);
+      expect(Number((await q(`SELECT count(*)::int AS n FROM stock_movements WHERE "referenceId"='${id}'`))[0].n)).toBe(0);
+    } finally { await run(`UPDATE accounts SET code='1103' WHERE "companyId"='${CO}' AND code='SYN-HIDDEN-AR'`); }
   });
 
   it('branch-limited approver of another branch cannot post or approve a branch-B draft, the branch-B staff can reach it', async () => {

@@ -73,6 +73,20 @@ class AppErrorText {
 class AppErrorMessageResolver {
   const AppErrorMessageResolver({required this.isArabic});
 
+  static const _salesPostingReasons = <String, List<String>>{
+    'SALES_POST_BRANCH_STOCK': ['لم تُرحّل الفاتورة: مخزون الفرع غير كافٍ. راجع كميات الأصناف وسجّل الاستلام الفعلي قبل الترحيل.', 'Invoice not posted: branch stock is insufficient. Review item quantities and record the actual receipt before posting.'],
+    'SALES_POST_LOT_STOCK': ['لم تُرحّل الفاتورة: الدفعات المتاحة غير كافية. راجع كميات الدفعات والصلاحية في مخزن الفاتورة.', 'Invoice not posted: available lots are insufficient. Review lot quantities and expiry dates in the invoice warehouse.'],
+    'SALES_POST_WAREHOUSE_STOCK': ['لم تُرحّل الفاتورة: مخزون المخزن المختار غير كافٍ. راجع المخزن والكميات.', 'Invoice not posted: stock in the selected warehouse is insufficient. Review the warehouse and quantities.'],
+    'SALES_POST_ACCOUNT_MISSING': ['لم تُرحّل الفاتورة: حساب محاسبي مطلوب غير موجود. اطلب من مسؤول الحسابات مراجعة دليل الحسابات.', 'Invoice not posted: a required account is missing. Ask accounting to review the chart of accounts.'],
+    'SALES_POST_ACCOUNT_UNAVAILABLE': ['لم تُرحّل الفاتورة: حساب محاسبي غير متاح للترحيل. اطلب من مسؤول الحسابات مراجعة الحسابات النشطة والقابلة للترحيل.', 'Invoice not posted: an account is unavailable for posting. Ask accounting to review active posting accounts.'],
+    'SALES_POST_PERIOD_CLOSED': ['لم تُرحّل الفاتورة: تاريخها يقع في فترة محاسبية مغلقة. راجع التاريخ مع مسؤول الحسابات دون تغيير الفترات لتجاوز الرقابة.', 'Invoice not posted: its date falls in a closed fiscal period. Review the date with accounting without bypassing period controls.'],
+    'SALES_POST_WAREHOUSE_REQUIRED': ['لم تُرحّل الفاتورة: صنف يحتاج دفعات ولا يوجد مخزن مناسب للفرع. راجع إعداد مخزن الفرع.', 'Invoice not posted: a lot-controlled item needs a branch warehouse. Review the branch warehouse setup.'],
+    'SALES_POST_ITEM_UNAVAILABLE': ['لم تُرحّل الفاتورة: أحد الأصناف لم يعد متاحًا. افتح المسودة وراجع أصنافها.', 'Invoice not posted: an item is no longer available. Open the draft and review its items.'],
+    'SALES_POST_UNBALANCED': ['لم تُرحّل الفاتورة: القيد غير متوازن. اطلب من مسؤول الحسابات مراجعة الإجماليات وإعداد الحسابات.', 'Invoice not posted: the journal does not balance. Ask accounting to review totals and account setup.'],
+    'SALES_POST_STATE_CHANGED': ['تغيرت حالة الفاتورة. حدّث القائمة وتحقق من حالتها قبل أي محاولة أخرى.', 'Invoice status changed. Refresh the list and check its status before trying again.'],
+    'SALES_POST_RULE_REJECTED': ['لم تُرحّل الفاتورة بسبب قاعدة عمل. احتفظ بالمسودة وأرسل رمز المساعدة للدعم؛ لا تكرر موافقة الائتمان دون معرفة السبب.', 'Invoice not posted because of a business rule. Keep the draft and report the support code; do not repeat credit approval without knowing the reason.'],
+  };
+
   /// When false, business messages are shown in the language the server
   /// sent them in (English) instead of being translated.
   final bool isArabic;
@@ -86,6 +100,16 @@ class AppErrorMessageResolver {
     // has no HTTP status at all, and must still be explained as "the server
     // could not be reached" rather than "an unexpected error".
     if (error is Failure) {
+      if (error is ApiFailure && error.statusCode == 400) {
+        final postingReason = _salesPostingReasons[error.code];
+        if (postingReason != null) {
+          return AppErrorText(
+            reason: AppErrorReason.invalidInput,
+            severity: AppErrorSeverity.warning,
+            businessMessage: '${postingReason[isArabic ? 0 : 1]}\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
+          );
+        }
+      }
       if (error is ApiFailure &&
           error.statusCode == 403 &&
           error.code == 'LICENSE_STATE_ID_MISMATCH') {
