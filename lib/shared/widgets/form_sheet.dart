@@ -345,6 +345,14 @@ class _FormSheetState extends State<_FormSheet> {
           final first = widget.fields
               .where((field) => _fieldErrors.containsKey(field.key))
               .firstOrNull;
+          // Errors the server attached to something this form has no field
+          // for (a nested line, a rule that spans fields) are not lost: they
+          // are shown in the ordinary error dialog, separately from the fields.
+          final known = widget.fields.map((field) => field.key).toSet();
+          final unmatched = error.fieldErrors.entries
+              .where((entry) => !known.contains(entry.key))
+              .map((entry) => entry.value)
+              .toList(growable: false);
           if (first != null) {
             final fieldContext = _fieldKeys[first.key]?.currentContext;
             // The context belongs to a field that the await above may have
@@ -353,6 +361,8 @@ class _FormSheetState extends State<_FormSheet> {
               Scrollable.ensureVisible(fieldContext);
               _focusNodes[first.key]?.requestFocus();
             }
+            if (unmatched.isEmpty) return;
+            await showAppErrorMessage(context, unmatched.join('\n'));
             return;
           }
         }

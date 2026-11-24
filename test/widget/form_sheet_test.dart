@@ -50,6 +50,50 @@ void main() {
     },
   );
 
+  testWidgets(
+    'focuses the first invalid field and shows errors without a field separately',
+    (tester) async {
+      await tester.pumpWidget(
+        wrapWithApp(
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => FilledButton(
+                onPressed: () => showFormSheet(
+                  context,
+                  title: 'Edit',
+                  fields: const [
+                    FieldSpec('name', 'Name'),
+                    FieldSpec('code', 'Code'),
+                  ],
+                  onSubmit: (_) async => throw const ApiFailure(
+                    'Invalid',
+                    statusCode: 400,
+                    code: 'VALIDATION_FAILED',
+                    fieldErrors: {
+                      'code': 'Code is too short',
+                      'lines.0.quantity': 'Quantity on line 1 must be at least 1',
+                    },
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'Sara');
+      await tester.enterText(find.byType(TextFormField).last, 'S');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Code is too short'), findsOneWidget);
+      expect(find.textContaining('Quantity on line 1'), findsOneWidget);
+      expect(find.text('Sara'), findsOneWidget);
+      expect(find.text('S'), findsOneWidget);
+    },
+  );
+
   testWidgets('server errors render and clear for toggles and selections', (
     tester,
   ) async {
