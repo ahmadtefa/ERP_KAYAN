@@ -434,6 +434,19 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// beside the field. Cleared per field as the person edits it.
   final _serverErrors = <String, String>{};
   final _inputErrors = <TextEditingController, String>{};
+  final _inputKeys = <TextEditingController, GlobalKey>{};
+  GlobalKey _inputKey(TextEditingController controller) =>
+      _inputKeys.putIfAbsent(controller, GlobalKey.new);
+  void _revealInputError() {
+    if (_inputErrors.isEmpty) return;
+    final controller = _inputErrors.keys.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _inputKeys[controller]?.currentContext;
+      if (target != null && target.mounted) {
+        Scrollable.ensureVisible(target, alignment: 0.35);
+      }
+    });
+  }
   final _sentTableLines = <List<_QLineDraft>>[];
 
   final _errorFieldKeys = <String, GlobalKey>{
@@ -832,7 +845,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
       _sentTableLines.add(active);
     }
-    if (_inputErrors.isNotEmpty) { setState(() {}); return; }
+    if (_inputErrors.isNotEmpty) {
+      setState(() {});
+      _revealInputError();
+      return;
+    }
     for (final table in _tables) {
       final title = table.title.text.trim();
       if (title.isEmpty) {
@@ -965,6 +982,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           else { _inputErrors[target] = entry.value; }
         }
         setState(() {});
+        _revealInputError();
         final known = _errorFieldKeys.keys.toSet();
         final here = {
           for (final e in unmatched.entries)
@@ -2248,6 +2266,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             Row(
               children: [
                 Expanded(
+                  key: _inputKey(table.title),
                   flex: 2,
                   child: TextField(
                     key: ValueKey('quotation-table-title-$index'),
@@ -2455,6 +2474,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ),
               const SizedBox(width: 8),
               Expanded(
+                  key: _inputKey(line.description),
                 flex: 3,
                 child: TextField(
                   controller: line.description,
@@ -2569,6 +2589,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     Key? fieldKey,
   }) {
     return SizedBox(
+      key: _inputKey(controller),
       width: width,
       child: TextField(
         key: fieldKey,
@@ -2579,7 +2600,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         decoration: InputDecoration(
           labelText: label,
           errorText: _inputErrors[controller],
-          errorMaxLines: 3,
+          errorMaxLines: 8,
           border: const OutlineInputBorder(),
           isDense: true,
         ),
