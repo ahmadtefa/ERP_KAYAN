@@ -122,10 +122,16 @@ try {
  Screenshot 'native-save-as'
  Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$buttonCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1');$button=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$buttonCondition);$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Stage 'open';$w=Wait-Dialog 'Open';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
- Set-FileName $w ($probeDir + '\');Invoke-DialogPrimary $w;Start-Sleep 3
+ # Navigate via the address bar, not the filename/filter controls.
+ $w.SetFocus();$keys.SendKeys('%d');Start-Sleep 1
+ $keys.SendKeys($probeDir);$keys.SendKeys('{ENTER}');Start-Sleep 3
+ Screenshot 'native-open-directory'
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  $names=@($elements | ForEach-Object {$_.Current.Name})
- if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
+ if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){
+  @($elements | ForEach-Object { [ordered]@{name=$_.Current.Name;class=$_.Current.ClassName;type=$_.Current.ControlType.ProgrammaticName} }) | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'filter-tree.json')
+  throw 'Allowed extension not visible by default or forbidden file visible'
+ }
  Screenshot 'native-open-filter'
  Set-FileName $w 'visible.json';Invoke-DialogPrimary $w
  Wait-Stage 'cancel';$w=Wait-Dialog 'Save As';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
