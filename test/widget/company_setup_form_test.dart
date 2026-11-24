@@ -36,6 +36,28 @@ void main() {
     expect(find.textContaining('Name is required'), findsNWidgets(2));
   });
 
+  testWidgets('server setup reason appears under its field and clears on edit', (tester) async {
+    await tester.pumpWidget(wrapWithApp(child: Scaffold(
+      body: SingleChildScrollView(child: CompanySetupForm(
+        onSubmit: (_) async {},
+        fieldErrors: const {'companyCode': 'Company code is already used'},
+      )),
+    )));
+    await tester.pumpAndSettle();
+    // The production screen delivers reasons on a widget update after submit.
+    await tester.pumpWidget(wrapWithApp(child: Scaffold(
+      body: SingleChildScrollView(child: CompanySetupForm(
+        onSubmit: (_) async {},
+        fieldErrors: const {'companyCode': 'Choose a different company code'},
+      )),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose a different company code'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'كود الشركة * / Code *'), 'CO');
+    await tester.pump();
+    expect(find.text('Choose a different company code'), findsNothing);
+  });
+
   for (final width in <double>[320, 400, 600, 800]) {
     testWidgets('company setup form has no overflow at ${width.toInt()} px', (
       tester,

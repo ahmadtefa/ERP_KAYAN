@@ -28,6 +28,7 @@ class CompanySetupForm extends StatefulWidget {
     this.submitLabel = 'إنشاء الحساب والبدء / Create and start',
     this.busy = false,
     this.error,
+    this.fieldErrors = const {},
   });
 
   /// Called with everything collected, after the form's own validation.
@@ -36,6 +37,7 @@ class CompanySetupForm extends StatefulWidget {
   final String submitLabel;
   final bool busy;
   final String? error;
+  final Map<String, String> fieldErrors;
 
   @override
   State<CompanySetupForm> createState() => _CompanySetupFormState();
@@ -67,8 +69,17 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   }
 
   @override
+  void didUpdateWidget(covariant CompanySetupForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.fieldErrors, oldWidget.fieldErrors)) {
+      _fieldErrors..clear()..addAll(widget.fieldErrors);
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
+    _fieldErrors.addAll(widget.fieldErrors);
     _restoreDraft();
     for (final controller in [
       _companyCode,

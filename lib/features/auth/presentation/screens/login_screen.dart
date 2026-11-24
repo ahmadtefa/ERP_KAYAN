@@ -55,6 +55,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _setupRecoveryRequired = false;
   bool _setupBusy = false;
   String? _setupError;
+  Map<String, String> _setupFieldErrors = const {};
 
   @override
   void initState() {
@@ -85,6 +86,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() {
       _setupBusy = true;
       _setupError = null;
+      _setupFieldErrors = const {};
     });
     try {
       await ref
@@ -134,7 +136,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _setupBusy = false;
         // The same mapper the rest of the interface uses: a server rule is
         // explained, an unexpected exception is not printed.
-        _setupError = localizedError(context, failure);
+        if (failure is ApiFailure &&
+            const {400, 422}.contains(failure.statusCode) &&
+            failure.fieldErrors.isNotEmpty) {
+          final rest = <String>[];
+          final mapped = <String, String>{};
+          failure.fieldErrors.forEach((key, message) {
+            final field = switch (key) {
+              'unitCode' => 'hqCode',
+              'unitNameAr' => 'hqNameAr',
+              'unitNameEn' => 'hqNameEn',
+              _ => key,
+            };
+            if (const {
+              'companyCode', 'companyNameAr', 'companyNameEn', 'phone', 'email',
+              'address', 'hqCode', 'hqNameAr', 'hqNameEn', 'adminUsername',
+              'adminPassword',
+            }.contains(field)) {
+              mapped[field] = message;
+            } else {
+              rest.add(message);
+            }
+          });
+          _setupFieldErrors = mapped;
+          _setupError = rest.isEmpty ? null : rest.join('\n');
+        } else {
+          _setupError = localizedError(context, failure);
+        }
       });
     } catch (error) {
       if (!mounted) return;
@@ -472,6 +500,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         onSubmit: _runSetup,
                         busy: _setupBusy,
                         error: _setupError,
+                        fieldErrors: _setupFieldErrors,
                       ),
                     ),
                   ],
