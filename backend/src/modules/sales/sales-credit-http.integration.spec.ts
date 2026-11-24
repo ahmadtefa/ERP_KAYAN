@@ -45,7 +45,7 @@ const ACCOUNTS: Array<[string, string, string]> = [
   ['1103', 'AR', 'ASSET'], ['4101', 'Sales', 'REVENUE'], ['2103', 'VAT', 'LIABILITY'], ['1104', 'Inv', 'ASSET'], ['5101', 'COGS', 'EXPENSE'],
 ];
 const uid = (n: number) => `88888888-8888-4888-8888-0000000000${String(n).padStart(2, '0')}`;
-const PERMS = ['sales.invoices.read', 'sales.invoices.post', 'sales.credit.approve', 'parties.customers.read'];
+const PERMS = ['sales.invoices.read', 'sales.invoices.post', 'sales.credit.approve', 'parties.customers.read', 'inventory.stock.read', 'accounting.accounts.read'];
 
 type Who = { id: string; token: string };
 
@@ -230,7 +230,10 @@ const ready =
     const refused = await call('creator', 'POST', `/sales/invoices/${STOCK_INV}/post`);
     expect(refused.status).toBe(400);
     expect(refused.json.code).toBe('SALES_POST_BRANCH_STOCK');
-    expect(JSON.stringify(refused.json)).not.toMatch(/Milk|Buyer|IT-1|1200/);
+    expect(refused.json.fieldErrors).toEqual({lineNumber:'1',itemCode:'IT-1',available:'0.0000',requested:'120.0000'});
+    const hidden = await call('poster', 'POST', `/sales/invoices/${STOCK_INV}/post`);
+    expect(hidden.json.code).toBe('SALES_POST_BRANCH_STOCK');expect(hidden.json.fieldErrors).toEqual({});
+    expect(JSON.stringify(refused.json)).not.toMatch(/Milk|Buyer|1200/);
     expect(await status(STOCK_INV)).toBe('DRAFT');
     expect(Number((await q(`SELECT count(*)::int AS n FROM journal_entries WHERE "sourceId"='${STOCK_INV}'`))[0].n)).toBe(0);
     expect(Number((await q(`SELECT count(*)::int AS n FROM stock_movements WHERE "referenceId"='${STOCK_INV}'`))[0].n)).toBe(0);
@@ -247,6 +250,8 @@ const ready =
     try {
       const result=await call('creator','POST',`/sales/invoices/${id}/post`);
       expect(result.status).toBe(400);expect(result.json.code).toBe('SALES_POST_ACCOUNT_MISSING');
+      expect(result.json.fieldErrors).toEqual({accountCode:'1103',accountKey:'accountsReceivable'});
+      const hidden=await call('poster','POST',`/sales/invoices/${id}/post`);expect(hidden.json.fieldErrors).toBeUndefined();
       expect(await status(id)).toBe('DRAFT');
       expect(Number((await q(`SELECT count(*)::int AS n FROM journal_entries WHERE "sourceId"='${id}'`))[0].n)).toBe(0);
       expect(Number((await q(`SELECT count(*)::int AS n FROM stock_movements WHERE "referenceId"='${id}'`))[0].n)).toBe(0);

@@ -632,7 +632,7 @@ export class SalesInvoicesService {
     id: string,
     mayReadCost = true,
     expiry?: { mayIssueExpired: boolean; reason?: string | null },
-    creditView: { mayDiscloseBalance: boolean } = { mayDiscloseBalance: false },
+    creditView: { mayDiscloseBalance: boolean; mayReadStock?: boolean; mayReadInvoice?: boolean } = { mayDiscloseBalance: false },
   ) {
     const expiredApproval =
       expiry?.mayIssueExpired === true
@@ -765,12 +765,14 @@ export class SalesInvoicesService {
         const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
 
         if (qtyOnHand.lessThan(line.quantity)) {
-          throw new BadRequestException(
-            `Not enough stock for ${item.code} ${item.nameEn}: ` +
-              `${qtyOnHand.toFixed(MONEY_SCALE)} available, ` +
-              `${line.quantity.toFixed(MONEY_SCALE)} requested. ` +
-              'Record a purchase invoice first.',
-          );
+          throw new BadRequestException({
+            code: 'SALES_POST_BRANCH_STOCK',
+            message: 'Review stock in the invoice branch before posting.',
+            errors: {
+              ...(creditView.mayReadInvoice ? { lineNumber: String(line.lineNumber), itemCode: item.code.slice(0, 64) } : {}),
+              ...(creditView.mayReadStock ? { available: qtyOnHand.toFixed(MONEY_SCALE), requested: line.quantity.toFixed(MONEY_SCALE) } : {}),
+            },
+          });
         }
 
         // A lot-controlled item cannot be sold from a branch that has no shelf

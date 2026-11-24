@@ -37,7 +37,7 @@ class _CommittedThenFailedApi extends ApiClient {
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     posts++;
-    if (postingCode != null) throw ApiFailure('synthetic-private-do-not-display', statusCode:400, code:postingCode);
+    if (postingCode != null) throw ApiFailure('synthetic-private-do-not-display', statusCode:400, code:postingCode, fieldErrors:const {'lineNumber':'1','itemCode':'SYN-ITEM','available':'0.0000','requested':'2.0000'});
     if (stockShortfall) throw const ApiFailure('الرصيد غير كافٍ في الدفعات المتاحة: ينقص 2.0000. / Not enough stock in the available lots: 2.0000 short.', statusCode: 400);
     status = path.endsWith('/reverse') ? 'reversed' : 'posted';
     if (responseLost && serverFailure) throw const ApiFailure('بيانات مصطنعة خاصة لا تعرض', statusCode: 503);
@@ -77,9 +77,9 @@ void main() {
     });
     final shot=GlobalKey();
     final api=_CommittedThenFailedApi('draft')..postingCode='SALES_POST_BRANCH_STOCK';
-    await tester.pumpWidget(RepaintBoundary(key:shot,child:ProviderScope(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],child:MaterialApp(theme:AppTheme.light(),locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales))))));
+    await tester.pumpWidget(RepaintBoundary(key:shot,child:ProviderScope(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],child:MaterialApp(theme:AppTheme.dark(),locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales))))));
     await tester.pumpAndSettle();await tester.tap(find.byTooltip('ترحيل'));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(FilledButton,'ترحيل'));await tester.pumpAndSettle();
-    expect(find.textContaining('مخزون الفرع غير كافٍ'),findsOneWidget);expect(find.textContaining('SALES_POST_BRANCH_STOCK'),findsOneWidget);
+    expect(find.textContaining('مخزون الفرع غير كافٍ'),findsOneWidget);expect(find.textContaining('SALES_POST_BRANCH_STOCK'),findsOneWidget);expect(find.textContaining('SYN-ITEM'),findsOneWidget);expect(find.textContaining('2.0000'),findsOneWidget);
     expect(find.textContaining('synthetic-private'),findsNothing);expect(api.status,'draft');expect(api.posts,1);
     final output=Platform.environment['KAYAN_SCREENSHOT_DIR'];
     if(output!=null) { await tester.runAsync(() async {

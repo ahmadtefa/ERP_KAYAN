@@ -4,7 +4,7 @@ import { BadRequestException } from '@nestjs/common';
  * package arbitrary exception text, company names or database diagnostics.
  * Only 400s are classified; authentication, credit, concurrency and 5xx
  * errors keep their original status and handling. */
-export function salesPostingError(error: unknown): unknown {
+export function salesPostingError(error: unknown, mayReadAccounts = false): unknown {
   if (!(error instanceof BadRequestException)) return error;
   const body = error.getResponse();
   if (typeof body !== 'string' && typeof body === 'object' && body !== null && 'code' in body) return error;
@@ -26,5 +26,8 @@ export function salesPostingError(error: unknown): unknown {
   const match = rules.find(([pattern]) => pattern.test(text));
   const code = match?.[1] ?? 'SALES_POST_RULE_REJECTED';
   const messageSafe = match?.[2] ?? 'Posting was refused by a business rule. Keep the invoice and report this support code.';
-  return new BadRequestException({ code, message: messageSafe });
+  const account = mayReadAccounts ? /^Required account (\d{1,12}) \((accountsReceivable|salesRevenue|vatPayable|inventory|costOfGoodsSold)\)/.exec(text) : null;
+  return new BadRequestException({ code, message: messageSafe,
+    ...(account ? { errors: { accountCode: account[1], accountKey: account[2] } } : {}),
+  });
 }

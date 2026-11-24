@@ -96,7 +96,9 @@ export class SalesInvoicesController {
     }, {
       // The credit figures are the customer card's company-wide figures.
       mayDiscloseBalance: mayDiscloseCreditFigures(user),
-    }).then((result) => this.redact(user, result)).catch((error: unknown) => { throw salesPostingError(error); });
+      mayReadStock: user.isSuperAdmin || (user.permissions ?? []).includes('inventory.stock.read'),
+      mayReadInvoice: user.isSuperAdmin || (user.permissions ?? []).includes('sales.invoices.read'),
+    }).then((result) => this.redact(user, result)).catch((error: unknown) => { throw salesPostingError(error, user.isSuperAdmin || (user.permissions ?? []).includes('accounting.accounts.read')); });
   }
 
   /// Signs for one over-limit draft invoice. The permission is separate from

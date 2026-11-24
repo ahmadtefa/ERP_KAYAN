@@ -87,6 +87,22 @@ class AppErrorMessageResolver {
     'SALES_POST_RULE_REJECTED': ['لم تُرحّل الفاتورة بسبب قاعدة عمل. احتفظ بالمسودة وأرسل رمز المساعدة للدعم؛ لا تكرر موافقة الائتمان دون معرفة السبب.', 'Invoice not posted because of a business rule. Keep the draft and report the support code; do not repeat credit approval without knowing the reason.'],
   };
 
+  String _postingContext(Map<String, String> fields) {
+    final parts = <String>[];
+    void numeric(String key, String ar, String en) {
+      final value=fields[key];
+      if(value!=null && RegExp(r'^-?[0-9]{1,16}(?:\.[0-9]{1,4})?$').hasMatch(value)) { parts.add('${isArabic ? ar : en}: $value'); }
+    }
+    numeric('lineNumber','سطر الفاتورة','Invoice line');
+    final item=fields['itemCode'];
+    if(item!=null && RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(item)) { parts.add('${isArabic ? 'كود الصنف' : 'Item code'}: $item'); }
+    numeric('available','المتاح بالفرع','Available in branch');numeric('requested','المطلوب','Requested');
+    numeric('accountCode','رقم الحساب','Account code');
+    const accountNames=<String,List<String>>{'accountsReceivable':['العملاء','Accounts receivable'],'salesRevenue':['إيراد المبيعات','Sales revenue'],'vatPayable':['ضريبة القيمة المضافة المستحقة','VAT payable'],'inventory':['المخزون','Inventory'],'costOfGoodsSold':['تكلفة المبيعات','Cost of goods sold']};
+    final account=accountNames[fields['accountKey']];if(account!=null) { parts.add(account[isArabic ? 0 : 1]); }
+    return parts.isEmpty ? '' : '\n${parts.join('\n')}';
+  }
+
   /// When false, business messages are shown in the language the server
   /// sent them in (English) instead of being translated.
   final bool isArabic;
@@ -106,7 +122,7 @@ class AppErrorMessageResolver {
           return AppErrorText(
             reason: AppErrorReason.invalidInput,
             severity: AppErrorSeverity.warning,
-            businessMessage: '${postingReason[isArabic ? 0 : 1]}\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
+            businessMessage: '${postingReason[isArabic ? 0 : 1]}${_postingContext(error.fieldErrors)}\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
           );
         }
       }
