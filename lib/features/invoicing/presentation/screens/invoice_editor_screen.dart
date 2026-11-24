@@ -667,6 +667,59 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     }
   }
 
+  /// Reasons the server gave for one line's field, keyed `index.field`
+  /// (`lines.2.quantity` from the API becomes `2.quantity`). Shown beside the
+  /// field and cleared when that field is edited.
+  final _lineErrors = <String, String>{};
+  final _lineErrorKeys = <String, GlobalKey>{};
+
+  GlobalKey _lineKey(int index, String field) =>
+      _lineErrorKeys.putIfAbsent('$index.$field', GlobalKey.new);
+
+  void _clearLineError(int index, String field) {
+    _lineErrors.remove('$index.$field');
+  }
+
+  static final _lineFieldPattern = RegExp(
+    r'^lines\.(\d+)\.(quantity|unitPrice|taxRate|discountPercent|discountAmount)$',
+  );
+
+  /// Marks the line fields a validation failure names and scrolls to the
+  /// first one. Returns true when something other than a line field remains
+  /// to be shown in the ordinary error dialog.
+  bool _flagLineErrors(ApiFailure failure, int lineCount) {
+    final marked = <String, String>{};
+    var others = false;
+    for (final entry in failure.fieldErrors.entries) {
+      final match = _lineFieldPattern.firstMatch(entry.key);
+      final index = match == null ? -1 : int.parse(match.group(1)!);
+      if (match != null && index < lineCount) {
+        final field = match.group(2)!.startsWith('discount')
+            ? 'discount'
+            : match.group(2)!;
+        marked['$index.$field'] = entry.value;
+      } else {
+        others = true;
+      }
+    }
+    setState(() {
+      _lineErrors
+        ..clear()
+        ..addAll(marked);
+    });
+    if (marked.isNotEmpty) {
+      final first = (marked.keys.toList()
+            ..sort((a, b) => int.parse(a.split('.').first)
+                .compareTo(int.parse(b.split('.').first))))
+          .first;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _lineErrorKeys[first]?.currentContext;
+        if (target != null && target.mounted) Scrollable.ensureVisible(target);
+      });
+    }
+    return others;
+  }
+
   Future<void> _save() async {
     final l10n = context.l10n;
     if (_partyId == null) {
@@ -810,7 +863,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.invoiceSaved);
       }
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e, error: true);
+      if (!mounted) return;
+      if (e is ApiFailure && e.fieldErrors.isNotEmpty) {
+        // Name the offending line fields; anything else the server said
+        // about the document is listed in the ordinary dialog.
+        if (_flagLineErrors(e, _lines.length)) showAppError(context, e);
+      } else {
+        showMessage(context, e, error: true);
+      }
     } catch (error) {
       if (mounted) showAppError(context, error);
     } finally {
@@ -1063,9 +1123,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                       language: language,
                       onChanged: () => setState(() {}),
                       onAdd: () => setState(() => _lines.add(_LineDraft())),
-                      onRemove: (index) =>
-                          setState(() => _lines.removeAt(index).dispose()),
+                      onRemove: (index) => setState(() {
+                        _lineErrors.clear();
+                        _lines.removeAt(index).dispose();
+                      }),
                       onItemDefaults: _applyItemDefaults,
+                      lineErrors: _lineErrors,
+                      lineKey: _lineKey,
+                      onLineEdited: _clearLineError,
                     ),
                     const SizedBox(height: 16),
                     if (salesTaxPricing.hasValue)
@@ -1297,9 +1362,18 @@ class _LinesTable extends StatelessWidget {
     required this.onAdd,
     required this.onRemove,
     required this.onItemDefaults,
+    required this.lineErrors,
+    required this.lineKey,
+    required this.onLineEdited,
   });
 
   final InvoiceKind kind;
+
+  /// Server reasons by `index.field`, the key that scrolls to a field, and
+  /// the callback that forgets a reason once the field is edited.
+  final Map<String, String> lineErrors;
+  final GlobalKey Function(int index, String field) lineKey;
+  final void Function(int index, String field) onLineEdited;
   final bool pricesIncludeTax;
   final List<_LineDraft> lines;
   final List<Json> items;
@@ -1541,19 +1615,25 @@ class _LinesTable extends StatelessWidget {
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
-                          child: TextFormField(
+                          child: KeyedSubtree(
+                            key: lineKey(index, 'quantity'),
+                            child: TextFormField(
                             key: ValueKey('line-quantity-$index'),
                             controller: lines[index].quantity,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             decoration: InputDecoration(
+                              errorText: lineErrors['$index.quantity'],
                               labelText: l10n.quantity,
                               isDense: true,
                               border: const OutlineInputBorder(),
                             ),
-                            onChanged: (_) => onChanged(),
-                          ),
+                            onChanged: (_) {
+                              onLineEdited(index, 'quantity');
+                              onChanged();
+                            },
+                          )),
                         ),
                         const SizedBox(width: 8),
                         // What the quantity above means in base units. Shown,
@@ -1576,43 +1656,51 @@ class _LinesTable extends StatelessWidget {
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
-                          child: TextFormField(
+                          child: KeyedSubtree(
+                            key: lineKey(index, 'unitPrice'),
+                            child: TextFormField(
                             key: ValueKey('line-price-$index'),
                             controller: lines[index].unitPrice,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             decoration: InputDecoration(
+                              errorText: lineErrors['$index.unitPrice'],
                               labelText: l10n.unitPrice,
                               isDense: true,
                               border: const OutlineInputBorder(),
                             ),
                             onChanged: (_) {
+                              onLineEdited(index, 'unitPrice');
                               lines[index].unitPriceAutomatic = false;
                               lines[index].unitPriceEdited = true;
                               onChanged();
                             },
-                          ),
+                          )),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
-                          child: TextFormField(
+                          child: KeyedSubtree(
+                            key: lineKey(index, 'taxRate'),
+                            child: TextFormField(
                             key: ValueKey('line-tax-rate-$index'),
                             controller: lines[index].taxRate,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             decoration: InputDecoration(
+                              errorText: lineErrors['$index.taxRate'],
                               labelText: l10n.taxRate,
                               isDense: true,
                               border: const OutlineInputBorder(),
                             ),
                             onChanged: (_) {
+                              onLineEdited(index, 'taxRate');
                               lines[index].taxRateEdited = true;
                               onChanged();
                             },
-                          ),
+                          )),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
@@ -1697,7 +1785,9 @@ class _LinesTable extends StatelessWidget {
                           const SizedBox(width: 8),
                           SizedBox(
                             width: 150,
-                            child: TextFormField(
+                            child: KeyedSubtree(
+                              key: lineKey(index, 'discount'),
+                              child: TextFormField(
                               key: ValueKey('line-discount-value-$index'),
                               controller: lines[index].discountValue,
                               enabled:
@@ -1708,6 +1798,7 @@ class _LinesTable extends StatelessWidget {
                                     decimal: true,
                                   ),
                               decoration: InputDecoration(
+                                errorText: lineErrors['$index.discount'],
                                 labelText:
                                     lines[index].discountKind ==
                                         DiscountKind.percent
@@ -1716,8 +1807,11 @@ class _LinesTable extends StatelessWidget {
                                 isDense: true,
                                 border: const OutlineInputBorder(),
                               ),
-                              onChanged: (_) => onChanged(),
-                            ),
+                              onChanged: (_) {
+                                onLineEdited(index, 'discount');
+                                onChanged();
+                              },
+                            )),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

@@ -1,0 +1,184 @@
+import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
+import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
+import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
+import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'test_harness.dart';
+
+class _FakeApiClient extends ApiClient {
+  _FakeApiClient()
+    : super(
+        const AppConfig(
+          environment: AppEnvironment.development,
+          apiBaseUrl: 'https://test.invalid/api/v1',
+          connectTimeout: Duration(seconds: 1),
+          receiveTimeout: Duration(seconds: 1),
+        ),
+        FakeTokenStore(),
+      );
+
+  String? postPath;
+  Map<String, dynamic>? postBody;
+
+  @override
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Object? body,
+    String? idempotencyKey,
+  }) async {
+    postPath = path;
+    postBody = Map<String, dynamic>.from(body! as Map);
+    throw const ApiFailure('x', statusCode: 400, code: 'VALIDATION_FAILED', fieldErrors: {
+      'lines.0.quantity': 'القيمة يجب أن تكون أكبر من صفر',
+      'lines.0.unitPrice': 'هذا الحقل مطلوب',
+    });
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => [];
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('server line errors appear beside the line fields and keep input', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          activeItemsProvider.overrideWith((ref) async => [
+            {
+              'id': 'item-1',
+              'code': 'ITEM-1',
+              'nameEn': 'Tracked item',
+              'nameAr': 'صنف مخزني',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': '14.0000',
+              'salePrice': '100.0000',
+            },
+            {
+              'id': 'item-2',
+              'code': 'ITEM-2',
+              'nameEn': 'Other item',
+              'nameAr': 'صنف آخر',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': '19.0000',
+              'salePrice': '100.0000',
+            },
+          ]),
+          activeCustomersProvider.overrideWith((ref) async => [
+            {
+              'id': 'customer-1',
+              'code': 'CUS-1',
+              'nameEn': 'Test customer',
+              'nameAr': 'عميل تجريبي',
+              'isActive': true,
+            },
+          ]),
+        ],
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const InvoiceEditorScreen(kind: InvoiceKind.sales),
+                    ),
+                  ),
+                  child: const Text('Open editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+
+    final dropdowns = find.byType(DropdownButtonFormField<String>);
+    await tester.tap(dropdowns.at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-1 — Test customer').last);
+    await tester.pumpAndSettle();
+
+    // The item picker carries the blank-state key, because the line has no
+    // item until this moment. The document-discount picker comes before it in
+    // the tree, so counting dropdowns is not a reliable way to find it.
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+      reason: 'a blank rate stays blank and is saved as zero',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '7');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-2 — Other item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '7',
+      reason: 'changing item must not override a user-entered rate',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+      reason: 'changing item must not replace an intentionally blank rate',
+    );
+
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '1');
+    await tester.enterText(find.byKey(const ValueKey('line-price-0')), '100');
+    // An explicitly cleared tax field must be sent as zero, not omitted.
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
+    await tester.pump();
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('القيمة يجب أن تكون أكبر من صفر'), findsOneWidget);
+    expect(find.text('هذا الحقل مطلوب'), findsOneWidget);
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text,
+      '1',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '3');
+    await tester.pump();
+    expect(find.text('القيمة يجب أن تكون أكبر من صفر'), findsNothing);
+    expect(find.text('هذا الحقل مطلوب'), findsOneWidget);
+  });
+}
