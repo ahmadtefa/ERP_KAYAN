@@ -2,6 +2,12 @@ name: KAYAN comprehensive application tests (non-signing)
 
 on:
   workflow_dispatch:
+    inputs:
+      build_unreleased_windows:
+        description: 'After all application checks pass, build an unreleased licence-protected Setup. No install, signing or release.'
+        type: boolean
+        default: false
+        required: false
   pull_request:
     paths:
       - 'lib/**'
@@ -431,3 +437,63 @@ jobs:
         env:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: python ../scripts/ci-diagnose.py npx ts-node --transpile-only scripts/verify-system-backup.ts --pgbin /usr/lib/postgresql/17/bin
+
+  windows-evaluation:
+    needs: [acceptance, postgres-acceptance, backup-restore-17]
+    if: github.event_name == 'workflow_dispatch' && inputs.build_unreleased_windows == true
+    name: Build licence-protected Setup on disposable Windows runner
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+      - name: Install Inno Setup on disposable runner
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+      - name: Build licence-protected Setup
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (@(git status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'Source checkout is not clean.' }
+          $operatorKey = @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem') |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $operatorKey) { throw 'The approved licence public key is missing.' }
+          & node .\scripts\license-build-policy.mjs --mode product --public-key $operatorKey
+          if ($LASTEXITCODE -ne 0) { throw 'Licence public key validation failed.' }
+          & .\distribution\windows\build-installer.ps1 -DisposableSource -Output 'build\windows-evaluation-setup'
+          if ($LASTEXITCODE -ne 0) { throw 'Setup build failed.' }
+          $setup = Get-Item -LiteralPath 'build\windows-evaluation-setup\KAYAN-ERP-Setup.exe'
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{ sourceCommit = (git rev-parse HEAD).Trim(); mode = 'product-build-unreleased'; name = $setup.Name; bytes = $setup.Length; sha256 = $hash; createdUtc = $setup.CreationTimeUtc.ToString('o') } |
+            ConvertTo-Json | Set-Content -LiteralPath 'build\windows-evaluation-setup\identity.json' -Encoding utf8
+      - name: Upload unreleased Setup and build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-unreleased-setup-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/windows-evaluation-setup/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload Setup identity separately
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kayan-setup-identity-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/windows-evaluation-setup/identity.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -82,14 +82,28 @@ for (const job of Object.values(restoreSafety.jobs)) {
 const application = read('kayan-acceptance.yml');
 assert.ok(Object.hasOwn(application.on, 'workflow_dispatch'));
 assert.deepEqual(application.permissions, { contents: 'read' });
-for (const job of Object.values(application.jobs)) {
-  assert.equal(job['runs-on'], 'ubuntu-24.04');
+for (const [name, job] of Object.entries(application.jobs)) {
+  assert.equal(job['runs-on'], name === 'windows-evaluation' ? 'windows-latest' : 'ubuntu-24.04');
   assert.equal(job['continue-on-error'], undefined);
+}
+const optionalWindows = application.jobs['windows-evaluation'];
+assert.deepEqual(application.on.workflow_dispatch.inputs.build_unreleased_windows,
+  { description: 'After all application checks pass, build an unreleased licence-protected Setup. No install, signing or release.', type: 'boolean', default: false, required: false });
+assert.deepEqual(optionalWindows.needs, ['acceptance', 'postgres-acceptance', 'backup-restore-17']);
+assert.equal(optionalWindows.if, "github.event_name == 'workflow_dispatch' && inputs.build_unreleased_windows == true");
+assert.equal(optionalWindows.environment, undefined);
+assert.equal(optionalWindows.env, undefined);
+assert.deepEqual(optionalWindows.steps.find(s => s.name === 'Build licence-protected Setup').env, { NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/ci-no-signing.cjs' });
+for (const step of optionalWindows.steps) {
+  assert.equal(step['continue-on-error'], undefined);
+  assert.doesNotMatch(String(step.run ?? ''), /generateKeyPair|createPrivateKey|license-generator|gh release|smoke-test-installed|install-runtime\.ps1|TestSignedBuild|EvaluationBuild/);
 }
 const setup = read('windows-evaluation-setup.yml');
 assert.deepEqual(Object.keys(setup.on), ['workflow_dispatch']);
 assert.deepEqual(setup.permissions, { contents: 'read' });
 assert.deepEqual(Object.keys(setup.jobs), ['windows-evaluation']);
+const guardedSteps = optionalWindows.steps.map(({env, ...step}) => step);
+assert.deepEqual(guardedSteps, setup.jobs['windows-evaluation'].steps, 'Reuse the separately reviewed non-signing build, adding only runtime signing guard');
 const installer = read('windows-installer.yml');
 assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
 assert.deepEqual(installer.permissions, { contents: 'read', deployments: 'read' }, 'Installer may read deployment review state but must not publish');
