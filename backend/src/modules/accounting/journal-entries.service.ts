@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -54,11 +55,12 @@ export class JournalEntriesService {
     private readonly costCenters: CostCentersService,
   ) {}
 
-  async findAll(companyId: string, page = 1, pageSize = 50) {
+  async findAll(companyId: string, page = 1, pageSize = 50, branchScope: string[] | null = null) {
     const safeSize = Math.min(Math.max(pageSize, 1), 200);
+    const where = { companyId, ...branchWhere(branchScope) };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.journalEntry.findMany({
-        where: { companyId },
+        where,
         orderBy: [{ entryDate: 'desc' }, { entryNumber: 'desc' }],
         skip: (page - 1) * safeSize,
         take: safeSize,
@@ -67,7 +69,7 @@ export class JournalEntriesService {
           branch: { select: { code: true, nameEn: true, nameAr: true } },
         },
       }),
-      this.prisma.journalEntry.count({ where: { companyId } }),
+      this.prisma.journalEntry.count({ where }),
     ]);
 
     return {
@@ -78,9 +80,9 @@ export class JournalEntriesService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const entry = await this.prisma.journalEntry.findFirst({
-      where: { id, companyId },
+      where: { id, companyId, ...branchWhere(branchScope) },
       include: {
         lines: LINES_WITH_ACCOUNT,
         branch: { select: { code: true, nameEn: true, nameAr: true } },

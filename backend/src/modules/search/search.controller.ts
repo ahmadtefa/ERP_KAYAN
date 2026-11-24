@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { Controller, Get, Query } from '@nestjs/common';
 
 import {
@@ -23,6 +24,6 @@ export class SearchController {
     return this.service.search(user.companyId, q ?? '', limit ? Number(limit) : 8, {
       sale: canReadSalePrice(user),
       purchase: canReadPurchasePrice(user),
-    });
+    }, branchReadScope(user));
   }
 }

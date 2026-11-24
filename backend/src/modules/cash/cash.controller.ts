@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -34,19 +35,19 @@ export class CashController {
       kind,
       includeInactive: includeInactive === 'true',
       branchId,
-    });
+    }, branchReadScope(user));
   }
 
   @Get('accounts/balances')
   @RequirePermissions('cash.accounts.read')
   balances(@CurrentUser() user: AuthUser, @Query('asOf') asOf?: string) {
-    return this.accounts.balances(user.companyId, asOf);
+    return this.accounts.balances(user.companyId, asOf, branchReadScope(user));
   }
 
   @Get('accounts/:id')
   @RequirePermissions('cash.accounts.read')
   getAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.accounts.findOne(user.companyId, id);
+    return this.accounts.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Post('accounts')
@@ -97,13 +98,13 @@ export class CashController {
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
       pageSize: query.pageSize ? Number(query.pageSize) : undefined,
-    });
+    }, branchReadScope(user));
   }
 
   @Get('vouchers/:id')
   @RequirePermissions('cash.vouchers.read')
   getVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.vouchers.findOne(user.companyId, id);
+    return this.vouchers.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Post('vouchers')
@@ -152,13 +153,13 @@ export class CashController {
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
       pageSize: query.pageSize ? Number(query.pageSize) : undefined,
-    });
+    }, branchReadScope(user));
   }
 
   @Get('transfers/:id')
   @RequirePermissions('cash.vouchers.read')
   getTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.transfers.findOne(user.companyId, id);
+    return this.transfers.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Post('transfers')

@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -72,11 +73,12 @@ export class SalesOrdersService {
       page?: number;
       pageSize?: number;
     } = {},
+    branchScope: string[] | null = null,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
-    const where: Prisma.SalesOrderWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.SalesOrderWhereInput = { companyId, deletedAt: null, ...branchWhere(branchScope) };
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
       const status = query.status.toUpperCase();
@@ -117,9 +119,9 @@ export class SalesOrdersService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const order = await this.prisma.salesOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: {
         customer: { select: { code: true, nameEn: true, nameAr: true, paymentTermDays: true } },
         branch: { select: { code: true, nameEn: true, nameAr: true } },

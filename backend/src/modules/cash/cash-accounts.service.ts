@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -28,10 +29,11 @@ export class CashAccountsService {
   async findAll(
     companyId: string,
     query: { kind?: string; includeInactive?: boolean; branchId?: string } = {},
+    branchScope: string[] | null = null,
   ) {
-    const where: Prisma.CashAccountWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.CashAccountWhereInput = { companyId, deletedAt: null, ...branchWhere(branchScope) };
     if (!query.includeInactive) where.isActive = true;
-    if (query.branchId) where.branchId = query.branchId;
+    if (query.branchId) where.branchId = branchScope && !branchScope.includes(query.branchId) ? { in: [] } : query.branchId;
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(CashAccountKind).includes(kind as CashAccountKind)) {
@@ -52,9 +54,9 @@ export class CashAccountsService {
     return { items: items.map((row) => this.toResponse(row)), total: items.length };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const row = await this.prisma.cashAccount.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: {
         account: { select: { code: true, nameEn: true, nameAr: true } },
         branch: { select: { code: true } },
@@ -217,11 +219,11 @@ export class CashAccountsService {
   }
 
   /** What each box or bank holds, read from the ledger. */
-  async balances(companyId: string, asOf?: string) {
+  async balances(companyId: string, asOf?: string, branchScope: string[] | null = null) {
     const date = asOf ? new Date(`${asOf.slice(0, 10)}T23:59:59.999Z`) : new Date();
 
     const accounts = await this.prisma.cashAccount.findMany({
-      where: { companyId, deletedAt: null },
+      where: { companyId, deletedAt: null, ...branchWhere(branchScope) },
       orderBy: [{ kind: 'asc' }, { code: 'asc' }],
       include: { account: { select: { code: true, nameEn: true, nameAr: true } } },
     });

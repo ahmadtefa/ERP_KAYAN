@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 
 import {
@@ -29,13 +30,13 @@ export class SalesOrdersController {
     @CurrentUser() user: AuthUser,
     @Query() query: { customerId?: string; status?: string; from?: string; to?: string },
   ) {
-    return this.service.findAll(user.companyId, query).then((result) => this.redact(user, result));
+    return this.service.findAll(user.companyId, query, branchReadScope(user)).then((result) => this.redact(user, result));
   }
 
   @Get(':id')
   @RequirePermissions('sales.orders.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id).then((result) => this.redact(user, result));
+    return this.service.findOne(user.companyId, id, branchReadScope(user)).then((result) => this.redact(user, result));
   }
 
   @Post()

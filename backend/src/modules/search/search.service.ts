@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
@@ -38,6 +39,7 @@ export class SearchService {
     q: string,
     limit = 8,
     visibility: { sale: boolean; purchase: boolean } = { sale: true, purchase: true },
+    branchScope: string[] | null = null,
   ) {
     const term = q.trim();
     if (term.length < 2) return { query: term, results: [] as SearchResult[], total: 0 };
@@ -49,6 +51,7 @@ export class SearchService {
         this.prisma.salesInvoice.findMany({
           where: {
             companyId,
+            ...branchWhere(branchScope),
             deletedAt: null,
             OR: [
               { invoiceNumber: contains },
@@ -71,6 +74,7 @@ export class SearchService {
         this.prisma.purchaseInvoice.findMany({
           where: {
             companyId,
+            ...branchWhere(branchScope),
             deletedAt: null,
             OR: [
               { invoiceNumber: contains },
@@ -93,6 +97,7 @@ export class SearchService {
         this.prisma.cashVoucher.findMany({
           where: {
             companyId,
+            ...branchWhere(branchScope),
             deletedAt: null,
             OR: [
               { voucherNumber: contains },
@@ -118,6 +123,7 @@ export class SearchService {
         this.prisma.journalEntry.findMany({
           where: {
             companyId,
+            ...branchWhere(branchScope),
             OR: [
               { entryNumber: contains },
               { description: contains },

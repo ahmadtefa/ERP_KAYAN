@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   AuthUser,
@@ -17,13 +18,13 @@ export class JournalEntriesController {
   @Get()
   @RequirePermissions('accounting.journal.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListJournalEntriesDto) {
-    return this.service.findAll(user.companyId, query.page, query.pageSize);
+    return this.service.findAll(user.companyId, query.page, query.pageSize, branchReadScope(user));
   }
 
   @Get(':id')
   @RequirePermissions('accounting.journal.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Post()

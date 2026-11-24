@@ -1,3 +1,4 @@
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import {
   AuthUser,
@@ -23,7 +24,7 @@ export class SalesInvoicesController {
   @Get()
   @RequirePermissions('sales.invoices.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListInvoicesDto) {
-    return this.service.findAll(user.companyId, query, canReadCost(user)).then((result) => this.redact(user, result));
+    return this.service.findAll(user.companyId, query, canReadCost(user), branchReadScope(user)).then((result) => this.redact(user, result));
   }
 
   @Get('tax-pricing')
@@ -35,7 +36,7 @@ export class SalesInvoicesController {
   @Get(':id')
   @RequirePermissions('sales.invoices.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, canReadCost(user)).then((result) => this.redact(user, result));
+    return this.service.findOne(user.companyId, id, canReadCost(user), branchReadScope(user)).then((result) => this.redact(user, result));
   }
 
   @Post()

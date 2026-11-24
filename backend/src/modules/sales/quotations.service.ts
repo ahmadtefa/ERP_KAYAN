@@ -1,3 +1,4 @@
+import { branchWhere } from '../../common/auth/branch-read-scope';
 import { QuotationBackgroundsService } from './quotation-backgrounds.service';
 import {
   BadRequestException,
@@ -121,12 +122,12 @@ export class QuotationsService {
 
   // ------------------------------------------------------------------ lists
 
-  async findAll(companyId: string, query: ListQuotationsDto) {
+  async findAll(companyId: string, query: ListQuotationsDto, branchScope: string[] | null = null) {
     await this.expireOverdue(companyId);
 
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
-    const where: Prisma.QuotationWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.QuotationWhereInput = { companyId, deletedAt: null, ...branchWhere(branchScope) };
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
       const status = this.status(query.status);
@@ -184,10 +185,10 @@ export class QuotationsService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     await this.expireOverdue(companyId);
     const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
+      where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: QUOTATION_INCLUDE,
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
