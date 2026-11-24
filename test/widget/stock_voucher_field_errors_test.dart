@@ -35,6 +35,8 @@ class _Api extends ApiClient {
   @override
   Future<Map<String, dynamic>> post(String path, {Object? body, String? idempotencyKey}) async {
     posts.add(Map<String, dynamic>.from(body! as Map));
+    if (posts.length == 1) throw const NetworkFailure();
+    if (posts.length == 3) return {'id': 'voucher-1'};
     throw const ApiFailure('x', statusCode: 400, code: 'VALIDATION_FAILED', fieldErrors: {
       'reason': 'السبب غير مقبول لهذا النوع',
       'lines.0.unitCost': 'التكلفة يجب ألا تقل عن صفر',
@@ -62,9 +64,14 @@ void main() {
         locale: const Locale('en'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        home: const StockVoucherCreateScreen(kind: 'RECEIPT'),
+        home: Builder(builder: (context) => Scaffold(body: TextButton(
+          onPressed: () => Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const StockVoucherCreateScreen(kind: 'RECEIPT'))),
+          child: const Text('Open voucher'),
+        ))),
       ),
     ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open voucher'));
     await tester.pumpAndSettle();
 
     Future<void> pick(String label, String option) async {
@@ -93,7 +100,20 @@ void main() {
     await tester.tap(save);
     await tester.pumpAndSettle();
 
+    // First send: network failure. The request is kept as uncertain.
     expect(api.posts, hasLength(1));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry'), findsOneWidget);
+    // Retry sends the SAME request with the SAME idempotency key.
+    await tester.ensureVisible(find.text('Retry'));
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(api.posts, hasLength(2));
+    expect(api.posts[1], api.posts[0]);
+    expect(api.posts[0]['idempotencyKey'], isA<String>());
+    // The server then refuses the content: the uncertain request is final.
+    expect(find.text('Retry'), findsNothing);
     expect(find.text('السبب غير مقبول لهذا النوع'), findsOneWidget);
     expect(find.text('التكلفة يجب ألا تقل عن صفر'), findsOneWidget);
     expect(find.byType(AlertDialog), findsNothing);
@@ -105,5 +125,16 @@ void main() {
     await tester.pump();
     expect(find.text('السبب غير مقبول لهذا النوع'), findsNothing);
     expect(find.text('التكلفة يجب ألا تقل عن صفر'), findsOneWidget);
+
+    // Correct the cost and save again: a NEW request (new key), and it succeeds once.
+    await type('Base unit cost', '6');
+    final saveAgain = find.byType(FilledButton).last;
+    await tester.ensureVisible(saveAgain);
+    await tester.tap(saveAgain);
+    await tester.pumpAndSettle();
+    expect(api.posts, hasLength(3));
+    expect(api.posts[2]['idempotencyKey'], isNot(api.posts[0]['idempotencyKey']));
+    expect((api.posts[2]['lines'] as List).single['unitCost'], '6');
+    expect(find.text('Open voucher'), findsOneWidget);
   });
 }
