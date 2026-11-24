@@ -1,4 +1,6 @@
+import { extractBackgroundPage } from './quotation-backgrounds.service';
 import {
+  rgb,
   PDFArray,
   PDFDict,
   PDFDocument,
@@ -342,6 +344,34 @@ describeWithBrowser('quotation PDF through the real browser renderer', () => {
       expect(fonts).toMatch(/NotoNaskhArabic-Regular/);
       // DejaVu is Chromium's own fallback for Latin; the Arabic must not be in it.
       expect(fonts).toMatch(/NotoNaskhArabic-Bold/);
+    },
+    240_000,
+  );
+  it(
+    'can hide the header and footer bands and sit on a PDF letterhead',
+    async () => {
+      // A stand-in letterhead: a coloured side stripe and a line of text.
+      const sheet = await PDFDocument.create();
+      const page = sheet.addPage([595.28, 841.89]);
+      page.drawRectangle({ x: 0, y: 0, width: 40, height: 841.89, color: rgb(0.1, 0.5, 0.3) });
+      page.drawText('LETTERHEAD BACKGROUND', { x: 80, y: 790, size: 18 });
+      const letterhead = Buffer.from(await sheet.save());
+
+      const content = { ...snapshot(40, 2), design: { hideHeader: true, hideFooter: true, backgroundId: 'x' } };
+      const html = renderQuotationDocument(content, { logoData: LOGO, logoMime: 'image/png' }, 'en', false);
+      const pdf = await browser.render(html, {
+        fullBleed: true,
+        pageNumberColor: { r: 0.3, g: 0.3, b: 0.3 },
+        pageNumberY: QUOTATION_PAGE_NUMBER.y,
+        pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+        backgroundPdf: await extractBackgroundPage(letterhead),
+      });
+      const document = await PDFDocument.load(pdf);
+      expect(document.getPageCount()).toBeGreaterThan(1);
+      if (process.env.KAYAN_PDF_OUT) {
+        const { writeFileSync } = await import('fs');
+        writeFileSync(process.env.KAYAN_PDF_OUT, pdf);
+      }
     },
     240_000,
   );

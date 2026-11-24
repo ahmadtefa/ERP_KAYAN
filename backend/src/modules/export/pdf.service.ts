@@ -173,8 +173,11 @@ export class PdfService {
       // for. One that fell back to the command line printer has no design at
       // all, so it gets the plain grey number in the white margin instead of
       // white-on-white.
+      const layered = options.backgroundPdf
+        ? await underlayBackground(pdf, options.backgroundPdf)
+        : pdf;
       return await stampPageNumbers(
-        pdf,
+        layered,
         options.fullBleed && !fullBleed
           ? { pageNumberSize: PAGE_NUMBER_GEOMETRY.size, pageNumberY: PAGE_NUMBER_GEOMETRY.y }
           : options,
@@ -285,6 +288,26 @@ export interface PdfRenderOptions {
   /// Points from the bottom edge; defaults to {@link PAGE_NUMBER_GEOMETRY}.
   pageNumberY?: number;
   pageNumberSize?: number;
+  /// A one-page PDF laid under every page of the output (a letterhead).
+  backgroundPdf?: Buffer;
+}
+
+/// Draws `background` (first page) under every page of `content`, scaled to
+/// the content page. The content must have been printed with a transparent
+/// page, or it will cover the background.
+export async function underlayBackground(content: Buffer, background: Buffer): Promise<Buffer> {
+  const out = await PDFDocument.create();
+  const src = await PDFDocument.load(content);
+  const bg = await PDFDocument.load(background);
+  const [bgPage] = await out.embedPdf(bg, [0]);
+  const pages = await out.embedPdf(src, src.getPageIndices());
+  pages.forEach((embedded, i) => {
+    const { width, height } = src.getPage(i).getSize();
+    const page = out.addPage([width, height]);
+    page.drawPage(bgPage, { x: 0, y: 0, width, height });
+    page.drawPage(embedded, { x: 0, y: 0, width, height });
+  });
+  return Buffer.from(await out.save());
 }
 
 /// Adds "n / total" in the horizontal centre of every page.

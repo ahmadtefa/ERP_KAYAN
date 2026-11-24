@@ -188,6 +188,7 @@ export class QuotationsController {
       pageNumberColor: document.pageNumberInk,
       pageNumberY: QUOTATION_PAGE_NUMBER.y,
       pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+      backgroundPdf: document.backgroundPdf ?? undefined,
     });
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(

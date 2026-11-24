@@ -1,7 +1,9 @@
+import { QuotationBackgroundsService } from './quotation-backgrounds.service';
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   Prisma,
@@ -114,6 +116,7 @@ export class QuotationsService {
     private readonly settings: CompanySettingsService,
     private readonly invoices: SalesInvoicesService,
     private readonly audit: AuditService,
+    @Optional() private readonly backgrounds?: QuotationBackgroundsService,
   ) {}
 
   // ------------------------------------------------------------------ lists
@@ -843,6 +846,8 @@ export class QuotationsService {
     /// the offer overrode it, and a number stamped in the wrong colour is a
     /// number nobody can read.
     pageNumberInk: PageNumberInk;
+    /// The one-page letterhead the design sits on, when it names one.
+    backgroundPdf: Buffer | null;
   }> {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -860,6 +865,10 @@ export class QuotationsService {
       pageNumberInk: quotationPageNumberInk(
         content.design as Record<string, unknown> | null | undefined,
       ),
+      backgroundPdf: (await this.backgrounds?.bytes(
+        companyId,
+        (content.design as Record<string, unknown> | null | undefined)?.backgroundId,
+      )) ?? null,
     };
   }
 

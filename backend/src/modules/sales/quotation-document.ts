@@ -194,6 +194,15 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
     if (v.visible === false) css.push('display:none !important');
     if (css.length) rules.push(`${selector}{${css.join(';')}}`);
   }
+  // Whole-band switches: hide the header band or the footer band entirely
+  // (for pre-printed letterhead paper), and let a PDF background show through.
+  if (design.hideHeader === true) rules.push('.page-bg .band-top{display:none !important}');
+  if (design.hideFooter === true) rules.push('.page-bg .band-bottom{display:none !important}');
+  if (typeof design.backgroundId === 'string' && design.backgroundId) {
+    rules.push('html,body{background:transparent !important}');
+    rules.push('@media print{body{background:transparent !important}}');
+    rules.push('.page-bg .frame,.page-bg .watermark{display:none !important}');
+  }
   return rules.join('\n');
 }
 
