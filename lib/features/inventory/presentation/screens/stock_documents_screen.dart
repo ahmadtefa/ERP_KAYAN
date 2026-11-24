@@ -328,8 +328,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   /// Why a typed quantity cannot be sent, or null. A count may be zero, a
   /// transfer must move something, an adjustment may add or remove (signed).
   String? _quantityError(String kind, String raw) {
-    final value = double.tryParse(raw.trim().replaceAll(',', '.'));
-    if (raw.trim().isEmpty || value == null) {
+    final value = double.tryParse(raw.trim());
+    if (!RegExp(r'^-?\d+(\.\d+)?$').hasMatch(raw.trim()) ||
+        value == null || !value.isFinite) {
       return _arabic ? 'اكتب كمية رقمية.' : 'Enter a numeric quantity.';
     }
     if (kind == 'TRANSFER' && value <= 0) {
@@ -678,7 +679,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     : (_arabic ? 'المخزن' : 'Store'),
                                 border: const OutlineInputBorder(),
                                 isDense: true,
-                                errorText: errors['fromWarehouse'],
+                                errorText: errors[kind == 'TRANSFER' ? 'fromWarehouse' : 'toWarehouse'],
                               ),
                               items: [
                                 for (final warehouse in warehouses)

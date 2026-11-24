@@ -184,6 +184,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   String? _toWarehouseId;
   String? _locationId;
   bool _busy = false;
+  final _fieldErrors = <String, String>{};
+  void _clearField(String key) {
+    if (_fieldErrors.remove(key) != null) setState(() {});
+  }
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
   String _label(String ar, String en) => _arabic ? ar : en;
@@ -255,7 +259,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
       return _label('الصيغة YYYY-MM-DD', 'Format YYYY-MM-DD');
     }
     final parsed = DateTime.tryParse(raw);
-    if (parsed == null) return _label('تاريخ غير صالح', 'Invalid date');
+    if (parsed == null || parsed.toIso8601String().substring(0, 10) != raw) {
+      return _label('تاريخ غير صالح', 'Invalid date');
+    }
     return null;
   }
 
@@ -280,12 +286,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     }
     if (operation == BatchOperation.transfer &&
         (_toWarehouseId == null || _toWarehouseId == _warehouseId)) {
-      _fail(
-        _label(
-          'اختر مستودعًا مختلفًا للتحويل',
-          'Choose a different destination warehouse',
-        ),
-      );
+      setState(() => _fieldErrors['toWarehouseId'] = _label(
+        'اختر مستودعًا مختلفًا للتحويل',
+        'Choose a different destination warehouse',
+      ));
       return;
     }
     final Map<String, dynamic> body;
@@ -322,6 +326,27 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
+      if (error is ApiFailure &&
+          const {400, 422}.contains(error.statusCode) &&
+          error.fieldErrors.isNotEmpty) {
+        final rest = <String>[];
+        setState(() {
+          _fieldErrors.clear();
+          error.fieldErrors.forEach((key, message) {
+            final field = key == 'fromWarehouseId' ? 'warehouseId' : key;
+            if (const {
+              'itemId', 'warehouseId', 'toWarehouseId', 'quantity', 'unitCost',
+              'productionDate', 'expiryDate', 'storageLocationId', 'reason',
+            }.contains(field)) {
+              _fieldErrors[field] = message;
+            } else {
+              rest.add(message);
+            }
+          });
+        });
+        if (rest.isNotEmpty) _fail(rest.join('\n'));
+        return;
+      }
       // The server's own sentence: "insufficient balance", "lot is expired",
       // "a grant is required". Replacing it with a generic failure would hide
       // which of those the operator has to act on.
@@ -420,6 +445,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     isExpanded: true,
                     decoration: InputDecoration(
                       labelText: _label('الصنف', 'Item'),
+                      errorText: _fieldErrors['itemId'],
                     ),
                     items: [
                       for (final row in widget.items)
@@ -431,7 +457,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                           ),
                         ),
                     ],
-                    onChanged: (value) => setState(() => _itemId = value),
+                    onChanged: (value) => setState(() {
+                      _fieldErrors.remove('itemId');
+                      _itemId = value;
+                    }),
                     validator: _required,
                   ),
                 if (widget.batch == null && operation != BatchOperation.transfer)
@@ -440,6 +469,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     child: _warehouseField(
                       label: _label('المستودع', 'Warehouse'),
                       value: _warehouseId,
+                      fieldKey: 'warehouseId',
                       // Switching warehouse must drop the shelf: the one that
                       // was chosen belongs to the old warehouse and the server
                       // would refuse it.
@@ -455,6 +485,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     child: _warehouseField(
                       label: _label('من مستودع', 'From warehouse'),
                       value: _warehouseId,
+                      fieldKey: 'warehouseId',
                       onChanged: (value) =>
                           setState(() => _warehouseId = value),
                     ),
@@ -464,6 +495,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     child: _warehouseField(
                       label: _label('إلى مستودع', 'To warehouse'),
                       value: _toWarehouseId,
+                      fieldKey: 'toWarehouseId',
                       onChanged: (value) =>
                           setState(() => _toWarehouseId = value),
                     ),
@@ -473,6 +505,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                   padding: const EdgeInsets.only(top: 12),
                   child: TextFormField(
                     controller: _quantity,
+                    forceErrorText: _fieldErrors['quantity'],
+                    onChanged: (_) => _clearField('quantity'),
                     decoration: InputDecoration(
                       labelText: _label('الكمية', 'Quantity'),
                     ),
@@ -487,6 +521,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _unitCost,
+                    forceErrorText: _fieldErrors['unitCost'],
+                    onChanged: (_) => _clearField('unitCost'),
                       decoration: InputDecoration(
                         labelText: _label(
                           'تكلفة الوحدة',
@@ -506,6 +542,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _productionDate,
+                    forceErrorText: _fieldErrors['productionDate'],
+                    onChanged: (_) => _clearField('productionDate'),
                       decoration: InputDecoration(
                         labelText: _label(
                           'تاريخ الإنتاج (اختياري)',
@@ -521,6 +559,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _expiryDate,
+                    forceErrorText: _fieldErrors['expiryDate'],
+                    onChanged: (_) => _clearField('expiryDate'),
                       decoration: InputDecoration(
                         labelText: _label(
                           'تاريخ الانتهاء (اختياري)',
@@ -548,6 +588,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     padding: const EdgeInsets.only(top: 12),
                     child: TextFormField(
                       controller: _reason,
+                    forceErrorText: _fieldErrors['reason'],
+                    onChanged: (_) => _clearField('reason'),
                       decoration: InputDecoration(
                         labelText: operation == BatchOperation.writeOff
                             ? _label('السبب', 'Reason')
@@ -615,6 +657,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
               'موقع التخزين (اختياري)',
               'Storage location (optional)',
             ),
+            errorText: _fieldErrors['storageLocationId'],
           ),
           items: [
             for (final row in rows)
@@ -626,7 +669,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                 ),
               ),
           ],
-          onChanged: (value) => setState(() => _locationId = value),
+          onChanged: (value) => setState(() {
+            _fieldErrors.remove('storageLocationId');
+            _locationId = value;
+          }),
         );
       },
     );
@@ -635,6 +681,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   Widget _warehouseField({
     required String label,
     required String? value,
+    required String fieldKey,
     required ValueChanged<String?> onChanged,
   }) {
     return DropdownButtonFormField<String>(
@@ -642,7 +689,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           ? value
           : null,
       isExpanded: true,
-      decoration: InputDecoration(labelText: label),
+      decoration: InputDecoration(labelText: label, errorText: _fieldErrors[fieldKey]),
       items: [
         for (final row in widget.warehouses)
           DropdownMenuItem(
@@ -653,7 +700,11 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
             ),
           ),
       ],
-      onChanged: onChanged,
+      onChanged: (value) {
+        _clearField(fieldKey);
+        if (fieldKey == 'warehouseId') _clearField('toWarehouseId');
+        onChanged(value);
+      },
       validator: _required,
     );
   }

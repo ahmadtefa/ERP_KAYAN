@@ -539,6 +539,11 @@ void main() {
 
       expect(api.posted, isEmpty);
       expect(find.text('Format YYYY-MM-DD'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Expiry date (optional)'), '2027-02-30');
+      await tapText(tester, 'Receive');
+      expect(api.posted, isEmpty);
+      expect(find.text('Invalid date'), findsOneWidget);
     });
   });
 
@@ -590,6 +595,25 @@ void main() {
             '"something went wrong" would not',
       );
       expect(api.listCalls, isNot(0));
+    });
+
+    testWidgets('server quantity error stays under quantity and clears on edit', (tester) async {
+      final api = _BatchApi(failPost: const ApiFailure(
+        'Validation failed', statusCode: 422,
+        fieldErrors: {'quantity': 'Quantity exceeds the lot balance'},
+      ));
+      await pump(tester, api);
+      await tapText(tester, 'Issue');
+      final qty = find.widgetWithText(TextFormField, 'Quantity');
+      await tester.enterText(qty, '99');
+      await tapText(tester, 'Issue');
+      expect(find.text('Quantity exceeds the lot balance'), findsOneWidget);
+      expect(tester.widget<TextFormField>(qty).forceErrorText,
+        'Quantity exceeds the lot balance');
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.enterText(qty, '2');
+      await tester.pump();
+      expect(find.text('Quantity exceeds the lot balance'), findsNothing);
     });
 
     testWidgets('the dialog stays open while the call is in flight', (
