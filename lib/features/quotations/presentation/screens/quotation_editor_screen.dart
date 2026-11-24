@@ -429,6 +429,38 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   final _responsiblePhone = TextEditingController();
   DiscountKind _discountKind = DiscountKind.none;
   String? _customerId;
+
+  /// Reasons the server (or this screen) gave for header fields, shown
+  /// beside the field. Cleared per field as the person edits it.
+  final _serverErrors = <String, String>{};
+  final _errorFieldKeys = <String, GlobalKey>{
+    'customerId': GlobalKey(),
+    'subject': GlobalKey(),
+    'terms': GlobalKey(),
+    'notes': GlobalKey(),
+  };
+
+  /// Marks header fields, then brings the first marked one (in screen order)
+  /// into view. Input is untouched.
+  void _flagFields(Map<String, String> errors) {
+    setState(() {
+      _serverErrors
+        ..clear()
+        ..addAll(errors);
+    });
+    for (final field in const ['customerId', 'subject', 'terms', 'notes']) {
+      if (!errors.containsKey(field)) continue;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _errorFieldKeys[field]?.currentContext;
+        if (target != null && target.mounted) Scrollable.ensureVisible(target);
+      });
+      break;
+    }
+  }
+
+  void _clearFieldError(String field) {
+    if (_serverErrors.containsKey(field)) setState(() => _serverErrors.remove(field));
+  }
   String _currency = 'EGP';
   late String _date;
   String? _validUntil;
@@ -770,6 +802,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     if (_saving || _loading || _loadFailed) return;
     final l10n = context.l10n;
     if (_customerId == null) {
+      _flagFields({'customerId': l10n.selectCustomer});
       showMessage(context, l10n.selectCustomer, error: true);
       return;
     }
@@ -878,7 +911,21 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         context.go(AppRoutes.quotations);
       }
     } catch (error) {
-      if (mounted) showAppError(context, error);
+      if (!mounted) return;
+      if (error is ApiFailure && error.fieldErrors.isNotEmpty) {
+        final known = _errorFieldKeys.keys.toSet();
+        final here = {
+          for (final e in error.fieldErrors.entries)
+            if (known.contains(e.key)) e.key: e.value,
+        };
+        final hasOthers = error.fieldErrors.keys.any((k) => !known.contains(k));
+        if (here.isNotEmpty) _flagFields(here);
+        // Errors on table rows or other parts of the offer are listed, with
+        // their Arabic labels, instead of being dropped.
+        if (hasOthers) showAppError(context, error);
+      } else {
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -948,11 +995,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                           runSpacing: 12,
                           children: [
                             SizedBox(
+                              key: _errorFieldKeys['customerId'],
                               width: 300,
                               child: DropdownButtonFormField<String>(
                                 initialValue: _choice(customers, _customerId),
                                 isExpanded: true,
                                 decoration: InputDecoration(
+                                  errorText: _serverErrors['customerId'],
                                   labelText: l10n.customer,
                                   border: const OutlineInputBorder(),
                                   isDense: true,
@@ -968,8 +1017,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       ),
                                     ),
                                 ],
-                                onChanged: (value) =>
-                                    setState(() => _customerId = value),
+                                onChanged: (value) {
+                                  _serverErrors.remove('customerId');
+                                  setState(() => _customerId = value);
+                                },
                               ),
                             ),
                             SizedBox(
@@ -1009,10 +1060,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
+                          key: _errorFieldKeys['terms'],
                           controller: _terms,
+                          onChanged: (_) => _clearFieldError('terms'),
                           minLines: 2,
                           maxLines: 6,
                           decoration: InputDecoration(
+                            errorText: _serverErrors['terms'],
                             labelText: l10n.termsAndConditions,
                             border: const OutlineInputBorder(),
                           ),
@@ -1070,27 +1124,34 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         ),
                         const SizedBox(height: 8),
                         TextField(
+                          key: _errorFieldKeys['notes'],
                           controller: _notes,
+                          onChanged: (_) => _clearFieldError('notes'),
                           minLines: 1,
                           maxLines: 4,
                           decoration: InputDecoration(
+                            errorText: _serverErrors['notes'],
                             labelText: l10n.notesLabel,
                             helperText: l10n.optional,
                             border: const OutlineInputBorder(),
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        KeyedSubtree(
+                          key: _errorFieldKeys['subject'],
+                          child: TextField(
                           key: const ValueKey('quotation-subject'),
                           controller: _subject,
+                          onChanged: (_) => _clearFieldError('subject'),
                           maxLength: 200,
                           decoration: InputDecoration(
+                            errorText: _serverErrors['subject'],
                             labelText: l10n.subject,
                             helperText: l10n.subjectHint,
                             border: const OutlineInputBorder(),
                             isDense: true,
                           ),
-                        ),
+                        )),
                         SwitchListTile(
                           key: const ValueKey('quotation-show-tax-number'),
                           contentPadding: EdgeInsets.zero,

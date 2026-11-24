@@ -120,4 +120,35 @@ void main() {
       File('/tmp/shots/quotation-paper-options.png').writeAsBytesSync(data!.buffer.asUint8List());
     });
   });
+
+  testWidgets('saving without a customer marks the customer field and keeps input', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(_FakeApiClient()),
+          itemsProvider.overrideWith((ref) async => []),
+          customersProvider.overrideWith((ref) async => []),
+        ],
+        child: MaterialApp.router(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          routerConfig: GoRouter(initialLocation: '/new', routes: [
+            GoRoute(path: '/new', builder: (c, s) => QuotationEditorScreen(navigationKey: s.pageKey)),
+          ]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('quotation-subject')), 'Keep me');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(find.text('Select a customer'), findsWidgets);
+    expect(find.text('Keep me'), findsOneWidget);
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+  });
 }
