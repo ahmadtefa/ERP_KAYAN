@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost, canReadPurchasePrice, canReadSalePrice } from '../../common/auth/cost-visibility';
@@ -31,13 +32,14 @@ export class ReturnsController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       canReadCost(user),
+      branchReadScope(user),
     ).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Get('sales/:id')
   @RequirePermissions('sales.invoices.read')
   getSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, 'sales', id, canReadCost(user)).then((result) => this.redact(user, result, 'sale'));
+    return this.service.findOne(user.companyId, 'sales', id, canReadCost(user), branchReadScope(user)).then((result) => this.redact(user, result, 'sale'));
   }
 
   @Post('sales')
@@ -71,13 +73,14 @@ export class ReturnsController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       canReadCost(user),
+      branchReadScope(user),
     ).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Get('purchases/:id')
   @RequirePermissions('purchases.invoices.read')
   getPurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, 'purchases', id, canReadCost(user)).then((result) => this.redact(user, result, 'purchase'));
+    return this.service.findOne(user.companyId, 'purchases', id, canReadCost(user), branchReadScope(user)).then((result) => this.redact(user, result, 'purchase'));
   }
 
   @Post('purchases')
