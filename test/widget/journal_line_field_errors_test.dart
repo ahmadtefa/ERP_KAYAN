@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -6,6 +11,8 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -33,8 +40,27 @@ class _Api extends ApiClient {
   }
 }
 
+Future<void> _fonts() async {
+  final f = FontLoader('IBMPlexSansArabic');
+  for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+    f.addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-$w.ttf').readAsBytesSync())));
+  }
+  await f.load();
+  final i = FontLoader('MaterialIcons')
+    ..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())));
+  await i.load();
+}
+
 void main() {
   testWidgets('journal line problems appear beside the field and input is kept', (tester) async {
+    await tester.runAsync(_fonts);
+    final shot = GlobalKey();
+    Future<void> snap(String name) => tester.runAsync(() async {
+          final b = shot.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+          final img = await b.toImage();
+          final d = await img.toByteData(format: ui.ImageByteFormat.png);
+          File('/tmp/shots/$name.png').writeAsBytesSync(d!.buffer.asUint8List());
+        });
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -49,12 +75,14 @@ void main() {
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: RepaintBoundary(key: shot, child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.dark(),
           locale: const Locale('en'),
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: const Scaffold(body: JournalEntriesScreen()),
-        )));
+        ))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('New journal entry'));
     await tester.pumpAndSettle();
@@ -76,6 +104,7 @@ void main() {
     expect(api.posts, 0);
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
+    await snap('journal-account-error');
 
     // Choosing the account clears the mark and keeps the amounts.
     await tester.tap(find.byType(DropdownButtonFormField<String>).at(0));
@@ -90,5 +119,8 @@ void main() {
     expect(tester.widget<TextField>(credit.at(1)).decoration!.errorText, 'المبلغ غير صحيح لهذا الحساب');
     expect(tester.widget<TextField>(credit.at(1)).controller!.text, '10');
     expect(tester.widget<TextField>(debit.at(0)).controller!.text, '10');
+    await snap('journal-server-error');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 70));
   });
 }
