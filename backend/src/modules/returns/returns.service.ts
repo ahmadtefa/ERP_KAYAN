@@ -68,7 +68,9 @@ export class ReturnsService {
     side: 'sales' | 'purchases',
     query: { from?: string; to?: string; page?: number; pageSize?: number } = {},
     mayReadCost = true,
+    branchScope: string[] | null = null,
   ) {
+    const bw = branchScope ? { branchId: { in: branchScope } } : {};
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
     const dateFilter =
@@ -84,6 +86,7 @@ export class ReturnsService {
         companyId,
         deletedAt: null,
         documentType: InvoiceDocumentType.CREDIT_NOTE,
+        ...bw,
         ...(dateFilter ? { invoiceDate: dateFilter } : {}),
       };
       const [items, total] = await this.prisma.$transaction([
@@ -111,6 +114,7 @@ export class ReturnsService {
       companyId,
       deletedAt: null,
       documentType: InvoiceDocumentType.DEBIT_NOTE,
+      ...bw,
       ...(dateFilter ? { invoiceDate: dateFilter } : {}),
     };
     const [items, total] = await this.prisma.$transaction([
@@ -134,10 +138,12 @@ export class ReturnsService {
     side: 'sales' | 'purchases',
     id: string,
     mayReadCost = true,
+    branchScope: string[] | null = null,
   ) {
+    const bw = branchScope ? { branchId: { in: branchScope } } : {};
     if (side === 'sales') {
       const invoice = await this.prisma.salesInvoice.findFirst({
-        where: { id, companyId, deletedAt: null, documentType: InvoiceDocumentType.CREDIT_NOTE },
+        where: { id, companyId, deletedAt: null, documentType: InvoiceDocumentType.CREDIT_NOTE, ...bw },
         include: {
           customer: { select: { id: true, code: true, nameEn: true, nameAr: true } },
           originalInvoice: { select: { id: true, invoiceNumber: true, invoiceDate: true } },
@@ -181,7 +187,7 @@ export class ReturnsService {
     }
 
     const invoice = await this.prisma.purchaseInvoice.findFirst({
-      where: { id, companyId, deletedAt: null, documentType: InvoiceDocumentType.DEBIT_NOTE },
+      where: { id, companyId, deletedAt: null, documentType: InvoiceDocumentType.DEBIT_NOTE, ...bw },
       include: {
         supplier: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         originalInvoice: { select: { id: true, invoiceNumber: true, invoiceDate: true } },
