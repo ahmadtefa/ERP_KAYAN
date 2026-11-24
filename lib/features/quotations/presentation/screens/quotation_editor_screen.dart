@@ -843,6 +843,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ? 'اكتب سعرًا صحيحًا بدون سالب' : 'Enter a valid price, zero or more';
         }
       }
+      if (table.discountKind != DiscountKind.none) {
+        final raw = table.discountValue.text.trim();
+        final value = raw.isEmpty ? Decimal.zero : Decimal.tryParse(raw);
+        if (value == null || value < Decimal.zero ||
+            (table.discountKind == DiscountKind.percent && value > Decimal.fromInt(100)) ||
+            (table.discountKind == DiscountKind.amount && value > table.gross)) {
+          _inputErrors[table.discountValue] = Localizations.localeOf(context).languageCode == 'ar'
+              ? 'اكتب خصمًا صحيحًا لا يتجاوز قيمة الجدول أو ١٠٠٪'
+              : 'Enter a valid discount within the table value or 100%';
+        }
+      }
       _sentTableLines.add(active);
     }
     if (_inputErrors.isNotEmpty) {
@@ -2333,6 +2344,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     ],
                     onChanged: (value) => setState(() {
                       table.discountKind = value ?? DiscountKind.none;
+                      _inputErrors.remove(table.discountValue);
                       if (table.discountKind == DiscountKind.none) {
                         table.discountValue.clear();
                       }
@@ -2341,6 +2353,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
+                  key: _inputKey(table.discountValue),
                   width: 160,
                   child: TextField(
                     key: ValueKey('quotation-table-discount-value-$index'),
@@ -2350,13 +2363,15 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       decimal: true,
                     ),
                     decoration: InputDecoration(
+                      errorText: _inputErrors[table.discountValue],
+                      errorMaxLines: 5,
                       labelText: table.discountKind == DiscountKind.percent
                           ? l10n.discountPercentValue
                           : l10n.discountAmountValue,
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(() { _inputErrors.remove(table.discountValue); }),
                   ),
                 ),
                 const SizedBox(width: 16),

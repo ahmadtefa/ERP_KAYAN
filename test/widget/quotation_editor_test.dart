@@ -195,6 +195,12 @@ void main() {
     expect(api.postPath, isNull);
     expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-price-0-0'))).decoration?.errorText, isNotNull);
     await tester.enterText(find.byKey(const ValueKey('quotation-price-0-0')), '100');
+    await tester.enterText(find.byKey(const ValueKey('quotation-table-discount-value-0')), '999999');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(api.postPath, isNull);
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('quotation-table-discount-value-0'))).decoration?.errorText, isNotNull);
+    await tester.enterText(find.byKey(const ValueKey('quotation-table-discount-value-0')), '10');
     final rowRefusal = api.pendingPost!;
     await tester.tap(find.text('Save'));
     await tester.pump();
