@@ -4,8 +4,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
+import { STOCK_VOUCHER_PENDING_APPROVAL, WRITEOFF_PENDING_APPROVAL, dedupeKey } from '../notifications/notification-kinds';
 import { randomUUID } from 'node:crypto';
 
 import { AuditService } from '../../common/audit/audit.service';
@@ -87,6 +90,7 @@ export class StockDocumentsService {
     private readonly warehouses: WarehouseService,
     private readonly costCenters: CostCentersService,
     private readonly ledger: StockLedgerService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async findAll(
@@ -683,6 +687,9 @@ export class StockDocumentsService {
       return document;
     }, { timeout: 30000 });
 
+    if ('kind' in created && created.kind === StockDocumentKind.WRITE_OFF) {
+      await this.announceApproval(companyId, created.id, 'REVIEW', userId, created.createdBy, true);
+    }
     return this.findOne(companyId, created.id, mayReadCost, voucherBranchIdOf(branchId));
   }
 
@@ -848,7 +855,62 @@ export class StockDocumentsService {
       }
       await this.auditInTx(tx, { companyId, userId, action: stage, entity: 'stock_documents', entityId: id }, );
     });
+    await this.announceApproval(companyId, id, stage, userId, null, false);
     return this.findOne(companyId, id, mayReadCost);
+  }
+
+  /// Keeps the notification centre in step with write-off and voucher
+  /// approval at once. Runs after the action committed, never undoes it; the
+  /// 30-minute scan is the backstop. A write-off is raised by the scan (its
+  /// create path is not hooked), a voucher is raised when it is reviewed.
+  private async announceApproval(
+    companyId: string,
+    id: string,
+    stage: 'REVIEW' | 'APPROVE',
+    userId: string,
+    createdBy: string | null,
+    writeOff: boolean,
+  ) {
+    if (!this.notifications) return;
+    try {
+      const doc = await this.prisma.stockDocument.findFirst({
+        where: { id, companyId },
+        select: { branchId: true, documentNumber: true, createdBy: true },
+      });
+      if (!doc) return;
+      const path = writeOff ? `/inventory/write-offs?document=${id}` : `/inventory/documents?document=${id}`;
+      if (stage === 'REVIEW') {
+        await this.notifications.raiseSafely({
+          companyId,
+          type: writeOff ? WRITEOFF_PENDING_APPROVAL : STOCK_VOUCHER_PENDING_APPROVAL,
+          branchId: doc.branchId,
+          entityType: 'StockDocument',
+          entityId: id,
+          entityRef: doc.documentNumber,
+          actionPath: path,
+          titleEn: `${writeOff ? 'Write-off' : 'Stock voucher'} ${doc.documentNumber} is waiting for approval`,
+          titleAr: `${writeOff ? 'مستند الإعدام' : 'إذن المخزن'} ${doc.documentNumber} في انتظار الاعتماد`,
+          dedupe: dedupeKey({ type: writeOff ? WRITEOFF_PENDING_APPROVAL : STOCK_VOUCHER_PENDING_APPROVAL, entityId: id }),
+        });
+        return;
+      }
+      await this.notifications.clearPending(companyId, 'StockDocument', id);
+      await this.notifications.tellRequester({
+        companyId,
+        branchId: doc.branchId,
+        requesterId: createdBy ?? doc.createdBy,
+        decidedBy: userId,
+        outcome: 'APPROVED',
+        entityType: 'StockDocument',
+        entityId: id,
+        entityRef: doc.documentNumber,
+        nameAr: writeOff ? 'مستند الإعدام' : 'إذن المخزن',
+        nameEn: writeOff ? 'Write-off' : 'Stock voucher',
+        actionPath: path,
+      });
+    } catch {
+      // The scan reconciles the centre on its next pass.
+    }
   }
 
   /// Approves a write-off, once. This is a separate approval cycle from the
@@ -902,6 +964,7 @@ export class StockDocumentsService {
       entityId: document.id,
       after: { documentNumber: document.documentNumber, approvedBy: userId },
     });
+    await this.announceApproval(companyId, document.id, 'APPROVE', userId, document.createdBy, true);
 
     return this.findOne(companyId, document.id, mayReadCost);
   }

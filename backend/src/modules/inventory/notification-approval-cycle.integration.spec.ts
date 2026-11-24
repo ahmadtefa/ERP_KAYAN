@@ -6,6 +6,7 @@ import { StockTransfersService } from './stock-transfers.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SalesOrdersService } from '../sales/sales-orders.service';
 import { StockTakesService } from './stock-takes.service';
+import { StockDocumentsService } from './stock-documents.service';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const BRANCH_A = '22222222-2222-4222-8222-222222222222';
@@ -198,5 +199,29 @@ const vmReady =
     expect(await sees(U.countApprover)).toEqual([]);
     expect(await sees(nu(REQUESTER, [], ['STOREKEEPER']))).toEqual(['DOCUMENT_APPROVED']);
     expect(await sees(U.other)).toEqual([]);
+  });
+
+  it('write-off and reviewed voucher alerts reach their own approvers; approving a write-off clears it and tells its author', async () => {
+    const WO = '99999999-9999-4999-8999-999999999995';
+    const VO = '99999999-9999-4999-8999-999999999996';
+    const ins = (id: string, kind: string, no: string, extra: string, extraVal: string) =>
+      prisma.$executeRawUnsafe(`INSERT INTO stock_documents(id,"companyId","branchId",kind,"documentNumber","documentDate","updatedAt","createdBy"${extra}) VALUES ('${id}','${COMPANY}','${BRANCH_A}','${kind}','${no}',current_date,now(),'${REQUESTER}'${extraVal})`);
+    await ins(WO, 'WRITE_OFF', 'WO-1', '', '');
+    await ins(VO, 'ADJUSTMENT', 'SV-1', ',"voucherKind","reviewedAt","counterpartyName"', ",'ISSUE',now(),'x'");
+    const U: any = {
+      writeOffApprover: nu(MANAGER, ['inventory.writeoff.approve'], ['WAREHOUSE_MANAGER']),
+      voucherApprover: nu(CHIEF, ['inventory.stock.approve'], ['WAREHOUSE_MANAGER']),
+      author: nu(REQUESTER, [], ['STOREKEEPER']),
+    };
+    await notif.scanBusiness(COMPANY);
+    expect(await sees(U.writeOffApprover)).toEqual(['WRITEOFF_PENDING_APPROVAL']);
+    expect(await sees(U.voucherApprover)).toEqual(['STOCK_VOUCHER_PENDING_APPROVAL']);
+    const docs = new StockDocumentsService(prisma as never, undefined as never, undefined as never, undefined as never, { record: async () => undefined } as never, undefined as never, undefined as never, undefined as never, undefined as never, notif);
+    await docs.approve(COMPANY, MANAGER, WO, true).catch((e: Error) => {
+      if (!/findOne|undefined|Cannot read/.test(String(e.stack))) throw e;
+    });
+    expect(await sees(U.writeOffApprover)).toEqual([]);
+    expect(await sees(U.author)).toEqual(['DOCUMENT_APPROVED']);
+    expect(await sees(U.voucherApprover)).toEqual(['STOCK_VOUCHER_PENDING_APPROVAL']);
   });
 });
