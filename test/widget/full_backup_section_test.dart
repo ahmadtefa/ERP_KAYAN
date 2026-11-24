@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'package:erp_kayan/core/platform/backup_save_target.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -53,6 +55,9 @@ class _FakeFullBackupService extends FullBackupService {
       'file': {'name': 'kayan-full-test.dump'},
     };
   }
+
+  @override
+  Future<Uint8List> downloadBytes(String name) async => Uint8List.fromList([80, 71, 68, 77, 80, 1]);
 
   @override
   Future<Map<String, dynamic>> restore({
@@ -123,17 +128,31 @@ class _MemoryTokens implements SecureTokenBackend {
   Future<void> delete(String key) async { values.remove(key); }
 }
 
+class _Target implements BackupSaveTarget {
+  @override
+  String get path => '/chosen/backup.dump';
+  Uint8List? saved;
+  Object? failure;
+  @override
+  Future<void> write(Uint8List bytes) async {
+    if (failure != null) throw failure!;
+    saved = bytes;
+  }
+}
+
 Future<void> _pump(
   WidgetTester tester,
   _FakeFullBackupService service, {
   _FakeSystemBackupService? system,
   TokenStore? tokenStore,
   Locale locale = const Locale('en'),
+  Future<BackupSaveTarget?> Function()? choose,
 }) {
   return tester.pumpWidget(
     ProviderScope(
       overrides: [
         fullBackupServiceProvider.overrideWithValue(service),
+        backupSaveTargetProvider.overrideWithValue(choose ?? () async => _Target()),
         if (tokenStore != null) tokenStoreProvider.overrideWithValue(tokenStore),
         systemBackupServiceProvider.overrideWithValue(
           system ?? _FakeSystemBackupService(),
@@ -148,6 +167,47 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('cancel Save As does not create or save a backup', (tester) async {
+    final service = _FakeFullBackupService();
+    await _pump(tester, service, choose: () async => null);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(service.createCalled, isFalse);
+    expect(find.textContaining('No backup was created'), findsOneWidget);
+  });
+  testWidgets('manual DUMP saves exact returned bytes only to chosen target', (tester) async {
+    final service = _FakeFullBackupService();
+    final target = _Target();
+    await _pump(tester, service, choose: () async => target);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(target.saved, [80, 71, 68, 77, 80, 1]);
+    expect(find.textContaining('Chosen file saved and verified'), findsOneWidget);
+    expect(find.textContaining('/chosen/backup.dump'), findsOneWidget);
+  });
+  testWidgets('write failure cannot claim chosen location saved or fallback', (tester) async {
+    final service = _FakeFullBackupService();
+    final target = _Target()..failure = StateError('write refused');
+    await _pump(tester, service, choose: () async => target);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(target.saved, isNull);
+    expect(find.textContaining('Chosen file saved and verified'), findsNothing);
+    expect(find.textContaining('The server copy remains'), findsOneWidget);
+  });
+  testWidgets('dialog failure cannot create a backup elsewhere', (tester) async {
+    final service = _FakeFullBackupService();
+    await _pump(tester, service, choose: () async => throw StateError('dialog unavailable'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(service.createCalled, isFalse);
+    expect(find.textContaining('Chosen file saved and verified'), findsNothing);
+  });
+
   testWidgets('successful interrupted recovery clears credentials and restarts cached app state', (tester) async {
     final store = TokenStore(backend: _MemoryTokens());
     await store.saveTokens(accessToken: 'old-access', refreshToken: 'old-refresh');

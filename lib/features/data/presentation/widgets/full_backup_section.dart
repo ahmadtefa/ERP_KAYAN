@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/app/app_scope_restart.dart';
@@ -140,7 +141,15 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       _notice = l10n.backupInProgress;
       _failure = null;
     });
+    String? serverFile;
+    var createStarted = false;
     try {
+      final target = kIsWeb ? null : await ref.read(backupSaveTargetProvider)();
+      if (!kIsWeb && target == null) {
+        if (mounted) setState(() => _notice = _t(context, 'تم إلغاء الحفظ. لم تُنشأ نسخة.', 'Saving cancelled. No backup was created.'));
+        return;
+      }
+      createStarted = true;
       final result = await ref.read(fullBackupServiceProvider).create();
       final file = result['file'] as Map<String, dynamic>?;
       // A 200 without a file is not a backup. Saying «saved» over an empty
@@ -151,7 +160,16 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
         throw const FormatException('The backup response did not identify a file.');
       }
       if (!mounted) return;
-      setState(() => _notice = _createdNotice(file, complete: false));
+      serverFile = file['name'] as String;
+      if (kIsWeb) {
+        setState(() => _notice = '${_createdNotice(file, complete: false)}\n${_t(context, 'نسخة على الخادم فقط. استخدم تنزيل للاحتفاظ بنسخة على جهازك حسب إعدادات المتصفح.', 'Server copy only. Use Download to keep a copy on your computer using browser settings.')}');
+        await _load();
+        return;
+      }
+      final bytes = await ref.read(fullBackupServiceProvider).downloadBytes(serverFile);
+      await target!.write(bytes);
+      if (!mounted) return;
+      setState(() => _notice = '${_createdNotice(file, complete: false)}\n${_t(context, 'تم حفظ الملف المختار والتحقق منه', 'Chosen file saved and verified')}: ${target.path}');
       await _load();
     } catch (error) {
       if (!mounted) return;
@@ -163,7 +181,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       if (!mounted) return;
       setState(() {
         _notice = null;
-        _failure = '$message\n${_t(
+        _failure = !createStarted ? '$message\n${_t(context, 'لم تُنشأ نسخة ولم يُحفظ ملف في مكان آخر.', 'No backup was created and no alternate file was saved.')}' : '$message${serverFile == null ? '' : '\n${_t(context, 'لم يتأكد الحفظ في المكان المختار. نسخة الخادم باقية', 'Saving to the chosen location was not confirmed. The server copy remains')}: $serverFile'}\n${_t(
           context,
           'تعذر تأكيد نتيجة الطلب. قد تنتمي الملفات الجديدة إلى عملية أخرى؛ افحص النسخة قبل الاعتماد عليها.',
           'The request outcome could not be confirmed. A new file may belong to another backup; inspect it before relying on it.',

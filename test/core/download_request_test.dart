@@ -11,6 +11,10 @@ Uint8List bytesOf(List<int> head, [int total = 64]) {
 
 void main() {
   group('validateDownloadedFile', () {
+    test('DUMP must carry PostgreSQL custom archive signature', () {
+      expect(() => validateDownloadedFile(bytesOf([80,71,68,77,80]), 'data.dump'), returnsNormally);
+      expect(() => validateDownloadedFile(bytesOf([60,104,116,109,108]), 'data.dump'), throwsA(isA<DownloadFailure>()));
+    });
     test('accepts a real PDF', () {
       // %PDF-
       final pdf = bytesOf([0x25, 0x50, 0x44, 0x46, 0x2d]);

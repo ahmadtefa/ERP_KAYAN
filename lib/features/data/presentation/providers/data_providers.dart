@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import '../../../../core/platform/backup_save_target.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -661,6 +664,10 @@ final dataServiceProvider = Provider<DataService>(
 );
 
 /// Full-database backups: the whole PostgreSQL archive, for disasters.
+final backupSaveTargetProvider = Provider<Future<BackupSaveTarget?> Function()>(
+  (ref) => chooseBackupSaveTarget,
+);
+
 class FullBackupService {
   FullBackupService(this._dio);
 
@@ -694,6 +701,16 @@ class FullBackupService {
       options: Options(receiveTimeout: const Duration(minutes: 15)),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<Uint8List> downloadBytes(String name) async {
+    final response = await _dio.get<List<int>>(
+      '$_path/${Uri.encodeComponent(name)}/download',
+      options: Options(responseType: ResponseType.bytes, receiveTimeout: const Duration(minutes: 15)),
+    );
+    final bytes = Uint8List.fromList(response.data ?? const []);
+    validateDownloadedFile(bytes, name);
+    return bytes;
   }
 
   Future<void> delete(String name) =>

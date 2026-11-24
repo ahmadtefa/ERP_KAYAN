@@ -60,6 +60,9 @@ void validateDownloadedFile(Uint8List bytes, String fileName) {
       'say why.',
     );
   }
+  if (name.endsWith('.dump') && !startsWith(const [0x50, 0x47, 0x44, 0x4d, 0x50])) {
+    throw const DownloadFailure('The server did not send a PostgreSQL archive, so nothing was saved.');
+  }
   if (name.endsWith('.json')) {
     try {
       jsonDecode(utf8.decode(bytes));
