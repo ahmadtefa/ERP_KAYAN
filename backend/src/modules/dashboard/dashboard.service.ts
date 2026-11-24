@@ -759,37 +759,25 @@ export class DashboardService {
     asOf: Date,
     branches: string[] | null,
   ) {
-    const branchFilter = branches ? { branchId: { in: branches } } : {};
-    const rows =
-      side === 'sales'
-        ? await this.prisma.salesInvoice.findMany({
-            where: {
-              companyId,
-              deletedAt: null,
-              status: InvoiceStatus.POSTED,
-              invoiceDate: { lte: asOf },
-              ...branchFilter,
-            },
-            select: { totalAmount: true, paidAmount: true },
-          })
-        : await this.prisma.purchaseInvoice.findMany({
-            where: {
-              companyId,
-              deletedAt: null,
-              status: InvoiceStatus.POSTED,
-              invoiceDate: { lte: asOf },
-              ...branchFilter,
-            },
-            select: { totalAmount: true, paidAmount: true },
-          });
-
-    const total = rows.reduce(
-      (sum, row) => sum.plus(row.totalAmount).minus(row.paidAmount),
-      new Prisma.Decimal(0),
-    );
+    // One aggregate in the database. The earlier version loaded every posted
+    // invoice row into the API process to add them up, which made this the most
+    // expensive part of the dashboard as the number of invoices grew. Same
+    // filters, same exact decimal arithmetic.
+    const table = side === 'sales' ? Prisma.sql`sales_invoices` : Prisma.sql`purchase_invoices`;
+    const branchSql = branches ? Prisma.sql`AND "branchId" = ANY(${branches}::uuid[])` : Prisma.sql``;
+    const rows = await this.prisma.$queryRaw<Array<{ total: Prisma.Decimal; invoices: bigint }>>(Prisma.sql`
+      SELECT COALESCE(SUM("totalAmount" - "paidAmount"), 0) AS total,
+             COUNT(*) FILTER (WHERE "totalAmount" <> "paidAmount") AS invoices
+        FROM ${table}
+       WHERE "companyId" = ${companyId}::uuid
+         AND "deletedAt" IS NULL
+         AND status = 'POSTED'
+         AND "invoiceDate" <= ${asOf}::date
+         ${branchSql}
+    `);
     return {
-      total: total.toFixed(MONEY_SCALE),
-      invoices: rows.filter((row) => !row.totalAmount.minus(row.paidAmount).isZero()).length,
+      total: new Prisma.Decimal(rows[0]?.total ?? 0).toFixed(MONEY_SCALE),
+      invoices: Number(rows[0]?.invoices ?? 0),
     };
   }
 }

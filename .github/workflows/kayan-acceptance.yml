@@ -345,6 +345,17 @@ jobs:
           const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (r.numPassedTests !== 4 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 4 real-PG transaction-lifetime cases must run.');
           NODE
+      - name: Prove dashboard aggregates preserve sales and purchase balances
+        if: matrix.suite == 'backend'
+        env:
+          KAYAN_DASHBOARD_PG: '1'
+        run: |
+          npm test -- --runInBand src/modules/dashboard/dashboard-balances.postgres.spec.ts --json --outputFile="$RUNNER_TEMP/dashboard-balances.json"
+          node - "$RUNNER_TEMP/dashboard-balances.json" <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (r.numPassedTests !== 30 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('All 30 real-PG dashboard balance cases must run.');
+          NODE
       - name: Prove paged aging matches full reports and nonzero ledgers
         if: matrix.suite == 'backend'
         env:
