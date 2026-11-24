@@ -70,6 +70,9 @@ Future<void> _loadFonts() async {
     loader.addFont(Future.value(ByteData.sublistView(bytes)));
   }
   await loader.load();
+  final icons = FontLoader('MaterialIcons')
+    ..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())));
+  await icons.load();
 }
 
 void main() {
