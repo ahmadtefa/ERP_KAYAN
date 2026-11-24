@@ -122,7 +122,7 @@ try {
  Screenshot 'native-save-as'
  Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$buttonCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1');$button=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,$buttonCondition);$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Stage 'open';$w=Wait-Dialog 'Open';$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
- Set-FileName $w ($probeDir + '\');$keys.SendKeys('{ENTER}');Start-Sleep 3
+ Set-FileName $w ($probeDir + '\');Invoke-DialogPrimary $w;Start-Sleep 3
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  $names=@($elements | ForEach-Object {$_.Current.Name})
  if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
