@@ -95,6 +95,8 @@ describe('notifications', () => {
       salesOrders: [] as Row[],
       purchaseOrders: [] as Row[],
       journalEntries: [] as Row[],
+      stockTakes: [] as Row[],
+      stockDocuments: [] as Row[],
       salesInvoices: [] as Row[],
       purchaseInvoices: [] as Row[],
       balances: [] as Row[],
@@ -262,8 +264,16 @@ describe('notifications', () => {
           state.purchaseOrders.filter((row) => matches(row, args.where)),
         ),
       },
-      stockTakeSession: { findMany: jest.fn(async () => [] as Row[]) },
-      stockDocument: { findMany: jest.fn(async () => [] as Row[]) },
+      stockTakeSession: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.stockTakes.filter((row) => matches(row, args.where)),
+        ),
+      },
+      stockDocument: {
+        findMany: jest.fn(async (args: Row = {}) =>
+          state.stockDocuments.filter((row) => matches(row, args.where)),
+        ),
+      },
       journalEntry: {
         findMany: jest.fn(async (args: Row = {}) =>
           state.journalEntries.filter((row) => matches(row, args.where)),
@@ -1235,6 +1245,23 @@ describe('notifications', () => {
     const journal = state.notifications.find((one) => one.type === 'JOURNAL_PENDING_APPROVAL');
     expect(journal?.permission).toBe('accounting.journal.approve');
     expect(journal?.severity).toBe('WARNING');
+  });
+
+  it('raises a stock count in review and a reviewed voucher for their own approvers, and closes them once decided', async () => {
+    const { service, state } = makeHarness();
+    state.stockTakes = [{ id: 'st-1', companyId: COMPANY, branchId: BRANCH, code: 'ST-1', status: 'REVIEW' }];
+    state.stockDocuments = [];
+    await service.scanBusiness(COMPANY, TODAY);
+    const count = state.notifications.filter((one) => one.type === 'STOCKTAKE_PENDING_APPROVAL');
+    expect(count).toHaveLength(1);
+    expect(count[0].permission).toBe('inventory.stocktake.approve');
+    expect(count[0].branchId).toBe(BRANCH);
+    // Approved: the count leaves the review state and the next pass closes the alert.
+    state.stockTakes = [];
+    await service.scanBusiness(COMPANY, TODAY);
+    expect(
+      state.notifications.filter((one) => one.type === 'STOCKTAKE_PENDING_APPROVAL' && one.status === 'OPEN'),
+    ).toHaveLength(0);
   });
 
   it('separates a bill falling due from a bill that is overdue', async () => {
