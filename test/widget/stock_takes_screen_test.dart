@@ -455,6 +455,19 @@ void main() {
     });
   });
 
+  testWidgets('cancelling an open count sends its entered reason', (tester) async {
+    final api = _StockTakesApi();
+    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel count'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Cancellation reason'), '  duplicate count  ');
+    await tester.tap(find.text('Confirm cancellation'));
+    await tester.pumpAndSettle();
+    expect(api.bodies['/inventory/stock-takes/st-1/cancel'], {'reason': 'duplicate count'});
+  });
+
   testWidgets('saves counted quantities to the session count endpoint', (
     tester,
   ) async {

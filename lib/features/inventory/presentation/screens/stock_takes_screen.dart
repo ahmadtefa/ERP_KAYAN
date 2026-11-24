@@ -792,26 +792,25 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   }
 
   Future<void> _cancelWithReason() async {
-    final reason = TextEditingController();
+    var reason = '';
     final value = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(_t('إلغاء الجرد', 'Cancel stock take')),
         content: TextField(
-          controller: reason,
+          onChanged: (value) => reason = value,
           decoration: InputDecoration(labelText: _t('سبب الإلغاء', 'Cancellation reason')),
           maxLines: 2,
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, reason.text.trim()),
+            onPressed: () => Navigator.pop(dialogContext, reason.trim()),
             child: Text(_t('تأكيد الإلغاء', 'Confirm cancellation')),
           ),
         ],
       ),
     );
-    reason.dispose();
     if (value == null || !mounted) return;
     await _act('cancel', body: {'reason': value}, success: _t('تم إلغاء الجرد.', 'Count cancelled.'));
   }
