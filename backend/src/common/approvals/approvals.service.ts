@@ -445,7 +445,28 @@ export class ApprovalsService {
 
   /// The decision history for one document, for the screen that shows the
   /// path it took.
-  async history(companyId: string, entityType: string, entityId: string) {
+  /// Branches a document of this type belongs to, or undefined when the type
+  /// has no known branch owner (a branch-limited caller then sees nothing).
+  async entityBranches(companyId: string, entityType: string, entityId: string): Promise<string[] | undefined> {
+    if (entityType === 'StockTransfer') {
+      const row = await this.prisma.stockTransfer.findFirst({
+        where: { id: entityId, companyId },
+        select: { sourceBranchId: true, destinationBranchId: true },
+      });
+      return row ? [row.sourceBranchId, row.destinationBranchId] : [];
+    }
+    return undefined;
+  }
+
+  async history(companyId: string, entityType: string, entityId: string, branchScope: string[] | null = null) {
+    if (branchScope) {
+      const owners = await this.entityBranches(companyId, entityType, entityId);
+      // Same rule as the transfer screens: every branch of the document must be
+      // inside the caller's scope. Unknown types are hidden from branch staff.
+      if (!owners || owners.length === 0 || !owners.every((id) => branchScope.includes(id))) {
+        throw new NotFoundException('Approval history not found');
+      }
+    }
     const rows = await this.prisma.approvalDecision.findMany({
       where: { companyId, entityType, entityId },
       orderBy: [{ createdAt: 'asc' }, { level: 'asc' }],
