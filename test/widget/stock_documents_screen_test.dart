@@ -4,6 +4,7 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_documents_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -149,8 +150,12 @@ class _DocumentsApi extends ApiClient {
       'path': path,
       if (body is Map) ...Map<String, dynamic>.from(body),
     });
+    final failure = refusePost;
+    if (failure != null) throw failure;
     return {'id': 'new-document'};
   }
+
+  Object? refusePost;
 }
 
 Finder tableText(String value) => find.byWidgetPredicate(
@@ -354,6 +359,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add at least one line.'), findsOneWidget);
     expect(api.posts, isEmpty);
+  });
+
+  testWidgets('a bad quantity is named on its own line, cleared on edit, and a server refusal lands there too', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+    final input = find.byKey(const ValueKey('stock-document-barcode'));
+    await tester.enterText(input, 'CARTON');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    final qty = find.widgetWithText(TextField, 'Quantity');
+    await tester.enterText(qty, 'abc');
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(api.posts, isEmpty);
+    expect(find.text('Enter a numeric quantity.'), findsOneWidget);
+    await tester.enterText(qty, '-1');
+    await tester.pump();
+    expect(find.text('Enter a numeric quantity.'), findsNothing);
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(find.text('A counted quantity cannot be negative.'), findsOneWidget);
+    expect(api.posts, isEmpty);
+    await tester.enterText(qty, '3');
+    api.refusePost = const ApiFailure(
+      'Validation failed',
+      statusCode: 422,
+      fieldErrors: {'lines.0.quantity': 'Not enough stock in this store'},
+    );
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(api.posts.length, 1);
+    expect(find.text('Not enough stock in this store'), findsOneWidget);
+    expect(find.text('New stock document'), findsOneWidget);
   });
 
   testWidgets('refresh issues a fresh list request', (tester) async {

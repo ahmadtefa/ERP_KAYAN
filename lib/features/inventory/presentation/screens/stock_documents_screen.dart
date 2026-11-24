@@ -8,6 +8,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/barcode/barcode_scan.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
@@ -324,6 +325,31 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   /// the ledger must only move when somebody decides it should. Every line
   /// carries the unit it was counted in, so a shelf counted in cartons and a
   /// ledger kept in pieces never drift apart.
+  /// Why a typed quantity cannot be sent, or null. A count may be zero, a
+  /// transfer must move something, an adjustment may add or remove (signed).
+  String? _quantityError(String kind, String raw) {
+    final value = double.tryParse(raw.trim().replaceAll(',', '.'));
+    if (raw.trim().isEmpty || value == null) {
+      return _arabic ? 'اكتب كمية رقمية.' : 'Enter a numeric quantity.';
+    }
+    if (kind == 'TRANSFER' && value <= 0) {
+      return _arabic
+          ? 'كمية التحويل يجب أن تكون أكبر من صفر.'
+          : 'A transfer quantity must be greater than zero.';
+    }
+    if (kind == 'COUNT' && value < 0) {
+      return _arabic
+          ? 'الكمية المعدودة لا تكون سالبة.'
+          : 'A counted quantity cannot be negative.';
+    }
+    if (kind == 'ADJUSTMENT' && value == 0) {
+      return _arabic
+          ? 'التسوية بصفر لا تغيّر شيئًا.'
+          : 'An adjustment of zero changes nothing.';
+    }
+    return null;
+  }
+
   Future<void> _createDocument() async {
     var kind = 'COUNT';
     String? fromWarehouseId;
@@ -334,6 +360,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     var scanning = false;
     final lines = <_DraftLine>[];
     String? error;
+    // Reasons under their field: lines, fromWarehouse, toWarehouse, line.N.
+    final errors = <String, String>{};
     var saving = false;
 
     List<Json> warehouses;
@@ -480,17 +508,43 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             }
 
             Future<void> submit() async {
+              final found = <String, String>{};
               if (lines.isEmpty) {
-                setDialogState(
-                  () => error = _arabic
-                      ? 'أضف سطرًا واحدًا على الأقل.'
-                      : 'Add at least one line.',
-                );
+                found['lines'] = _arabic
+                    ? 'أضف سطرًا واحدًا على الأقل.'
+                    : 'Add at least one line.';
+              }
+              if (kind == 'TRANSFER') {
+                if (fromWarehouseId == null) {
+                  found['fromWarehouse'] =
+                      _arabic ? 'اختر المخزن المحوِّل.' : 'Choose the source store.';
+                }
+                if (toWarehouseId == null) {
+                  found['toWarehouse'] =
+                      _arabic ? 'اختر المخزن المستلم.' : 'Choose the destination store.';
+                } else if (fromWarehouseId == toWarehouseId) {
+                  found['toWarehouse'] = _arabic
+                      ? 'المخزن المستلم يجب أن يختلف عن المحوِّل.'
+                      : 'The destination must differ from the source store.';
+                }
+              }
+              for (var i = 0; i < lines.length; i++) {
+                final reason = _quantityError(kind, lines[i].quantity.text);
+                if (reason != null) found['line.$i'] = reason;
+              }
+              if (found.isNotEmpty) {
+                setDialogState(() {
+                  errors
+                    ..clear()
+                    ..addAll(found);
+                  error = null;
+                });
                 return;
               }
               setDialogState(() {
                 saving = true;
                 error = null;
+                errors.clear();
               });
               final navigator = Navigator.of(dialogContext);
               var closed = false;
@@ -530,7 +584,33 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 );
                 await ref.read(stockDocumentsProvider.notifier).reload();
               } catch (failure) {
-                if (!closed && dialogContext.mounted) {
+                if (!closed &&
+                    dialogContext.mounted &&
+                    failure is ApiFailure &&
+                    const {400, 422}.contains(failure.statusCode) &&
+                    failure.fieldErrors.isNotEmpty) {
+                  // Nothing was saved: reasons go under their fields.
+                  final lineKey = RegExp(r'^lines\.(\d+)\.');
+                  final rest = <String>[];
+                  setDialogState(() {
+                    errors.clear();
+                    failure.fieldErrors.forEach((key, message) {
+                      final m = lineKey.firstMatch(key);
+                      if (m != null) {
+                        errors['line.${m.group(1)}'] = message;
+                      } else if (key == 'fromWarehouseId') {
+                        errors['fromWarehouse'] = message;
+                      } else if (key == 'toWarehouseId') {
+                        errors['toWarehouse'] = message;
+                      } else if (key == 'lines') {
+                        errors['lines'] = message;
+                      } else {
+                        rest.add(message);
+                      }
+                    });
+                    error = rest.isEmpty ? null : rest.join('\n');
+                  });
+                } else if (!closed && dialogContext.mounted) {
                   await showAppError(dialogContext, failure);
                 }
               } finally {
@@ -580,7 +660,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                               ],
                               onChanged: (value) {
                                 if (value != null) {
-                                  setDialogState(() => kind = value);
+                                  setDialogState(() {
+                                    kind = value;
+                                    errors.clear();
+                                  });
                                 }
                               },
                             ),
@@ -595,6 +678,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     : (_arabic ? 'المخزن' : 'Store'),
                                 border: const OutlineInputBorder(),
                                 isDense: true,
+                                errorText: errors['fromWarehouse'],
                               ),
                               items: [
                                 for (final warehouse in warehouses)
@@ -606,6 +690,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   ),
                               ],
                               onChanged: (value) => setDialogState(() {
+                                errors.remove('fromWarehouse');
+                                errors.remove('toWarehouse');
                                 if (kind == 'TRANSFER') {
                                   fromWarehouseId = value;
                                 } else {
@@ -624,6 +710,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   labelText: _arabic ? 'إلى مخزن' : 'To store',
                                   border: const OutlineInputBorder(),
                                   isDense: true,
+                                  errorText: errors['toWarehouse'],
                                 ),
                                 items: [
                                   for (final warehouse in warehouses)
@@ -634,8 +721,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                       ),
                                     ),
                                 ],
-                                onChanged: (value) =>
-                                    setDialogState(() => toWarehouseId = value),
+                                onChanged: (value) => setDialogState(() {
+                                  errors.remove('toWarehouse');
+                                  toWarehouseId = value;
+                                }),
                               ),
                             ),
                           TextButton.icon(
@@ -668,9 +757,15 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                         child: lines.isEmpty
                             ? Center(
                                 child: Text(
-                                  _arabic
-                                      ? 'لا توجد سطور بعد.'
-                                      : 'No lines yet.',
+                                  errors['lines'] ??
+                                      (_arabic
+                                          ? 'لا توجد سطور بعد.'
+                                          : 'No lines yet.'),
+                                  style: errors['lines'] == null
+                                      ? null
+                                      : TextStyle(
+                                          color: Theme.of(context).colorScheme.error,
+                                        ),
                                 ),
                               )
                             : ListView.separated(
@@ -679,21 +774,42 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     const Divider(height: 1),
                                 itemBuilder: (context, index) {
                                   final line = lines[index];
-                                  return ListTile(
-                                    dense: true,
-                                    title: Text(line.itemLabel),
-                                    subtitle: Text(
-                                      _arabic
-                                          ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
-                                          : 'Unit: ${line.unitName ?? line.baseUnit}',
+                                  // A plain row, not a ListTile: a quantity that shows its
+                                  // reason is taller than a dense tile allows.
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 6,
                                     ),
-                                    trailing: Row(
+                                    child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(line.itemLabel),
+                                          Text(
+                                            _arabic
+                                                ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
+                                                : 'Unit: ${line.unitName ?? line.baseUnit}',
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         SizedBox(
                                           width: 110,
                                           child: TextField(
                                             controller: line.quantity,
+                                            onChanged: (_) {
+                                              if (errors.remove('line.$index') != null) {
+                                                setDialogState(() {});
+                                              }
+                                            },
                                             keyboardType:
                                                 const TextInputType.numberWithOptions(
                                                   decimal: true,
@@ -704,6 +820,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                   : 'Quantity',
                                               isDense: true,
                                               border: const OutlineInputBorder(),
+                                              errorText: errors['line.$index'],
+                                              errorMaxLines: 3,
                                             ),
                                           ),
                                         ),
@@ -715,10 +833,13 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                             size: 20,
                                           ),
                                           onPressed: () => setDialogState(() {
+                                            errors.removeWhere((k, _) => k.startsWith('line.'));
                                             lines.removeAt(index).dispose();
                                           }),
                                         ),
                                       ],
+                                    ),
+                                    ],
                                     ),
                                   );
                                 },
