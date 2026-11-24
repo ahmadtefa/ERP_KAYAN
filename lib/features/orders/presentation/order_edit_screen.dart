@@ -117,6 +117,35 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
     return null;
   }
 
+  /// Reasons the server gave per field (`lines.0.quantity`, ...), shown under
+  /// the field until that field is edited.
+  final _serverErrors = <String, String>{};
+  String? _srv(String key) => _serverErrors[key];
+  void _edited(String key) {
+    _changed();
+    if (_serverErrors.remove(key) != null) setState(() {});
+  }
+
+  void _placeServerErrors(ApiFailure error) {
+    final known = <String>{
+      for (var i = 0; i < _lines.length; i++)
+        for (final f in const ['quantity', 'unitPrice', 'discountPercent', 'taxRate']) 'lines.$i.$f',
+    };
+    final rest = <String, String>{};
+    setState(() {
+      _serverErrors.clear();
+      for (final entry in error.fieldErrors.entries) {
+        if (known.contains(entry.key)) { _serverErrors[entry.key] = entry.value; } else { rest[entry.key] = entry.value; }
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _form.currentState?.validate();
+    });
+    if (rest.isNotEmpty) {
+      showMessage(context, ApiFailure(error.message, statusCode: error.statusCode, fieldErrors: rest), error: true);
+    }
+  }
+
   Future<void> _save() async {
     if (_busy || _pending != null || _store == null || _scope == null || _lines.isEmpty) return;
     if (!(_form.currentState?.validate() ?? false)) return;
@@ -150,6 +179,10 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
           (error.statusCode == 409 && error.code == 'ORDER_EDIT_STALE'))) {
         await _store!.complete(_scope!);
         if (mounted) setState(() { _pending = null; _stale = error.code == 'ORDER_EDIT_STALE'; });
+        if (mounted && error.statusCode != 409 && error.fieldErrors.isNotEmpty) {
+          _placeServerErrors(error);
+          return;
+        }
       }
       if (mounted) showMessage(context, error, error: true);
     } catch (error) { if (mounted) showMessage(context, error, error: true); }
@@ -173,21 +206,21 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
             title: Text(tr('لم يتأكد رد تعديل الأمر؛ أعد المحاولة بنفس الطلب.', 'Order edit is unresolved; retry the same request.')),
             trailing: FilledButton(onPressed: _busy ? null : () => _send(_pending!), child: Text(tr('إعادة المحاولة', 'Retry'))),
           )),
-          Form(key: _form, child: IgnorePointer(ignoring: disabled, child: Column(children: [
+          Form(key: _form, autovalidateMode: AutovalidateMode.onUserInteraction, child: IgnorePointer(ignoring: disabled, child: Column(children: [
             for (final line in _lines) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
               Text('${line.name} • ${line.unit}'),
               if (widget.amendApproved) Text('${tr('المخصص بالوحدة الأساسية', 'Allocated in base units')}: ${line.allocated ?? '—'}'),
-              TextFormField(controller: line.quantity, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('الكمية', 'Quantity')), validator: (v) => _number(v, positive: true)),
+              TextFormField(controller: line.quantity, onChanged: (_) => _edited('lines.${_lines.indexOf(line)}.quantity'), keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: tr('الكمية', 'Quantity')), validator: (v) => _number(v, positive: true) ?? _srv('lines.${_lines.indexOf(line)}.quantity')),
               TextFormField(controller: line.price, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
-                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('السعر', 'Price')), validator: _number),
+                onChanged: (_) => _edited('lines.${_lines.indexOf(line)}.unitPrice'), keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: tr('السعر', 'Price')), validator: (v) => _number(v) ?? _srv('lines.${_lines.indexOf(line)}.unitPrice')),
               TextFormField(controller: line.discount, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
-                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true)),
+                onChanged: (_) => _edited('lines.${_lines.indexOf(line)}.discountPercent'), keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true) ?? _srv('lines.${_lines.indexOf(line)}.discountPercent')),
               TextFormField(controller: line.tax, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
-                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true, allowEmpty: true)),
+                onChanged: (_) => _edited('lines.${_lines.indexOf(line)}.taxRate'), keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true, allowEmpty: true) ?? _srv('lines.${_lines.indexOf(line)}.taxRate')),
             ]))),
             FilledButton(onPressed: disabled || _stale || _lines.isEmpty || text(widget.order, 'updatedAt').isEmpty ? null : _save,
               child: Text(tr('حفظ التعديلات', 'Save changes'))),
