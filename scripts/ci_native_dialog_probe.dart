@@ -26,7 +26,9 @@ void main() {
       final expected = File('${root.path}/chosen.dump');
       if (target.path.toLowerCase() !=
           expected.path.replaceAll('/', r'\').toLowerCase()) {
-        throw StateError('Wrong Save As path');
+        throw StateError(
+          'Wrong Save As path: ${target.path}, expected ${expected.path}',
+        );
       }
       final bytes = Uint8List.fromList('PGDMP-native-dialog-probe'.codeUnits);
       await target.write(bytes);

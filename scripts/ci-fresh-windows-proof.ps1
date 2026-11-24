@@ -67,17 +67,25 @@ function Wait-Dialog {
  @($tree | ForEach-Object { [ordered]@{name=$_.Current.Name;class=$_.Current.ClassName;pid=$_.Current.ProcessId;type=$_.Current.ControlType.ProgrammaticName} }) | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'dialog-tree.json')
  throw 'Native dialog absent'
 }
+function Set-FileName([Windows.Automation.AutomationElement]$dialog,[string]$value){
+ $id=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
+ $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$id)
+ if(-not $edit){throw 'Native filename control absent'}
+ $pattern=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+ $pattern.SetValue($value)
+ $edit.SetFocus()
+}
 try {
  Wait-Stage 'save';Start-Sleep 3;Screenshot 'before-dialog-discovery';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
  Screenshot 'native-save-as'
- $keys.SendKeys('%n');$keys.SendKeys((Join-Path $probeDir 'chosen.dump'));$keys.SendKeys('{ENTER}')
+ Set-FileName $w (Join-Path $probeDir 'chosen.dump');Screenshot 'native-save-chosen-path';$keys.SendKeys('{ENTER}')
  Wait-Stage 'open';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 2
- $keys.SendKeys('^l');$keys.SendKeys($probeDir);$keys.SendKeys('{ENTER}');Start-Sleep 3
+ Set-FileName $w ($probeDir + '\');$keys.SendKeys('{ENTER}');Start-Sleep 3
  $elements=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
  $names=@($elements | ForEach-Object {$_.Current.Name})
  if(-not ($names -contains 'visible.json') -or ($names -contains 'hidden.txt')){throw 'Allowed extension not visible by default or forbidden file visible'}
  Screenshot 'native-open-filter'
- $keys.SendKeys('%n');$keys.SendKeys('visible.json');$keys.SendKeys('{ENTER}')
+ Set-FileName $w 'visible.json';$keys.SendKeys('{ENTER}')
  Wait-Stage 'cancel';$w=Wait-Dialog;$null=$keys.AppActivate($w.Current.ProcessId);Start-Sleep 1;Screenshot 'native-save-cancel';$keys.SendKeys('{ESC}')
  Wait-Stage 'passed'
 }finally{if(-not $probe.HasExited){Stop-Process -Id $probe.Id -Force}}
