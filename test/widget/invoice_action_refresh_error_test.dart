@@ -1,3 +1,4 @@
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -43,7 +44,7 @@ void main() {
       tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_CommittedThenFailedApi('draft')..stockShortfall=true;
-      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      await tester.pumpWidget(ProviderScope(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),
         exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
         child:MaterialApp(locale:locale,localizationsDelegates:AppLocalizations.localizationsDelegates,
           supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales)))));
@@ -61,7 +62,7 @@ void main() {
     tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final api=_CommittedThenFailedApi('draft')..responseLost=false;
-    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+    final container=ProviderContainer(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
     addTearDown(container.dispose);
     expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],'draft');
@@ -79,7 +80,7 @@ void main() {
     tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final api=_CommittedThenFailedApi('draft')..serverFailure=true;
-    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+    await tester.pumpWidget(ProviderScope(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
         supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales)))));
@@ -98,7 +99,7 @@ void main() {
         tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
         addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
         final api=_CommittedThenFailedApi(reverse ? 'posted' : 'draft');
-        final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+        final container=ProviderContainer(overrides:[currentUserProvider.overrideWithValue(const AppUser(id:'operator',username:'operator',fullName:'Operator',companyId:'c',isSuperAdmin:true)),apiClientProvider.overrideWithValue(api),
           exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
         addTearDown(container.dispose);
         expect((await container.read(dashboardSummaryProvider.future))['status'],reverse ? 'posted' : 'draft');

@@ -322,13 +322,13 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
                   icon: const Icon(Icons.verified_user_outlined, size: 20),
                   onPressed: _busy ? null : () => _approveCredit(row),
                 ),
-              if (status == 'draft')
+              if (status == 'draft' && user?.can(isSales ? 'sales.invoices.post' : 'purchases.invoices.post') == true)
                 IconButton(
                   tooltip: l10n.post,
                   icon: const Icon(Icons.check_circle_outline, size: 20),
                   onPressed: _busy ? null : () => _post(row),
                 ),
-              if (status == 'posted')
+              if (status == 'posted' && user?.can(isSales ? 'sales.invoices.post' : 'purchases.invoices.post') == true)
                 IconButton(
                   tooltip: l10n.reverse,
                   icon: const Icon(Icons.undo_outlined, size: 20),

@@ -45,6 +45,7 @@ void main() {
   testWidgets('approver without posting permission approves with reason and never posts', (tester) async {
     final api=_Api();
     await pump(tester,api,const AppUser(id:'reviewer',username:'reviewer',fullName:'Reviewer',companyId:'c',permissions:['sales.invoices.read','sales.credit.approve']));
+    expect(find.byTooltip('Post'),findsNothing);
     await tester.tap(find.byTooltip('Approve credit-limit exception'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Save'));
