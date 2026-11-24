@@ -9,6 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 /// of the DTOs, the business rules the server enforces, and a few shapes a
 /// stray exception can take.
 void main() {
+  test('typed rolled-back transaction has safe Arabic guidance, other 503 does not', () {
+    const resolver=AppErrorMessageResolver(isArabic:true);
+    final typed=resolver.resolve(const ApiFailure('synthetic raw',statusCode:503,code:'TRANSACTION_ROLLED_BACK'));
+    expect(typed.businessMessage,contains('حدّث المستند'));
+    expect(typed.businessMessage,isNot(contains('synthetic raw')));
+    expect(resolver.resolve(const ApiFailure('synthetic raw',statusCode:503)).businessMessage,isNull);
+  });
+
   test(
     'sales posting stock shortfall remains actionable in both languages',
     () {

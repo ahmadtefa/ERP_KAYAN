@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
+import { ClosedDatabaseTransactionError } from '../prisma/transaction-lifetime';
 
 /**
  * Emits RFC 9457 problem-details responses and never leaks stack traces or
@@ -20,6 +21,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
 
+    const isClosedTransaction = exception instanceof ClosedDatabaseTransactionError;
     const isUniqueConstraint =
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2002';
@@ -52,7 +54,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
           ? Number((exception as { statusCode?: unknown }).statusCode)
           : 0;
     const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
-    const status = isUniqueConstraint
+    const status = isClosedTransaction ? HttpStatus.SERVICE_UNAVAILABLE : isUniqueConstraint
       ? HttpStatus.CONFLICT
       : isVoucherClaimTrigger
         ? HttpStatus.CONFLICT
@@ -69,7 +71,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       : 'Unexpected server error';
     let extra: Record<string, unknown> = {};
 
-    if (isUniqueConstraint) {
+    if (isClosedTransaction) {
+      detail = 'The operation took too long and was rolled back. Reload the document to check its state before trying again.';
+      extra = { code: 'TRANSACTION_ROLLED_BACK' };
+    } else if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
     } else if (isVoucherClaimTrigger) {
       detail =

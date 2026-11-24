@@ -1,6 +1,7 @@
 import { Controller, Get, HttpException, HttpStatus, Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
+import { ClosedDatabaseTransactionError } from '../prisma/transaction-lifetime';
 import { ProblemDetailsFilter } from './problem-details.filter';
 
 @Controller('synthetic-problem')
@@ -16,6 +17,17 @@ class SyntheticProblemController {
 @Module({controllers:[SyntheticProblemController]}) class SyntheticProblemModule {}
 
 describe('ProblemDetailsFilter', () => {
+  it('maps only the typed closed-transaction guard to a safe rolled-back 503', () => {
+    const response={status:jest.fn().mockReturnThis(),json:jest.fn()};
+    const host={switchToHttp:()=>({getResponse:()=>response})} as any;
+    const filter=new ProblemDetailsFilter();filter.catch(new ClosedDatabaseTransactionError(),host);
+    expect(response.status).toHaveBeenLastCalledWith(503);
+    expect(response.json).toHaveBeenLastCalledWith(expect.objectContaining({code:'TRANSACTION_ROLLED_BACK',errorCode:'TRANSACTION_ROLLED_BACK'}));
+    filter.catch(new Error('Database transaction is closed'),host);
+    expect(response.status).toHaveBeenLastCalledWith(500);
+    expect(response.json).toHaveBeenLastCalledWith(expect.objectContaining({detail:'Unexpected server error'}));
+  });
+
   it('keeps safe field and action details in the compatible error contract', () => {
     const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const host = { switchToHttp: () => ({ getResponse: () => response }) } as any;

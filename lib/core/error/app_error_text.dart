@@ -116,6 +116,13 @@ class AppErrorMessageResolver {
     // has no HTTP status at all, and must still be explained as "the server
     // could not be reached" rather than "an unexpected error".
     if (error is Failure) {
+      if (error is ApiFailure && error.statusCode == 503 && error.code == 'TRANSACTION_ROLLED_BACK') {
+        return AppErrorText(reason: AppErrorReason.server, severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+            ? 'استغرقت العملية وقتًا أطول من المسموح وأُلغيت تغييراتها. حدّث المستند وتحقق من حالته قبل المحاولة مرة أخرى.'
+            : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
+      }
+
       if (error is ApiFailure && error.statusCode == 400) {
         final postingReason = _salesPostingReasons[error.code];
         if (postingReason != null) {

@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { guardAdapterTransactions } from './transaction-lifetime';
 import { PrismaClient } from '@prisma/client';
 import { API_APPLICATION_NAME } from '../maintenance/process-identity';
 
@@ -13,6 +14,12 @@ import { API_APPLICATION_NAME } from '../maintenance/process-identity';
  * underneath. The connection string is read once, from the environment, and
  * never logged.
  */
+class TransactionSafePg extends PrismaPg {
+  override async connect() {
+    return guardAdapterTransactions(await super.connect());
+  }
+}
+
 export function createPgAdapter(): PrismaPg {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -27,7 +34,7 @@ export function createPgAdapter(): PrismaPg {
   // BARRIER_POOL_MAX, since every API process uses both pools.
   const configured = Number(process.env.PG_POOL_MAX);
   const max = Number.isInteger(configured) && configured >= 1 && configured <= 500 ? configured : undefined;
-  return new PrismaPg({ connectionString, application_name: API_APPLICATION_NAME, ...(max ? { max } : {}) });
+  return new TransactionSafePg({ connectionString, application_name: API_APPLICATION_NAME, ...(max ? { max } : {}) });
 }
 
 @Injectable()
