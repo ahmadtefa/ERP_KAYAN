@@ -13,6 +13,7 @@ void main() {
         final firstPosition=tester.getCenter(find.byType(Tooltip).first);final lastPosition=tester.getCenter(find.byType(Tooltip).last);expect(firstPosition.dx,lessThan(lastPosition.dx));
         final tips=tester.widgetList<Tooltip>(find.byType(Tooltip)).toList();expect(tips.length,12);
         expect(tips.first.message,contains('2026-01'));expect(tips.first.message,contains('1250'));expect(tips.first.message,contains('-250'));expect(tips.first.message,isNot(contains('987654321')));expect(tips.first.message,isNot(contains('المشتريات')));
+        await tester.ensureVisible(find.byType(Tooltip).first);await tester.pumpAndSettle();
         await tester.tap(find.byType(Tooltip).first);await tester.pumpAndSettle();expect(find.textContaining('2026-01'),findsOneWidget);expect(find.textContaining('1250'),findsOneWidget);expect(tester.takeException(),isNull);
       });
     }
