@@ -61,6 +61,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   String _facilityKind = 'HEADQUARTERS';
   bool _obscure = true;
   String? _localError;
+  final _fieldErrors = <String, String>{};
+  void _clearField(String key) {
+    if (_fieldErrors.remove(key) != null) setState(() {});
+  }
 
   @override
   void initState() {
@@ -200,23 +204,45 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
     final username = _adminUsername.text.trim();
     final password = _adminPassword.text;
 
-    String? problem;
-    if (code.length < 2) {
-      problem = 'كود الشركة لازم حرفين على الأقل / Company code needs at least 2 characters';
-    } else if (nameAr.isEmpty || nameEn.isEmpty) {
-      problem = 'اسم الشركة بالعربي والإنجليزي مطلوب / Both company names are required';
-    } else if (username.length < 3) {
-      problem = 'اسم المستخدم لازم ٣ حروف على الأقل / Username needs at least 3 characters';
-    } else if (password.length < 8) {
-      problem = 'كلمة السر لازم ٨ حروف على الأقل / Password needs at least 8 characters';
-    } else if (password != _adminAgain.text) {
-      problem = 'كلمة السر والتأكيد مش زي بعض / The two passwords do not match';
+    final errors = <String, String>{};
+    final codePattern = RegExp(r'^[A-Za-z0-9_-]{2,20}$');
+    if (!codePattern.hasMatch(code)) {
+      errors['companyCode'] = 'استخدم ٢ إلى ٢٠ حرفًا أو رقمًا أو - أو _ / Use 2-20 letters, digits, dash or underscore';
     }
-    if (problem != null) {
-      setState(() => _localError = problem);
-      return;
+    if (nameAr.isEmpty) errors['companyNameAr'] = 'الاسم مطلوب / Name is required';
+    if (nameEn.isEmpty) errors['companyNameEn'] = 'الاسم مطلوب / Name is required';
+    if (username.length < 3 || username.length > 60) {
+      errors['adminUsername'] = 'اسم المستخدم من ٣ إلى ٦٠ حرفًا / Username needs 3-60 characters';
     }
-    setState(() => _localError = null);
+    if (password.length < 8 || password.length > 200) {
+      errors['adminPassword'] = 'كلمة السر من ٨ إلى ٢٠٠ حرف / Password needs 8-200 characters';
+    }
+    if (password != _adminAgain.text) {
+      errors['adminAgain'] = 'كلمة السر والتأكيد مش زي بعض / The two passwords do not match';
+    }
+    final email = _email.text.trim();
+    if (email.isNotEmpty && !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      errors['email'] = 'اكتب بريدًا إلكترونيًا صحيحًا / Enter a valid email';
+    }
+    if (_hqCode.text.trim().isNotEmpty && !codePattern.hasMatch(_hqCode.text.trim())) {
+      errors['hqCode'] = 'استخدم ٢ إلى ٢٠ حرفًا أو رقمًا أو - أو _ / Use 2-20 letters, digits, dash or underscore';
+    }
+    for (final entry in {
+      'companyNameAr': (_companyNameAr, 200),
+      'companyNameEn': (_companyNameEn, 200),
+      'phone': (_phone, 50), 'email': (_email, 200),
+      'address': (_address, 500),
+      'hqNameAr': (_hqNameAr, 200), 'hqNameEn': (_hqNameEn, 200),
+    }.entries) {
+      if (entry.value.$1.text.trim().length > entry.value.$2) {
+        errors[entry.key] = 'الحد الأقصى ${entry.value.$2} حرف / Maximum ${entry.value.$2} characters';
+      }
+    }
+    setState(() {
+      _fieldErrors..clear()..addAll(errors);
+      _localError = null;
+    });
+    if (errors.isNotEmpty) return;
 
     widget
         .onSubmit(
@@ -290,8 +316,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _companyNameAr,
+          onChanged: (_) => _clearField('companyNameAr'),
           enabled: !busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['companyNameAr'],
             labelText: 'اسم الشركة بالعربية * / Name (Arabic) *',
             border: OutlineInputBorder(),
           ),
@@ -299,8 +327,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _companyNameEn,
+          onChanged: (_) => _clearField('companyNameEn'),
           enabled: !busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['companyNameEn'],
             labelText: 'اسم الشركة بالإنجليزية * / Name (English) *',
             border: OutlineInputBorder(),
           ),
@@ -309,16 +339,20 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         _fieldRow([
           TextField(
             controller: _companyCode,
+          onChanged: (_) => _clearField('companyCode'),
             enabled: !busy,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
+            errorText: _fieldErrors['companyCode'],
               labelText: 'كود الشركة * / Code *',
               border: OutlineInputBorder(),
             ),
           ),
           TextField(
             controller: _phone,
+          onChanged: (_) => _clearField('phone'),
             enabled: !busy,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
+            errorText: _fieldErrors['phone'],
               labelText: 'الهاتف / Phone',
               border: OutlineInputBorder(),
             ),
@@ -327,8 +361,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _email,
+          onChanged: (_) => _clearField('email'),
           enabled: !busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['email'],
             labelText: 'البريد الإلكتروني / Email',
             border: OutlineInputBorder(),
           ),
@@ -336,8 +372,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _address,
+          onChanged: (_) => _clearField('address'),
           enabled: !busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['address'],
             labelText: 'العنوان / Address',
             border: OutlineInputBorder(),
           ),
@@ -388,8 +426,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         _fieldRow([
           TextField(
             controller: _hqCode,
+          onChanged: (_) => _clearField('hqCode'),
             enabled: !busy,
             decoration: InputDecoration(
+            errorText: _fieldErrors['hqCode'],
               labelText: _facilityKind == 'HEADQUARTERS'
                   ? 'كود المقر / Unit code (MAIN)'
                   : 'كود الفرع / Branch code (BR01)',
@@ -398,8 +438,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           ),
           TextField(
             controller: _hqNameAr,
+          onChanged: (_) => _clearField('hqNameAr'),
             enabled: !busy,
             decoration: InputDecoration(
+            errorText: _fieldErrors['hqNameAr'],
               labelText: _facilityKind == 'HEADQUARTERS'
                   ? 'اسم المقر بالعربية / HQ name (Arabic)'
                   : 'اسم الفرع بالعربية / Branch name (Arabic)',
@@ -408,8 +450,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           ),
           TextField(
             controller: _hqNameEn,
+          onChanged: (_) => _clearField('hqNameEn'),
             enabled: !busy,
             decoration: InputDecoration(
+            errorText: _fieldErrors['hqNameEn'],
               labelText: _facilityKind == 'HEADQUARTERS'
                   ? 'اسم المقر بالإنجليزية / HQ name (English)'
                   : 'اسم الفرع بالإنجليزية / Branch name (English)',
@@ -461,8 +505,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _adminUsername,
+          onChanged: (_) => _clearField('adminUsername'),
           enabled: !busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['adminUsername'],
             labelText: 'اسم المستخدم * / Username *',
             border: OutlineInputBorder(),
           ),
@@ -470,9 +516,11 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _adminPassword,
+          onChanged: (_) => _clearField('adminPassword'),
           enabled: !busy,
           obscureText: _obscure,
           decoration: InputDecoration(
+            errorText: _fieldErrors['adminPassword'],
             labelText: 'كلمة السر * / Password * (8+)',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
@@ -488,10 +536,12 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         const SizedBox(height: 12),
         TextField(
           controller: _adminAgain,
+          onChanged: (_) => _clearField('adminAgain'),
           enabled: !busy,
           obscureText: _obscure,
           onSubmitted: (_) => busy ? null : _submit(),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
+            errorText: _fieldErrors['adminAgain'],
             labelText: 'تأكيد كلمة السر / Confirm',
             border: OutlineInputBorder(),
           ),

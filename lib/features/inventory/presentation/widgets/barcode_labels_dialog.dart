@@ -51,6 +51,7 @@ class _BarcodeLabelsDialogState extends ConsumerState<BarcodeLabelsDialog> {
   String _paper = 'A4';
   bool _showPrice = true;
   bool _working = false;
+  final _copyErrors = <String, String>{};
 
   List<LabelUnitSelection> get _selected =>
       widget.units.where((unit) => unit.selected && unit.printable).toList();
@@ -122,13 +123,22 @@ class _BarcodeLabelsDialogState extends ConsumerState<BarcodeLabelsDialog> {
                                 keyboardType: TextInputType.number,
                                 decoration: InputDecoration(
                                   labelText: l10n.barcodeLabelsCopies,
+                                  errorText: _copyErrors[unit.unitId],
+                                  errorMaxLines: 3,
                                   isDense: true,
                                 ),
                                 onChanged: (value) {
                                   final parsed = int.tryParse(value);
-                                  if (parsed != null && parsed >= 1 && parsed <= 500) {
-                                    setState(() => unit.copies = parsed);
-                                  }
+                                  setState(() {
+                                    if (parsed != null && parsed >= 1 && parsed <= 500) {
+                                      unit.copies = parsed;
+                                      _copyErrors.remove(unit.unitId);
+                                    } else {
+                                      _copyErrors[unit.unitId] = language == 'ar'
+                                          ? 'اكتب عددًا من ١ إلى ٥٠٠'
+                                          : 'Enter a count from 1 to 500';
+                                    }
+                                  });
                                 },
                               ),
                             )
@@ -143,6 +153,7 @@ class _BarcodeLabelsDialogState extends ConsumerState<BarcodeLabelsDialog> {
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: _paper,
+                    isExpanded: true,
                     decoration: InputDecoration(labelText: l10n.barcodeLabelsPaper),
                     items: [
                       for (final entry in papers.entries)
@@ -173,7 +184,7 @@ class _BarcodeLabelsDialogState extends ConsumerState<BarcodeLabelsDialog> {
         OutlinedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
           label: Text(l10n.barcodeLabelsPdf),
-          onPressed: (_working || specs.isEmpty)
+          onPressed: (_working || specs.isEmpty || _selected.any((u) => _copyErrors.containsKey(u.unitId)))
               ? null
               : () => _run(() => runDownload(
                     context,
@@ -193,7 +204,7 @@ class _BarcodeLabelsDialogState extends ConsumerState<BarcodeLabelsDialog> {
                 ? l10n.barcodeLabelsPrintCount(_totalLabels)
                 : l10n.barcodeLabelsPrint,
           ),
-          onPressed: (_working || specs.isEmpty)
+          onPressed: (_working || specs.isEmpty || _selected.any((u) => _copyErrors.containsKey(u.unitId)))
               ? null
               : () async {
                   await _run(() => runPrint(
