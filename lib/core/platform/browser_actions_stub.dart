@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'download_request.dart';
 import 'picked_file.dart';
+import 'file_type_filter.dart';
 
 /// Opens [url] in the machine's default browser.
 ///
@@ -224,12 +225,12 @@ Future<PickedFile?> pickFile({List<String> extensions = const []}) async {
 
   // One PowerShell command for the system file dialogue: the desktop program
   // ships no extra package for it, and a real dialogue is what people expect.
-  final filter = extensions.isEmpty
-      ? 'All files (*.*)|*.*'
-      : 'Files (${extensions.join(';')})|${extensions.join(';')}|All files (*.*)|*.*';
+  final filter = windowsFileFilter(extensions);
   final script = 'Add-Type -AssemblyName System.Windows.Forms\n'
       r'$dialog = New-Object System.Windows.Forms.OpenFileDialog' '\n'
       r'$dialog.Multiselect = $false' '\n'
+      r'$dialog.FilterIndex = 1' '\n'
+      r'$dialog.CheckFileExists = $true' '\n'
       "\$dialog.Filter = '${filter.replaceAll("'", "''")}'\n"
       r'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
       r'{ [Console]::Out.Write($dialog.FileName) }';
