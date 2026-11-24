@@ -61,7 +61,8 @@ describe('BranchReportScopeGuard', () => {
   });
 
   it('leaves company-wide users and super administrators unrestricted', () => {
-    expect(guard.canActivate(context({ isSuperAdmin: false, branchIds: [] }))).toBe(true);
+    expect(guard.canActivate(context({ isSuperAdmin: false, branchIds: [], roles: ['ADMIN'] }))).toBe(true);
+    expect(() => guard.canActivate(context({ isSuperAdmin: false, branchIds: [], roles: ['SALES_CLERK'] }))).toThrow(ForbiddenException);
     expect(guard.canActivate(context({ isSuperAdmin: true, branchIds: ['branch-a'] }))).toBe(true);
   });
 });

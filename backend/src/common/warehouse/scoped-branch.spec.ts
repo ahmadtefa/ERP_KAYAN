@@ -3,8 +3,8 @@ import { scopedBranchId } from './warehouse.service';
 
 describe('scopedBranchId', () => {
   it('leaves a company-wide account unfiltered', () => {
-    expect(scopedBranchId({ branchId: null, branchIds: [] })).toBeUndefined();
-    expect(scopedBranchId({ branchId: null, branchIds: [] }, 'b1')).toBe('b1');
+    expect(scopedBranchId({ branchId: null, branchIds: [], roles: ['ADMIN'] })).toBeUndefined();
+    expect(scopedBranchId({ branchId: null, branchIds: [], roles: ['ADMIN'] }, 'b1')).toBe('b1');
   });
 
   it('pins a single-branch account to its branch', () => {
