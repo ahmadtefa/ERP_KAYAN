@@ -222,6 +222,7 @@ export class SalesInvoicesService {
 
     return {
       ...this.toSummary(invoice, mayReadCost),
+      warehouseId: invoice.warehouseId ?? null,
       branch: invoice.branch,
       orderId: invoice.salesOrderId,
       updatedAt: invoice.updatedAt.toISOString(),

@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -195,7 +198,7 @@ function serviceWith(db: PGlite) {
     new AccountMapService(),
     // Company tax policy is configuration, not behaviour under test here; a
     // zero rate keeps the journal to the accounts this suite seeded.
-    { get: async () => ({ defaultTaxRate: D(0), pricesIncludeTax: false }) } as never,
+    { get: async () => ({ defaultTaxRate: D(0), taxRate: '0.0000', maxDiscountPercent: '100.0000', pricesIncludeTax: false }) } as never,
     new WarehouseService(prisma as never, audit as never),
     {} as never,
     audit as never,
@@ -412,4 +415,65 @@ const placedNow = async (db: PGlite) => {
       { storageLocationId: LOC_A, quantity: '1.0000' }, { storageLocationId: LOC_B, quantity: '1.0000' },
     ]);
   });
+
+  it('persisted carton roundtrip: create, findOne, updateDraft, findOne, post', async () => {
+    const lot = await seedLot(db, 'L1', 40, '2027-01-01', 5);
+    await seedShelf(db, 40, 200);
+    await seedPlaced(db, lot, 20, 20);
+    await db.query(`INSERT INTO item_units (id,"itemId",unit,factor,"isActive","updatedAt") VALUES (gen_random_uuid(),$1,'carton',12,true,now()),(gen_random_uuid(),$1,'piece',1,true,now())`, [ITEM]);
+    const { service } = serviceWith(db);
+    const dto = (a: string, b: string) => ({
+      customerId: CUSTOMER, invoiceDate: '2026-11-07', warehouseId: WAREHOUSE,
+      lines: [{ itemId: ITEM, quantity: '2', unitName: 'carton', unitPrice: '10', taxRate: '0',
+        locationAllocations: [{ storageLocationId: LOC_A, quantity: a }, { storageLocationId: LOC_B, quantity: b }] }],
+    }) as never;
+    const created = await service.create(COMPANY, BRANCH, USER, dto('0.5', '1.5'));
+    const first = (created as { lines: Array<{ locationAllocations: unknown; quantity: string; unitQuantity: string }> }).lines[0];
+    expect(first.locationAllocations).toEqual([
+      { storageLocationId: LOC_A, quantity: '0.5000' }, { storageLocationId: LOC_B, quantity: '1.5000' }]);
+    expect([first.quantity, first.unitQuantity]).toEqual(['24.0000', '2.0000']);
+    const id = (created as { id: string }).id;
+    // reopen and resave what was read, unchanged: must stay the same
+    const reread = await service.findOne(COMPANY, id) as unknown as { lines: Array<{ locationAllocations: Array<{ storageLocationId: string; quantity: string }> }> };
+    expect((reread as unknown as { warehouseId: string }).warehouseId).toBe(WAREHOUSE);
+    await service.updateDraft(COMPANY, BRANCH, USER, id, dto(reread.lines[0].locationAllocations[0].quantity, reread.lines[0].locationAllocations[1].quantity));
+    const again = await service.findOne(COMPANY, id) as unknown as { lines: Array<{ locationAllocations: unknown; quantity: string }> };
+    expect(again.lines[0].locationAllocations).toEqual(first.locationAllocations);
+    expect(again.lines[0].quantity).toBe('24.0000');
+    expect((again as unknown as { warehouseId: string }).warehouseId).toBe(WAREHOUSE);
+    await service.post(COMPANY, USER, id);
+    // 0.5 carton = 6 base from A-01, 1.5 carton = 18 base from B-01
+    expect(await placedNow(db)).toEqual({ 'A-01': 14, 'B-01': 2 });
+    expect(await shelf(db)).toBe(16);
+  });
+  (process.env.KAYAN_SALES_LOCATION_UI === '1' ? it : it.skip)('real Flutter draft read allocation edit save then SQL post and reverse', async () => {
+    const lot=await seedLot(db,'UI-LOT',40,'2027-01-01',5);
+    await seedShelf(db,40,200);await seedPlaced(db,lot,20,20);
+    await db.query(`INSERT INTO item_units (id,"itemId",unit,factor,"isActive","updatedAt") VALUES (gen_random_uuid(),$1,'carton',12,true,now()),(gen_random_uuid(),$1,'piece',1,true,now())`,[ITEM]);
+    const {service}=serviceWith(db);
+    const locations=new StorageLocationsService(pglitePrisma(db) as never,{record:async()=>undefined} as never);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-25',warehouseId:WAREHOUSE,lines:[{itemId:ITEM,quantity:'2',unitName:'carton',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'1'},{storageLocationId:LOC_B,quantity:'1'}]}]} as never);
+    const id=(invoice as {id:string}).id;
+    const server=createServer(async(req,res)=>{try{
+      const url=new URL(req.url!,'http://localhost');const path=url.pathname.replace('/api/v1','');let data:unknown;
+      if(path==='/sales/invoices/current'&&req.method==='PUT'){let body='';for await(const chunk of req)body+=chunk;data=await service.updateDraft(COMPANY,BRANCH,USER,id,JSON.parse(body));}
+      else if(path==='/sales/invoices/current')data=await service.findOne(COMPANY,id);
+      else if(path.startsWith('/inventory/locations/item/'))data=await locations.itemLocations(COMPANY,ITEM,{},null);
+      else if(path==='/inventory/items')data=[{id:ITEM,code:'IT-1',nameEn:'Milk',nameAr:'حليب',unit:'piece',isActive:true,units:[{unit:'piece',factor:'1'},{unit:'carton',factor:'12'}]}];
+      else if(path==='/parties/customers')data=[{id:CUSTOMER,code:'C-1',nameEn:'Buyer',nameAr:'مشتري',isActive:true}];
+      else if(path.includes('tax-pricing'))data={pricesIncludeTax:false};
+      else data=[];
+      res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
+    }catch(e){res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
+    await new Promise<void>(r=>server.listen(3220,'127.0.0.1',r));
+    try{
+      const output=await promisify(execFile)(process.env.FLUTTER_BIN??'flutter',['test','test/widget/sales_location_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});
+      console.log(output.stdout);
+      const read=await service.findOne(COMPANY,id) as unknown as {warehouseId:string;lines:Array<{locationAllocations:unknown;quantity:string}>};
+      expect(read.warehouseId).toBe(WAREHOUSE);expect(read.lines[0].locationAllocations).toEqual([{storageLocationId:LOC_A,quantity:'0.5000'},{storageLocationId:LOC_B,quantity:'1.5000'}]);
+      await service.post(COMPANY,USER,id);expect(await placedNow(db)).toEqual({'A-01':14,'B-01':2});expect(await shelf(db)).toBe(16);
+      await service.reverse(COMPANY,USER,id);expect(await placedNow(db)).toEqual({'A-01':20,'B-01':20});expect(await shelf(db)).toBe(40);
+    }finally{await new Promise<void>(r=>server.close(()=>r()));}
+  },150000);
+
 });

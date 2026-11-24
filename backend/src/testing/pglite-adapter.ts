@@ -415,7 +415,18 @@ export function pglitePrisma(db: PgliteLike) {
         // `include` is a second query per relation in Prisma, and it is a
         // second query here too - not a join - so the shape the caller sees and
         // the shape the database holds stay the same thing.
-        const include = args.include as Record<string, Row | boolean> | undefined;
+        // A relation named inside `select` (select: { units: true }) is an
+        // include for that relation, as in Prisma.
+        const selectedRelations = select
+          ? Object.fromEntries(
+              Object.keys(RELATIONS[model] ?? {})
+                .filter((field) => Boolean(select[field]))
+                .map((field) => [field, select[field] as Row | boolean]),
+            )
+          : {};
+        const include = (Object.keys(selectedRelations).length
+          ? { ...selectedRelations, ...((args.include as Row) ?? {}) }
+          : args.include) as Record<string, Row | boolean> | undefined;
         if (!include) return shaped;
         for (const [field, spec] of Object.entries(RELATIONS[model] ?? {})) {
           if (!include[field]) continue;
@@ -476,7 +487,18 @@ export function pglitePrisma(db: PgliteLike) {
       update: async (args: Row) => {
         const params: unknown[] = [];
         const sets: string[] = [];
-        for (const [field, value] of Object.entries(args.data as Row)) {
+        // Nested `{ deleteMany: {}, create: [...] }` on a to-many child (a
+        // draft's lines being replaced) is applied after the parent row.
+        const nestedWrites: Array<{ child: { model: string; table: string; foreignKey: string }; spec: Row }> = [];
+        const data = { ...(args.data as Row) };
+        for (const [key, mapping] of Object.entries(CHILDREN[model] ?? {})) {
+          const v = data[key] as Row | undefined;
+          if (v && (Array.isArray(v.create) || v.deleteMany !== undefined)) {
+            nestedWrites.push({ child: mapping, spec: v });
+            delete data[key];
+          }
+        }
+        for (const [field, value] of Object.entries(data)) {
           const op = value as Record<string, unknown>;
           if (op && typeof op === 'object' && 'increment' in op) {
             params.push(op.increment);
@@ -494,7 +516,18 @@ export function pglitePrisma(db: PgliteLike) {
           `UPDATE "${table}" SET ${sets.join(',')}${where} RETURNING *`,
           params,
         );
-        return rows[0] ?? {};
+        const updated = rows[0];
+        if (updated) {
+          for (const { child, spec } of nestedWrites) {
+            if (spec.deleteMany !== undefined) {
+              await db.query(`DELETE FROM "${child.table}" WHERE "${child.foreignKey}" = $1`, [updated.id]);
+            }
+            for (const childData of (spec.create as Row[] | undefined) ?? []) {
+              await createWithChildren(child.model, child.table, { ...childData, [child.foreignKey]: updated.id });
+            }
+          }
+        }
+        return updated ?? {};
       },
       updateMany: async (args: Row) => {
         const params: unknown[] = [];
