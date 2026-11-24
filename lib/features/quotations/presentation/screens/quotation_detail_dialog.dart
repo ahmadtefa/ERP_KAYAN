@@ -1,3 +1,4 @@
+import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -578,8 +579,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
               ],
             ),
             const SizedBox(height: 6),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            HorizontalScrollFrame(
               child: DataTable(
                 headingTextStyle: theme.textTheme.labelSmall,
                 dataTextStyle: theme.textTheme.bodySmall,

@@ -73,3 +73,41 @@ class PersistentTableScrollState extends State<PersistentTableScroll> {
     );
   }
 }
+
+/// A sideways scroller with a bar that is always visible, for a wide table
+/// that does not scroll vertically itself (dialogs, previews). The plain
+/// `SingleChildScrollView(scrollDirection: Axis.horizontal)` shows no bar at
+/// all on desktop, so hidden columns were easy to miss.
+class HorizontalScrollFrame extends StatefulWidget {
+  const HorizontalScrollFrame({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<HorizontalScrollFrame> createState() => _HorizontalScrollFrameState();
+}
+
+class _HorizontalScrollFrameState extends State<HorizontalScrollFrame> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _controller,
+    thumbVisibility: true,
+    trackVisibility: true,
+    notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+    child: SingleChildScrollView(
+      controller: _controller,
+      scrollDirection: Axis.horizontal,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: widget.child,
+      ),
+    ),
+  );
+}
