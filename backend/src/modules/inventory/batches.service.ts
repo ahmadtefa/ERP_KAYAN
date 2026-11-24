@@ -793,6 +793,7 @@ export class BatchesService {
     const { warehouse, item } = resolved;
     const policy = batchPolicyOf(item);
     const today = new Date();
+    if (warehouse) await this.lockItemStock(tx, warehouse.id, item.id);
     if (warehouse && !input.storageLocationId) {
       await this.assertNoLocatedStock(tx, companyId, warehouse.id, item);
     }
@@ -1227,38 +1228,44 @@ export class BatchesService {
         'الدفعة تم إعدامها بالفعل. / This lot has already been written off.',
       );
     }
-    // Located stock may only be written off from a named shelf, and only up
-    // to what that shelf holds of this lot.
-    const lotShelves = await this.placedRows(this.prisma as unknown as Prisma.TransactionClient, companyId, warehouse.id, input.itemId, batch.id);
     let writeOffShelf: string | null = null;
-    if (input.storageLocationId) {
-      const here = lotShelves.find((r) => r.id === input.storageLocationId);
-      const have = here?.quantity ?? new Prisma.Decimal(0);
-      if (have.lessThan(quantity)) {
-        throw new BadRequestException({
-          code: 'WRITEOFF_LOCATION_SHORT',
-          message:
-            `الموقع المختار يحوي ${have.toFixed(MONEY_SCALE)} فقط من هذه الدفعة، والمطلوب ${quantity.toFixed(MONEY_SCALE)}. ` +
-            'قلل الكمية أو اختر موقعًا آخر. / ' +
-            `The chosen location holds ${have.toFixed(MONEY_SCALE)} of this lot, not ${quantity.toFixed(MONEY_SCALE)}. Reduce the quantity or choose another location.`,
-          errors: { available: have.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
-        });
-      }
-      writeOffShelf = input.storageLocationId;
-    } else if (lotShelves.length) {
-      const list = lotShelves.map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`);
-      throw new BadRequestException({
-        code: 'WRITEOFF_LOCATION_REQUIRED',
-        message:
-          `هذه الدفعة موزعة على مواقع (${list.join('، ')}). اختر الموقع الذي يُعدم منه ثم أعد المحاولة؛ بياناتك محفوظة. / ` +
-          `This lot is stored on locations (${list.join(', ')}). Choose the location to write off from, then try again; what you entered is kept.`,
-        errors: { locations: lotShelves.map((r) => ({ locationId: r.id, code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })) },
-      });
-    }
 
     const date = input.documentDate ? dayOnly(input.documentDate) : dayOnly(new Date());
 
     return this.prisma.$transaction(async (tx) => {
+      // Source availability is read and acted on under one lock per item and
+      // warehouse, so two write-offs (or an issue) against the same shelf
+      // cannot both pass the check and drive it negative.
+      await this.lockItemStock(tx, warehouse.id, input.itemId);
+        // Located stock may only be written off from a named shelf, and only up
+        // to what that shelf holds of this lot.
+        const lotShelves = await this.placedRows(tx, companyId, warehouse.id, input.itemId, batch.id);
+        if (input.storageLocationId) {
+          const here = lotShelves.find((r) => r.id === input.storageLocationId);
+          const have = here?.quantity ?? new Prisma.Decimal(0);
+          if (have.lessThan(quantity)) {
+            throw new BadRequestException({
+              code: 'WRITEOFF_LOCATION_SHORT',
+              message:
+                `الموقع المختار يحوي ${have.toFixed(MONEY_SCALE)} فقط من هذه الدفعة، والمطلوب ${quantity.toFixed(MONEY_SCALE)}. ` +
+                'قلل الكمية أو اختر موقعًا آخر. / ' +
+                `The chosen location holds ${have.toFixed(MONEY_SCALE)} of this lot, not ${quantity.toFixed(MONEY_SCALE)}. Reduce the quantity or choose another location.`,
+              errors: { available: have.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
+            });
+          }
+          writeOffShelf = input.storageLocationId;
+        } else if (lotShelves.length) {
+          const list = lotShelves.map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`);
+          throw new BadRequestException({
+            code: 'WRITEOFF_LOCATION_REQUIRED',
+            message:
+              `هذه الدفعة موزعة على مواقع (${list.join('، ')}). اختر الموقع الذي يُعدم منه ثم أعد المحاولة؛ بياناتك محفوظة. / ` +
+              `This lot is stored on locations (${list.join(', ')}). Choose the location to write off from, then try again; what you entered is kept.`,
+            errors: { locations: lotShelves.map((r) => ({ locationId: r.id, code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })) },
+          });
+        }
+
+
       // The lot row is claimed before anything is posted: two simultaneous
       // write-offs of the last unit would otherwise both succeed.
       const claimed = await tx.itemBatch.updateMany({
@@ -1916,6 +1923,24 @@ export class BatchesService {
       );
     }
     return item;
+  }
+
+  /// Serialises writers that read a shelf's quantity and then act on it.
+  /// Held until the surrounding transaction ends.
+  private async lockItemStock(tx: Prisma.TransactionClient, warehouseId: string, itemId: string) {
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${warehouseId}:${itemId}`}, 0))`,
+    );
+  }
+
+  /// Takes the per-item locks of a multi-item document in one fixed order
+  /// (sorted by key), so two documents that list the same items in opposite
+  /// order queue instead of deadlocking. Call it before any single-item lock
+  /// or stock row lock of the same transaction. Same key as lockItemStock.
+  async lockItemsStock(tx: Prisma.TransactionClient, warehouseId: string, itemIds: string[]) {
+    for (const id of [...new Set(itemIds)].sort()) {
+      await this.lockItemStock(tx, warehouseId, id);
+    }
   }
 
   /// Shelves holding stock of an item (or of one lot), from the movement

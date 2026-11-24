@@ -47,8 +47,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const I=randomUUID();await p.item.create({data:{id:I,companyId:C,code:mode,nameEn:mode,nameAr:mode,unit:'piece',requiresBatch:true,isStockTracked:true,useFefo:true}});
   const receipt=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:I,batchNumber:mode,quantity:6,unitCost:2,storageLocationId:L,expiryDate:'2027-03-01'});
   // Move half to another shelf so the lot total cannot itself prevent overspending source A.
-  // Fixture-only value-neutral move, avoiding the independently reported Prisma void-return bug in move().
-  for (const [storageLocationId,direction] of [[L,'OUT'],[L2,'IN']]) await p.stockMovement.create({data:{companyId:C,branchId:B,warehouseId:W,itemId:I,batchId:receipt.batchId,storageLocationId,direction,quantity:3,unitCost:2,totalCost:6,movementDate:new Date(),referenceType:'SYNTHETIC_LOCATION_MOVE'}});
+  const {StorageLocationsService}=require('../dist/src/modules/inventory/storage-locations.service.js');
+  await new StorageLocationsService(p,audit).move(C,U,{fromLocationId:L,toLocationId:L2,itemId:I,batchId:receipt.batchId,quantity:3,reason:'synthetic setup'},null);
   let release; const locked=new Promise(r=>release=r);let acquired;
   const ready=new Promise(r=>acquired=r);const original=a.lockItemStock.bind(a);
   a.lockItemStock=async(tx,w,i)=>{await original(tx,w,i);acquired();await locked;};
@@ -65,6 +65,45 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const batch=await p.itemBatch.findUnique({where:{id:receipt.batchId}});assert.equal(Number(batch.remainingQuantity),4);
   reports.push({mode,successes:1,sourceRemaining:source,lotRemaining:Number(batch.remainingQuantity),waits,error:rejected.reason.response??String(rejected.reason)});
  }
+ // Native-driver checks for assignment and explicit historical-deficit reconciliation.
+ const {StorageLocationsService}=require('../dist/src/modules/inventory/storage-locations.service.js');
+ const locations=new StorageLocationsService(p,audit);
+ const J=randomUUID();await p.item.create({data:{id:J,companyId:C,code:'assign',nameEn:'assign',nameAr:'assign',unit:'piece',requiresBatch:true,isStockTracked:true}});
+ const r=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:J,batchNumber:'unlocated',quantity:4,unitCost:2});
+ await locations.assignUnlocated(C,U,{warehouseId:W,toLocationId:L,itemId:J,batchId:r.batchId,quantity:3,reason:'physical placement'},null);
+ // Simulate the exact legacy discrepancy with value-neutral paired ledger entries.
+ for(const [storageLocationId,direction] of [[null,'OUT'],[L,'IN']])await p.stockMovement.create({data:{companyId:C,branchId:B,warehouseId:W,itemId:J,batchId:r.batchId,storageLocationId,direction,quantity:2,unitCost:2,totalCost:4,movementDate:new Date(),referenceType:'SYNTHETIC_LEGACY_DEFICIT'}});
+ await locations.reconcileUnlocated(C,U,{warehouseId:W,fromLocationId:L,itemId:J,batchId:r.batchId,quantity:1,reason:'verified legacy discrepancy'},null);
+ const corrected=(await sql.query('SELECT \"storageLocationId\",SUM(CASE WHEN direction=\'IN\' THEN quantity ELSE -quantity END)::text q FROM stock_movements WHERE \"itemId\"=$1 GROUP BY \"storageLocationId\"',[J])).rows;
+ assert.equal(Number(corrected.find(x=>x.storageLocationId===null).q),0);
+ assert.equal(Number(corrected.find(x=>x.storageLocationId===L).q),4);
+ const correctedBalance=await p.warehouseStockBalance.findFirst({where:{warehouseId:W,itemId:J}});assert.equal(Number(correctedBalance.quantity),4);assert.equal(Number(correctedBalance.value),8);
+ reports.push({mode:'native move/assign/reconcile',success:true,unlocated:0,located:4,warehouseQuantity:4,warehouseValue:8});
+ // Opposite-order sales invoices with a deliberate lock overlap on independent clients.
+ const {SalesInvoicesService}=require('../dist/src/modules/sales/sales-invoices.service.js');
+ const {WarehouseService}=require('../dist/src/common/warehouse/warehouse.service.js');
+ const {AuditService}=require('../dist/src/common/audit/audit.service.js');
+ for(const [code,type] of [['1103','ASSET'],['4101','REVENUE'],['2103','LIABILITY'],['5101','EXPENSE']])await p.account.create({data:{companyId:C,code,nameEn:code,nameAr:code,type,isPostable:true,isActive:true}});
+ const customer=await p.customer.create({data:{companyId:C,code:'BUYER',nameEn:'Synthetic',nameAr:'Synthetic'}});
+ const items=[randomUUID(),randomUUID()];
+ for(const id of items){await p.item.create({data:{id,companyId:C,code:id,nameEn:'Two item',nameAr:'Two item',unit:'piece',requiresBatch:true,isStockTracked:true}});await a.receive(C,U,{branchId:B,warehouseId:W,itemId:id,batchNumber:id,quantity:10,unitCost:2,storageLocationId:L});}
+ function sales(prisma,batches){const au=new AuditService(prisma),numbers=new DocumentNumberService();return new SalesInvoicesService(prisma,numbers,new PostingService(numbers,new FiscalPeriodsService(prisma,au),new CostCentersService(prisma,au)),new AccountMapService(),{get:async()=>({defaultTaxRate:0,taxRate:'0',maxDiscountPercent:'100',pricesIncludeTax:false})},new WarehouseService(prisma,au),{},au,batches,new StockLedgerService(),{assertCanPost:async()=>{}});}
+ const sa=sales(p,a),sb=sales(q,b);
+ const inv=[];
+ for(const order of [items,[...items].reverse()]){
+  const id=randomUUID();
+  await sql.query(`INSERT INTO sales_invoices (id,"companyId","branchId","warehouseId","invoiceNumber","invoiceDate","customerId",status,currency,"subTotal","taxAmount","totalAmount","paidAmount","costOfGoods","documentType","updatedAt") VALUES ($1,$2,$3,$4,$5,'2026-11-25',$6,'DRAFT','EGP',20,0,20,0,0,'INVOICE',now())`,[id,C,B,W,id,customer.id]);
+  for(const [index,item] of order.entries())await sql.query(`INSERT INTO sales_invoice_lines (id,"invoiceId","lineNumber","itemId",description,quantity,"unitPrice","taxRate","taxAmount","lineTotal","unitCost","costTotal","locationAllocations") VALUES ($1,$2,$3,$4,'Synthetic',1,10,0,0,10,0,0,$5::jsonb)`,[randomUUID(),id,index+1,item,JSON.stringify([{storageLocationId:L,quantity:'1'}])]);
+  inv.push(id);
+ }
+ let unlock,signal;const gated=new Promise(r=>unlock=r),entered=new Promise(r=>signal=r);const original=a.lockItemStock.bind(a);let once=true;
+ a.lockItemStock=async(tx,w,i)=>{await original(tx,w,i);if(once){once=false;signal();await gated;}};
+ const f=sa.post(C,U,inv[0]);await entered;const g=sb.post(C,U,inv[1]);await sleep(250);
+ const waits=(await sql.query("SELECT application_name,wait_event_type,wait_event FROM pg_stat_activity WHERE datname=$1 AND wait_event_type='Lock'",[database])).rows;assert.ok(waits.length);unlock();
+ const saleResults=await Promise.allSettled([f,g]);a.lockItemStock=original;
+ assert.deepEqual(saleResults.map(x=>x.status),['fulfilled','fulfilled'],JSON.stringify(saleResults));
+ for(const id of items){const balance=await p.warehouseStockBalance.findFirst({where:{warehouseId:W,itemId:id}});assert.equal(Number(balance.quantity),8);}
+ reports.push({mode:'sales A/B vs B/A',posted:2,eachItemRemaining:8,waits});
  console.log(JSON.stringify({postgres:identity.version,database,reports},null,2));
  await Promise.all(clients.map(x=>x.$disconnect()));await sql.end();
 })().catch(e=>{console.error(e);process.exit(1)});

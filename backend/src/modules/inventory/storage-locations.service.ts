@@ -428,25 +428,29 @@ export class StorageLocationsService {
     });
     if (!item) throw new NotFoundException('Item not found');
 
-    const availableRows = await this.prisma.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
-      Prisma.sql`
-        SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
-          FROM "stock_movements"
-         WHERE "companyId" = ${companyId}::uuid
-           AND "storageLocationId" = ${input.fromLocationId}::uuid
-           AND "itemId" = ${input.itemId}::uuid
-           ${input.batchId ? Prisma.sql`AND "batchId" = ${input.batchId}::uuid` : Prisma.empty}
-      `,
-    );
-    const available = new Prisma.Decimal(availableRows[0]?.quantity ?? 0);
-    if (available.lessThan(quantity)) {
-      throw new BadRequestException(
-        `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
-          `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
-      );
-    }
-
     const result = await this.prisma.$transaction(async (tx) => {
+      // The availability check runs under the same per-item lock as issues,
+      // write-offs and assignments, so two moves cannot both pass it.
+      await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${from.warehouseId}:${item.id}`}, 0))`,
+      );
+      const availableRows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
+        Prisma.sql`
+          SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+            FROM "stock_movements"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "storageLocationId" = ${input.fromLocationId}::uuid
+             AND "itemId" = ${input.itemId}::uuid
+             ${input.batchId ? Prisma.sql`AND "batchId" = ${input.batchId}::uuid` : Prisma.empty}
+        `,
+      );
+      const available = new Prisma.Decimal(availableRows[0]?.quantity ?? 0);
+      if (available.lessThan(quantity)) {
+        throw new BadRequestException(
+          `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
+            `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
+        );
+      }
       // The value travels with the goods at the shelf's average, so a move
       // never invents profit and never loses cost.
       const balance = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(
@@ -705,7 +709,7 @@ export class StorageLocationsService {
     return this.prisma.$transaction(async (tx) => {
       // Two assignments of the same goods queue here instead of both reading
       // the same unlocated quantity.
-      await tx.$queryRaw(
+      await tx.$executeRaw(
         Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${to.warehouseId}:${item.id}`}, 0))`,
       );
       const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
@@ -840,7 +844,7 @@ export class StorageLocationsService {
     const batchId = input.batchId ?? null;
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(
+      await tx.$executeRaw(
         Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${from.warehouseId}:${item.id}`}, 0))`,
       );
       const sum = async (located: boolean) => {

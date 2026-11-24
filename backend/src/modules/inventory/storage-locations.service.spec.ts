@@ -168,6 +168,7 @@ describe('storage locations', () => {
       $queryRaw: jest.fn(async (query: { sql?: string; values?: unknown[] }) => readRaw(query)),
       $transaction: jest.fn(async (run: (tx: unknown) => Promise<unknown>) =>
         run({
+          $executeRaw: jest.fn(async () => 1),
           $queryRaw: jest.fn(async (query: { sql?: string; values?: unknown[] }) => readRaw(query)),
           stockMovement,
           itemBatch,

@@ -802,6 +802,15 @@ export class SalesInvoicesService {
       // An item that keeps no lots still issues exactly as before. The engine
       // detects that itself and takes the weighted average off the shelf, so
       // the two paths cannot drift apart.
+      // Every item's stock lock is taken up front, in one fixed order, before
+      // any line is issued: two invoices listing A,B and B,A must not deadlock.
+      if (warehouseId) {
+        await this.batches.lockItemsStock(
+          tx,
+          warehouseId,
+          invoice.lines.flatMap((l) => (l.itemId ? [l.itemId] : [])),
+        );
+      }
       let costOfGoods = new Prisma.Decimal(0);
       const costByLine = new Map<string, { unitCost: Prisma.Decimal; costTotal: Prisma.Decimal }>();
 

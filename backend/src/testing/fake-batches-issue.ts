@@ -20,6 +20,7 @@ export interface FakeIssueOptions {
 export function fakeBatches(options: FakeIssueOptions = {}) {
   const at = options.onHand ?? { quantity: 0, value: 0 };
   return {
+    lockItemsStock: jest.fn(async () => undefined),
     issueTx: jest.fn(
       async (
         tx: any,
