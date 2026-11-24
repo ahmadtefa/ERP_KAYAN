@@ -797,7 +797,8 @@ export class WarehouseService {
  * `undefined` means "every branch I am allowed to see":
  *   - a company-wide account has no scope, so the filter stays as asked;
  *   - an account with exactly one assigned branch is pinned to it;
- *   - an account with several is asked to choose, rather than being given a
+ *   - an account with several opens on its home branch when that is one of
+ *     them, and is asked to choose otherwise, rather than being given a
  *     merged total that belongs to no single branch.
  */
 export function scopedBranchId(
@@ -820,6 +821,11 @@ export function scopedBranchId(
       'No branch is assigned to this account. / لا يوجد فرع مسند لهذا الحساب.',
     );
   }
+  // Several assigned branches and none chosen: open on the account's own home
+  // branch, exactly as the inventory reports do, instead of failing a screen
+  // that has no branch picker. A different branch is still one explicit
+  // `branchId` away, and that id is still checked against the assignment.
+  if (user.branchId && scope.includes(user.branchId)) return user.branchId;
   throw new BadRequestException(
     'Select one of your assigned branches. / اختر أحد الفروع المسندة إليك.',
   );
