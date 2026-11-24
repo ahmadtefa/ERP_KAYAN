@@ -1,3 +1,4 @@
+import '../../core/error/app_error_text.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -349,10 +350,10 @@ class _FormSheetState extends State<_FormSheet> {
           // for (a nested line, a rule that spans fields) are not lost: they
           // are shown in the ordinary error dialog, separately from the fields.
           final known = widget.fields.map((field) => field.key).toSet();
-          final unmatched = error.fieldErrors.entries
-              .where((entry) => !known.contains(entry.key))
-              .map((entry) => entry.value)
-              .toList(growable: false);
+          final unmatched = {
+            for (final entry in error.fieldErrors.entries)
+              if (!known.contains(entry.key)) entry.key: entry.value,
+          };
           if (first != null) {
             final fieldContext = _fieldKeys[first.key]?.currentContext;
             // The context belongs to a field that the await above may have
@@ -362,7 +363,13 @@ class _FormSheetState extends State<_FormSheet> {
               _focusNodes[first.key]?.requestFocus();
             }
             if (unmatched.isEmpty) return;
-            await showAppErrorMessage(context, unmatched.join('\n'));
+            await showAppErrorMessage(
+              context,
+              describeFieldErrors(
+                unmatched,
+                isArabic: Localizations.localeOf(context).languageCode == 'ar',
+              ),
+            );
             return;
           }
         }

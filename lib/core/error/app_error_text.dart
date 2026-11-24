@@ -97,6 +97,18 @@ class AppErrorMessageResolver {
               : 'The protected licence state does not match the database. Preserve the data and contact support for an authorised recovery or transfer.',
         );
       }
+      if (error is ApiFailure &&
+          error.code == 'VALIDATION_FAILED' &&
+          error.fieldErrors.isNotEmpty) {
+        return AppErrorText(
+          reason: AppErrorReason.invalidInput,
+          severity: AppErrorSeverity.warning,
+          businessMessage: describeFieldErrors(
+            error.fieldErrors,
+            isArabic: isArabic,
+          ),
+        );
+      }
       final preferred = _reasonOf(error);
       final code = _statusOf(error) ?? statusCode;
       final text = _resolveText(
@@ -270,7 +282,8 @@ class AppErrorMessageResolver {
     //    list left every parameterised rule ("Nothing to depreciate for
     //    2024-01 — FA-M-1: already depreciated for 2024-01") falling through
     //    to "The submitted data is not valid", which explains nothing.
-    final knownRule = _exactArLower.containsKey(body.toLowerCase()) ||
+    final knownRule =
+        _exactArLower.containsKey(body.toLowerCase()) ||
         _patterns.any((rule) => rule.pattern.hasMatch(body));
     if (!isArabic && _looksLikeSentence(body) && (knownRule || !untrusted)) {
       final reason = _reasonFor(statusCode, preferred);
@@ -1236,4 +1249,75 @@ class _LinePrefix {
 
   final String? prefix;
   final String body;
+}
+
+/// The few field names a person actually sees on screen, in Arabic. A name
+/// that is not here is shown as written, so nothing is hidden by a missing
+/// entry.
+const _fieldLabelsAr = <String, String>{
+  'name': 'الاسم',
+  'nameAr': 'الاسم بالعربية',
+  'nameEn': 'الاسم بالإنجليزية',
+  'code': 'الكود',
+  'email': 'البريد الإلكتروني',
+  'phone': 'الهاتف',
+  'address': 'العنوان',
+  'taxNumber': 'الرقم الضريبي',
+  'notes': 'ملاحظات',
+  'quantity': 'الكمية',
+  'unitPrice': 'سعر الوحدة',
+  'price': 'السعر',
+  'amount': 'المبلغ',
+  'discount': 'الخصم',
+  'description': 'الوصف',
+  'itemId': 'الصنف',
+  'customerId': 'العميل',
+  'supplierId': 'المورد',
+  'warehouseId': 'المخزن',
+  'branchId': 'الفرع',
+  'accountId': 'الحساب',
+  'date': 'التاريخ',
+  'quotationDate': 'تاريخ العرض',
+  'validUntil': 'ساري حتى',
+  'invoiceDate': 'تاريخ الفاتورة',
+  'dueDate': 'تاريخ الاستحقاق',
+  'username': 'اسم المستخدم',
+  'password': 'كلمة المرور',
+  'unit': 'الوحدة',
+  'subject': 'الموضوع',
+  'lines': 'البنود',
+  'tables': 'الجداول',
+  'items': 'البنود',
+  'currency': 'العملة',
+  'reason': 'السبب',
+};
+
+/// One line per refused field: "الحقل: السبب". A path into a list
+/// (`lines.0.quantity`) reads as "البنود (1) - الكمية".
+String describeFieldErrors(
+  Map<String, String> errors, {
+  required bool isArabic,
+}) {
+  String label(String path) {
+    final parts = path.split('.');
+    final out = <String>[];
+    for (var i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      final index = int.tryParse(part);
+      if (index != null) {
+        if (out.isNotEmpty) out[out.length - 1] = '${out.last} (${index + 1})';
+        continue;
+      }
+      out.add(isArabic ? (_fieldLabelsAr[part] ?? part) : part);
+    }
+    return out.join(' - ');
+  }
+
+  final header = isArabic
+      ? 'راجع الحقول التالية:'
+      : 'Please check these fields:';
+  return [
+    header,
+    for (final entry in errors.entries) '• ${label(entry.key)}: ${entry.value}',
+  ].join('\n');
 }
