@@ -3,8 +3,11 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, StockDocumentKind } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
+import { STOCKTAKE_PENDING_APPROVAL, dedupeKey } from '../notifications/notification-kinds';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -32,6 +35,7 @@ export class StockTakesService {
     private readonly numbers: DocumentNumberService,
     private readonly documents: StockDocumentsService,
     private readonly audit: AuditService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async list(
@@ -434,8 +438,62 @@ export class StockTakesService {
       entityId: session.id,
       after: { lines: dto.lines.length, finished: Boolean(dto.finish) },
     });
+    if (dto.finish) await this.announce(companyId, session.id, 'SUBMIT', userId);
 
     return this.findOne(companyId, session.id, scope);
+  }
+
+  /// Keeps the notification centre in step with the count at once. Runs after
+  /// the action has committed and never undoes it; the 30-minute scan is the
+  /// backstop.
+  private async announce(
+    companyId: string,
+    id: string,
+    action: 'SUBMIT' | 'APPROVE' | 'CANCEL',
+    userId: string,
+    createdBy?: string | null,
+  ) {
+    if (!this.notifications) return;
+    try {
+      const session = await this.prisma.stockTakeSession.findFirst({
+        where: { id, companyId },
+        select: { branchId: true, code: true },
+      });
+      if (!session) return;
+      if (action === 'SUBMIT') {
+        await this.notifications.raiseSafely({
+          companyId,
+          type: STOCKTAKE_PENDING_APPROVAL,
+          branchId: session.branchId,
+          entityType: 'StockTakeSession',
+          entityId: id,
+          entityRef: session.code,
+          actionPath: `/inventory/stock-takes?session=${id}`,
+          titleEn: `Stock count ${session.code} is waiting for approval`,
+          titleAr: `الجرد ${session.code} في انتظار اعتماد الفروق`,
+          dedupe: dedupeKey({ type: STOCKTAKE_PENDING_APPROVAL, entityId: id }),
+        });
+        return;
+      }
+      await this.notifications.clearPending(companyId, 'StockTakeSession', id);
+      if (action === 'APPROVE') {
+        await this.notifications.tellRequester({
+          companyId,
+          branchId: session.branchId,
+          requesterId: createdBy,
+          decidedBy: userId,
+          outcome: 'APPROVED',
+          entityType: 'StockTakeSession',
+          entityId: id,
+          entityRef: session.code,
+          nameAr: 'الجرد',
+          nameEn: 'Stock count',
+          actionPath: `/inventory/stock-takes?session=${id}`,
+        });
+      }
+    } catch {
+      // The scan reconciles the centre on its next pass.
+    }
   }
 
   /// Approves the difference, once.
@@ -480,6 +538,7 @@ export class StockTakesService {
       entityId: session.id,
       after: { code: session.code, approvedBy: userId },
     });
+    await this.announce(companyId, session.id, 'APPROVE', userId, session.createdBy);
 
     return this.findOne(companyId, session.id, scope);
   }
@@ -645,6 +704,7 @@ export class StockTakesService {
       entityId: session.id,
       after: { code: session.code, reason: reason ?? null },
     });
+    await this.announce(companyId, session.id, 'CANCEL', userId, null);
     return this.findOne(companyId, session.id, scope);
   }
 

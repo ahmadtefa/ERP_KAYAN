@@ -5,6 +5,7 @@ import { ApprovalsService, ApprovalActor } from '../../common/approvals/approval
 import { StockTransfersService } from './stock-transfers.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SalesOrdersService } from '../sales/sales-orders.service';
+import { StockTakesService } from './stock-takes.service';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const BRANCH_A = '22222222-2222-4222-8222-222222222222';
@@ -189,6 +190,13 @@ const vmReady =
     };
     await notif.scanBusiness(COMPANY);
     expect(await sees(U.countApprover)).toEqual(['STOCKTAKE_PENDING_APPROVAL']);
+    expect(await sees(U.other)).toEqual([]);
+    // Approval clears the task at once and tells the person who opened the count.
+    await prisma.$executeRawUnsafe(`UPDATE stock_take_sessions SET "createdBy"='${REQUESTER}' WHERE id='${STK}'`);
+    const takes = new StockTakesService(prisma as never, undefined as never, undefined as never, undefined as never, undefined as never, { record: async () => undefined } as never, notif);
+    await takes.approve(COMPANY, MANAGER, STK);
+    expect(await sees(U.countApprover)).toEqual([]);
+    expect(await sees(nu(REQUESTER, [], ['STOREKEEPER']))).toEqual(['DOCUMENT_APPROVED']);
     expect(await sees(U.other)).toEqual([]);
   });
 });
