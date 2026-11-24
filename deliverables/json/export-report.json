@@ -1,0 +1,23 @@
+{
+ "companyId": "2f9ac477-f86b-4317-8f45-eb9c53022fbf",
+ "kinds": [
+  {
+   "kind": "items",
+   "records": 1000,
+   "bytes": 607644,
+   "path": "/home/user/ERP_KAYAN/deliverables/json/items.json"
+  },
+  {
+   "kind": "customers",
+   "records": 500,
+   "bytes": 179594,
+   "path": "/home/user/ERP_KAYAN/deliverables/json/customers.json"
+  },
+  {
+   "kind": "suppliers",
+   "records": 100,
+   "bytes": 36403,
+   "path": "/home/user/ERP_KAYAN/deliverables/json/suppliers.json"
+  }
+ ]
+}
