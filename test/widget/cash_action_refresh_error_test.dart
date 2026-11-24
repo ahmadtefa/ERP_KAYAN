@@ -44,6 +44,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_CashApi(entry.initial);
       final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(testUser),
         exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
       addTearDown(container.dispose);
       expect((await container.read(dashboardSummaryProvider.future))['status'],entry.initial);
