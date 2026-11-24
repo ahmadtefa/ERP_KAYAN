@@ -450,6 +450,41 @@ void main() {
     });
 
     testWidgets(
+      'split located lot requires a physical source before direct issue',
+      (tester) async {
+        final row = _lot(location: null)
+          ..['locations'] = [
+            {'locationId': 'loc-1', 'quantity': '40.0000'},
+          ];
+        final api = _BatchApi(lots: [row]);
+        await pump(tester, api);
+        await tapText(tester, 'Issue');
+        await tapText(tester, 'Issue');
+        expect(api.posted, isEmpty);
+        expect(
+          find.textContaining('Choose the physical source location.'),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Quantity'),
+              )
+              .controller!
+              .text,
+          '40',
+        );
+        await pickDropdownItem(
+          tester,
+          'Source location',
+          'A-01 • Aisle A shelf 1',
+        );
+        await tapText(tester, 'Issue');
+        expect(api.posted.single.$2['storageLocationId'], 'loc-1');
+      },
+    );
+
+    testWidgets(
       'receive refreshes locations created after an earlier empty dialog',
       (tester) async {
         final api = _BatchApi()..locationsAvailable = false;

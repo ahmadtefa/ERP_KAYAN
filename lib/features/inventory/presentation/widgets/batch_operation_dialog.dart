@@ -683,17 +683,25 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     return Consumer(
       builder: (context, ref, _) {
         final shelves = ref.watch(batchShelvesOfProvider(warehouseId));
-        final rows = shelves.value ?? prefetched;
+        final rows = (shelves.value ?? prefetched)
+            .where((row) => row['isActive'] != false)
+            .toList(growable: false);
+        final sourceRequired =
+            widget.operation == BatchOperation.issue &&
+            (listOf(widget.batch?['locations']).isNotEmpty ||
+                asString(widget.batch?['storageLocationId']) != null);
         return DropdownButtonFormField<String>(
           initialValue: rows.any((row) => text(row, 'id') == _locationId)
               ? _locationId
               : null,
           isExpanded: true,
           decoration: InputDecoration(
-            labelText: _label(
-              'موقع التخزين (اختياري)',
-              'Storage location (optional)',
-            ),
+            labelText: sourceRequired
+                ? _label('موقع الصرف', 'Source location')
+                : _label(
+                    'موقع التخزين (اختياري)',
+                    'Storage location (optional)',
+                  ),
             errorText: _fieldErrors['storageLocationId'],
             helperText: shelves.isLoading
                 ? _label('جارٍ تحميل المواقع...', 'Loading locations...')
@@ -719,6 +727,12 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
               icon: const Icon(Icons.refresh),
             ),
           ),
+          validator: (value) => sourceRequired && (value ?? '').isEmpty
+              ? _label(
+                  'اختر الموقع الذي ستصرف منه البضاعة. لو الكمية موزعة، اصرف كمية كل موقع على حدة.',
+                  'Choose the physical source location. For split stock, issue each location quantity separately.',
+                )
+              : null,
           items: [
             for (final row in rows)
               DropdownMenuItem(
