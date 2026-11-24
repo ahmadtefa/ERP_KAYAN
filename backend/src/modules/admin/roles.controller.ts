@@ -56,6 +56,14 @@ export class RolesController {
     return { ...result, ...(await this.roles.list(user.companyId)) };
   }
 
+  /// Manual one-company upgrade: takes the audit-trail and approvals reads off
+  /// the standard Read-only and Reports roles (custom roles untouched).
+  @Post('roles/upgrade-standard-read-roles')
+  @RequirePermissions('admin.roles.manage')
+  async upgradeStandardReadRoles(@CurrentUser() user: AuthUser) {
+    return this.catalogue.retireWildcardAdminReads(user.companyId);
+  }
+
   @Get('roles/:id')
   @RequirePermissions('admin.roles.manage')
   findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {

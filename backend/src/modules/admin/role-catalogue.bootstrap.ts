@@ -113,4 +113,33 @@ export class RoleCatalogueBootstrap implements OnApplicationBootstrap {
     }
     return { created, companies: companies.length };
   }
+
+  /// Explicit, manual upgrade for ONE company (never run at start-up): the
+  /// standard READ_ONLY and REPORT_USER roles used to receive the audit trail
+  /// and approvals reads through the read-everything wildcard. Removes exactly
+  /// those two codes from those two standard (isSystem) roles. Custom roles and
+  /// every other grant are untouched. A company that deliberately added those
+  /// codes to these two roles must grant them again; the removal is logged.
+  async retireWildcardAdminReads(companyId: string): Promise<{ removed: number; roles: string[] }> {
+    const roles = await this.prisma.role.findMany({
+      where: {
+        companyId,
+        isSystem: true,
+        deletedAt: null,
+        code: { in: ['READ_ONLY', 'REPORT_USER'] },
+      },
+      select: { id: true, code: true },
+    });
+    if (roles.length === 0) return { removed: 0, roles: [] };
+    const result = await this.prisma.rolePermission.deleteMany({
+      where: {
+        roleId: { in: roles.map((role) => role.id) },
+        permission: { code: { in: ['admin.audit.read', 'admin.approvals.read'] } },
+      },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Role upgrade: removed ${result.count} admin read grant(s) from standard roles of one company`);
+    }
+    return { removed: result.count, roles: roles.map((role) => role.code) };
+  }
 }
