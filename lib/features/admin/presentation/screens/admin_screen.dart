@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../../operations/ops_auto_create.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -153,7 +154,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 
   Future<List<FieldOption>> _branchOptions() async {
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-    final branches = await ref.read(apiClientProvider).getList('/company/branches');
+    final branches = await ref
+        .read(apiClientProvider)
+        .getList('/company/branches');
     final ids = [for (final branch in branches) text(branch, 'id')];
     if (ids.any((id) => id.isEmpty) || ids.toSet().length != ids.length) {
       throw const FormatException();
@@ -240,16 +243,19 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         FieldSpec(
           'username',
           l10n.username,
+          maxLength: 60,
           required: true,
           helper: l10n.usernameHelper,
         ),
-      FieldSpec('fullNameEn', l10n.fullNameEn, required: true),
-      FieldSpec('fullNameAr', l10n.fullNameAr, required: true),
-      FieldSpec('email', l10n.email),
+      FieldSpec('fullNameEn', l10n.fullNameEn, maxLength: 200, required: true),
+      FieldSpec('fullNameAr', l10n.fullNameAr, maxLength: 200, required: true),
+      FieldSpec('email', l10n.email, maxLength: 200, email: true),
       if (!isEdit)
         FieldSpec(
           'password',
           l10n.password,
+          maxLength: 200,
+          minLength: 12,
           required: true,
           helper: l10n.passwordHelper,
           obscure: true,
@@ -296,8 +302,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           } else if (isEdit) {
             payload['expectedRoleIds'] = roleIds;
           }
-          final selectedBranches =
-              (payload['branchIds'] as List).cast<String>().toSet();
+          final selectedBranches = (payload['branchIds'] as List)
+              .cast<String>()
+              .toSet();
           if (isEdit &&
               selectedBranches.length == branchIds.length &&
               selectedBranches.containsAll(branchIds)) {
@@ -310,7 +317,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
             await client.patch('/admin/users/${existing['id']}', body: payload);
           } else {
             final created = await client.post('/admin/users', body: payload);
-            createdUserId = created['id'] is String ? created['id'] as String : null;
+            createdUserId = created['id'] is String
+                ? created['id'] as String
+                : null;
           }
         } catch (error) {
           throw UncertainFormSubmission(error);
@@ -327,14 +336,26 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: Text(arabic ? 'صورة المستخدم' : 'User photo'),
-            content: Text(arabic ? 'هل تريد إضافة صورة لهذا الحساب الآن؟' : 'Add a photo to this account now?'),
+            content: Text(
+              arabic
+                  ? 'هل تريد إضافة صورة لهذا الحساب الآن؟'
+                  : 'Add a photo to this account now?',
+            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: Text(l10n.cancel)),
-              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text(arabic ? 'اختيار صورة' : 'Choose photo')),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(arabic ? 'اختيار صورة' : 'Choose photo'),
+              ),
             ],
           ),
         );
-        if (choose == true && mounted) await _changePhoto({'id': createdUserId});
+        if (choose == true && mounted) {
+          await _changePhoto({'id': createdUserId});
+        }
       }
     }
   }
@@ -432,7 +453,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       context: context,
       barrierDismissible: false,
       builder: (context) => _PermissionsDialog(
-        title: '${arabic ? 'الصلاحيات المرفوضة' : 'Denied permissions'} — ${text(row, 'username')}',
+        title:
+            '${arabic ? 'الصلاحيات المرفوضة' : 'Denied permissions'} — ${text(row, 'username')}',
         selected: selected,
         exitRelay: widget.exitRelay,
         onSubmit: (chosen) async {
@@ -443,7 +465,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
                   '/admin/users/${row['id']}',
                   body: {
                     'deniedPermissions': chosen.toList(growable: false),
-                    'expectedDeniedPermissions': selected.toList(growable: false),
+                    'expectedDeniedPermissions': selected.toList(
+                      growable: false,
+                    ),
                   },
                 );
           } finally {
@@ -467,9 +491,12 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       final data = await ref
           .read(apiClientProvider)
           .get('/admin/users/${row['id']}/effective-permissions');
-      final permissions = (data['permissions'] as List?)?.cast<String>() ?? const <String>[];
-      final denied = (data['denied'] as List?)?.cast<String>() ?? const <String>[];
-      final roles = (data['roles'] as List?)?.cast<String>() ?? const <String>[];
+      final permissions =
+          (data['permissions'] as List?)?.cast<String>() ?? const <String>[];
+      final denied =
+          (data['denied'] as List?)?.cast<String>() ?? const <String>[];
+      final roles =
+          (data['roles'] as List?)?.cast<String>() ?? const <String>[];
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -490,15 +517,21 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
                 ),
                 if (roles.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text(roles.join(' · '), style: Theme.of(dialogContext).textTheme.bodySmall),
+                  Text(
+                    roles.join(' · '),
+                    style: Theme.of(dialogContext).textTheme.bodySmall,
+                  ),
                 ],
                 if (denied.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(
-                    arabic ? 'مرفوضة: ${denied.length}' : 'Denied: ${denied.length}',
-                    style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(dialogContext).colorScheme.error,
-                    ),
+                    arabic
+                        ? 'مرفوضة: ${denied.length}'
+                        : 'Denied: ${denied.length}',
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(
+                          color: Theme.of(dialogContext).colorScheme.error,
+                        ),
                   ),
                 ],
                 const Divider(),
@@ -546,6 +579,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         FieldSpec(
           'password',
           l10n.password,
+          maxLength: 200,
+          minLength: 12,
           required: true,
           helper: l10n.passwordHelper,
           obscure: true,
@@ -780,11 +815,12 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         FieldSpec(
           'code',
           l10n.roleCode,
+          maxLength: 40,
           required: true,
           helper: '${text(source, 'code')}_COPY',
         ),
-        FieldSpec('nameEn', l10n.fullNameEn, required: true),
-        FieldSpec('nameAr', l10n.fullNameAr, required: true),
+        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
+        FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
       ],
       initial: {
         'code': '${text(source, 'code')}_COPY',
@@ -793,10 +829,12 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       },
       onSubmit: (draft) async {
         try {
-          await ref.read(apiClientProvider).post(
-            '/admin/roles',
-            body: {...draft, 'copyFromRoleId': text(source, 'id')},
-          );
+          await ref
+              .read(apiClientProvider)
+              .post(
+                '/admin/roles',
+                body: {...draft, 'copyFromRoleId': text(source, 'id')},
+              );
         } catch (error) {
           throw UncertainFormSubmission(error);
         } finally {
@@ -804,7 +842,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         }
       },
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   /// Disables a role without removing it: its holders keep it, it grants
@@ -832,10 +872,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
-      await ref.read(apiClientProvider).patch(
-        '/admin/roles/${role['id']}',
-        body: {'isActive': !active},
-      );
+      await ref
+          .read(apiClientProvider)
+          .patch('/admin/roles/${role['id']}', body: {'isActive': !active});
       if (mounted) ref.invalidate(rolesListProvider);
     } catch (error) {
       if (mounted) showAppError(context, error);
@@ -852,22 +891,26 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       exitRelay: widget.exitRelay,
       title: isEdit ? l10n.editRole : l10n.newRole,
       fields: [
-        if (!isEdit) FieldSpec('code', l10n.roleCode, required: true),
-        FieldSpec('nameEn', l10n.fullNameEn, required: true),
-        FieldSpec('nameAr', l10n.fullNameAr, required: true),
+        if (!isEdit)
+          FieldSpec('code', l10n.roleCode, maxLength: 40, required: true),
+        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
+        FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
         FieldSpec(
           'descriptionEn',
           'Description (English)',
+          maxLength: 500,
           kind: FieldKind.multiline,
         ),
         FieldSpec(
           'descriptionAr',
           'الوصف (بالعربية)',
+          maxLength: 500,
           kind: FieldKind.multiline,
         ),
         FieldSpec(
           'category',
           'المجموعة / Category',
+          maxLength: 20,
           kind: FieldKind.select,
           options: _categories,
         ),
@@ -1383,7 +1426,10 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                           child: Text(l10n.clearAll),
                         ),
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 12,
+                          ),
                           child: Text(
                             isArabic
                                 ? '${_selected.length} محددة'

@@ -15,7 +15,8 @@ import '../../../shared/widgets/state_views.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/providers/resource_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
-import '../../accounting/presentation/screens/journal_entries_screen.dart' show journalEntriesProvider;
+import '../../accounting/presentation/screens/journal_entries_screen.dart'
+    show journalEntriesProvider;
 import '../../dashboard/presentation/providers/dashboard_providers.dart';
 
 /// The fixed-asset register.
@@ -76,7 +77,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   bool _actionUncertain = false;
   final _exitRelay = DraftExitRelay();
   late final DraftExitGuard _exitGuard;
-  Future<bool> _canLeave() => _busy ? Future.value(false) : _exitRelay.canLeave();
+  Future<bool> _canLeave() =>
+      _busy ? Future.value(false) : _exitRelay.canLeave();
   final _search = TextEditingController();
   String? _statusFilter;
   String? _categoryFilter;
@@ -108,7 +110,9 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
 
   Future<List<Json>?> _accounts() async {
     try {
-      return await ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
+      return await ref
+          .read(apiClientProvider)
+          .getList('/accounting/chart-of-accounts');
     } catch (error) {
       if (mounted) showAppError(context, error);
       return null;
@@ -170,8 +174,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     } on Failure {
       // The link is optional; the form still works without the list.
     }
-    final currentLine =
-        (existing ?? prefill)?['purchaseInvoiceLineId']?.toString();
+    final currentLine = (existing ?? prefill)?['purchaseInvoiceLineId']
+        ?.toString();
     if (currentLine != null &&
         !purchaseLineOptions.any((o) => o.value == currentLine)) {
       purchaseLineOptions.add(
@@ -184,11 +188,16 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       exitRelay: _exitRelay,
       title: isEdit ? l10n.editAsset : l10n.newAsset,
       fields: [
-        if (!isEdit) FieldSpec('code', l10n.assetCode),
-        FieldSpec('nameEn', l10n.fullNameEn, required: true),
-        FieldSpec('nameAr', l10n.fullNameAr, required: true),
-        FieldSpec('category', l10n.assetCategory),
-        FieldSpec('description', l10n.description, kind: FieldKind.multiline),
+        if (!isEdit) FieldSpec('code', l10n.assetCode, maxLength: 50),
+        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
+        FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
+        FieldSpec('category', l10n.assetCategory, maxLength: 60),
+        FieldSpec(
+          'description',
+          l10n.description,
+          maxLength: 500,
+          kind: FieldKind.multiline,
+        ),
         FieldSpec(
           'purchaseDate',
           l10n.purchaseDate,
@@ -211,6 +220,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         FieldSpec(
           'usefulLifeMonths',
           l10n.usefulLifeMonths,
+          minInteger: 1,
+          maxInteger: 1200,
           kind: FieldKind.integer,
           required: true,
         ),
@@ -235,7 +246,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           required: true,
           options: _options(accounts, type: 'expense'),
         ),
-        FieldSpec('location', l10n.assetLocation),
+        FieldSpec('location', l10n.assetLocation, maxLength: 200),
         FieldSpec(
           'purchaseInvoiceLineId',
           _t('بند فاتورة الشراء (اختياري)', 'Purchase invoice line (optional)'),
@@ -257,9 +268,11 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         final values = Map<String, dynamic>.from(draft);
         final chosenLine = values['purchaseInvoiceLineId']?.toString() ?? '';
         values.removeWhere(
-          (key, value) => value == null || (value is String && value.trim().isEmpty),
+          (key, value) =>
+              value == null || (value is String && value.trim().isEmpty),
         );
-        if (isEdit && chosenLine.isEmpty &&
+        if (isEdit &&
+            chosenLine.isEmpty &&
             (existing['purchaseInvoiceLineId']?.toString() ?? '').isNotEmpty) {
           values['purchaseInvoiceLineId'] = null;
           values['purchaseInvoiceId'] = null;
@@ -280,7 +293,9 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         }
       },
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _activate(Json asset) async {
@@ -304,11 +319,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       onSubmit: (values) => _postFromForm(
         confirm: l10n.confirmActivateAsset,
         title: l10n.activateAsset,
-        run: () => ref.read(apiClientProvider)
+        run: () => ref
+            .read(apiClientProvider)
             .post('/fixed-assets/${asset['id']}/activate', body: values),
       ),
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _dispose(Json asset) async {
@@ -344,11 +362,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         confirm: l10n.confirmDisposeAsset,
         title: l10n.disposeAsset,
         destructive: true,
-        run: () => ref.read(apiClientProvider)
+        run: () => ref
+            .read(apiClientProvider)
             .post('/fixed-assets/${asset['id']}/dispose', body: values),
       ),
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _showRuns() async {
@@ -412,16 +433,17 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       context,
       exitRelay: _exitRelay,
       title: l10n.runDepreciation,
-      fields: [
-        FieldSpec('period', l10n.depreciationPeriod, required: true),
-      ],
+      fields: [FieldSpec('period', l10n.depreciationPeriod, required: true)],
       initial: {'period': current},
       onSubmit: (values) => _postFromForm(
-        run: () => ref.read(apiClientProvider)
+        run: () => ref
+            .read(apiClientProvider)
             .post('/fixed-assets/depreciation-runs', body: values),
       ),
     );
-    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
+    if (values != null && mounted) {
+      showMessage(context, l10n.createdSuccessfully);
+    }
   }
 
   Future<void> _postFromForm({
@@ -431,8 +453,13 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     required Future<void> Function() run,
   }) async {
     if (confirm != null) {
-      final ok = await confirmAction(context, title: title ?? '', message: confirm,
-        confirmLabel: title, destructive: destructive);
+      final ok = await confirmAction(
+        context,
+        title: title ?? '',
+        message: confirm,
+        confirmLabel: title,
+        destructive: destructive,
+      );
       if (!ok || !mounted) throw const FormSubmissionCancelled();
     }
     setState(() => _busy = true);
@@ -585,10 +612,12 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           if (_actionUncertain)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Text(_t(
-                'قد تكون العملية قد اكتملت. راجع الأصول والقيود والتقارير قبل إعادة فتح الشاشة أو تكرار العملية.',
-                'The action may have completed. Review assets, journal entries and reports before reopening this screen or repeating it.',
-              )),
+              child: Text(
+                _t(
+                  'قد تكون العملية قد اكتملت. راجع الأصول والقيود والتقارير قبل إعادة فتح الشاشة أو تكرار العملية.',
+                  'The action may have completed. Review assets, journal entries and reports before reopening this screen or repeating it.',
+                ),
+              ),
             ),
           summary.maybeWhen(
             data: (data) {
@@ -671,8 +700,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                           child: Text(status),
                         ),
                     ],
-                    onChanged: (value) =>
-                        setState(() => _statusFilter = value),
+                    onChanged: (value) => setState(() => _statusFilter = value),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -735,92 +763,98 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                       text(row, 'location').toLowerCase().contains(query);
                 }).toList();
                 return RecordsTable(
-                rows: visible,
-                onTap: _details,
-                columns: [
-                  ColumnSpec(
-                    l10n.assetCode,
-                    value: (r) => text(r, 'code'),
-                    emphasise: true,
-                  ),
-                  ColumnSpec(
-                    isArabic ? l10n.fullNameAr : l10n.fullNameEn,
-                    value: (r) => isArabic
-                        ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
-                        : text(r, 'nameEn', fallback: text(r, 'nameAr')),
-                  ),
-                  ColumnSpec(
-                    l10n.assetCategory,
-                    value: (r) => text(r, 'category'),
-                  ),
-                  ColumnSpec(
-                    l10n.inServiceDate,
-                    value: (r) => text(r, 'inServiceDate'),
-                  ),
-                  ColumnSpec(
-                    l10n.status,
-                    value: (r) => text(r, 'status'),
-                    tone: (r) => _toneFor(text(r, 'status')),
-                  ),
-                  ColumnSpec(
-                    l10n.assetCost,
-                    numeric: true,
-                    value: (r) => formatAmount(asString(r['cost'])),
-                  ),
-                  ColumnSpec(
-                    l10n.salvageValue,
-                    numeric: true,
-                    value: (r) => formatAmount(asString(r['salvageValue'])),
-                  ),
-                  ColumnSpec(
-                    l10n.usefulLifeMonths,
-                    numeric: true,
-                    value: (r) => text(r, 'usefulLifeMonths'),
-                  ),
-                  ColumnSpec(
-                    l10n.accumulatedDepreciation,
-                    numeric: true,
-                    value: (r) =>
-                        formatAmount(asString(r['accumulatedDepreciation'])),
-                  ),
-                  ColumnSpec(
-                    l10n.bookValue,
-                    numeric: true,
-                    emphasise: true,
-                    value: (r) => formatAmount(asString(r['bookValue'])),
-                  ),
-                  ColumnSpec(
-                    _t('آخر إهلاك', 'Last depreciation'),
-                    value: (r) => text(r, 'lastDepreciationPeriod'),
-                  ),
-                  ColumnSpec(
-                    l10n.assetLocation,
-                    value: (r) => text(r, 'location'),
-                  ),
-                ],
-                actions: (row) {
-                  final status = text(row, 'status');
-                  return [
-                    if (status == 'DRAFT')
-                      IconButton(
-                        tooltip: l10n.edit,
-                        icon: const Icon(Icons.edit_outlined, size: 20),
-                        onPressed: _busy || _actionUncertain ? null : () => _save(existing: row),
-                      ),
-                    if (status == 'DRAFT')
-                      IconButton(
-                        tooltip: l10n.activateAsset,
-                        icon: const Icon(Icons.play_circle_outline, size: 20),
-                        onPressed: _busy || _actionUncertain ? null : () => _activate(row),
-                      ),
-                    if (status == 'ACTIVE' || status == 'FULLY_DEPRECIATED')
-                      IconButton(
-                        tooltip: l10n.disposeAsset,
-                        icon: const Icon(Icons.outbox_outlined, size: 20),
-                        onPressed: _busy || _actionUncertain ? null : () => _dispose(row),
-                      ),
-                  ];
-                },
+                  rows: visible,
+                  onTap: _details,
+                  columns: [
+                    ColumnSpec(
+                      l10n.assetCode,
+                      value: (r) => text(r, 'code'),
+                      emphasise: true,
+                    ),
+                    ColumnSpec(
+                      isArabic ? l10n.fullNameAr : l10n.fullNameEn,
+                      value: (r) => isArabic
+                          ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
+                          : text(r, 'nameEn', fallback: text(r, 'nameAr')),
+                    ),
+                    ColumnSpec(
+                      l10n.assetCategory,
+                      value: (r) => text(r, 'category'),
+                    ),
+                    ColumnSpec(
+                      l10n.inServiceDate,
+                      value: (r) => text(r, 'inServiceDate'),
+                    ),
+                    ColumnSpec(
+                      l10n.status,
+                      value: (r) => text(r, 'status'),
+                      tone: (r) => _toneFor(text(r, 'status')),
+                    ),
+                    ColumnSpec(
+                      l10n.assetCost,
+                      numeric: true,
+                      value: (r) => formatAmount(asString(r['cost'])),
+                    ),
+                    ColumnSpec(
+                      l10n.salvageValue,
+                      numeric: true,
+                      value: (r) => formatAmount(asString(r['salvageValue'])),
+                    ),
+                    ColumnSpec(
+                      l10n.usefulLifeMonths,
+                      numeric: true,
+                      value: (r) => text(r, 'usefulLifeMonths'),
+                    ),
+                    ColumnSpec(
+                      l10n.accumulatedDepreciation,
+                      numeric: true,
+                      value: (r) =>
+                          formatAmount(asString(r['accumulatedDepreciation'])),
+                    ),
+                    ColumnSpec(
+                      l10n.bookValue,
+                      numeric: true,
+                      emphasise: true,
+                      value: (r) => formatAmount(asString(r['bookValue'])),
+                    ),
+                    ColumnSpec(
+                      _t('آخر إهلاك', 'Last depreciation'),
+                      value: (r) => text(r, 'lastDepreciationPeriod'),
+                    ),
+                    ColumnSpec(
+                      l10n.assetLocation,
+                      value: (r) => text(r, 'location'),
+                    ),
+                  ],
+                  actions: (row) {
+                    final status = text(row, 'status');
+                    return [
+                      if (status == 'DRAFT')
+                        IconButton(
+                          tooltip: l10n.edit,
+                          icon: const Icon(Icons.edit_outlined, size: 20),
+                          onPressed: _busy || _actionUncertain
+                              ? null
+                              : () => _save(existing: row),
+                        ),
+                      if (status == 'DRAFT')
+                        IconButton(
+                          tooltip: l10n.activateAsset,
+                          icon: const Icon(Icons.play_circle_outline, size: 20),
+                          onPressed: _busy || _actionUncertain
+                              ? null
+                              : () => _activate(row),
+                        ),
+                      if (status == 'ACTIVE' || status == 'FULLY_DEPRECIATED')
+                        IconButton(
+                          tooltip: l10n.disposeAsset,
+                          icon: const Icon(Icons.outbox_outlined, size: 20),
+                          onPressed: _busy || _actionUncertain
+                              ? null
+                              : () => _dispose(row),
+                        ),
+                    ];
+                  },
                 );
               },
             ),

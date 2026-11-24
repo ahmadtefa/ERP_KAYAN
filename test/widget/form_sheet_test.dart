@@ -7,6 +7,89 @@ import 'test_harness.dart';
 
 void main() {
   testWidgets(
+    'explicit DTO constraints name all fields before submit and nullable clear sends null',
+    (tester) async {
+      Map<String, dynamic>? sent;
+      await tester.pumpWidget(
+        wrapWithApp(
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => FilledButton(
+                onPressed: () => showFormSheet(
+                  context,
+                  title: 'Constraints',
+                  fields: const [
+                    FieldSpec(
+                      'email',
+                      'Email',
+                      email: true,
+                      maxLength: 200,
+                      nullWhenEmpty: true,
+                    ),
+                    FieldSpec(
+                      'password',
+                      'Password',
+                      minLength: 12,
+                      maxLength: 200,
+                    ),
+                    FieldSpec(
+                      'months',
+                      'Months',
+                      kind: FieldKind.integer,
+                      minInteger: 1,
+                      maxInteger: 1200,
+                    ),
+                  ],
+                  onSubmit: (values) async {
+                    sent = values;
+                  },
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'),
+        'bad',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'short',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Months'),
+        '1201',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(sent, isNull);
+      expect(find.text('Enter a valid email'), findsOneWidget);
+      expect(find.text('Use at least 12 characters'), findsOneWidget);
+      expect(
+        find.text('Enter a whole number between 1 and 1200'),
+        findsOneWidget,
+      );
+      await tester.enterText(find.widgetWithText(TextFormField, 'Email'), '');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'long-enough-password',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Months'),
+        '1200',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(sent!.containsKey('email'), isTrue);
+      expect(sent!['email'], isNull);
+      expect(sent!['months'], '1200');
+    },
+  );
+  testWidgets(
     'server field errors stay beside fields and preserve entered values',
     (tester) async {
       await tester.pumpWidget(
@@ -65,14 +148,16 @@ void main() {
                     FieldSpec('name', 'Name'),
                     FieldSpec('code', 'Code'),
                   ],
-                  onSubmit: (_) async => throw const UncertainFormSubmission(ApiFailure(
-                    'Invalid',
-                    statusCode: 422,
-                    fieldErrors: {
-                      'name': 'Name already exists',
-                      'code': 'Code already exists',
-                    },
-                  )),
+                  onSubmit: (_) async => throw const UncertainFormSubmission(
+                    ApiFailure(
+                      'Invalid',
+                      statusCode: 422,
+                      fieldErrors: {
+                        'name': 'Name already exists',
+                        'code': 'Code already exists',
+                      },
+                    ),
+                  ),
                 ),
                 child: const Text('open'),
               ),
@@ -115,7 +200,8 @@ void main() {
                     code: 'VALIDATION_FAILED',
                     fieldErrors: {
                       'code': 'Code is too short',
-                      'lines.0.quantity': 'Quantity on line 1 must be at least 1',
+                      'lines.0.quantity':
+                          'Quantity on line 1 must be at least 1',
                     },
                   ),
                 ),

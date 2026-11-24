@@ -46,11 +46,18 @@ class FieldSpec {
     this.clearable = false,
     this.obscure = false,
     this.validator,
+    this.maxLength,
+    this.minLength,
+    this.email = false,
+    this.minInteger,
+    this.maxInteger,
     this.nullWhenEmpty = false,
   });
 
   /// Additional source-grounded domain constraints, applied before submit.
   final String? Function(String value)? validator;
+  final int? maxLength, minLength, minInteger, maxInteger;
+  final bool email;
 
   /// Send explicit null to clear a nullable optional API field.
   final bool nullWhenEmpty;
@@ -254,6 +261,30 @@ class _FormSheetState extends State<_FormSheet> {
     final text = value?.trim() ?? '';
     if (field.required && text.isEmpty) return context.l10n.requiredField;
     if (text.isEmpty) return null;
+    final ar = Localizations.localeOf(context).languageCode == 'ar';
+    if (field.maxLength != null && text.length > field.maxLength!) {
+      return ar
+          ? 'الحد الأقصى ${field.maxLength} حرفًا'
+          : 'Use no more than ${field.maxLength} characters';
+    }
+    if (field.minLength != null && text.length < field.minLength!) {
+      return ar
+          ? 'أدخل ${field.minLength} أحرف على الأقل'
+          : 'Use at least ${field.minLength} characters';
+    }
+    if (field.email && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
+      return ar ? 'أدخل بريدًا إلكترونيًا صحيحًا' : 'Enter a valid email';
+    }
+    if (field.minInteger != null || field.maxInteger != null) {
+      final number = int.tryParse(text);
+      if (number == null ||
+          (field.minInteger != null && number < field.minInteger!) ||
+          (field.maxInteger != null && number > field.maxInteger!)) {
+        return ar
+            ? 'أدخل عددًا صحيحًا بين ${field.minInteger ?? 0} و${field.maxInteger ?? 999999999}'
+            : 'Enter a whole number between ${field.minInteger ?? 0} and ${field.maxInteger ?? 999999999}';
+      }
+    }
     final reason = field.validator?.call(text);
     if (reason != null) return reason;
     switch (field.kind) {

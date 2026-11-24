@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../../operations/ops_auto_create.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -50,19 +51,18 @@ final itemsListProvider = AsyncNotifierProvider<JsonListController, List<Json>>(
 /// rebuild. Sorting first means the same rows always produce the same key.
 final itemThumbnailsProvider =
     FutureProvider.family<Map<String, Uint8List>, String>((ref, key) async {
-  if (key.isEmpty) return const {};
-  try {
-    return await ItemImageDataSource(
-      ref.watch(apiClientProvider),
-    ).thumbnails(key.split(','));
-  } on Object {
-    // A picture is decoration. If the endpoint is unreachable - an older
-    // server, a restricted account, a dropped connection - the catalogue
-    // still lists every item, just without thumbnails. Letting this escape
-    // would take the whole screen down over a 32-pixel square.
-    return const {};
-  }
-});
+      if (key.isEmpty) return const {};
+      try {
+        return await ItemImageDataSource(ref.watch(apiClientProvider))
+            .thumbnails(key.split(','));
+      } on Object {
+        // A picture is decoration. If the endpoint is unreachable - an older
+        // server, a restricted account, a dropped connection - the catalogue
+        // still lists every item, just without thumbnails. Letting this escape
+        // would take the whole screen down over a 32-pixel square.
+        return const {};
+      }
+    });
 
 /// The provider key for a page of ids.
 String _thumbnailKey(Iterable<String> ids) => (ids.toList()..sort()).join(',');
@@ -110,15 +110,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       exitRelay: _exitRelay,
       title: isEdit ? l10n.editItem : l10n.newItem,
       fields: [
-        if (!isEdit) FieldSpec('code', l10n.accountCode, required: true),
-        FieldSpec('nameEn', 'Name (English)'),
-        FieldSpec('nameAr', 'الاسم (عربي)'),
-        FieldSpec('unit', l10n.unit),
-        FieldSpec('barcode', 'Barcode'),
+        if (!isEdit)
+          FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
+        FieldSpec('nameEn', 'Name (English)', maxLength: 200),
+        FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
+        FieldSpec('unit', l10n.unit, maxLength: 20),
+        FieldSpec('barcode', 'Barcode', maxLength: 60),
         if (canManageSalePrice)
           FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         if (canManagePurchasePrice)
-          FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice, kind: FieldKind.decimal),
+          FieldSpec(
+            'purchasePrice',
+            l10n.unitsBarcodesFieldPurchasePrice,
+            kind: FieldKind.decimal,
+          ),
         FieldSpec(
           'taxRate',
           l10n.taxRate,
@@ -149,6 +154,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec(
           'notes',
           l10n.description,
+          maxLength: 1000,
           kind: FieldKind.multiline,
           maxLines: 2,
         ),
@@ -161,7 +167,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         // not “clear the saved value”. Clearing remains an explicit workflow.
         for (final key in ['salePrice', 'purchasePrice', 'openingUnitCost']) {
           final value = payload[key];
-          if (value == null || value.toString().trim().isEmpty) payload.remove(key);
+          if (value == null || value.toString().trim().isEmpty) {
+            payload.remove(key);
+          }
         }
         try {
           if (isEdit) {
@@ -423,7 +431,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           exitRelay: _exitRelay,
           title: l10n.unitsBarcodesAdd,
           fields: [
-            FieldSpec('unit', l10n.unitsBarcodesFieldUnit, required: true),
+            FieldSpec(
+              'unit',
+              l10n.unitsBarcodesFieldUnit,
+              maxLength: 40,
+              required: true,
+            ),
             FieldSpec(
               'factor',
               l10n.unitsBarcodesFieldFactor,
@@ -432,7 +445,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               helper: l10n.unitsBarcodesFactorHelper,
             ),
             if (canManageBarcodes)
-              FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
+              FieldSpec(
+                'barcode',
+                l10n.unitsBarcodesFieldBarcode,
+                maxLength: 60,
+              ),
             if (canManageSalePrice)
               FieldSpec(
                 'salePrice',
@@ -568,8 +585,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             'unit': unit['unit'],
             'factor': unit['factor'],
             if (canManageBarcodes) 'barcode': unit['barcode'],
-            if (canManageSalePrice && (currentUser?.canReadSalePrice ?? false)) 'salePrice': unit['salePrice'],
-            if (canManagePurchasePrice && canSeePurchasePrice) 'purchasePrice': unit['purchasePrice'],
+            if (canManageSalePrice && (currentUser?.canReadSalePrice ?? false))
+              'salePrice': unit['salePrice'],
+            if (canManagePurchasePrice && canSeePurchasePrice)
+              'purchasePrice': unit['purchasePrice'],
             'isDefaultSale': unit['isDefaultSale'] == true,
             'isDefaultPurchase': unit['isDefaultPurchase'] == true,
           },
@@ -590,7 +609,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                   : l10n.unitsBarcodesFactorEditHelper,
             ),
             if (canManageBarcodes)
-              FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
+              FieldSpec(
+                'barcode',
+                l10n.unitsBarcodesFieldBarcode,
+                maxLength: 60,
+              ),
             if (canManageSalePrice)
               FieldSpec(
                 'salePrice',
@@ -677,7 +700,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final canSeeSalePrice = ref.watch(currentUserProvider)?.canReadSalePrice ?? false;
+    final canSeeSalePrice =
+        ref.watch(currentUserProvider)?.canReadSalePrice ?? false;
     final async = ref.watch(itemsListProvider);
 
     return ModuleScaffold(
@@ -747,7 +771,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                 // column of its own: on a phone the first column is the card's
                 // headline, and a headline of nothing but a picture would lose
                 // the code the rest of the app refers to.
-                leading: (row) => ItemThumbnail(bytes: pictures[text(row, 'id')]),
+                leading: (row) =>
+                    ItemThumbnail(bytes: pictures[text(row, 'id')]),
               ),
               ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
               ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../operations/ops_auto_create.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
@@ -61,8 +62,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
 
   bool get _isCustomer => widget.kind == PartyKind.customer;
 
-  String get _path =>
-      _isCustomer ? '/parties/customers' : '/parties/suppliers';
+  String get _path => _isCustomer ? '/parties/customers' : '/parties/suppliers';
 
   AsyncNotifierProvider<JsonListController, List<Json>> get _provider =>
       _isCustomer ? customersListProvider : suppliersListProvider;
@@ -72,13 +72,19 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
     final isEdit = existing != null;
     final fields = <FieldSpec>[
       if (!isEdit)
-        FieldSpec('code', l10n.accountCode, required: true),
-      FieldSpec('nameEn', 'Name (English)'),
-      FieldSpec('nameAr', 'الاسم (عربي)'),
-      FieldSpec('phone', l10n.phone),
-      FieldSpec('email', l10n.email),
-      FieldSpec('taxNumber', l10n.taxNumber),
-      FieldSpec('address', l10n.address, kind: FieldKind.multiline, maxLines: 2),
+        FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
+      FieldSpec('nameEn', 'Name (English)', maxLength: 200),
+      FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
+      FieldSpec('phone', l10n.phone, maxLength: 40),
+      FieldSpec('email', l10n.email, maxLength: 200, email: true),
+      FieldSpec('taxNumber', l10n.taxNumber, maxLength: 60),
+      FieldSpec(
+        'address',
+        l10n.address,
+        maxLength: 500,
+        kind: FieldKind.multiline,
+        maxLines: 2,
+      ),
       if (_isCustomer)
         FieldSpec(
           'creditLimit',
@@ -86,7 +92,13 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           kind: FieldKind.decimal,
           helper: l10n.creditLimitNote,
         ),
-      FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2),
+      FieldSpec(
+        'notes',
+        l10n.description,
+        maxLength: 1000,
+        kind: FieldKind.multiline,
+        maxLines: 2,
+      ),
     ];
 
     final values = await showFormSheet(
@@ -256,10 +268,10 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
               onPressed: _busy
                   ? null
                   : () => showPartyStatementDialog(
-                        context,
-                        isCustomer: _isCustomer,
-                        party: row,
-                      ),
+                      context,
+                      isCustomer: _isCustomer,
+                      party: row,
+                    ),
             ),
             IconButton(
               tooltip: l10n.edit,
