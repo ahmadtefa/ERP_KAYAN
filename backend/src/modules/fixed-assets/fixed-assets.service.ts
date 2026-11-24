@@ -260,8 +260,8 @@ export class FixedAssetsService {
     return this.findOne(companyId, created.id);
   }
 
-  async findAll(companyId: string, query: ListFixedAssetsDto) {
-    const where: Prisma.FixedAssetWhereInput = { companyId, deletedAt: null };
+  async findAll(companyId: string, query: ListFixedAssetsDto, branchScope: string[] | null = null) {
+    const where: Prisma.FixedAssetWhereInput = { companyId, deletedAt: null, ...(branchScope ? { branchId: { in: branchScope } } : {}) };
     if (query.status) {
       const status = query.status.toUpperCase();
       if (!Object.values(FixedAssetStatus).includes(status as FixedAssetStatus)) {
@@ -308,8 +308,9 @@ export class FixedAssetsService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const asset = await this.get(companyId, id);
+    if (branchScope && !branchScope.includes(asset.branchId)) throw new NotFoundException('Fixed asset not found');
     const rows = await this.prisma.assetDepreciation.findMany({
       where: { assetId: id, companyId },
       orderBy: { periodKey: 'asc' },

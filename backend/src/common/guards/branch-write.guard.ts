@@ -16,6 +16,7 @@ const BRANCH_OWNED: Array<{ prefix: RegExp; model: string }> = [
   { prefix: /^\/api\/v1\/sales\/quotations\/([0-9a-f-]{36})(\/|$)/i, model: 'quotation' },
   { prefix: /^\/api\/v1\/cash\/vouchers\/([0-9a-f-]{36})(\/|$)/i, model: 'cashVoucher' },
   { prefix: /^\/api\/v1\/cash\/transfers\/([0-9a-f-]{36})(\/|$)/i, model: 'cashTransfer' },
+  { prefix: /^\/api\/v1\/fixed-assets\/([0-9a-f-]{36})(\/|$)/i, model: 'fixedAsset' },
   { prefix: /^\/api\/v1\/cash\/accounts\/([0-9a-f-]{36})(\/|$)/i, model: 'cashAccount' },
 ];
 

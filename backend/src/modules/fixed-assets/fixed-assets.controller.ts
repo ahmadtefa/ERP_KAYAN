@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
+import { branchReadScope } from '../../common/auth/branch-read-scope';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.guard';
@@ -63,7 +64,7 @@ export class FixedAssetsController {
   @Get()
   @RequirePermissions('accounting.fixedassets.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListFixedAssetsDto) {
-    return this.service.findAll(user.companyId, query);
+    return this.service.findAll(user.companyId, query, branchReadScope(user));
   }
 
   @Post()
@@ -75,7 +76,7 @@ export class FixedAssetsController {
   @Get(':id')
   @RequirePermissions('accounting.fixedassets.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, branchReadScope(user));
   }
 
   @Patch(':id')
