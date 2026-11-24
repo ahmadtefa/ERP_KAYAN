@@ -9,6 +9,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { branchReadScope } from '../auth/branch-read-scope';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { APPROVAL_OPERATIONS, ApprovalsService, PolicyInput } from './approvals.service';
 
@@ -66,7 +67,7 @@ export class ApprovalsController {
     @Param('entityType') entityType: string,
     @Param('entityId', new ParseUUIDPipe()) entityId: string,
   ) {
-    return this.approvals.history(user.companyId, entityType, entityId);
+    return this.approvals.history(user.companyId, entityType, entityId, branchReadScope(user));
   }
 
   private actor(user: AuthUser) {
