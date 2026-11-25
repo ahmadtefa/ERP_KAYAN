@@ -104,6 +104,25 @@ void main() {
           expect(shown, isNot(contains('abc123')));
         }
       });
+      test('a listed code whose body carries personal data is not relayed (arabic=$arabic)', () {
+        for (final body in [
+          'Lot held by ahmed.salem@example.com / Lot held by ahmed.salem@example.com',
+          'Ask 01012345678 about the lot / Ask 01012345678 about the lot',
+          'Owner id 29801011234567 has the lot / Owner id 29801011234567 has the lot',
+        ]) {
+          final out = r.resolve(ApiFailure(body, statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
+          final shown = out.businessMessage ?? '';
+          expect(shown, isNot(contains('example.com')));
+          expect(shown, isNot(contains('01012345678')));
+          expect(shown, isNot(contains('29801011234567')));
+        }
+      });
+      test('a listed code with an ordinary business sentence is still relayed (arabic=$arabic)', () {
+        final out = r.resolve(ApiFailure(
+            'Lot LOT-7 is short by 3 / Lot LOT-7 is short by 3',
+            statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
+        expect(out.businessMessage ?? '', contains('LOT-7'));
+      });
       test('a listed code with a 500 or 403 status is not relayed (arabic=$arabic)', () {
         for (final status in [500, 403]) {
           final out = r.resolve(ApiFailure('Private body / Private body', statusCode: status, code: 'STOCK_DOC_LOT_SHORT'));

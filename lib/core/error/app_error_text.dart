@@ -180,7 +180,8 @@ class AppErrorMessageResolver {
         final sentence = chosen.trim();
         if (sentence.isNotEmpty &&
             sentence.length <= 600 &&
-            !_looksTechnical(sentence)) {
+            !_looksTechnical(sentence) &&
+            !_carriesPersonalData(sentence)) {
           return AppErrorText(
             reason: AppErrorReason.invalidInput,
             severity: AppErrorSeverity.warning,
@@ -496,6 +497,14 @@ class AppErrorMessageResolver {
     RegExp(r'\bbearer\s+\S+', caseSensitive: false),
     RegExp(r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----', caseSensitive: false),
   ];
+
+  /// Listed refusal sentences name items, lots and quantities. They never
+  /// need an e-mail address or a long number (phone, national or card id), so
+  /// a body carrying one is treated as unsafe and the generic sentence is
+  /// shown instead.
+  static bool _carriesPersonalData(String text) =>
+      RegExp(r'[\w.+-]+@[\w-]+\.[\w.-]+').hasMatch(text) ||
+      RegExp(r'(?:\d[\s-]?){10,}').hasMatch(text);
 
   static bool _looksTechnical(String text) =>
       _technicalSignatures.any((pattern) => pattern.hasMatch(text));
