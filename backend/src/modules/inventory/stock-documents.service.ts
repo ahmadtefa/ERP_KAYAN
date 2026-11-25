@@ -1744,7 +1744,12 @@ export class StockDocumentsService {
           // shelf (or the unlocated pile) when the goods leave the destination.
           const originalShelf = (original as { storageLocationId?: string | null }).storageLocationId ?? null;
           const originalBatch = (original as { batchId?: string | null }).batchId ?? null;
-          if (document.kind === StockDocumentKind.TRANSFER && wasOut && line.batchId && originalBatch !== line.batchId) {
+          // Transfer legs: the issue leg must carry exactly the line's lot (or none
+          // when the line has none); the receipt leg must carry a lot when the line
+          // names one and none when it does not. A line that lost its lot while a
+          // leg kept one (or the reverse) is not guessed: it is refused.
+          if (document.kind === StockDocumentKind.TRANSFER &&
+              (wasOut ? originalBatch !== (line.batchId ?? null) : (line.batchId ? !originalBatch : !!originalBatch))) {
             throw new BadRequestException({
               code: 'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
               message:

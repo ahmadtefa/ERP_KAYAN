@@ -414,4 +414,8 @@ const vmReady =
     const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);await db.query(`UPDATE stock_document_lines SET "batchId"=NULL WHERE "documentId"=$1`,[id]);const before={a:await shelf(SHELF),b:await shelf(SHELF_W2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};expect(await failure(documents.reverse(COMPANY,USER,id))).not.toBeNull();expect({a:await shelf(SHELF),b:await shelf(SHELF_W2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);
   });
 
+  it('transfer forged receiving movement with stocked different destination lot refuses atomically',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);const other=await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE_2,itemId:ITEM,batchNumber:'OTHER',quantity:5,unitCost:6,storageLocationId:SHELF_W2,expiryDate:'2027-03-01'});await db.query(`UPDATE stock_movements SET "batchId"=$1 WHERE "referenceId"=$2 AND "referenceType"='STOCK_TRANSFER_IN'`,[other.batchId,id]);const before={a:await shelf(SHELF),b:await shelf(SHELF_W2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};expect(await failure(documents.reverse(COMPANY,USER,id))).not.toBeNull();expect({a:await shelf(SHELF),b:await shelf(SHELF_W2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');
+  });
+
 });

@@ -129,3 +129,9 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - 9 unit suites80/80 pass. Writeoff unit now asserts precisely one lot-cost evidence UPDATE and exact parameters, not merely absence of CLOSED text. TypeScript noEmit clean.
 - Remaining FAIL: synthetic legacy transfer line.batchId null with proven original lot movements and destination lot merged into preexisting lot. Reverse still succeeds leaving lots unchanged while reversing ledger/books. New-post refusal does not protect old documents. Own test saved and reported.
 - Full37-case PGlite single run exceeded120sec and stopped, no claim of full-suite pass. Smaller scoped groups used.
+
+### 05:43 patch45 identity closeout and bounded gate
+- Applied service hunk only; own failing legacy merged-transfer cleared-line test now refuses unchanged. Identity group5/5 pass; additional forged receiving movement bound to another stocked target lot refuses unchanged,2/2 pass.
+- Current45 native PG14 combined generic and transfer harness passes: exact later actual receipt adjustment±/count±/writeoff inverse, source/destination transfer repricing, lot-shelf shortage and generic/transfer inverse-v-issue overlap. All synthetic journals balanced; native server stopped.
+- TypeScript noEmit clean.44 bounded PGlite baseline14, transfer/reprice8, split/identity6 pass. Earlier44 generic inverse8/count+legacy3 pass. No single full-suite completion claimed. All five observed43 failures now covered by later fixes or atomic refusal; repeated equal-line/sourceLineId identity remains a limited proof boundary.
+- No CI/push/release/install. Full inventory per-control register remains incomplete; real Windows login/licence/installation and production databases untouched.
