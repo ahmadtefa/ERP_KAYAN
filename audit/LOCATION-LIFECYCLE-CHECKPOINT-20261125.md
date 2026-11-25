@@ -75,3 +75,9 @@ Production service hunk integrated. Worker test hunk overlapped independent prob
 - Create and correction source/destination review now shows actual location identity; correction loads receiving location code when available, preserves unavailable id if fetch fails. EN/AR create screenshots visually checked; AR split pixels remain to inspect.
 - Stockdoc SQL split chunks11+11 and new distinct split1 pass (23 non-opt-in cases across chunks); opt-in old correction bridge not rerun after41. Unit warehouse guard27/27 with fixture-only repair. Generic stockdoc widgets22/22, full analyze clean; TypeScript clean before latest UI-only changes.
 - Remaining: native41 edit/post overlap for split, controller DTO/permission chain for split, AR split visual, direct item-picker create bridge, wider every-control register and installed licence/release. No production DB, remote push/CI or release changes.
+
+## 05:15 native split overlap follow-through
+
+- Native41 split/post overlap exact orders pass: split edit-first commits two lines/version1 then post succeeds; post-first commits original single line/version0 and split refuses. Synthetic harness setup quantity typo corrected before final rerun. Evidence patch41-native-split.out.
+- Own shelf-overdraw fixture rechecked: positive transfer5 from B shelf4, expected STOCK_DOC_SHELF_SHORT, target lot5 and shelf4 unchanged, passing SQL chunk. Worker reported a different negative fixture, not copied here.
+- Correction destination code fetch implemented; create EN/AR actual shelf labels rendered and inspected. AR split/controller HTTP split/direct item picker remain unqualified.

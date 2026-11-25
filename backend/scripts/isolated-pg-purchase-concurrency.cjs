@@ -216,6 +216,19 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const line=await p.stockDocumentLine.findFirst({where:{documentId:cd.id}});assert.equal(line.toStorageLocationId,firstKind==='edit'?targetL:null);reports.push({mode:'draft correction vs post '+firstKind+' first',results:rr.map(x=>x.status),status:row.status,version:row.editVersion,target:line.toStorageLocationId});
  }
 
+ for(const firstKind of ['edit','post']){
+  const CI=randomUUID();await p.item.create({data:{id:CI,companyId:C,code:'split-correct-'+firstKind,nameEn:'Correction',nameAr:'Correction',unit:'piece',requiresBatch:true,isStockTracked:true}});const cr=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:CI,batchNumber:'CORRECT',quantity:3,unitCost:2,storageLocationId:L});
+  const cd=await da.create(C,B,U,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:B,fromWarehouseId:W,toWarehouseId:targetW,lines:[{itemId:CI,quantity:3,batchId:cr.batchId,storageLocationId:L}]});
+  let entered,release;const ready=new Promise(r=>entered=r),gate=new Promise(r=>release=r);const original=p.$transaction.bind(p);
+  p.$transaction=(fn,...args)=>original(async tx=>{const model=tx.stockDocument,update=model.updateMany.bind(model);model.updateMany=async arg=>{const result=await update(arg);if(arg.where.id===cd.id){entered();await gate;}return result;};return fn(tx);},...args);
+  const change={expectedVersion:0,lines:[{lineNumber:1,splits:[{batchId:cr.batchId,quantity:'2',storageLocationId:L,toStorageLocationId:targetL},{batchId:cr.batchId,quantity:'1',storageLocationId:L,toStorageLocationId:targetL}]}]};
+  const f=firstKind==='edit'?da.updateDraftLocations(C,U,cd.id,change):da.post(C,U,cd.id);await ready;
+  const g=firstKind==='edit'?db.post(C,U,cd.id):db.updateDraftLocations(C,U,cd.id,change);await sleep(250);release();const rr=await Promise.allSettled([f,g]);p.$transaction=original;
+  const row=await p.stockDocument.findUnique({where:{id:cd.id}});assert.equal(row.status,'POSTED');
+  if(firstKind==='edit')assert.equal(rr.filter(x=>x.status==='fulfilled').length,2,JSON.stringify(rr));else assert.equal(rr.filter(x=>x.status==='fulfilled').length,1,JSON.stringify(rr));
+  const line=await p.stockDocumentLine.findFirst({where:{documentId:cd.id}});assert.equal(line.toStorageLocationId,firstKind==='edit'?targetL:null);assert.equal(await p.stockDocumentLine.count({where:{documentId:cd.id}}),firstKind==='edit'?2:1);reports.push({mode:'draft SPLIT vs post '+firstKind+' first',results:rr.map(x=>x.status),status:row.status,version:row.editVersion,target:line.toStorageLocationId});
+ }
+
  const {ItemsService}=require('../dist/src/modules/inventory/items.service.js');
  await p.account.create({data:{companyId:C,code:'3103',nameEn:'Opening equity',nameAr:'Opening equity',type:'EQUITY',isPostable:true,isActive:true}});
  await p.warehouse.update({where:{id:W},data:{isDefault:true}});
