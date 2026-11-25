@@ -829,23 +829,98 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
           listOf(data['lines']),
         );
       }
-      final x = await api.getObject('/inventory/stock-transfers/${widget.id}');
+      var x = await api.getObject('/inventory/stock-transfers/${widget.id}');
       final pending = ref.read(_uncertainTransferOperations)[recoveryScope];
       if (pending != null) {
-        final actions = listOf(x['actions']);
-        final confirmed = actions.any(
-          (a) =>
-              a['requestKey'] ==
-                  '${pending.action.toUpperCase()}:${pending.key}' &&
-              a['stockDocumentId'] != null,
-        );
-        if (confirmed) {
-          await persistOperation(null);
-          ref.read(_uncertainTransferOperations).remove(recoveryScope);
-          reconciliation = t(
-            'تم تأكيد العملية السابقة من سجل التحويل. راجع الكميات المحدثة.',
-            'The earlier operation is confirmed in the transfer record. Review the updated quantities.',
+        try {
+          final alias = pending.action == 'settle/approve'
+              ? 'approve_settlement'
+              : pending.action;
+          final proof = await api.getObject(
+            '/inventory/stock-transfers/${widget.id}/actions',
+            query: {'key': pending.key, 'action': alias},
           );
+          final allowed =
+              <String, Set<String>>{
+                'review': {'REVIEWED'},
+                'submit': {'PENDING_APPROVAL', 'REVIEWED'},
+                'approve': {'APPROVED', 'CHAIN_APPROVE'},
+                'reject': {'REJECTED', 'CHAIN_REJECT'},
+                'return': {'DRAFT', 'CHAIN_RETURN'},
+                'close': {'CLOSED'},
+                'cancel': {'CANCELLED', 'CANCEL'},
+                'dispatch': {'DISPATCH'},
+                'receive': {'RECEIVE'},
+                'settle': {'SETTLE', 'SETTLE_DONE', 'RETURN'},
+                'approve_settlement': {
+                  'SETTLEMENT_APPROVED',
+                  'SETTLE_ALREADY_DONE',
+                },
+              }[alias] ??
+              <String>{};
+          final outcomes = listOf(proof['outcomes']);
+          final exact =
+              proof['transferId'] == widget.id &&
+              proof['key'] == pending.key &&
+              outcomes.isNotEmpty &&
+              outcomes.every(
+                (a) =>
+                    allowed.contains(a['action']) &&
+                    a['requestKey'] is String &&
+                    (a['requestKey'] as String).substring(
+                          (a['requestKey'] as String).indexOf(':') + 1,
+                        ) ==
+                        pending.key,
+              );
+          final completed =
+              exact &&
+              proof['state'] == 'COMPLETED' &&
+              outcomes.every((a) => a['state'] == 'COMPLETED');
+          final acceptedStep =
+              exact &&
+              alias == 'approve' &&
+              proof['state'] == 'ACCEPTED_STEP' &&
+              outcomes.every(
+                (a) =>
+                    a['action'] == 'CHAIN_APPROVE' &&
+                    a['state'] == 'ACCEPTED_STEP' &&
+                    a['scope'] == 'DECISION_ONLY' &&
+                    a['operationComplete'] == true &&
+                    a['terminalPending'] == null,
+              );
+          final already =
+              exact &&
+              alias == 'approve_settlement' &&
+              proof['state'] == 'ALREADY_APPROVED' &&
+              outcomes.every(
+                (a) =>
+                    a['action'] == 'SETTLE_ALREADY_DONE' &&
+                    a['state'] == 'ALREADY_APPROVED' &&
+                    a['applied'] == false,
+              );
+          if (completed || acceptedStep || already) {
+            // Proof can arrive after the initial details read. Do not unlock
+            // actions against quantities/state from before that proof.
+            x = await api.getObject('/inventory/stock-transfers/${widget.id}');
+            await persistOperation(null);
+            ref.read(_uncertainTransferOperations).remove(recoveryScope);
+            reconciliation = acceptedStep
+                ? t(
+                    'تم تسجيل خطوة الاعتماد السابقة فقط. راجع بقية مستويات الاعتماد؛ لم يُؤكد اكتمال التحويل.',
+                    'The earlier approval step was recorded. Review the remaining approval levels. This does not confirm that the transfer is fully approved.',
+                  )
+                : already
+                ? t(
+                    'لم يطبق طلبك اعتمادا جديدا؛ سبق اعتماد التسوية بطلب آخر. راجع الحالة الحالية.',
+                    'Your request did not apply another approval. Another request had already approved the settlement. Review the current state.',
+                  )
+                : t(
+                    'تم تأكيد العملية السابقة من سجل طلبها الأصلي. راجع الحالة والكميات المحدثة.',
+                    'The earlier operation is confirmed by its original request record. Review the current state and quantities.',
+                  );
+          }
+        } catch (_) {
+          // Unavailable or unverifiable proof leaves the durable block intact.
         }
       }
       Json? p;

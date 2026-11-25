@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -363,6 +364,25 @@ export class ApprovalsService {
     return { chain, decisions, state: foldDecisions(chain, decisions) };
   }
 
+  /// The decision that completed (or would complete) the chain: the highest
+  /// approved level of the current round. A replayed earlier level is not it.
+  async finalApprovalId(companyId: string, entityType: string, entityId: string, since?: Date | null): Promise<string | null> {
+    const row = await this.prisma.approvalDecision.findFirst({
+      where: { companyId, entityType, entityId, decision: 'APPROVE', ...(since ? { createdAt: { gte: since } } : {}) },
+      orderBy: [{ level: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  /// The decision recorded under one client key, if any.
+  async keyedDecision(companyId: string, entityType: string, entityId: string, requestKey: string) {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; level: number; decision: string; actorId: string; createdAt: Date; requestHash: string | null; policyId: string | null; completesChain: boolean | null }>>`
+      SELECT id, level, decision, "actorId", "createdAt", "requestHash", "policyId", "completesChain" FROM approval_decisions
+      WHERE "companyId"=${companyId}::uuid AND "entityType"=${entityType} AND "entityId"=${entityId}::uuid AND "requestKey"=${requestKey} LIMIT 1`;
+    return rows[0] ?? null;
+  }
+
   /// Record one decision, enforcing both the chain and separation of duties.
   ///
   /// `expectedLevel` is what the caller believes it is deciding. Passing it
@@ -380,6 +400,9 @@ export class ApprovalsService {
       expectedLevel?: number | null;
       /// When the document was last submitted; earlier rounds are history only.
       since?: Date | null;
+      /// Client key. A repeat with the same actor and decision returns the
+      /// recorded decision; any other use of the key is a conflict.
+      requestKey?: string | null;
     },
   ) {
     const { decision, entityType, entityId, chain } = params;
@@ -393,6 +416,26 @@ export class ApprovalsService {
     if (reason && reason.length > 2000) throw new BadRequestException('A reason may be at most 2000 characters');
     if (chain.source === 'LEGACY') {
       throw new ConflictException('This document does not use a configured approval chain');
+    }
+    const requestKey = params.requestKey ? String(params.requestKey).slice(0, 160) : null;
+    // Everything the caller chose is part of the key's fingerprint: a retry with
+    // an altered reason, expected level, policy or round is a different request.
+    const fingerprint = createHash('sha256').update(JSON.stringify({
+      entityType, entityId, actor: actor.userId, decision, reason: reason ?? null,
+      expectedLevel: params.expectedLevel ?? null, policyId: chain.policyId ?? null,
+      since: params.since ? params.since.toISOString() : null,
+    })).digest('hex');
+    // Checked before any chain-state refusal, so a replay after the chain moved
+    // on still reports the decision it recorded.
+    if (requestKey) {
+      const prior = await this.keyedDecision(actor.companyId, entityType, entityId, requestKey);
+      if (prior) {
+        if (prior.actorId !== actor.userId || prior.decision !== decision || prior.requestHash !== fingerprint) {
+          throw new ConflictException('Idempotency key was reused for a different approval decision');
+        }
+        const replayState = await this.stateFor(actor.companyId, chain, entityType, entityId, params.since ?? null);
+        return { decision: prior, ...replayState, replayed: true };
+      }
     }
     const everything = await this.decisions(actor.companyId, entityType, entityId);
     const since = params.since ?? null;
@@ -418,9 +461,13 @@ export class ApprovalsService {
     );
     if (!verdict.allowed) throw new ForbiddenException(verdict.reason);
     const roleCode = actor.roles.find((role) => !level.roleCode || role === level.roleCode) ?? null;
+    // Frozen with the decision: a later policy edit cannot change what this one was.
+    const lastRule = chain.levels[chain.levels.length - 1];
+    const completesChain = decision === 'APPROVE' && !!lastRule && lastRule.level === levelNumber;
     let created;
     try {
-      created = await this.prisma.approvalDecision.create({
+      created = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.approvalDecision.create({
         data: {
           companyId: actor.companyId,
           policyId: chain.policyId,
@@ -433,6 +480,9 @@ export class ApprovalsService {
           actorId: actor.userId,
           actorRoleCode: roleCode,
         },
+        });
+        if (requestKey) await tx.$executeRaw`UPDATE approval_decisions SET "requestKey"=${requestKey}, "requestHash"=${fingerprint}, "completesChain"=${completesChain} WHERE id=${row.id}::uuid`;
+        return row;
       });
     } catch (error) {
       // The unique index on (company, entity, level) for approvals is the
@@ -443,6 +493,14 @@ export class ApprovalsService {
         code === 'P2002' ||
         code === '23505' ||
         (error instanceof Error && /unique constraint/i.test(error.message));
+      if (uniqueViolation && requestKey) {
+        const winner = await this.keyedDecision(actor.companyId, entityType, entityId, requestKey);
+        if (winner && winner.actorId === actor.userId && winner.decision === decision && winner.requestHash === fingerprint) {
+          const replayState = await this.stateFor(actor.companyId, chain, entityType, entityId, params.since ?? null);
+          return { decision: winner, ...replayState, replayed: true };
+        }
+        if (winner) throw new ConflictException('Idempotency key was reused for a different approval decision');
+      }
       if (uniqueViolation && decision === 'APPROVE') {
         throw new ConflictException(
           'This level was approved by somebody else a moment ago; reload the request',

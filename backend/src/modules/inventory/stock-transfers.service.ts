@@ -196,11 +196,15 @@ export class StockTransfersService {
       chain,
       requesterId: row.createdBy,
       decision: 'APPROVE',
+      requestKey: `APPROVE:${this.key(key)}`,
       reason: reason ?? null,
       expectedLevel: expectedLevel ?? null,
       since: row.submittedAt,
     });
-    if (result.state.isComplete) {
+    const replayedDecision = (result as { replayed?: boolean }).replayed ? (result.decision as { completesChain?: boolean | null }) : null;
+    // A replay resumes finalization only from the decision's frozen record; a
+    // fresh decision uses the state it just produced.
+    if (replayedDecision ? replayedDecision.completesChain === true : result.state.isComplete) {
       return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'APPROVED', {
         approvedBy: userId,
         approvedAt: new Date(),
@@ -226,7 +230,7 @@ export class StockTransfersService {
     if (!actor) throw new BadRequestException('An approval actor is required to reject a configured chain');
     await this.approvals.decide(actor, {
       entityType: 'StockTransfer', entityId: id, chain,
-      requesterId: row.createdBy, decision: 'REJECT', reason: reason.trim(),
+      requesterId: row.createdBy, decision: 'REJECT', requestKey: `REJECT:${this.key(key)}`, reason: reason.trim(),
       since: row.submittedAt,
     });
     return this.transition(companyId, userId, id, key, ['PENDING_APPROVAL'], 'REJECTED', {
@@ -264,7 +268,7 @@ export class StockTransfersService {
     }
     await this.approvals.decide(actor, {
       entityType: 'StockTransfer', entityId: id, chain,
-      requesterId: row.createdBy, decision: 'RETURN', reason: reason.trim(),
+      requesterId: row.createdBy, decision: 'RETURN', requestKey: `RETURN:${this.key(key)}`, reason: reason.trim(),
       since: row.submittedAt,
     });
     return this.transition(companyId, userId, id, key, [row.status], 'DRAFT', {
@@ -631,6 +635,8 @@ export class StockTransfersService {
       const status = settlementDocumentId ? 'SETTLEMENT_PENDING' : unresolved ? 'PARTIALLY_RECEIVED' : 'SETTLED';
       await tx.stockTransfer.update({ where: { id }, data: { status, settlementDocumentId, settlementRequestedBy: settlementDocumentId ? userId : null, version: { increment: 1 } } });
       await tx.stockTransferAction.update({ where: { id: previous.id }, data: { stockDocumentId: settlementDocumentId, resultVersion: currentTransfer.version + 1 } });
+      // Durable completion proof, committed with the state change: later status changes can never be mistaken for it.
+      await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: `SETTLED:${requestKey.slice(requestKey.indexOf(':') + 1)}`, requestHash, action: 'SETTLE_DONE', stockDocumentId: settlementDocumentId, resultVersion: currentTransfer.version + 1 } });
     });
     await this.audit.record({ companyId, userId, action: 'SETTLE', entity: 'stock_transfers', entityId: id, after: { settlementDocumentId, returns: returns.map(x=>[x.line.id,x.quantity.toString()]), writeOffs: writeOffs.map(x=>[x.line.id,x.quantity.toString()]) } });
     const settled = await this.findOne(companyId, id);
@@ -638,8 +644,21 @@ export class StockTransfersService {
     return settled;
   }
 
-  async approveSettlement(companyId: string, userId: string, id: string) {
+  async approveSettlement(companyId: string, userId: string, id: string, rawKey?: string) {
     const transfer = await this.findOne(companyId, id);
+    // With a key, the approval is recorded under it in the same transaction as
+    // the state change: a replay returns the committed result, a different
+    // actor or transfer under the same key is a 409. Without a key the legacy
+    // behaviour applies and its outcome cannot be reconciled by key.
+    const settlementKey = rawKey === undefined ? null : `SETTLEMENT_APPROVED:${this.key(rawKey)}`;
+    const settlementHash = this.hash({ id, actor: userId, action: 'APPROVE_SETTLEMENT' });
+    if (settlementKey) {
+      const prior = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: settlementKey } });
+      if (prior) {
+        if (prior.requestHash !== settlementHash) throw new ConflictException('Idempotency key was reused for a different settlement approval');
+        return transfer;
+      }
+    }
     if (transfer.status !== 'SETTLEMENT_PENDING' || !transfer.settlementDocumentId) throw new ConflictException('There is no pending transfer write-off to approve');
     if (transfer.settlementRequestedBy === userId) throw new BadRequestException('The person reporting a transfer difference cannot approve its write-off');
     const document = await this.documents.findOne(companyId, transfer.settlementDocumentId, true) as { status?: string; approvedAt?: string | null };
@@ -651,8 +670,25 @@ export class StockTransfersService {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
       if (!current) throw new NotFoundException('Stock transfer not found');
-      if (current.status === 'SETTLED') return;
-      if (current.status !== 'SETTLEMENT_PENDING') throw new ConflictException('Transfer settlement has changed');
+      // Same key first, under the lock: a committed first call is a replay even
+      // if the transfer moved on (SETTLED or PARTIALLY_RECEIVED) since.
+      if (settlementKey) {
+        const again = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: settlementKey } });
+        if (again) {
+          if (again.requestHash !== settlementHash) throw new ConflictException('Idempotency key was reused for a different settlement approval');
+          return;
+        }
+      }
+      if (current.status !== 'SETTLEMENT_PENDING') {
+        // Another request already completed it. This key did not apply the
+        // approval; record that truthfully so its read is neither absent nor applied.
+        if (settlementKey && ['SETTLED', 'PARTIALLY_RECEIVED'].includes(current.status) && current.settlementApprovedAt) {
+          await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: settlementKey, requestHash: settlementHash, action: 'SETTLE_ALREADY_DONE', stockDocumentId: transfer.settlementDocumentId, resultVersion: current.version } });
+          return;
+        }
+        if (current.status === 'SETTLED') return;
+        throw new ConflictException('Transfer settlement has changed');
+      }
       for (const line of current.lines) {
         const remainingDifference = line.reportedShortage.add(line.reportedDamage).sub(line.writtenOffQuantity);
         if (remainingDifference.gt(0)) await tx.stockTransferLine.update({ where: { id: line.id }, data: { writtenOffQuantity: { increment: remainingDifference } } });
@@ -660,6 +696,7 @@ export class StockTransfersService {
       const finalLines = await tx.stockTransferLine.findMany({ where: { transferId: id } });
       const unresolved = finalLines.some(line => line.dispatchedQuantity.lt(line.requestedQuantity) || line.dispatchedQuantity.gt(line.receivedQuantity.add(line.returnedQuantity).add(line.writtenOffQuantity)));
       await tx.stockTransfer.update({ where: { id }, data: { status: unresolved ? 'PARTIALLY_RECEIVED' : 'SETTLED', settlementApprovedBy: userId, settlementApprovedAt: new Date(), version: { increment: 1 } } });
+      if (settlementKey) await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: settlementKey, requestHash: settlementHash, action: 'SETTLEMENT_APPROVED', stockDocumentId: transfer.settlementDocumentId, resultVersion: current.version + 1 } });
     });
     await this.audit.record({ companyId, userId, action: 'APPROVE_TRANSFER_SETTLEMENT', entity: 'stock_transfers', entityId: id, after: { stockDocumentId: transfer.settlementDocumentId } });
     const approved = await this.findOne(companyId, id);
@@ -673,6 +710,117 @@ export class StockTransfersService {
     const outstanding = row.lines.some(x => x.dispatchedQuantity.lt(x.requestedQuantity) || x.dispatchedQuantity.gt(x.receivedQuantity.add(x.returnedQuantity).add(x.writtenOffQuantity)));
     if (outstanding) throw new ConflictException('Unresolved goods remain in transit; receive, return or approve a write-off before closing');
     return this.transition(companyId, userId, id, key, [row.status], 'CLOSED', { closedBy: userId, closedAt: new Date() });
+  }
+
+  /// The screen's action names mapped to the prefixes the server stores. A
+  /// SETTLE read also needs its SETTLED marker, so both prefixes are listed.
+  private storedPrefixes(alias?: string): string[] | null {
+    if (alias === undefined || alias === '') return null;
+    const map: Record<string, string[]> = {
+      create: ['CREATE'], submit: ['PENDING_APPROVAL', 'REVIEWED'], review: ['REVIEWED'], approve: ['APPROVED'],
+      reject: ['REJECTED'], return: ['DRAFT'], close: ['CLOSED'], cancel: ['CANCELLED', 'CANCEL'],
+      dispatch: ['DISPATCH'], receive: ['RECEIVE'], settle: ['SETTLE', 'SETTLED', 'RETURN'],
+      approve_settlement: ['SETTLEMENT_APPROVED', 'SETTLE_ALREADY_DONE'],
+    };
+    const prefixes = map[String(alias).toLowerCase()];
+    if (!prefixes) throw new BadRequestException('Unknown action. Use one of: ' + Object.keys(map).join(', '));
+    return prefixes;
+  }
+
+  /// Read-only reconciliation of one idempotency key after an unknown outcome
+  /// (a lost response, a restart). It reports what the server COMMITTED for the
+  /// key and never inferred from totals or status alone:
+  ///   COMPLETED - the action committed (stock-moving actions: the document is
+  ///               recorded; settle/cancel: the transfer left its working state;
+  ///               plain transitions commit the row and the state together).
+  ///   PENDING   - the reservation row exists but the action has not finished.
+  ///               Resume by replaying the SAME key and payload: the server
+  ///               completes it once, or answers 409 if the payload differs.
+  ///   ABSENT    - no row for this key. This does NOT prove the action never
+  ///               ran or is not still in flight; it only means nothing is
+  ///               committed under the key yet. Replaying the same key and
+  ///               payload is safe (applied once, or refused with 409).
+  /// It never exposes payload hashes, costs or other users' data, and it is
+  /// scoped to the company and the transfer.
+  async actionOutcomes(companyId: string, id: string, rawKey: string, actionAlias?: string) {
+    const key = this.key(rawKey);
+    const prefixes = this.storedPrefixes(actionAlias);
+    const transfer = await this.findOne(companyId, id);
+    const rows = await this.prisma.stockTransferAction.findMany({
+      where: { companyId, transferId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    const mine = rows.filter((row) => row.requestKey.slice(row.requestKey.indexOf(':') + 1) === key && (!prefixes || prefixes.includes(row.requestKey.slice(0, row.requestKey.indexOf(':')))));
+    const done = new Set(rows.filter((row) => row.action === 'SETTLE_DONE').map((row) => row.requestKey.slice(row.requestKey.indexOf(':') + 1)));
+    const reversals = rows.filter((row) => row.action === 'REVERSAL').length;
+    const outcomes: Array<Record<string, unknown> & { state: string }> = mine.map((row) => {
+      let state: 'COMPLETED' | 'PENDING' | 'REVIEW' | 'ALREADY_APPROVED' | 'DECISION_RECORDED';
+      if (row.action === 'DISPATCH' || row.action === 'RECEIVE') {
+        state = row.stockDocumentId ? 'COMPLETED' : 'PENDING';
+      } else if (row.action === 'SETTLE') {
+        // Completion needs the marker written with it. A settle row with no
+        // marker that is no longer SETTLING (older data) cannot be proven.
+        const suffix = row.requestKey.slice(row.requestKey.indexOf(':') + 1);
+        state = done.has(suffix) ? 'COMPLETED' : transfer.status === 'SETTLING' ? 'PENDING' : 'REVIEW';
+      } else if (row.action === 'SETTLE_ALREADY_DONE') {
+        // Recorded by a request that reached the lock after another request had
+        // already approved. This key did NOT apply the approval.
+        state = 'ALREADY_APPROVED';
+      } else {
+        // Plain transitions, CREATE, CANCEL, RETURN and markers are committed
+        // in the same transaction as the state change they record.
+        state = 'COMPLETED';
+      }
+      return {
+        action: row.action,
+        requestKey: row.requestKey,
+        state,
+        resultVersion: row.resultVersion,
+        stockDocumentId: row.stockDocumentId ?? null,
+        recordedAt: row.createdAt,
+        applied: state === 'COMPLETED' ? true : state === 'ALREADY_APPROVED' ? false : null,
+      };
+    });
+    // A cancel after dispatch reverses documents one by one BEFORE its own row
+    // is committed, under keys that do not carry the client key. Without a row
+    // for this key, those partial reversals are unattributable: do not call it absent.
+    // Configured-chain decisions are recorded with their own key before the
+    // transfer changes state; read them as exact-key evidence. Only the decision
+    // is proven: the transfer may still be waiting for further levels.
+    const wanted = !prefixes ? ['APPROVE', 'REJECT', 'RETURN'] : ['APPROVE', 'REJECT', 'RETURN'].filter((kind) => prefixes.includes(kind === 'APPROVE' ? 'APPROVED' : kind === 'REJECT' ? 'REJECTED' : 'DRAFT'));
+    const transitionDone = new Set(mine.map((row) => row.requestKey.slice(0, row.requestKey.indexOf(':'))));
+    for (const kind of wanted) {
+      const decided = await this.approvals.keyedDecision(companyId, 'StockTransfer', id, `${kind}:${key}`);
+      if (!decided) continue;
+      // The decision commits before the transfer transition. Only the decision is
+      // proven here; the whole operation is complete only with the transition row
+      // that endpoint writes under the same key. Replaying the same key finishes it.
+      const finishing = kind === 'APPROVE' ? 'APPROVED' : kind === 'REJECT' ? 'REJECTED' : 'DRAFT';
+      const transitioned = transitionDone.has(finishing);
+      // An APPROVE is an accepted intermediate step when it is not the last
+      // level of the policy it was recorded under. That is durable and final for
+      // THIS request: no transition is owed. The last level owes the APPROVED
+      // transition, so without that row it is "decision recorded, finalization pending".
+      // Read from the decision's own frozen record, never the current policy:
+      // an edited or reordered policy cannot change what this decision was.
+      const accepted: boolean | null = kind === 'APPROVE' && !transitioned && decided.completesChain !== null && decided.completesChain !== undefined ? !decided.completesChain : null;
+      const state = transitioned ? 'COMPLETED' : accepted === true ? 'ACCEPTED_STEP' : 'DECISION_RECORDED';
+      outcomes.push({
+        action: `CHAIN_${kind}`, requestKey: `${kind}:${key}`, state, resultVersion: null, stockDocumentId: null,
+        recordedAt: decided.createdAt, applied: null, level: decided.level, scope: 'DECISION_ONLY',
+        operationComplete: transitioned || accepted === true ? true : null,
+        terminalPending: kind === 'APPROVE' && !transitioned && accepted === false ? 'FINAL_TRANSITION' : kind !== 'APPROVE' && !transitioned ? 'TRANSITION' : null,
+      } as never);
+    }
+    const partialCancel = outcomes.length === 0 && reversals > 0 && transfer.status !== 'CANCELLED';
+    return {
+      transferId: id,
+      key,
+      state: partialCancel ? 'REVIEW' : outcomes.length === 0 ? 'ABSENT' : outcomes.some((o) => o.state === 'REVIEW') ? 'REVIEW' : outcomes.every((o) => o.state === 'COMPLETED') ? 'COMPLETED' : outcomes.every((o) => o.state === 'ALREADY_APPROVED') ? 'ALREADY_APPROVED' : outcomes.some((o) => o.state === 'DECISION_RECORDED') ? 'DECISION_RECORDED' : outcomes.every((o) => o.state === 'ACCEPTED_STEP' || o.state === 'COMPLETED') ? 'ACCEPTED_STEP' : 'PENDING',
+      reason: partialCancel ? 'Partial reversal evidence exists for this transfer that cannot be attributed to this key.' : undefined,
+      outcomes,
+      transfer: { status: transfer.status, version: transfer.version },
+    };
   }
 
   async cancel(companyId: string, userId: string, id: string, key: string) {
@@ -736,7 +884,11 @@ export class StockTransfersService {
 
   private async transition(companyId: string, userId: string, id: string, key: string, allowed: string[], status: string, extra: Record<string, unknown>) {
     const requestKey = `${status}:${this.key(key)}`;
-    const hash = this.hash({ id, status, extra });
+    // The fingerprint is the user's intent, not the server clock: timestamps in
+    // `extra` change on every call and would turn a legitimate same-key replay
+    // into a 409. Actor and stable fields (reason) are kept.
+    const stable = Object.fromEntries(Object.entries(extra).filter(([, value]) => !(value instanceof Date)).sort(([a], [b]) => a.localeCompare(b)));
+    const hash = this.hash({ id, status, actor: userId, stable });
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const row = await tx.stockTransfer.findFirst({ where: { id, companyId } });

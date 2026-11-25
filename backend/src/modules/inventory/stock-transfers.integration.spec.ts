@@ -206,4 +206,62 @@ const vmReady=process.execArgv.includes('--experimental-vm-modules')||(process.e
     await service.create(COMPANY,USER_A,input);
     await expect(service.create(COMPANY,USER_A,{...input,lines:[{itemId:ITEM,quantity:2}]})).rejects.toThrow('different transfer request');
   });
+
+  async function outcomeFixture() {
+    const row=await service.create(COMPANY,USER_A,{sourceWarehouseId:FROM,destinationWarehouseId:TO,transferDate:'2026-11-21',reason:'Outcome qualification',idempotencyKey:'out-create',lines:[{itemId:ITEM,quantity:'10'}]});
+    await service.review(COMPANY,USER_B,row.id,'out-review');
+    await service.approve(COMPANY,USER_C,row.id,'out-approve');
+    await service.dispatch(COMPANY,USER_A,row.id,'out-dispatch',[{lineId:row.lines[0].id,quantity:'10'}]);
+    return row;
+  }
+  it('proposal48 exact aliases stable replay actor and key boundaries on SQL',async()=>{
+    const row=await outcomeFixture();
+    await new Promise(resolve=>setTimeout(resolve,5));
+    await service.review(COMPANY,USER_B,row.id,'out-review');
+    await expect(service.review(COMPANY,USER_C,row.id,'out-review')).rejects.toThrow('different action');
+    expect((await service.actionOutcomes(COMPANY,row.id,'out-review','review')).state).toBe('COMPLETED');
+    expect((await service.actionOutcomes(COMPANY,row.id,'out-review','approve')).state).toBe('ABSENT');
+    expect((await service.actionOutcomes(COMPANY,row.id,'out-review','review')).outcomes[0].action).toBe('REVIEWED');
+    await expect(service.actionOutcomes(COMPANY,row.id,'out-review','invented')).rejects.toThrow();
+    await expect(service.actionOutcomes('99999999-9999-4999-8999-999999999999',row.id,'out-review','review')).rejects.toThrow();
+  });
+  it('proposal48 completed return-only key stays completed during later failed settlement',async()=>{
+    const row=await outcomeFixture();
+    await service.settle(COMPANY,USER_A,row.id,'return-old',[{lineId:row.lines[0].id,returnedQuantity:'1',reason:'return'}]);
+    let outcome=await service.actionOutcomes(COMPANY,row.id,'return-old','settle');
+    expect(outcome.state).toBe('COMPLETED');
+    expect(outcome.outcomes.some(x=>x.action==='SETTLE_DONE')).toBe(true);
+    const docs=(service as unknown as {documents:{create:jest.Mock}}).documents;
+    docs.create.mockRejectedValueOnce(new Error('injected document failure'));
+    await expect(service.settle(COMPANY,USER_A,row.id,'return-later',[{lineId:row.lines[0].id,returnedQuantity:'1',reason:'later'}])).rejects.toThrow('injected document failure');
+    outcome=await service.actionOutcomes(COMPANY,row.id,'return-old','settle');
+    expect(outcome.state).toBe('COMPLETED');
+    expect((await service.actionOutcomes(COMPANY,row.id,'return-later','settle')).state).toBe('PENDING');
+    expect((await service.actionOutcomes(COMPANY,row.id,'not-sent','settle')).state).toBe('ABSENT');
+  });
+  it('proposal48 marker failure atomically rolls back quantity status and return row',async()=>{
+    const row=await outcomeFixture();
+    await db.exec(`CREATE FUNCTION fail_settle_marker() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'SETTLE_DONE' THEN RAISE EXCEPTION 'marker-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_marker BEFORE INSERT ON stock_transfer_actions FOR EACH ROW EXECUTE FUNCTION fail_settle_marker();`);
+    await expect(service.settle(COMPANY,USER_A,row.id,'rollback-marker',[{lineId:row.lines[0].id,returnedQuantity:'1',reason:'return'}])).rejects.toThrow('marker-failure');
+    const after=await service.findOne(COMPANY,row.id);
+    expect(after.status).toBe('SETTLING');
+    expect(after.lines[0].returnedQuantity.toString()).toBe('0');
+    const outcome=await service.actionOutcomes(COMPANY,row.id,'rollback-marker','settle');
+    expect(outcome.state).toBe('PENDING');
+    expect(outcome.outcomes.map(x=>x.action)).toEqual(['SETTLE']);
+  });
+  it('proposal48 keyed settlement approval exact actor and same key completion',async()=>{
+    const row=await outcomeFixture();
+    await service.settle(COMPANY,USER_A,row.id,'writeoff-key',[{lineId:row.lines[0].id,shortage:'2',reason:'damage check'}]);
+    expect((await service.actionOutcomes(COMPANY,row.id,'approval-key','approve_settlement')).state).toBe('ABSENT');
+    await expect(service.approveSettlement(COMPANY,USER_A,row.id,'approval-key')).rejects.toThrow('cannot approve');
+    await service.approveSettlement(COMPANY,USER_B,row.id,'approval-key');
+    const outcome=await service.actionOutcomes(COMPANY,row.id,'approval-key','approve_settlement');
+    expect(outcome.state).toBe('COMPLETED');expect(outcome.outcomes[0].action).toBe('SETTLEMENT_APPROVED');
+    expect(outcome.outcomes[0].stockDocumentId).toBeTruthy();
+    await service.approveSettlement(COMPANY,USER_B,row.id,'approval-key');
+    await expect(service.approveSettlement(COMPANY,USER_C,row.id,'approval-key')).rejects.toThrow('different settlement approval');
+    expect((await service.actionOutcomes(COMPANY,row.id,'approval-key','settle')).state).toBe('ABSENT');
+  });
+
 });

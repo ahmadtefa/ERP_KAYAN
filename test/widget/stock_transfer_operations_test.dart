@@ -33,6 +33,9 @@ class _Api extends ApiClient {
   bool refuse = false;
   bool definite = false;
   bool confirmed = false;
+  String proofState = 'COMPLETED';
+  String proofAction = 'DISPATCH';
+  bool wrongProofKey = false;
   Map<String, dynamic> get row => {
     'id': 't',
     'documentNumber': 'TR-OPS',
@@ -66,6 +69,26 @@ class _Api extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     reads++;
+    if (path.endsWith('/actions')) {
+      return {
+        'transferId': 't',
+        'key': wrongProofKey ? 'wrong' : query?['key'],
+        'state': confirmed ? proofState : 'ABSENT',
+        'outcomes': confirmed
+            ? [
+                {
+                  'action': proofAction,
+                  'requestKey': '$proofAction:${query?['key']}',
+                  'state': proofState,
+                  'scope': 'DECISION_ONLY',
+                  'operationComplete': true,
+                  'terminalPending': null,
+                  'applied': proofState == 'ALREADY_APPROVED' ? false : true,
+                },
+              ]
+            : [],
+      };
+    }
     return path.endsWith('/approvals')
         ? {}
         : {
@@ -586,6 +609,97 @@ void main() {
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
+    },
+  );
+  for (final outcome in [
+    'COMPLETED',
+    'ACCEPTED_STEP',
+    'DECISION_RECORDED',
+    'PENDING',
+    'ABSENT',
+    'REVIEW',
+    'wrong-key',
+    'wrong-action',
+  ]) {
+    testWidgets('exact review recovery gates $outcome without replay', (
+      tester,
+    ) async {
+      final api = _Api(outcome == 'ACCEPTED_STEP' ? 'REVIEWED' : 'DRAFT')
+        ..refuse = true;
+      await pump(tester, api);
+      final label = outcome == 'ACCEPTED_STEP' ? 'Approve' : 'Review';
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      api.confirmed = true;
+      api.proofAction = outcome == 'ACCEPTED_STEP'
+          ? 'CHAIN_APPROVE'
+          : outcome == 'wrong-action'
+          ? 'DISPATCH'
+          : 'REVIEWED';
+      api.proofState = outcome.startsWith('wrong-') ? 'COMPLETED' : outcome;
+      api.wrongProofKey = outcome == 'wrong-key';
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await pump(tester, api);
+      if (outcome == 'ACCEPTED_STEP') {
+        expect(
+          find.textContaining('earlier approval step was recorded'),
+          findsOneWidget,
+        );
+        final boundary =
+            visualKey.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File('/downloads/transfer-accepted-step.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+            .onPressed,
+        outcome == 'COMPLETED' || outcome == 'ACCEPTED_STEP'
+            ? isNotNull
+            : isNull,
+      );
+      expect(api.posts, hasLength(1));
+    });
+  }
+  testWidgets(
+    'lost settlement approval race clears only explicit unapplied proof',
+    (tester) async {
+      final api = _Api('SETTLEMENT_PENDING')..refuse = true;
+      await pump(tester, api);
+      await tester.tap(find.text('Approve write-off'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      api.confirmed = true;
+      api.proofAction = 'SETTLE_ALREADY_DONE';
+      api.proofState = 'ALREADY_APPROVED';
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await pump(tester, api);
+      expect(
+        find.textContaining('did not apply another approval'),
+        findsOneWidget,
+      );
+      expect(api.posts, hasLength(1));
     },
   );
 }

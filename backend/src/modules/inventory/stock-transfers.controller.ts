@@ -133,6 +133,13 @@ export class StockTransfersController {
   /// The approval path this transfer is following: the configured levels, who
   /// closed each one and what remains. Shown on the screen beside the buttons
   /// so a person can see why an action is offered or missing.
+  @Get(':id/actions')
+  @RequirePermissions('inventory.transfer.read')
+  async actionOutcomes(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('key') key: string, @Query('action') action?: string) {
+    await this.assertPair(user, id, 'view');
+    return this.service.actionOutcomes(user.companyId, id, key, action);
+  }
+
   @Get(':id/approvals')
   @RequirePermissions('inventory.transfer.read')
   async approvals(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -160,9 +167,9 @@ export class StockTransfersController {
 
   @Post(':id/settle/approve')
   @RequirePermissions('inventory.transfer.settle.approve')
-  async approveSettlement(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async approveSettlement(@CurrentUser() user: AuthUser, @Param('id') id: string, @Headers('idempotency-key') key?: string) {
     await this.assertPair(user, id, 'approve');
-    return this.present(user, this.service.approveSettlement(user.companyId, user.userId, id));
+    return this.present(user, this.service.approveSettlement(user.companyId, user.userId, id, key));
   }
 
   @Post(':id/close')

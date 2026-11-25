@@ -891,6 +891,11 @@ model ApprovalDecision {
 
   actorId       String  @db.Uuid
   actorRoleCode String? @db.VarChar(48)
+  /// Client request key for exact-key reconciliation; NULL on older rows.
+  requestKey    String? @db.VarChar(160)
+  requestHash   String? @db.VarChar(64)
+  /// Frozen at decision time: did this APPROVE close the last level of the chain it was decided under. NULL on older rows.
+  completesChain Boolean?
 
   createdAt DateTime @default(now())
 

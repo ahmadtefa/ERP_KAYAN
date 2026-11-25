@@ -197,6 +197,79 @@ const vmReady =
       expect(posted).toHaveLength(0);
     });
 
+
+    it('proposal50 changed reason level actor policy and round conflict', async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');
+      await service.approve(COMPANY,MANAGER,transfer.id,'decision-key',manager(),'original reason',1);
+      await expect(service.approve(COMPANY,MANAGER,transfer.id,'decision-key',manager(),'different reason',1)).rejects.toThrow('reused');
+      await expect(service.approve(COMPANY,MANAGER,transfer.id,'decision-key',manager(),'original reason',2)).rejects.toThrow('reused');
+      await expect(service.approve(COMPANY,CHIEF,transfer.id,'decision-key',chief(),'original reason',1)).rejects.toThrow('reused');
+      const chain=await service.chainFor(COMPANY,await service.findOne(COMPANY,transfer.id));
+      const base={entityType:'StockTransfer' as const,entityId:transfer.id,chain,requesterId:REQUESTER,decision:'APPROVE' as const,requestKey:'APPROVE:decision-key',reason:'original reason',expectedLevel:1,since:(await service.findOne(COMPANY,transfer.id)).submittedAt};
+      await expect(approvals.decide(manager(),{...base,chain:{...chain,policyId:'99999999-9999-4999-8999-999999999999'}})).rejects.toThrow('reused');
+      await expect(approvals.decide(manager(),{...base,since:new Date('2026-01-01')})).rejects.toThrow('reused');
+      const outcome=await service.actionOutcomes(COMPANY,transfer.id,'decision-key','approve');
+      expect(outcome.state).toBe('ACCEPTED_STEP');expect(outcome.outcomes[0]).toMatchObject({action:'CHAIN_APPROVE',scope:'DECISION_ONLY',operationComplete:true});
+      const result=await db.query<{reason:string}>(`SELECT reason FROM approval_decisions WHERE "requestKey"='APPROVE:decision-key'`);
+      expect(result.rows.map(x=>x.reason)).toEqual(['original reason']);
+    });
+    it('proposal50 committed reject decision is decision-only until same-key transition resumes',async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');
+      await db.exec(`CREATE FUNCTION fail_reject_transfer() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'REJECTED' THEN RAISE EXCEPTION 'transition-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_failure BEFORE UPDATE ON stock_transfers FOR EACH ROW EXECUTE FUNCTION fail_reject_transfer();`);
+      await expect(service.reject(COMPANY,MANAGER,transfer.id,'reject-key','reason',manager())).rejects.toThrow('transition-failure');
+      expect((await service.findOne(COMPANY,transfer.id)).status).toBe('PENDING_APPROVAL');
+      const result=await service.actionOutcomes(COMPANY,transfer.id,'reject-key','reject');
+      expect(result.state).toBe('DECISION_RECORDED');expect(result.outcomes.map(x=>x.action)).toEqual(['CHAIN_REJECT']);
+      await db.exec('DROP TRIGGER reject_failure ON stock_transfers');
+      await service.reject(COMPANY,MANAGER,transfer.id,'reject-key','reason',manager());
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'reject-key','reject')).state).toBe('COMPLETED');
+    });
+
+    it('proposal50 earlier-level replay cannot own final transition after final actor failure',async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');
+      await service.approve(COMPANY,MANAGER,transfer.id,'manager-key',manager(),'first',1);
+      await db.exec(`CREATE FUNCTION fail_approved_transfer() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'APPROVED' THEN RAISE EXCEPTION 'final-transition-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER approve_failure BEFORE UPDATE ON stock_transfers FOR EACH ROW EXECUTE FUNCTION fail_approved_transfer();`);
+      await expect(service.approve(COMPANY,CHIEF,transfer.id,'chief-key',chief(),'final',2)).rejects.toThrow('final-transition-failure');
+      expect((await service.findOne(COMPANY,transfer.id)).status).toBe('PENDING_APPROVAL');
+      await db.exec('DROP TRIGGER approve_failure ON stock_transfers');
+      const replayed=await service.approve(COMPANY,MANAGER,transfer.id,'manager-key',manager(),'first',1);
+      expect(replayed.status).toBe('PENDING_APPROVAL');expect(replayed.approvedBy).toBeNull();
+      const result=await service.actionOutcomes(COMPANY,transfer.id,'manager-key','approve');
+      expect(result.state).toBe('ACCEPTED_STEP');
+      const done=await service.approve(COMPANY,CHIEF,transfer.id,'chief-key',chief(),'final',2);expect(done.status).toBe('APPROVED');expect(done.approvedBy).toBe(CHIEF);
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'chief-key','approve')).state).toBe('COMPLETED');
+    });
+
+    it('proposal50 committed return decision is decision-only until same-key transition resumes',async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');
+      await db.exec(`CREATE FUNCTION fail_return_transfer() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'DRAFT' THEN RAISE EXCEPTION 'return-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER return_failure BEFORE UPDATE ON stock_transfers FOR EACH ROW EXECUTE FUNCTION fail_return_transfer();`);
+      await expect(service.returnForAmendment(COMPANY,MANAGER,transfer.id,'return-key','reason',manager())).rejects.toThrow('return-failure');
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'return-key','return')).state).toBe('DECISION_RECORDED');
+      await db.exec('DROP TRIGGER return_failure ON stock_transfers');
+      await service.returnForAmendment(COMPANY,MANAGER,transfer.id,'return-key','reason',manager());
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'return-key','return')).state).toBe('COMPLETED');
+    });
+
+    it('proposal52 frozen finality survives live policy extension',async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');await service.approve(COMPANY,MANAGER,transfer.id,'manager-key',manager(),'first',1);
+      await db.exec(`CREATE FUNCTION fail_approved_transfer() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'APPROVED' THEN RAISE EXCEPTION 'final-transition-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER approve_failure BEFORE UPDATE ON stock_transfers FOR EACH ROW EXECUTE FUNCTION fail_approved_transfer();`);
+      await expect(service.approve(COMPANY,CHIEF,transfer.id,'chief-key',chief(),'final',2)).rejects.toThrow('final-transition-failure');
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'chief-key','approve')).state).toBe('DECISION_RECORDED');
+      await db.exec(`INSERT INTO approval_levels (id,"policyId",level,"nameEn","nameAr",permission,"roleCode",optional) SELECT gen_random_uuid(),id,3,'Extra','Extra','inventory.transfer.approve','GENERAL_MANAGER',false FROM approval_policies WHERE "companyId"='${COMPANY}'`);
+      const changed=await service.actionOutcomes(COMPANY,transfer.id,'chief-key','approve');
+      expect(changed.state).toBe('DECISION_RECORDED');expect(changed.outcomes[0]).toMatchObject({operationComplete:null,terminalPending:'FINAL_TRANSITION'});
+      expect((await service.findOne(COMPANY,transfer.id)).status).toBe('PENDING_APPROVAL');
+    });
+
+    it('proposal52 frozen accepted step survives policy deletion but old round cannot execute again',async()=>{
+      await withChain();const transfer=await openTransfer();await service.submit(COMPANY,REQUESTER,transfer.id,'submit-key');await service.approve(COMPANY,MANAGER,transfer.id,'step-key',manager(),'first',1);
+      await db.exec('DELETE FROM approval_levels WHERE level=2');
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'step-key','approve')).state).toBe('ACCEPTED_STEP');
+      const replay=await service.approve(COMPANY,MANAGER,transfer.id,'step-key',manager(),'first',1);expect(replay.status).toBe('PENDING_APPROVAL');expect(replay.approvedBy).toBeNull();
+      await db.exec(`UPDATE stock_transfers SET "submittedAt"='2026-12-01' WHERE id='${transfer.id}'`);
+      await expect(service.approve(COMPANY,MANAGER,transfer.id,'step-key',manager(),'first',1)).rejects.toThrow('reused');
+      expect((await service.actionOutcomes(COMPANY,transfer.id,'step-key','approve')).state).toBe('ACCEPTED_STEP');
+    });
     it('walks two levels in order and only then approves', async () => {
       await withChain();
       const transfer = await openTransfer();
