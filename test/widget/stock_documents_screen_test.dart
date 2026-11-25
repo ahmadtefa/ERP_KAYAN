@@ -533,11 +533,11 @@ void main() {
   });
 
   testWidgets('post confirmation for a count and an adjustment says a journal entry is made when the value changes', (tester) async {
-    final api = _DocumentsApi()
-      ..extraRows.addAll([
-        _row(id: 'd-5', number: 'CNT-001', kind: 'count', status: 'draft'),
-        _row(id: 'd-6', number: 'ADJ-002', kind: 'adjustment', status: 'draft'),
-      ]);
+    final api = _DocumentsApi();
+    api.extraRows.addAll([
+      api._row(id: 'd-5', number: 'CNT-001', kind: 'count', status: 'draft'),
+      api._row(id: 'd-6', number: 'ADJ-002', kind: 'adjustment', status: 'draft'),
+    ]);
     await pump(tester, api, user: storeAdjuster);
     // Post buttons in list order: TRF-001, CNT-001, ADJ-002.
     await tester.tap(find.byTooltip('Post').at(1));
