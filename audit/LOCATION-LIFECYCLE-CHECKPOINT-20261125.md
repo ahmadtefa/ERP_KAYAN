@@ -111,3 +111,8 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ## Generic lot cost after later receipts, 05:30
 
 43 exact basic inverse passes, but positive adjustment+2 then real receipt2@24 then reverse from original10@12 yields lot12@13.7143 vs expected14, books12/value168 correct. Negative adjustment-2 then same receipt/reverse also fails lot contribution restoration. Physical lot and book costs remain separate bases, neither should be silently repriced by inverse. Backend owner notified for recorded physical contribution or fail-closed proof. New tests allow an atomic refusal as safe outcome. Evidence patch43-reprice.out, patch43-negative-reprice.out.
+
+### 05:32 split source visibility and broad local unit regressions
+- Explicitly show each staged split part's physical source code beside its quantity and lot, rather than hiding differing sources behind the common line summary.
+- Actual Flutter retained-refusal/edit/save/post/reverse native bridge passes with the source-aware summary. Inspected screenshot `/downloads/stock-document-lot-split.png`: readable A source per part and T destination, no overlap.
+- Full Flutter analyze clean. Stockdoc units/controller/warehouses/cost/source/writeoff/transfer-lots/warehouse guard and response permissions: 9 suites, 80 tests pass locally. These do not override the three known isolated integration failures.

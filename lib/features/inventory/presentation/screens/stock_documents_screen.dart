@@ -685,7 +685,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     (line['splits'] as List)
                                         .map(
                                           (p) =>
-                                              '${p['quantity']} × ${p['label']}',
+                                              '${p['quantity']} × ${p['label']} [${p['sourceLabel'] ?? line['storageLocationCode'] ?? (_arabic ? "بدون موقع" : "unlocated")}]',
                                         )
                                         .join(' + '),
                                   ),

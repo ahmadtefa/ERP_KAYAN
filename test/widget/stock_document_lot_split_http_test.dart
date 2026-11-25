@@ -129,7 +129,10 @@ void main() {
     }
     await tester.tap(find.text(tr('Apply split', 'تطبيق التقسيم')));
     await settle();
-    expect(find.textContaining('2 × LOT-UI + 1 × LOT-UI'), findsOneWidget);
+    expect(
+      find.textContaining('2 × LOT-UI [A] + 1 × LOT-UI [A]'),
+      findsOneWidget,
+    );
     final boundary =
         visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     await tester.runAsync(() async {
@@ -145,7 +148,10 @@ void main() {
     await tester.tap(find.text(tr('Save locations', 'حفظ المواقع')));
     await settle();
     expect(find.textContaining('Synthetic refusal'), findsOneWidget);
-    expect(find.textContaining('2 × LOT-UI + 1 × LOT-UI'), findsOneWidget);
+    expect(
+      find.textContaining('2 × LOT-UI [A] + 1 × LOT-UI [A]'),
+      findsOneWidget,
+    );
     await tester.tap(find.text(tr('Split line quantity', 'تقسيم كمية السطر')));
     await settle();
     final first = tester.widget<TextFormField>(
