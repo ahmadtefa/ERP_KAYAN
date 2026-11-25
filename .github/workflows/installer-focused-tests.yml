@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
       KAYAN_BRIDGE_EVIDENCE_DIR: ${{ github.workspace }}/build/bridge-evidence
       KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/bridge-evidence/pixels
     steps:
@@ -32,19 +31,29 @@ jobs:
           channel: stable
       - name: Install locked backend dependencies and generate Prisma
         working-directory: backend
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx prisma generate
       - name: Resolve locked Flutter packages
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: flutter pub get --enforce-lockfile
       - name: Check bridge evidence refusal rules and workflow safety
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           node --test scripts/verify-location-bridge-evidence.test.mjs backend/scripts/bridge-harness.test.cjs backend/scripts/isolated-pg-cluster.test.cjs
           node scripts/ci-workflow-safety.test.cjs
       - name: Compile backend without product packaging
         working-directory: backend
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: npx tsc -p tsconfig.json
       - name: Run six selected PGlite HTTP bridges sequentially
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           export FLUTTER_BIN="$(command -v flutter)"
           mkdir -p "$KAYAN_BRIDGE_EVIDENCE_DIR"
@@ -52,10 +61,14 @@ jobs:
             node scripts/run-location-pglite-bridge.mjs "$bridge" "$KAYAN_BRIDGE_EVIDENCE_DIR"
           done
       - name: Run three selected native isolated HTTP bridges
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: |
           export FLUTTER_BIN="$(command -v flutter)"
           node scripts/run-location-native-bridges.mjs "$KAYAN_BRIDGE_EVIDENCE_DIR"
       - name: Verify all nine child and parent SQL outcomes
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: node scripts/verify-location-bridge-evidence.mjs "$KAYAN_BRIDGE_EVIDENCE_DIR" "$KAYAN_BRIDGE_EVIDENCE_DIR/report.json"
       - name: Preserve raw selected evidence even on failure
         if: always()

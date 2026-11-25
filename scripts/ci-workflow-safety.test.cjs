@@ -119,8 +119,10 @@ assert.deepEqual(bridges.permissions, {contents: 'read'});
 assert.deepEqual(Object.keys(bridges.jobs), ['bridges']);
 assert.equal(bridges.jobs.bridges['runs-on'], 'ubuntu-24.04');
 assert.equal(bridges.jobs.bridges.environment, undefined);
-assert.equal(bridges.jobs.bridges.env.NODE_OPTIONS, '--require=${{ github.workspace }}/scripts/ci-no-signing.cjs');
+assert.equal(bridges.jobs.bridges.env.NODE_OPTIONS, undefined, 'Checkout must work before repo guard exists');
 for (const step of bridges.jobs.bridges.steps) {
+  if(step.run)assert.equal(step.env?.NODE_OPTIONS,'--require=${{ github.workspace }}/scripts/ci-no-signing.cjs');
+  else assert.equal(step.env?.NODE_OPTIONS,undefined);
   assert.equal(step['continue-on-error'], undefined);
   assert.doesNotMatch(String(step.run ?? ''), /generateKeyPair|createPrivateKey|license-generator|gh release|smoke-test-installed|install-runtime\.ps1|build-installer|reset-kayan|EvaluationBuild|TestSignedBuild/);
 }
