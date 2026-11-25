@@ -297,4 +297,19 @@ const vmReady =
     expect({a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)}).toEqual(before);
   });
 
+  it('transfer reversal refuses depleted original destination shelf atomically',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    const other='cccccccc-cccc-4ccc-8ccc-cccccccccccc';await db.query(`INSERT INTO storage_locations (id,"companyId","branchId","warehouseId",kind,code,"nameEn","nameAr","isActive","updatedAt") VALUES ($1,$2,$3,$4,'SHELF','D-01','D','D',true,now())`,[other,COMPANY,BRANCH,WAREHOUSE_2]);
+    const destLot=(await one(db,`SELECT id FROM item_batches WHERE "warehouseId"=$1 AND "batchNumber"='L1'`,[WAREHOUSE_2])).id;
+    const available=Number((await one(db,`SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "storageLocationId"=$1 AND "batchId"=$2`,[SHELF_W2,destLot])).q);
+    const locs=new StorageLocationsService(pglitePrisma(db) as never,{record:async()=>undefined} as never);await locs.move(COMPANY,USER,{fromLocationId:SHELF_W2,toLocationId:other,itemId:ITEM,batchId:destLot,quantity:available-1,reason:'synthetic move'},null);
+    const before={a:await shelf(SHELF),c:await shelf(SHELF_W2),d:await shelf(other),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)};
+    const err=await failure(documents.reverse(COMPANY,USER,id));expect(err).not.toBeNull();expect({a:await shelf(SHELF),c:await shelf(SHELF_W2),d:await shelf(other),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');
+  });
+
+  it('transfer receipt movement binds the actual destination warehouse lot',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    const row=await one(db,`SELECT m."batchId", b."warehouseId" FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceId"=$1 AND m."referenceType"='STOCK_TRANSFER_IN'`,[id]);expect(row.warehouseId).toBe(WAREHOUSE_2);
+  });
+
 });
