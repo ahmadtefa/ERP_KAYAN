@@ -1564,7 +1564,7 @@ export class NotificationsService {
       }
     }
 
-    // ── who may do what, and what changed underneath ─────────────────────
+    // ── operations that alter the company itself (not access changes) ────
     if (enabled(ADMIN_ALERT)) {
       const since = new Date(today.getTime() - 24 * 3_600_000);
       const changes = await this.prisma.auditLog.findMany({
@@ -1572,17 +1572,10 @@ export class NotificationsService {
           companyId,
           createdAt: { gte: since },
           action: {
-            in: [
-              'role.create',
-              'role.update',
-              'role.remove',
-              'role.permissions_set',
-              'user.create',
-              'user.update',
-              'user.password',
-              'admin.backup.restore',
-              'admin.reset',
-            ],
+            // Sign-in/sign-out and who-may-do-what changes (roles, permissions,
+            // users) are NOT alerts here: the administration screen owns them.
+            // Only operations that alter the company itself are raised.
+            in: ['admin.backup.restore', 'admin.reset'],
           },
         },
         select: {
@@ -1607,8 +1600,8 @@ export class NotificationsService {
           entityRef: change.action,
           actionPath: '/administration',
           dueAt: change.createdAt,
-          titleEn: `Access change: ${change.action}`,
-          titleAr: `تغيير في الصلاحيات: ${change.action}`,
+          titleEn: `Company operation: ${change.action}`,
+          titleAr: `عملية على الشركة: ${change.action}`,
           bodyEn: `${change.user?.fullNameEn ?? change.user?.username ?? 'The system'} on ${change.entity}.`,
           bodyAr: `${change.user?.fullNameAr ?? change.user?.username ?? 'النظام'} على ${change.entity}.`,
           dedupe,

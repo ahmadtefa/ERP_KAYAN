@@ -58,7 +58,9 @@ export const PAYABLE_OVERDUE = 'PAYABLE_OVERDUE';
 /// A shelf whose quantity or value has gone negative, or a movement the ledger
 /// cannot explain: the state a person should look at before it compounds.
 export const STOCK_ABNORMAL = 'STOCK_ABNORMAL';
-/// A change to who may do what, and operations that alter the company itself.
+/// Operations that alter the company itself (a restore, a reset). Sign-in,
+/// sign-out and changes to who may do what live in the administration screen,
+/// not here.
 export const ADMIN_ALERT = 'ADMIN_ALERT';
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
@@ -277,7 +279,7 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
     entityType: 'WarehouseStockBalance',
     repeatAfterHours: 12,
   },
-  // ── who may do what, and what changed underneath ───────────────────────
+  // ── operations that alter the company itself ───────────────────────────
   {
     type: ADMIN_ALERT,
     module: 'admin',

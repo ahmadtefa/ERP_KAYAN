@@ -1329,15 +1329,32 @@ describe('notifications', () => {
     expect(state.notifications.find((one) => one.type === 'STOCK_ABNORMAL')?.status).toBe('CLOSED');
   });
 
-  it('tells an auditor when access was changed, with the audit row as the key', async () => {
+  it('does not alert for access changes or sign-ins: the administration screen owns them', async () => {
+    const { service, state } = makeHarness();
+    const base = { companyId: COMPANY, entity: 'roles', entityId: 'x', createdAt: days(0), user: { username: 'admin', fullNameEn: 'System Administrator', fullNameAr: 'مدير النظام' } };
+    state.auditLogs = [
+      { ...base, id: 'audit-1', action: 'role.permissions_set' },
+      { ...base, id: 'audit-2', action: 'role.update' },
+      { ...base, id: 'audit-3', action: 'user.update' },
+      { ...base, id: 'audit-4', action: 'user.password' },
+      { ...base, id: 'audit-5', action: 'auth.login' },
+      { ...base, id: 'audit-6', action: 'auth.logout' },
+    ];
+
+    await service.scanBusiness(COMPANY, TODAY);
+
+    expect(state.notifications.filter((one) => one.type === 'ADMIN_ALERT')).toHaveLength(0);
+  });
+
+  it('still tells an auditor about a restore or reset of the company, keyed by the audit row', async () => {
     const { service, state } = makeHarness();
     state.auditLogs = [
       {
         id: 'audit-1',
         companyId: COMPANY,
-        action: 'role.permissions_set',
-        entity: 'roles',
-        entityId: 'role-1',
+        action: 'admin.backup.restore',
+        entity: 'company',
+        entityId: 'c-1',
         createdAt: days(0),
         user: { username: 'admin', fullNameEn: 'System Administrator', fullNameAr: 'مدير النظام' },
       },
