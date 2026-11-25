@@ -655,6 +655,15 @@ void main() {
       find.textContaining('Approving does not move stock yet'),
       findsOneWidget,
     );
+    final boundary =
+        visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final image = await boundary.toImage();
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      await screenshotFile('stock-take-approve-confirm.png')
+          .writeAsBytes(bytes!.buffer.asUint8List());
+      image.dispose();
+    });
     expect(api.posts, isEmpty);
   });
 
