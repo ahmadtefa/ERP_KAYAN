@@ -122,6 +122,7 @@ class _DocumentsApi extends ApiClient {
       ),
       _row(id: 'd-3', number: 'OPN-001', kind: 'opening', status: 'posted'),
       _row(id: 'd-4', number: 'WO-001', kind: 'write_off', status: 'draft'),
+      ...extraRows,
     ];
   }
 
@@ -168,6 +169,9 @@ class _DocumentsApi extends ApiClient {
   }
 
   Object? refusePost;
+
+  /// Extra rows a test wants listed after the standard four.
+  final extraRows = <Map<String, dynamic>>[];
 }
 
 Finder tableText(String value) => find.byWidgetPredicate(
@@ -525,7 +529,33 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(api.posts, isEmpty);
-    // The write-off draft in this fixture offers no Post action (it needs its own approval), so the non-transfer wording is not exercised here.
+    // Write-off drafts offer no Post action on this screen (they have their own approval screen).
+  });
+
+  testWidgets('post confirmation for a count and an adjustment says a journal entry is made when the value changes', (tester) async {
+    final api = _DocumentsApi()
+      ..extraRows.addAll([
+        _row(id: 'd-5', number: 'CNT-001', kind: 'count', status: 'draft'),
+        _row(id: 'd-6', number: 'ADJ-002', kind: 'adjustment', status: 'draft'),
+      ]);
+    await pump(tester, api, user: storeAdjuster);
+    // Post buttons in list order: TRF-001, CNT-001, ADJ-002.
+    await tester.tap(find.byTooltip('Post').at(1));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Post CNT-001'), findsOneWidget);
+    expect(find.textContaining('set to the counted quantity'), findsOneWidget);
+    expect(find.textContaining('a journal entry is made when the value changes'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Post').at(2));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Post ADJ-002'), findsOneWidget);
+    expect(find.textContaining('added to or removed from the balance'), findsOneWidget);
+    expect(find.textContaining('a journal entry is made when the value changes'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Post'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-6/post');
+    expect(find.text('Document posted.'), findsOneWidget);
   });
 
   testWidgets('a refused post keeps the list and the draft, and says why', (tester) async {
