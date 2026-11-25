@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 53,
-    "OPEN_UNMAPPED": 138
+    "MAPPED_WIDGET": 65,
+    "OPEN_UNMAPPED": 126
   },
   "controls": [
     {
@@ -1540,85 +1540,157 @@
       "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
       "line": 88,
       "source": "onPressed: () => ref.invalidate(_peopleProvider),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouse_access_screen_test.dart",
+          "test": "refresh reloads people without changing their grants",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
       "line": 116,
       "source": "onTap: () => ref",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouse_access_screen_test.dart",
+          "test": "a restricted person is described as restricted",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
       "line": 263,
       "source": "onPressed: _dirty && !_saving ? _save : null,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouse_access_screen_test.dart",
+          "test": "a second warehouse is added to the whole set, not on its own",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
       "line": 313,
       "source": "onChanged: widget.mayManage",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouse_access_screen_test.dart",
+          "test": "a second warehouse is added to the whole set, not on its own",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
       "line": 328,
       "source": "onSelected: widget.mayManage",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouse_access_screen_test.dart",
+          "test": "nothing is sent until Save is pressed",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 111,
       "source": "onPressed: () => ref.read(warehousesListProvider.notifier).reload(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "refresh reloads warehouses without changing them",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 116,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "search narrows the list by code, either name and address",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 126,
       "source": "onPressed: () {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "warehouse balance dialog reads the API rows and scopes request",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 140,
       "source": "onPressed: _busy ? null : () => _save(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "warehouse creation selects and submits a branch by name",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 188,
       "source": "onPressed: () => _openBalances(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "balances asks the real endpoint and shows the shelf rows",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 194,
       "source": "onPressed: _busy ? null : () => _save(existing: row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "editing targets the chosen warehouse and keeps its branch",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
       "line": 206,
       "source": "onPressed: _busy ? null : () => _toggleActive(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/warehouses_screen_test.dart",
+          "test": "deactivating asks first, then posts and refreshes",
+          "proofLevel": "widget with synthetic API, 33-case two-file local run 2026-11-25 06:06 passes; named branch only, no live grant change or SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",

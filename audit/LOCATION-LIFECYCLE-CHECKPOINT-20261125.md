@@ -150,3 +150,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Batches operations SQL16/16 non-opt-in cases pass in two8-case groups: receive/issue/transfer/writeoff/list. The opt-in actual Flutter receipt bridge is not counted as rerun here.
 - Item-location widget9/9 pass including new cancel-without-mutation and prior scoped target/quantity/reason/retained-refusal/uncertain-block/refresh checks. Mapped8 original source sites to these tests, callback branches only where exercised. MAPPED_WIDGET never means every branch or SQL acceptance.
 - Partial original191-site register now53 mapped/138 open, with substantial dedicated transfer/voucher/count forms still unqualified in the register. Full Flutter analyze clean.
+
+### 06:06 warehouse and access control proof
+- Added warehouse refresh without mutation, chosen-row edit preserves branch and excludes immutable code, access people refresh without grant mutation. All33 warehouse/access widget tests pass. Initial new edit test incorrectly assumed an editable code field; fixed test to actual immutable-code contract, no production change.
+- Mapped12 original source sites to specific passing warehouse/access tests, including prior create/search/balances/activation and scoped grant-save/switch/chip tests. Partial register65 mapped/126 open. These are synthetic widgets only, not actual permission mutations or SQL qualification. Full analyze clean.

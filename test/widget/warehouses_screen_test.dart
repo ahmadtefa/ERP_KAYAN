@@ -20,6 +20,7 @@ class _WarehousesApi extends ApiClient {
         FakeTokenStore(),
       );
 
+  int listCalls = 0;
   bool active;
   bool failList;
   final posts = <String>[];
@@ -80,6 +81,7 @@ class _WarehousesApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    if (path == '/inventory/warehouses') listCalls++;
     if (failList) throw StateError('WAREHOUSE_LIST_FAILED');
     if (path == '/company/branches') {
       return [
@@ -186,6 +188,22 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('refresh reloads warehouses without changing them', (tester) async {
+    final api=_WarehousesApi();await pump(tester,api);final before=api.listCalls;
+    await tester.tap(find.byTooltip('Refresh'));await tester.pumpAndSettle();
+    expect(api.listCalls,greaterThan(before));expect(api.posts,isEmpty);expect(api.patches,isEmpty);
+  });
+
+  testWidgets('editing targets the chosen warehouse and keeps its branch', (tester) async {
+    final api=_WarehousesApi();await pump(tester,api);
+    await tester.tap(find.byTooltip('Edit').first);await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(find.byType(TextFormField).first).controller!.text,'Main store');
+    await tester.enterText(find.byType(TextFormField).first,'Changed store');
+    await tester.tap(find.widgetWithText(FilledButton,'Save'));await tester.pumpAndSettle();
+    expect(api.posts,isEmpty);expect(api.patches,hasLength(1));expect(api.patches.single.$1,'/inventory/warehouses/wh-1');
+    final body=api.patches.single.$2 as Map;expect(body['branchId'],'br-1');expect(body.containsKey('code'),isFalse);expect(body['nameEn'],'Changed store');
+  });
 
   testWidgets('lists warehouses with code, branch and status', (tester) async {
     await pump(tester, _WarehousesApi());

@@ -149,6 +149,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('refresh reloads people without changing their grants', (tester) async {
+    final api=_AccessApi();await pump(tester,api);final before=api.userListQueries.length;
+    await tester.tap(find.byTooltip('Refresh'));await tester.pumpAndSettle();
+    expect(api.userListQueries.length,greaterThan(before));expect(api.puts,isEmpty);
+  });
+
   testWidgets('loads users with the real API query contract', (tester) async {
     final api = _AccessApi();
     await pump(tester, api);
