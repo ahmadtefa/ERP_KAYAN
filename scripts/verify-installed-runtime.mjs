@@ -30,6 +30,8 @@ const REQUIRED = [
   ['backend\\scripts\\apply-migrations.mjs', 'applying the migrations themselves'],
   ['backend\\node_modules\\prisma\\build\\index.js', 'the bundled Prisma CLI'],
   ['backend\\node_modules\\pg\\package.json', 'the PostgreSQL driver'],
+  ['backend\\node_modules\\@hyzyla\\pdfium\\dist\\index.cjs', 'reading a PDF letterhead for quotation backgrounds (loaded on first upload, not at startup)'],
+  ['backend\\node_modules\\@hyzyla\\pdfium\\dist\\pdfium.wasm', 'the PDF engine binary that the letterhead upload needs'],
   ['backend\\prisma\\schema.prisma', 'the schema Prisma reads'],
   ['backend\\prisma\\migrations\\migration_lock.toml', 'the migration lock'],
   ['backend\\node\\node.exe', 'the bundled Node runtime'],

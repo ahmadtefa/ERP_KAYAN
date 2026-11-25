@@ -43,6 +43,7 @@ export function inspectListing(text) {
     ['backend/scripts/database-state.mjs', 'database state detection'],
     ['backend/node/node.exe', 'the bundled Node runtime'],
     ['backend/node_modules/prisma/build/index.js', 'the bundled Prisma CLI'],
+    ['backend/node_modules/@hyzyla/pdfium/dist/pdfium.wasm', 'the PDF engine for quotation letterhead upload'],
     ['backend/prisma/schema.prisma', 'the Prisma schema'],
     ['backend/prisma/migrations/migration_lock.toml', 'the migration lock'],
     ['backend/postgres/bin/pg_ctl.exe', 'PostgreSQL control'],

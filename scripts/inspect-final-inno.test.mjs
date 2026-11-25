@@ -17,6 +17,7 @@ const complete = (extra = [], drop = []) => [
   'app/backend/scripts/database-state.mjs',
   'app/backend/node/node.exe',
   'app/backend/node_modules/prisma/build/index.js',
+  'app/backend/node_modules/@hyzyla/pdfium/dist/pdfium.wasm',
   'app/backend/prisma/schema.prisma',
   'app/backend/prisma/migrations/migration_lock.toml',
   'app/backend/prisma/migrations/20260101000000_init/migration.sql',

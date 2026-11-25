@@ -316,6 +316,9 @@ foreach ($relative in @(
   "backend\scripts\migrate-deploy.mjs",
   "backend\scripts\apply-migrations.mjs",
   "backend\node_modules\prisma\build\index.js",
+  # Loaded lazily on the first PDF letterhead upload, so a missing engine would not show at startup.
+  "backend\node_modules\@hyzyla\pdfium\dist\index.cjs",
+  "backend\node_modules\@hyzyla\pdfium\dist\pdfium.wasm",
   "prerequisites\vc_redist.x64.exe",
   "install-runtime.ps1",
   "repair-runtime.ps1",
