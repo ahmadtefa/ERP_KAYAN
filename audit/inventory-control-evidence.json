@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 147,
-    "OPEN_UNMAPPED": 44
+    "MAPPED_WIDGET": 151,
+    "OPEN_UNMAPPED": 40
   },
   "controls": [
     {
@@ -394,8 +394,14 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 361,
       "source": "onPressed: () =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "unit manager barcode targets selected unit or stays neutral",
+          "proofLevel": "synthetic unit API; exact selected endpoint, remove cancel/confirm, disabled base guard separately; no backend mutation semantics proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
@@ -414,22 +420,40 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 379,
       "source": "onPressed: () =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "unit manager reactivate targets selected unit or stays neutral",
+          "proofLevel": "synthetic unit API; exact selected endpoint, remove cancel/confirm, disabled base guard separately; no backend mutation semantics proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 392,
       "source": "onPressed: isBase",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "unit manager remove targets selected unit or stays neutral",
+          "proofLevel": "synthetic unit API; exact selected endpoint, remove cancel/confirm, disabled base guard separately; no backend mutation semantics proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 406,
       "source": "onPressed: () => Navigator.of(dialogContext).pop(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "unit manager close targets selected unit or stays neutral",
+          "proofLevel": "synthetic unit API; exact selected endpoint, remove cancel/confirm, disabled base guard separately; no backend mutation semantics proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",

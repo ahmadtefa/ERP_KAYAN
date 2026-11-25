@@ -264,3 +264,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 08:24 count detail action controls
 - Two own widget cases tap actual detail Approve/Post callbacks (distinct from already-tested list toolbar), cancel sends nothing, confirm targets exact session endpoint. Synthetic response only, no SQL/stock/idempotency/restart proof implied.
 - Partial register147mapped/44open of191. Focused2/2 and analyze pass. No production logic changes in this batch.
+
+### 08:35 unit management callbacks
+- Five focused callback cases qualify selected unit barcode generation/reactivation/delete endpoint, delete cancel neutrality/confirmation, base unit disabled remove guard and dialog Close neutrality. Synthetic unit bridge only, not barcode uniqueness/deactivation/backend proof.
+-11 full unit widget cases and analyze pass. Partial register151mapped/40open of191 after4 mapped source sites; disabled base branch is extra evidence, not extra denominator. No production code or visual change in this batch.
