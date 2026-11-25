@@ -1,9 +1,9 @@
 {
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
-  "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof.",
+  "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 35,
-    "OPEN_UNMAPPED": 156
+    "MAPPED_WIDGET": 42,
+    "OPEN_UNMAPPED": 149
   },
   "controls": [
     {
@@ -175,7 +175,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
       "line": 284,
-      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? '\u0625\u0644\u063a\u0627\u0621' : 'Cancel')),",
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -188,7 +188,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
       "line": 285,
-      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext, <String>{}), child: Text(_arabic ? '\u0627\u0644\u0643\u0644' : 'All assigned')),",
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext, <String>{}), child: Text(_arabic ? 'الكل' : 'All assigned')),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -201,7 +201,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
       "line": 286,
-      "source": "FilledButton(onPressed: () => Navigator.pop(dialogContext, draft), child: Text(_arabic ? '\u062a\u0637\u0628\u064a\u0642' : 'Apply')),",
+      "source": "FilledButton(onPressed: () => Navigator.pop(dialogContext, draft), child: Text(_arabic ? 'تطبيق' : 'Apply')),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -408,36 +408,66 @@
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 220,
       "source": "onPressed: _createDocument,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "creates a stock document with the kind and warehouse chosen",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 240,
       "source": "onChanged: (value) => setState(() => _kind = value),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "the kind filter keeps only the chosen kind",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 245,
       "source": "onPressed: async.isLoading",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "refresh issues a fresh list request",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 251,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "search narrows by number and by raiser",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 273,
       "source": "onPressed: _changingStatus ? null : () => _changeStatus(row, reverse: reverse),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "posts a draft and reloads the stock documents",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
@@ -499,15 +529,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 863,
       "source": "onPressed: saving ? null : closeDraft,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "stock document cancel retains the draft until discard is confirmed",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
       "line": 867,
       "source": "onPressed: saving ? null : submit,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_documents_screen_test.dart",
+          "test": "a bad quantity is named on its own line, cleared on edit, and a server refusal lands there too",
+          "proofLevel": "widget with synthetic API, 22-case local run 2026-11-25 05:34 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -701,7 +743,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 262,
-      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? '\u0625\u0644\u063a\u0627\u0621' : 'Cancel')),",
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -795,7 +837,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 806,
-      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('\u0631\u062c\u0648\u0639', 'Back'))),",
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
@@ -829,7 +871,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 978,
-      "source": "if (editable) OutlinedButton(onPressed: _busy ? null : () => _save(finish: false), child: Text(_t('\u062d\u0641\u0638 \u0627\u0644\u0639\u062f', 'Save count'))),",
+      "source": "if (editable) OutlinedButton(onPressed: _busy ? null : () => _save(finish: false), child: Text(_t('حفظ العد', 'Save count'))),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -842,7 +884,7 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 979,
-      "source": "if (editable) FilledButton(onPressed: _busy ? null : () => _save(finish: true), child: Text(_t('\u0625\u0646\u0647\u0627\u0621 \u0648\u0625\u0631\u0633\u0627\u0644 \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u0629', 'Finish & review'))),",
+      "source": "if (editable) FilledButton(onPressed: _busy ? null : () => _save(finish: true), child: Text(_t('إنهاء وإرسال للمراجعة', 'Finish & review'))),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -855,21 +897,21 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 981,
-      "source": "FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('\u0627\u0639\u062a\u0645\u0627\u062f', 'Approve'))),",
+      "source": "FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('اعتماد', 'Approve'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 983,
-      "source": "FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('\u062a\u0631\u062d\u064a\u0644', 'Post'))),",
+      "source": "FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('ترحيل', 'Post'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 985,
-      "source": "OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('\u0625\u0644\u063a\u0627\u0621 \u0627\u0644\u062c\u0631\u062f', 'Cancel count'))),",
+      "source": "OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('إلغاء الجرد', 'Cancel count'))),",
       "state": "MAPPED_WIDGET",
       "evidence": [
         {
@@ -882,42 +924,42 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 987,
-      "source": "TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('\u0625\u063a\u0644\u0627\u0642', 'Close'))),",
+      "source": "TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 54,
-      "source": "SizedBox(width:190,child:TextField(decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:t('\u0628\u062d\u062b','Search'),isDense:true),onChanged:(v)=>setState(()=>_query=v.trim().toLowerCase()))),",
+      "source": "SizedBox(width:190,child:TextField(decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:t('بحث','Search'),isDense:true),onChanged:(v)=>setState(()=>_query=v.trim().toLowerCase()))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 55,
-      "source": "IconButton(tooltip:t('\u062a\u062d\u062f\u064a\u062b','Refresh'),onPressed:()=>ref.read(stockTransfersProvider.notifier).reload(),icon:const Icon(Icons.refresh)),",
+      "source": "IconButton(tooltip:t('تحديث','Refresh'),onPressed:()=>ref.read(stockTransfersProvider.notifier).reload(),icon:const Icon(Icons.refresh)),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 56,
-      "source": "if(user?.can('inventory.transfer.report')??false) IconButton(tooltip:t('\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u062a\u062d\u0648\u064a\u0644\u0627\u062a \u0648\u0627\u0644\u0637\u0631\u064a\u0642','Transfer/transit report'),onPressed:_report,icon:const Icon(Icons.assessment_outlined)),",
+      "source": "if(user?.can('inventory.transfer.report')??false) IconButton(tooltip:t('تقرير التحويلات والطريق','Transfer/transit report'),onPressed:_report,icon:const Icon(Icons.assessment_outlined)),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 57,
-      "source": "if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('\u0637\u0644\u0628 \u062a\u062d\u0648\u064a\u0644','Request transfer'))),",
+      "source": "if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('طلب تحويل','Request transfer'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 58,
-      "source": "]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('\u0644\u0627 \u062a\u0648\u062c\u062f \u062a\u062d\u0648\u064a\u0644\u0627\u062a \u0645\u062e\u0632\u0646\u064a\u0629.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  \u2192  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\\n${text(row,'transferDate').split('T').first} \u00b7 ${(row['lines'] as List? ??const[]).length} ${t('\u0628\u0646\u0648\u062f','lines')}'),trailing:IconButton(tooltip:t('\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}",
+      "source": "]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
@@ -931,84 +973,84 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 150,
-      "source": "DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('\u0645\u0646 \u0627\u0644\u0645\u062e\u0632\u0646','Source warehouse'),errorText:_errors['sourceWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} \u00b7 ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('sourceWarehouseId');setState(()=>_from=v);}),",
+      "source": "DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse'),errorText:_errors['sourceWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('sourceWarehouseId');setState(()=>_from=v);}),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 152,
-      "source": "DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('\u0625\u0644\u0649 \u0627\u0644\u0645\u062e\u0632\u0646','Destination warehouse'),errorText:_errors['destinationWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} \u00b7 ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('destinationWarehouseId');setState(()=>_to=v);}),",
+      "source": "DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse'),errorText:_errors['destinationWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('destinationWarehouseId');setState(()=>_to=v);}),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 164,
-      "source": "SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('\u0627\u0644\u0635\u0646\u0641','Item'),errorText:_errors['lines.$index.itemId']),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} \u00b7 ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v){_errors.remove('lines.$index.itemId');setState(() {line.itemId=v;line.batchId=null;line.unitName=null;});})),",
+      "source": "SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item'),errorText:_errors['lines.$index.itemId']),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v){_errors.remove('lines.$index.itemId');setState(() {line.itemId=v;line.batchId=null;line.unitName=null;});})),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 165,
-      "source": "SizedBox(width:115,child:TextField(controller:line.quantity,onChanged:(_)=>_clear('lines.$index.quantity'),keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('\u0643\u0645\u064a\u0629','Quantity'),errorText:_errors['lines.$index.quantity']))),",
+      "source": "SizedBox(width:115,child:TextField(controller:line.quantity,onChanged:(_)=>_clear('lines.$index.quantity'),keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity'),errorText:_errors['lines.$index.quantity']))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 166,
-      "source": "if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(isExpanded:true,initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('\u0627\u0644\u0648\u062d\u062f\u0629','Unit'),errorText:_errors['lines.$index.unitName']),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} \u00d7 ${u['factor']??1}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v){_errors.remove('lines.$index.unitName');setState(()=>line.unitName=v);})),",
+      "source": "if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(isExpanded:true,initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit'),errorText:_errors['lines.$index.unitName']),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v){_errors.remove('lines.$index.unitName');setState(()=>line.unitName=v);})),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 167,
-      "source": "if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('\u062f\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u062f\u0631','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} \u00b7 ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),",
+      "source": "if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 168,
-      "source": "IconButton(tooltip:t('\u062d\u0630\u0641 \u0627\u0644\u0628\u0646\u062f','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),",
+      "source": "IconButton(tooltip:t('حذف البند','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 171,
-      "source": "Align(alignment:AlignmentDirectional.centerStart,child:TextButton.icon(onPressed:()=>setState(()=>_lines.add(_DraftLine())),icon:const Icon(Icons.add),label:Text(t('\u0625\u0636\u0627\u0641\u0629 \u0635\u0646\u0641','Add item')))),",
+      "source": "Align(alignment:AlignmentDirectional.centerStart,child:TextButton.icon(onPressed:()=>setState(()=>_lines.add(_DraftLine())),icon:const Icon(Icons.add),label:Text(t('إضافة صنف','Add item')))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 172,
-      "source": "TextField(controller:_reason,onChanged:(_)=>_clear('reason'),decoration:InputDecoration(labelText:t('\u0633\u0628\u0628 \u0627\u0644\u062a\u062d\u0648\u064a\u0644','Transfer reason'),errorText:_errors['reason'])),",
+      "source": "TextField(controller:_reason,onChanged:(_)=>_clear('reason'),decoration:InputDecoration(labelText:t('سبب التحويل','Transfer reason'),errorText:_errors['reason'])),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 173,
-      "source": "TextField(controller:_notes,onChanged:(_)=>_clear('notes'),decoration:InputDecoration(labelText:t('\u0645\u0644\u0627\u062d\u0638\u0627\u062a','Notes'),errorText:_errors['notes'])),",
+      "source": "TextField(controller:_notes,onChanged:(_)=>_clear('notes'),decoration:InputDecoration(labelText:t('ملاحظات','Notes'),errorText:_errors['notes'])),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 175,
-      "source": "actions:[TextButton(onPressed:_sending?null:()=>Navigator.pop(context,false),child:Text(t('\u0625\u0644\u063a\u0627\u0621','Cancel'))),FilledButton(onPressed:_sending?null:_save,child:Text(t('\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0637\u0644\u0628','Create request')))],",
+      "source": "actions:[TextButton(onPressed:_sending?null:()=>Navigator.pop(context,false),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:_sending?null:_save,child:Text(t('إنشاء الطلب','Create request')))],",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 272,
-      "source": "TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('\u062a\u0645','Done'))),",
+      "source": "TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
@@ -1029,14 +1071,14 @@
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 364,
-      "source": "TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('\u0625\u0644\u063a\u0627\u0621', 'Cancel'))),",
+      "source": "TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', 'Cancel'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 365,
-      "source": "FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: Text(t('\u062a\u0623\u0643\u064a\u062f', 'Confirm'))),",
+      "source": "FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: Text(t('تأكيد', 'Confirm'))),",
       "state": "OPEN_UNMAPPED",
       "evidence": []
     },
