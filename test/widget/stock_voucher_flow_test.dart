@@ -1169,7 +1169,9 @@ void main() {
       }
       expect(api.actions, ['review', 'approve', 'post', 'reverse']);
       expect(api.actionVersions, [0, 1, 2, 2]);
-      expect(find.textContaining('reversed'), findsOneWidget);
+      // The header still shows the voucher status; the result message now names the action too.
+      expect(find.textContaining('SA-1 • ISSUE • reversed'), findsOneWidget);
+      expect(find.text('Voucher reversed.'), findsOneWidget);
     },
   );
 }
