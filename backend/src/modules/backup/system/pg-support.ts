@@ -5,6 +5,7 @@ import { mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Client } from 'pg';
+import { pgBackupConnectionEnv } from '../pg-backup-connection';
 import { runRestoreTool } from './restore-tool';
 
 import { sanitiseLicence, type SanitisedLicence } from './manifest';
@@ -45,19 +46,10 @@ export interface PgCommandResult {
 /// every user of the machine could read it.
 export function connectionEnv(raw = process.env.DATABASE_URL): NodeJS.ProcessEnv {
   if (!raw) return {};
-  try {
-    const url = new URL(raw);
-    return {
-      PGHOST: url.hostname,
-      PGPORT: url.port || '5432',
-      PGUSER: decodeURIComponent(url.username),
-      PGPASSWORD: decodeURIComponent(url.password),
-      PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')).split('?')[0],
-      PGSSLMODE: url.searchParams.get('sslmode') ?? undefined,
-    } as NodeJS.ProcessEnv;
-  } catch {
-    return {};
-  }
+  // One translation for every backup tool, so a socket or custom-port URL
+  // reaches the same server the program uses. An unsupported URL fails closed
+  // instead of letting a tool fall back to a default host.
+  return pgBackupConnectionEnv(raw);
 }
 
 /// The URL without Prisma's `schema` parameter, which the command-line tools
