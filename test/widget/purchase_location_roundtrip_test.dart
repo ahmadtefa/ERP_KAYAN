@@ -117,6 +117,15 @@ void main() {
             .text,
         '2',
       );
+      await tester.enterText(find.byKey(const ValueKey('purchase-expiry-0-i')), '2026-99-01');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(api.saved, isNull);
+      expect(find.textContaining('Check the line batch dates.'), findsOneWidget);
+      expect(find.text('2026-99-01'), findsOneWidget);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('purchase-expiry-0-i')), '2027-04-01');
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await tester.pumpAndSettle();
       expect(api.saved!['warehouseId'], 'w');
