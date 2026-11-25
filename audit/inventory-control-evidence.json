@@ -1581,7 +1581,7 @@
   },
   "genericTransferReverse": {
     "status": "FAIL",
-    "evidence": "backend/src/modules/inventory/stock-documents.locations.integration.spec.ts transfer post reverse restores",
-    "finding": "Warehouse restores but shelves and lot quantities/cost do not; owner notified"
+    "evidence": "stock-documents.locations.integration.spec.ts and isolated-pg-purchase-concurrency.cjs KAYAN_DOC_REVERSE=1",
+    "finding": "loc37 single-lot forward binding fixed; reverse OUT still source lot ID; native destination lot5 versus ledger8; conflicting origin accepted; partial/multi-lot unqualified"
   }
 }

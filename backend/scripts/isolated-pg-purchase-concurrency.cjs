@@ -181,6 +181,28 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const od=[];for(const [from,to,src,dst,lot] of [[W,targetW,L,targetL,orA.batchId],[targetW,W,targetL,L,orB.batchId]])od.push(await da.create(C,B,U,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:B,fromWarehouseId:from,toWarehouseId:to,lines:[{itemId:OI,quantity:1,batchId:lot,storageLocationId:src,toStorageLocationId:dst}]}));
  const ores=await Promise.allSettled([da.post(C,U,od[0].id),db.post(C,U,od[1].id)]);assert.equal(ores.filter(x=>x.status==='fulfilled').length,2,JSON.stringify(ores));for(const wh of [W,targetW])assert.equal(Number((await p.itemBatch.findFirst({where:{warehouseId:wh,itemId:OI}})).remainingQuantity),5);reports.push({mode:'opposite warehouse stock document transfers',posted:2,eachLot:5});
 
+
+ if(process.env.KAYAN_DOC_REVERSE==='1'){
+  const results=[];
+  for(const mode of ['lot-shelf-short','source-reprice','target-reprice','issue-overlap']){
+   const item=randomUUID(),otherShelf=randomUUID();await p.item.create({data:{id:item,companyId:C,code:'REV-'+mode,nameEn:mode,nameAr:mode,unit:'piece',requiresBatch:true,isStockTracked:true}});await p.storageLocation.create({data:{id:otherShelf,companyId:C,branchId:B,warehouseId:targetW,kind:'SHELF',code:'REV-'+mode,nameEn:mode,nameAr:mode}});
+   const src=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:item,batchNumber:'REV',quantity:10,unitCost:12,storageLocationId:L});const dst=await a.receive(C,U,{branchId:B,warehouseId:targetW,itemId:item,batchNumber:'REV',quantity:5,unitCost:6,storageLocationId:targetL});
+   const doc=await da.create(C,B,U,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:B,fromWarehouseId:W,toWarehouseId:targetW,lines:[{itemId:item,quantity:3,batchId:src.batchId,storageLocationId:L,toStorageLocationId:targetL}]});await da.post(C,U,doc.id);console.log('DOC_REVERSE_BIND',JSON.stringify({mode,src:src.batchId,dst:dst.batchId,moves:await p.stockMovement.findMany({where:{referenceId:doc.id},select:{batchId:true,storageLocationId:true,warehouseId:true,quantity:true,createdAt:true}})}));
+   if(mode==='lot-shelf-short'){
+    const {StorageLocationsService}=require('../dist/src/modules/inventory/storage-locations.service.js');await new StorageLocationsService(p,audit).move(C,U,{fromLocationId:targetL,toLocationId:otherShelf,itemId:item,batchId:dst.batchId,quantity:7,reason:'synthetic depleted exact lot'},null);
+    await a.receive(C,U,{branchId:B,warehouseId:targetW,itemId:item,batchNumber:'UNRELATED',quantity:3,unitCost:6,storageLocationId:targetL});
+   }
+   if(mode==='source-reprice'||mode==='target-reprice')await a.receive(C,U,{branchId:B,warehouseId:mode==='source-reprice'?W:targetW,itemId:item,batchNumber:'REV',quantity:2,unitCost:24,storageLocationId:mode==='source-reprice'?L:targetL});
+   const snapshot=async()=>({lots:await p.itemBatch.findMany({where:{itemId:item},orderBy:{id:'asc'},select:{id:true,remainingQuantity:true,unitCost:true}}),balances:await p.warehouseStockBalance.findMany({where:{itemId:item},orderBy:{warehouseId:'asc'},select:{warehouseId:true,quantity:true,value:true}}),movements:await p.stockMovement.count({where:{itemId:item}})});let before=await snapshot(),outcome;
+   if(mode==='issue-overlap'){
+    let release,enter;const gate=new Promise(r=>release=r),ready=new Promise(r=>enter=r),orig=a.lockItemStock.bind(a);a.lockItemStock=async(tx,w,i)=>{await orig(tx,w,i);enter();await gate;};const issue=a.issue(C,U,{branchId:B,warehouseId:targetW,itemId:item,batchId:dst.batchId,quantity:6,storageLocationId:targetL,allowExpired:true});await ready;const reverse=db.reverse(C,U,doc.id);await sleep(250);const waits=(await sql.query("SELECT wait_event_type FROM pg_stat_activity WHERE datname=$1 AND wait_event_type='Lock'",[database])).rows;release();const settled=await Promise.allSettled([issue,reverse]);a.lockItemStock=orig;outcome={settled:settled.map(x=>x.status==='fulfilled'?{status:x.status}:{status:x.status,error:String(x.reason)}),waits:waits.length};const live=await p.itemBatch.findUnique({where:{id:dst.batchId}});const ledger=await sql.query(`SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "companyId"=$1 AND "warehouseId"=$2 AND "itemId"=$3 AND "batchId"=$4`,[C,targetW,item,dst.batchId]);outcome.destinationLot=Number(live.remainingQuantity);outcome.destinationLotLedger=Number(ledger.rows[0].q);outcome.consistent=outcome.destinationLot===outcome.destinationLotLedger;console.log('DOC_REVERSE_OVERLAP',JSON.stringify(outcome));assert.equal(settled.filter(x=>x.status==='fulfilled').length,1);
+   }else{
+    let error;try{await da.reverse(C,U,doc.id);}catch(e){error=e.response?.code||String(e);}const after=await snapshot();outcome={error:error||null,unchanged:JSON.stringify(before)===JSON.stringify(after),status:(await p.stockDocument.findUnique({where:{id:doc.id}})).status};
+   }
+   const result={mode:'native transfer reverse '+mode,...outcome};console.log('DOC_REVERSE_PROBE',JSON.stringify(result));results.push(result);
+  }
+  reports.push(...results);
+ }
  for(const firstKind of ['edit','post']){
   const CI=randomUUID();await p.item.create({data:{id:CI,companyId:C,code:'correct-'+firstKind,nameEn:'Correction',nameAr:'Correction',unit:'piece',requiresBatch:true,isStockTracked:true}});const cr=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:CI,batchNumber:'CORRECT',quantity:3,unitCost:2,storageLocationId:L});
   const cd=await da.create(C,B,U,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:B,fromWarehouseId:W,toWarehouseId:targetW,lines:[{itemId:CI,quantity:1,batchId:cr.batchId,storageLocationId:L}]});

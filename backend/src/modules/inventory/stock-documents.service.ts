@@ -1265,6 +1265,23 @@ export class StockDocumentsService {
               });
             }
           }
+          const destinationLots: Array<{ batchId: string; quantity: Prisma.Decimal }> = [];
+          // The lots travel with the goods. Only what the lots actually hold
+          // is moved: a partial transfer moves the requested quantity out of
+          // the source lot and the remainder stays where it was.
+          await this.moveLots(tx, {
+            companyId,
+            userId,
+            itemId: line.itemId,
+            fromWarehouseId: fromWarehouseId ?? null,
+            toWarehouseId,
+            toBranchId: document.branchId,
+            quantity: line.quantity,
+            batchId: line.batchId ?? null,
+            date: document.documentDate,
+            referenceNumber: document.documentNumber,
+            destinationLots,
+          });
           await this.move(tx, {
             companyId,
             branchId: document.branchId,
@@ -1284,27 +1301,19 @@ export class StockDocumentsService {
             userId,
             requireStock: false,
             warehouseId: toWarehouseId,
-            batchId: line.batchId ?? null,
+            // The IN movement is bound to the DESTINATION lot that actually
+            // received the goods (not the source lot id), so the receiving
+            // lot's shelf balance sees it. A transfer spread over several lots
+            // or only partly covered by lots keeps the legacy binding.
+            batchId:
+              destinationLots.length === 1 && destinationLots[0].quantity.equals(line.quantity)
+                ? destinationLots[0].batchId
+                : (line.batchId ?? null),
             // The source shelf belongs to the source warehouse; the receiving shelf
             // is the one the document names for it, or none (arrive unlocated).
             storageLocationId: (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null,
           });
 
-          // The lots travel with the goods. Only what the lots actually hold
-          // is moved: a partial transfer moves the requested quantity out of
-          // the source lot and the remainder stays where it was.
-          await this.moveLots(tx, {
-            companyId,
-            userId,
-            itemId: line.itemId,
-            fromWarehouseId: fromWarehouseId ?? null,
-            toWarehouseId,
-            toBranchId: document.branchId,
-            quantity: line.quantity,
-            batchId: line.batchId ?? null,
-            date: document.documentDate,
-            referenceNumber: document.documentNumber,
-          });
           continue;
         }
 
@@ -1775,6 +1784,23 @@ export class StockDocumentsService {
           if (destination.remainingQuantity.lessThan(quantity)) {
             throw fail('STOCK_DOC_REVERSE_LOT_SHORT', `دفعة الاستلام تحمل ${destination.remainingQuantity.toFixed(MONEY_SCALE)} فقط من ${quantity.toFixed(MONEY_SCALE)} المطلوبة.`, `the receiving lot holds only ${destination.remainingQuantity.toFixed(MONEY_SCALE)} of the ${quantity.toFixed(MONEY_SCALE)} required.`);
           }
+          // The cost the goods arrived with is not stored per transfer; it is the
+          // source lot's cost at that time. That only holds while neither lot
+          // took a later receipt (a later IN would have re-averaged it). Any
+          // later IN on either lot makes the original cost unprovable: refuse.
+          const [later] = await tx.$queryRaw<Array<{ n: bigint }>>(Prisma.sql`
+            SELECT COUNT(*)::bigint AS n
+              FROM "stock_movements" m
+             WHERE m."companyId" = ${companyId}::uuid
+               AND m."batchId" IN (${source.id}::uuid, ${destination.id}::uuid)
+               AND m."direction" = 'IN'
+               AND (m."referenceId" IS DISTINCT FROM ${document.id}::uuid)
+               AND m."createdAt" > (SELECT MIN(d."createdAt") FROM "stock_movements" d
+                                     WHERE d."companyId" = ${companyId}::uuid AND d."referenceId" = ${document.id}::uuid)
+          `);
+          if (Number(later?.n ?? 0) > 0) {
+            throw fail('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE', 'دخلت كمية جديدة إلى الدفعة المصدر أو دفعة الاستلام بعد هذا المستند فلا يمكن إثبات تكلفة النقل الأصلية.', 'a later receipt entered the source or receiving lot, so the original transfer cost cannot be proven.');
+          }
           await removeFromLotCost(tx, destination.id, quantity, source.unitCost);
           await tx.itemBatch.update({
             where: { id: destination.id },
@@ -1873,6 +1899,7 @@ export class StockDocumentsService {
       batchId: string | null;
       date: Date;
       referenceNumber: string;
+      destinationLots?: Array<{ batchId: string; quantity: Prisma.Decimal }>;
     },
   ): Promise<Prisma.Decimal> {
     if (!input.fromWarehouseId || !input.toWarehouseId) return new Prisma.Decimal(0);
@@ -1947,6 +1974,7 @@ export class StockDocumentsService {
         },
       });
       if (destination) {
+        input.destinationLots?.push({ batchId: destination.id, quantity: allocation.quantity });
         await tx.itemBatch.update({
           where: { id: destination.id },
           data: {
@@ -1967,7 +1995,7 @@ export class StockDocumentsService {
           },
         });
       } else {
-        await tx.itemBatch.create({
+        const createdLot = await tx.itemBatch.create({
           data: {
             companyId: input.companyId,
             branchId: input.toBranchId,
@@ -1985,6 +2013,7 @@ export class StockDocumentsService {
             createdBy: input.userId,
           },
         });
+        input.destinationLots?.push({ batchId: createdLot.id, quantity: allocation.quantity });
       }
       moved = moved.plus(allocation.quantity);
     }
