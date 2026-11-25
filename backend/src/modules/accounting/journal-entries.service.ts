@@ -248,7 +248,12 @@ export class JournalEntriesService {
    * Posts a draft entry. Re-validates the balance so a row edited directly in
    * the database cannot be posted unbalanced.
    */
-  async post(companyId: string, userId: string, id: string) {
+  async post(
+    companyId: string,
+    userId: string,
+    id: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, companyId },
       include: { lines: true },
@@ -329,7 +334,7 @@ export class JournalEntriesService {
       status: JournalStatus.POSTED,
       postedAt: new Date(),
       postedBy: userId,
-    }, 'POST');
+    }, 'POST', undefined, options);
   }
 
   /// Moves a draft to "waiting for approval".
@@ -462,6 +467,7 @@ export class JournalEntriesService {
     data: Prisma.JournalEntryUpdateManyMutationInput,
     action: 'POST' | 'SUBMIT' | 'APPROVE' | 'CANCEL',
     reason?: string | null,
+    options: { discloseBalance?: boolean } = {},
   ) {
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.journalEntry.updateMany({
@@ -477,7 +483,7 @@ export class JournalEntriesService {
         where: { id: entry.id },
         include: { lines: LINES_WITH_ACCOUNT },
       });
-      if (action === 'POST') await this.assertPostingLines(tx, companyId, updated);
+      if (action === 'POST') await this.assertPostingLines(tx, companyId, updated, options);
       await this.audit.recordRequired({
         companyId, userId, action, entity: 'journal_entries', entityId: entry.id,
         before: { status: entry.status },
@@ -495,9 +501,11 @@ export class JournalEntriesService {
     companyId: string,
     entry: {
       id: string;
+      entryDate: Date;
       totalDebit: Prisma.Decimal; totalCredit: Prisma.Decimal; reversalOfId: string | null;
       lines: Array<{accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal}>;
     },
+    options: { discloseBalance?: boolean } = {},
   ): Promise<void> {
     if (entry.lines.length < 2) throw new BadRequestException('A journal needs at least two lines');
     let debit = new Prisma.Decimal(0);
@@ -537,8 +545,9 @@ export class JournalEntriesService {
     // than it holds is refused here exactly as it is for a payment voucher.
     // The entry was already claimed above, so its own lines are excluded from
     // the balance it is checked against.
-    await this.posting.assertCashBalancesCover(tx, companyId, entry.lines, {
+    await this.posting.assertCashBalancesCover(tx, companyId, entry.lines, entry.entryDate, {
       excludeEntryId: entry.id,
+      discloseBalance: options.discloseBalance,
     });
   }
 
@@ -574,7 +583,12 @@ export class JournalEntriesService {
    * Posted entries are never edited or deleted: the reversal preserves the
    * audit trail, which is the whole point of double-entry bookkeeping.
    */
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(
+    companyId: string,
+    userId: string,
+    id: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const original = await this.prisma.journalEntry.findFirst({
       where: { id, companyId },
       include: { lines: { include: { allocations: true } } },
@@ -619,6 +633,8 @@ export class JournalEntriesService {
         tx,
         companyId,
         original.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit })),
+        reversalDate,
+        { discloseBalance: options.discloseBalance },
       );
 
       // Claim the original first. The pre-checks above run outside the

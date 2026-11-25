@@ -12,6 +12,13 @@ import { CashVouchersService } from './cash-vouchers.service';
 /// Every route here needs a permission of its own: reading a cash position,
 /// creating a voucher and posting one are three different jobs in an
 /// accounting office, and the server is where that is enforced.
+
+/// A balance refusal carries the actual figures only to a user who may read
+/// cash balances at all; everyone else gets the account code and the rule.
+function mayReadCashBalance(user: AuthUser): boolean {
+  return user.isSuperAdmin || (user.permissions ?? []).includes('cash.accounts.read');
+}
+
 @Controller('cash')
 export class CashController {
   constructor(
@@ -110,13 +117,17 @@ export class CashController {
   @Post('vouchers')
   @RequirePermissions('cash.vouchers.create')
   createVoucher(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.vouchers.create(user.companyId, user.branchId, user.userId, body as never);
+    return this.vouchers.create(user.companyId, user.branchId, user.userId, body as never, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Post('vouchers/:id/post')
   @RequirePermissions('cash.vouchers.post')
   postVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.vouchers.post(user.companyId, user.userId, id);
+    return this.vouchers.post(user.companyId, user.userId, id, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Post('vouchers/:id/reverse')
@@ -126,7 +137,9 @@ export class CashController {
     @Param('id') id: string,
     @Body() body: { reason?: string },
   ) {
-    return this.vouchers.reverse(user.companyId, user.userId, id, body?.reason);
+    return this.vouchers.reverse(user.companyId, user.userId, id, body?.reason, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Get('open-invoices/:kind/:partyId')
@@ -165,19 +178,25 @@ export class CashController {
   @Post('transfers')
   @RequirePermissions('cash.vouchers.create')
   createTransfer(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.transfers.create(user.companyId, user.branchId, user.userId, body as never);
+    return this.transfers.create(user.companyId, user.branchId, user.userId, body as never, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Post('transfers/:id/post')
   @RequirePermissions('cash.vouchers.post')
   postTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.transfers.post(user.companyId, user.userId, id);
+    return this.transfers.post(user.companyId, user.userId, id, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Post('transfers/:id/reverse')
   @RequirePermissions('cash.vouchers.post')
   reverseTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.transfers.reverse(user.companyId, user.userId, id);
+    return this.transfers.reverse(user.companyId, user.userId, id, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   // ---------------------------------------------------- reconciliations

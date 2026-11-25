@@ -62,23 +62,28 @@ const vmReady =
          INSERT INTO cash_accounts(id,"companyId","branchId",code,"nameEn","nameAr",kind,"accountId","updatedAt")
            VALUES ('${boxId(n)}','${COMPANY}','${BRANCH}','CA${n}','Box ${n}','خزنة ${n}','${kind}','${glId(n)}',now())`);
 
-  const receipt = (n: number, amount: string) =>
+  const receipt = (n: number, amount: string, voucherDate = '2026-01-10') =>
     vouchers.create(COMPANY, BRANCH, USER, {
       kind: 'RECEIPT',
       cashAccountId: boxId(n),
-      voucherDate: '2026-01-10',
+      voucherDate,
       amount,
       counterAccountId: EXP,
     });
 
-  const payment = (n: number, amount: string) =>
+  const payment = (
+    n: number,
+    amount: string,
+    voucherDate = '2026-01-11',
+    options: { discloseBalance?: boolean } = {},
+  ) =>
     vouchers.create(COMPANY, BRANCH, USER, {
       kind: 'PAYMENT',
       cashAccountId: boxId(n),
-      voucherDate: '2026-01-11',
+      voucherDate,
       amount,
       counterAccountId: EXP,
-    });
+    }, options);
 
   const voucherState = (id: string) =>
     query(`SELECT "voucherNumber", status FROM cash_vouchers WHERE id='${id}'`);
@@ -134,7 +139,7 @@ const vmReady =
     await vouchers.post(COMPANY, USER, rc.id);
     expect((await balance(1)).toFixed(4)).toBe('100.0000');
 
-    const failure = await payment(1, '150').catch((error) => error);
+    const failure = await payment(1, '150', '2026-01-11', { discloseBalance: true }).catch((error) => error);
     expect(failure).toBeInstanceOf(BadRequestException);
     expect(failure.response).toMatchObject({
       code: 'CASH_SAVE_BALANCE_SHORT',
@@ -163,7 +168,7 @@ const vmReady =
     expect((await balance(2)).toFixed(4)).toBe('20.0000');
 
     const before = await journalCount();
-    const failure = await vouchers.post(COMPANY, USER, p2.id).catch((error) => error);
+    const failure = await vouchers.post(COMPANY, USER, p2.id, { discloseBalance: true }).catch((error) => error);
     expect(failure).toBeInstanceOf(BadRequestException);
     expect(failure.response).toMatchObject({
       code: 'CASH_BALANCE_NEGATIVE',
@@ -210,16 +215,18 @@ const vmReady =
     expect((await balance(3)).toFixed(4)).toBe('0.0000');
     expect((await balance(4)).toFixed(4)).toBe('50.0000');
 
-    // A draft transfer can also be overtaken before it is posted.
+    // A draft transfer can also be overtaken before it is posted. The
+    // spend is dated after the funding transfer: money cannot be spent
+    // before it arrived.
     const transfer2 = await transfers.create(COMPANY, BRANCH, USER, {
       fromCashAccountId: boxId(4),
       toCashAccountId: boxId(3),
-      transferDate: '2026-01-13',
+      transferDate: '2026-01-14',
       amount: '50',
     });
-    const spend = await payment(4, '20');
+    const spend = await payment(4, '20', '2026-01-13');
     await vouchers.post(COMPANY, USER, spend.id);
-    const failure = await transfers.post(COMPANY, USER, transfer2.id).catch((error) => error);
+    const failure = await transfers.post(COMPANY, USER, transfer2.id, { discloseBalance: true }).catch((error) => error);
     expect(failure).toBeInstanceOf(BadRequestException);
     expect(failure.response).toMatchObject({
       code: 'CASH_BALANCE_NEGATIVE',
@@ -264,7 +271,7 @@ const vmReady =
         { accountId: glId(6), credit: '50' },
       ],
     } as never);
-    const failure = await journals.post(COMPANY, USER, entry.id).catch((error) => error);
+    const failure = await journals.post(COMPANY, USER, entry.id, { discloseBalance: true }).catch((error) => error);
     expect(failure).toBeInstanceOf(BadRequestException);
     expect(failure.response).toMatchObject({
       code: 'CASH_BALANCE_NEGATIVE',
@@ -298,7 +305,8 @@ const vmReady =
       ],
     } as never);
     await journals.post(COMPANY, USER, entry.id);
-    const spend = await payment(7, '60');
+    // Dated after the funding entry: money cannot be spent before it arrived.
+    const spend = await payment(7, '60', '2026-01-15');
     await vouchers.post(COMPANY, USER, spend.id);
 
     const failure = await journals.reverse(COMPANY, USER, entry.id).catch((error) => error);
@@ -307,6 +315,97 @@ const vmReady =
     expect(
       (await query(`SELECT status FROM journal_entries WHERE id='${entry.id}'`))[0].status,
     ).toBe('POSTED');
+  });
+
+  it('a later-dated receipt cannot fund an earlier-dated payment, even though the total covers it', async () => {
+    await seedBox(9);
+    const early = await receipt(9, '100', '2026-01-05');
+    await vouchers.post(COMPANY, USER, early.id);
+    // The draft is covered on every date when saved.
+    const draft = await payment(9, '60', '2026-01-10');
+    // Then the early money leaves, and replacement money arrives - but only
+    // dated the 20th.
+    const spend = await payment(9, '80', '2026-01-08');
+    await vouchers.post(COMPANY, USER, spend.id);
+    const late = await receipt(9, '100', '2026-01-20');
+    await vouchers.post(COMPANY, USER, late.id);
+    // End-of-history total is 120, which an undated check would accept.
+    expect((await balance(9)).toFixed(4)).toBe('120.0000');
+
+    const failure = await vouchers.post(COMPANY, USER, draft.id).catch((error) => error);
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure.response).toMatchObject({ code: 'CASH_BALANCE_NEGATIVE' });
+    // The draft is unharmed and can still be posted once its own dates are
+    // covered: a receipt dated no later than the draft fixes it.
+    expect((await voucherState(draft.id))[0].status).toBe('DRAFT');
+    const timely = await receipt(9, '60', '2026-01-09');
+    await vouchers.post(COMPANY, USER, timely.id);
+    await vouchers.post(COMPANY, USER, draft.id);
+    expect((await balance(9)).toFixed(4)).toBe('120.0000');
+  });
+
+  it('a refusal carries no balance figures without the disclose flag, on a real refusal', async () => {
+    await seedBox(10);
+    const rc = await receipt(10, '40');
+    await vouchers.post(COMPANY, USER, rc.id);
+
+    const failure = await payment(10, '100').catch((error) => error);
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure.response.code).toBe('CASH_SAVE_BALANCE_SHORT');
+    expect(failure.response.errors).toEqual({ cashAccountCode: 'CA10' });
+    expect(failure.response.message).not.toMatch(/40/);
+    expect(failure.response.message).not.toMatch(/100/);
+  });
+
+  it('a backdated reversal is refused when its mirror would dip the box between dates the total hides', async () => {
+    await seedBox(11);
+    const rc = await receipt(11, '100', '2026-01-05');
+    await vouchers.post(COMPANY, USER, rc.id);
+    const spend = await payment(11, '100', '2026-01-10');
+    await vouchers.post(COMPANY, USER, spend.id);
+    const late = await receipt(11, '150', '2026-01-20');
+    await vouchers.post(COMPANY, USER, late.id);
+    // Total 150, so an undated check would let the receipt's reversal take
+    // 100 out. Dated on the 15th the mirror leaves the box at -100 until the
+    // 20th: the statement would show a negative box for five days.
+    const entryId = (await query(`SELECT "journalEntryId" AS id FROM cash_vouchers WHERE id='${rc.id}'`))[0].id;
+    const failure = await prisma
+      .$transaction((tx) =>
+        posting.reverse(tx, COMPANY, USER, entryId as string, 'backdated reversal', new Date('2026-01-15')),
+      )
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure.response).toMatchObject({ code: 'CASH_BALANCE_NEGATIVE' });
+    expect(
+      (await query(`SELECT status FROM journal_entries WHERE id='${entryId}'`))[0].status,
+    ).toBe('POSTED');
+  });
+
+  it('pre-existing negative history: corrections always possible, deepening never', async () => {
+    await seedBox(12);
+    // Books from before the guard, written straight into the ledger: the box
+    // stood at -80 on the 5th.
+    await run(`INSERT INTO journal_entries(id,"companyId","branchId","entryNumber","entryDate",description,status,"totalDebit","totalCredit","createdBy","updatedAt")
+               VALUES ('c0000000-0000-4000-8000-c00000000001','${COMPANY}','${BRANCH}','JV-OLD-1','2026-01-05','legacy overdraft','POSTED',80,80,'${USER}',now())`);
+    await run(`INSERT INTO journal_lines(id,"journalEntryId","lineNumber","accountId",debit,credit)
+               VALUES ('c0000000-0000-4000-8000-c00000000002','c0000000-0000-4000-8000-c00000000001',1,'${glId(12)}',0,80),
+                      ('c0000000-0000-4000-8000-c00000000003','c0000000-0000-4000-8000-c00000000001',2,'${EXP}',80,0)`);
+    expect((await balance(12)).toFixed(4)).toBe('-80.0000');
+
+    // A corrective receipt is never refused, even while the box is negative.
+    const fix = await receipt(12, '100', '2026-01-10');
+    await vouchers.post(COMPANY, USER, fix.id);
+    expect((await balance(12)).toFixed(4)).toBe('20.0000');
+
+    // A payment dated after the dip is judged on its own dates: allowed.
+    const after = await payment(12, '10', '2026-01-15');
+    await vouchers.post(COMPANY, USER, after.id);
+    expect((await balance(12)).toFixed(4)).toBe('10.0000');
+
+    // A payment dated before the dip would deepen it: refused at save.
+    const deepening = await payment(12, '10', '2026-01-03').catch((error) => error);
+    expect(deepening).toBeInstanceOf(BadRequestException);
+    expect(deepening.response).toMatchObject({ code: 'CASH_SAVE_BALANCE_SHORT' });
   });
 
   it('two payments posted at the same moment: exactly one succeeds and the balance never dips below zero', async () => {
@@ -321,8 +420,8 @@ const vmReady =
     const services = buildServices(other);
     try {
       const [first, second] = await Promise.allSettled([
-        vouchers.post(COMPANY, USER, d1.id),
-        services.vouchers.post(COMPANY, USER, d2.id),
+        vouchers.post(COMPANY, USER, d1.id, { discloseBalance: true }),
+        services.vouchers.post(COMPANY, USER, d2.id, { discloseBalance: true }),
       ]);
       const outcomes = [first, second];
       const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');

@@ -87,6 +87,7 @@ export class CashTransfersService {
       amount: string | number;
       description?: string;
     },
+    options: { discloseBalance?: boolean } = {},
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -107,25 +108,39 @@ export class CashTransfersService {
     const date = this.date(dto.transferDate);
 
     // A transfer the source box cannot cover is refused at save, like a
-    // payment voucher; posting re-checks under a row lock.
-    const available = await this.posting.postedBalanceFor(
+    // payment voucher; posting re-checks under a row lock. The check is
+    // against the lowest running balance from the transfer's date onward.
+    // Balance figures leave only for a user confirmed to may read them.
+    const available = await this.posting.lowestCashBalanceFrom(
       this.prisma as never,
       companyId,
       from.accountId,
+      date,
     );
     if (amount.greaterThan(available)) {
+      if (options.discloseBalance) {
+        throw new BadRequestException({
+          code: 'CASH_SAVE_BALANCE_SHORT',
+          message:
+            `لم يُحفظ التحويل: أدنى رصيد تصل إليه «${from.nameAr}» (${from.code}) من تاريخ التحويل فصاعدًا هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
+            `قلّل المبلغ إلى الرصيد المتاح أو موّل الحساب بتاريخ لا يتأخر عن التحويل. لم يُنشأ أي تحويل. / ` +
+            `The transfer was not saved: "${from.nameEn}" (${from.code}) runs as low as ${available.toFixed(MONEY_SCALE)} from the transfer's date onward and the transfer is ${amount.toFixed(MONEY_SCALE)}. ` +
+            `Lower the amount to the available balance or fund the account with an entry dated no later than the transfer. No transfer was created.`,
+          errors: {
+            cashAccountCode: from.code,
+            requested: amount.toFixed(MONEY_SCALE),
+            available: available.toFixed(MONEY_SCALE),
+          },
+        });
+      }
       throw new BadRequestException({
         code: 'CASH_SAVE_BALANCE_SHORT',
         message:
-          `لم يُحفظ التحويل: رصيد «${from.nameAr}» (${from.code}) هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
-          `قلّل المبلغ إلى الرصيد المتاح أو موّل الحساب أولًا. لم يُنشأ أي تحويل. / ` +
-          `The transfer was not saved: "${from.nameEn}" (${from.code}) holds ${available.toFixed(MONEY_SCALE)} and the transfer is ${amount.toFixed(MONEY_SCALE)}. ` +
-          `Lower the amount to the available balance or fund the account first. No transfer was created.`,
-        errors: {
-          cashAccountCode: from.code,
-          requested: amount.toFixed(MONEY_SCALE),
-          available: available.toFixed(MONEY_SCALE),
-        },
+          `لم يُحفظ التحويل: رصيد (${from.code}) لا يكفي لهذا المبلغ في تاريخ التحويل. ` +
+          `قلّل المبلغ أو موّل الحساب أولًا. لم يُنشأ أي تحويل. / ` +
+          `The transfer was not saved: (${from.code}) cannot cover this amount at the transfer's date. ` +
+          `Lower the amount or fund the account first. No transfer was created.`,
+        errors: { cashAccountCode: from.code },
       });
     }
 
@@ -160,7 +175,12 @@ export class CashTransfersService {
     return this.findOne(companyId, created.id);
   }
 
-  async post(companyId: string, userId: string, id: string) {
+  async post(
+    companyId: string,
+    userId: string,
+    id: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const transfer = await this.prisma.cashTransfer.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -206,6 +226,7 @@ export class CashTransfersService {
             description: `Transfer to ${transfer.toCashAccount.code}`,
           },
         ],
+        discloseBalance: options.discloseBalance,
       });
 
       await tx.cashTransfer.update({
@@ -228,7 +249,12 @@ export class CashTransfersService {
     return this.findOne(companyId, id);
   }
 
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(
+    companyId: string,
+    userId: string,
+    id: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const transfer = await this.prisma.cashTransfer.findFirst({
       where: { id, companyId, deletedAt: null },
     });
@@ -251,6 +277,8 @@ export class CashTransfersService {
         userId,
         transfer.journalEntryId as string,
         `Reversal of transfer ${transfer.transferNumber}`,
+        new Date(),
+        options.discloseBalance,
       );
     });
 

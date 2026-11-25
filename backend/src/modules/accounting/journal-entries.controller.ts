@@ -11,6 +11,12 @@ import {
 } from './dto/create-journal-entry.dto';
 import { JournalEntriesService } from './journal-entries.service';
 
+/// A cash-balance refusal carries the actual figures only to a user who may
+/// read cash balances; everyone else gets the account code and the rule.
+function mayReadCashBalance(user: AuthUser): boolean {
+  return user.isSuperAdmin || (user.permissions ?? []).includes('cash.accounts.read');
+}
+
 @Controller('accounting/journal-entries')
 export class JournalEntriesController {
   constructor(private readonly service: JournalEntriesService) {}
@@ -41,7 +47,9 @@ export class JournalEntriesController {
   @Post(':id/post')
   @RequirePermissions('accounting.journal.post')
   post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id);
+    return this.service.post(user.companyId, user.userId, id, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 
   @Post(':id/submit')
@@ -69,6 +77,8 @@ export class JournalEntriesController {
   @Post(':id/reverse')
   @RequirePermissions('accounting.journal.post')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id);
+    return this.service.reverse(user.companyId, user.userId, id, {
+      discloseBalance: mayReadCashBalance(user),
+    });
   }
 }

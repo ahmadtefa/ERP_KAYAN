@@ -16,14 +16,18 @@ describe('PostingService guards', () => {
     original?: Record<string, unknown> | null;
     cashAccounts?: Array<Record<string, unknown>>;
     balance?: string;
+    ledgerRows?: Array<{ d: string; net: string }>;
   } = {}) {
     const created: Array<Record<string, unknown>> = [];
     const tx = {
       $queryRaw: jest.fn(async (sql: { strings?: readonly string[] }) => {
-        // The balance probe reads journal lines; every other raw statement
-        // (account locks, the cash account row lock) returns no rows.
+        // The balance probe reads journal lines as per-day aggregates; every
+        // other raw statement (account locks, the cash account row lock)
+        // returns no rows.
         if (sql?.strings?.some((part) => part.includes('journal_lines'))) {
-          return [{ net: overrides.balance ?? '0' }];
+          return (
+            overrides.ledgerRows ?? [{ d: '2026-01-01', net: overrides.balance ?? '0' }]
+          ).map((row) => ({ d: new Date(row.d), net: row.net }));
         }
         return [];
       }),
@@ -223,7 +227,9 @@ describe('PostingService guards', () => {
 
     it('refuses a posting that takes more out of a box than it holds, and writes nothing', async () => {
       const { service, tx, created } = makeService({ cashAccounts: [box], balance: '40' });
-      const failure = await service.post(tx, paymentRequest).catch((error) => error);
+      const failure = await service
+        .post(tx, { ...paymentRequest, discloseBalance: true })
+        .catch((error) => error);
       expect(failure).toBeInstanceOf(BadRequestException);
       expect(failure.response.code).toBe('CASH_BALANCE_NEGATIVE');
       expect(failure.response.errors).toEqual({
@@ -233,6 +239,119 @@ describe('PostingService guards', () => {
       });
       expect(failure.response.message).toMatch(/بالسالب/);
       expect(failure.response.message).toMatch(/can never go negative/);
+      expect(created).toHaveLength(0);
+    });
+
+    it('redacts the balance figures from a user who may not read them', async () => {
+      // Default path: no discloseBalance flag, as every caller outside the
+      // cash and journal controllers invokes it. The refusal names the box
+      // (the user picked it) but no amounts leak in either language.
+      const { service, tx, created } = makeService({ cashAccounts: [box], balance: '40' });
+      const failure = await service.post(tx, paymentRequest).catch((error) => error);
+      expect(failure).toBeInstanceOf(BadRequestException);
+      expect(failure.response.code).toBe('CASH_BALANCE_NEGATIVE');
+      expect(failure.response.errors).toEqual({ cashAccountCode: 'CASH' });
+      expect(failure.response.message).toMatch(/بالسالب/);
+      expect(failure.response.message).not.toMatch(/40/);
+      expect(failure.response.message).not.toMatch(/100/);
+      expect(created).toHaveLength(0);
+    });
+
+    it('refuses a backdated payment a later-dated receipt cannot cover', async () => {
+      // The only funding is dated after the payment: the total is enough,
+      // the timeline is not.
+      const { service, tx, created } = makeService({
+        cashAccounts: [box],
+        ledgerRows: [{ d: '2026-03-20', net: '100' }],
+      });
+      const failure = await service
+        .post(tx, { ...paymentRequest, entryDate: new Date('2026-03-10') })
+        .catch((error) => error);
+      expect(failure.response?.code).toBe('CASH_BALANCE_NEGATIVE');
+      expect(created).toHaveLength(0);
+    });
+
+    it('allows a backdated payment the box covered at every date', async () => {
+      const { service, tx, created } = makeService({
+        cashAccounts: [box],
+        ledgerRows: [
+          { d: '2026-02-05', net: '100' },
+          { d: '2026-03-20', net: '100' },
+        ],
+      });
+      const entry = await service.post(tx, {
+        ...paymentRequest,
+        entryDate: new Date('2026-03-10'),
+      });
+      expect(entry.entryNumber).toBe('JV-0001');
+      expect(created).toHaveLength(1);
+    });
+
+    it('refuses a payment that only dips below zero on a later date', async () => {
+      // 100 in on day one, 80 out on day three: a payment of 50 dated day
+      // two fits on its own date (100) but not on day three (20).
+      const { service, tx, created } = makeService({
+        cashAccounts: [box],
+        ledgerRows: [
+          { d: '2026-03-01', net: '100' },
+          { d: '2026-03-03', net: '-80' },
+        ],
+      });
+      const failure = await service
+        .post(tx, {
+          ...paymentRequest,
+          entryDate: new Date('2026-03-02'),
+          lines: [
+            { accountId: 'acc-revenue', debit: '50' },
+            { accountId: 'acc-cash', credit: '50' },
+          ],
+        })
+        .catch((error) => error);
+      expect(failure.response?.code).toBe('CASH_BALANCE_NEGATIVE');
+      expect(created).toHaveLength(0);
+    });
+
+    it('never blocks an outflow dated after a pre-existing dip it cannot deepen', async () => {
+      // Legacy books from before the guard: -80 then +100. A payment dated
+      // after the dip runs against dates that are all covered.
+      const { service, tx, created } = makeService({
+        cashAccounts: [box],
+        ledgerRows: [
+          { d: '2026-02-05', net: '-80' },
+          { d: '2026-02-10', net: '100' },
+        ],
+      });
+      const entry = await service.post(tx, {
+        ...paymentRequest,
+        entryDate: new Date('2026-03-01'),
+        lines: [
+          { accountId: 'acc-revenue', debit: '10' },
+          { accountId: 'acc-cash', credit: '10' },
+        ],
+      });
+      expect(entry.entryNumber).toBe('JV-0001');
+      expect(created).toHaveLength(1);
+    });
+
+    it('refuses a backdated outflow that would deepen a pre-existing dip', async () => {
+      const { service, tx, created } = makeService({
+        cashAccounts: [box],
+        ledgerRows: [
+          { d: '2026-02-05', net: '-80' },
+          { d: '2026-02-10', net: '100' },
+        ],
+      });
+      const failure = await service
+        .post(tx, {
+          ...paymentRequest,
+          entryDate: new Date('2026-02-03'),
+          lines: [
+            { accountId: 'acc-revenue', debit: '10' },
+            { accountId: 'acc-cash', credit: '10' },
+          ],
+        })
+        .catch((error) => error);
+      expect(failure.response?.code).toBe('CASH_BALANCE_NEGATIVE');
       expect(created).toHaveLength(0);
     });
 

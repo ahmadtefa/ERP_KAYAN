@@ -182,6 +182,7 @@ export class CashVouchersService {
       reference?: string;
       allocations?: AllocationInput[];
     },
+    options: { discloseBalance?: boolean } = {},
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -241,26 +242,41 @@ export class CashVouchersService {
     // A payment the box cannot cover is refused now, at save, not later at
     // posting: the clerk hears about it while the entries are still on the
     // screen. Posting re-checks under a row lock, because the balance can
-    // change between the two.
+    // change between the two. The check is against the lowest running
+    // balance from the voucher's date onward: a later-dated receipt cannot
+    // fund this payment. Balance figures leave this method only for a user
+    // the controller has confirmed may read them (cash.accounts.read).
     if (kind === CashVoucherKind.PAYMENT) {
-      const available = await this.posting.postedBalanceFor(
+      const available = await this.posting.lowestCashBalanceFrom(
         this.prisma as never,
         companyId,
         cashAccount.accountId,
+        date,
       );
       if (amount.greaterThan(available)) {
+        if (options.discloseBalance) {
+          throw new BadRequestException({
+            code: 'CASH_SAVE_BALANCE_SHORT',
+            message:
+              `لم يُحفظ سند الصرف: أدنى رصيد تصل إليه الخزنة أو البنك (${cashAccount.code}) من تاريخ السند فصاعدًا هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
+              `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض بتاريخ لا يتأخر عن سند الصرف، ثم احفظ مرة أخرى. لم يُنشأ أي سند. / ` +
+              `The payment voucher was not saved: the cash or bank account (${cashAccount.code}) runs as low as ${available.toFixed(MONEY_SCALE)} from the voucher's date onward and the payment is ${amount.toFixed(MONEY_SCALE)}. ` +
+              `Lower the amount to the available balance or record a receipt dated no later than the payment, then save again. No voucher was created.`,
+            errors: {
+              cashAccountCode: cashAccount.code,
+              requested: amount.toFixed(MONEY_SCALE),
+              available: available.toFixed(MONEY_SCALE),
+            },
+          });
+        }
         throw new BadRequestException({
           code: 'CASH_SAVE_BALANCE_SHORT',
           message:
-            `لم يُحفظ سند الصرف: رصيد الخزنة أو البنك (${cashAccount.code}) هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
-            `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض أولًا، ثم احفظ مرة أخرى. لم يُنشأ أي سند. / ` +
-            `The payment voucher was not saved: the cash or bank account (${cashAccount.code}) holds ${available.toFixed(MONEY_SCALE)} and the payment is ${amount.toFixed(MONEY_SCALE)}. ` +
-            `Lower the amount to the available balance or record a receipt first, then save again. No voucher was created.`,
-          errors: {
-            cashAccountCode: cashAccount.code,
-            requested: amount.toFixed(MONEY_SCALE),
-            available: available.toFixed(MONEY_SCALE),
-          },
+            `لم يُحفظ سند الصرف: رصيد الخزنة أو البنك (${cashAccount.code}) لا يكفي لهذا المبلغ في تاريخ السند. ` +
+            `قلّل المبلغ أو سجّل سند قبض أولًا، ثم احفظ مرة أخرى. لم يُنشأ أي سند. / ` +
+            `The payment voucher was not saved: the cash or bank account (${cashAccount.code}) cannot cover this amount at the voucher's date. ` +
+            `Lower the amount or record a receipt first, then save again. No voucher was created.`,
+          errors: { cashAccountCode: cashAccount.code },
         });
       }
     }
@@ -320,7 +336,12 @@ export class CashVouchersService {
    * Posts the voucher: money moves, invoices are marked as settled, and one
    * journal entry records all of it.
    */
-  async post(companyId: string, userId: string, id: string) {
+  async post(
+    companyId: string,
+    userId: string,
+    id: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const voucher = await this.prisma.cashVoucher.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -548,6 +569,7 @@ export class CashVouchersService {
         sourceNumber: voucher.voucherNumber,
         currency: voucher.currency,
         lines,
+        discloseBalance: options.discloseBalance,
       });
 
       await tx.cashVoucher.update({
@@ -579,7 +601,13 @@ export class CashVouchersService {
    * Reverses a posted voucher: a mirror journal entry, the allocations given
    * back, and the invoices returned to what they were owed.
    */
-  async reverse(companyId: string, userId: string, id: string, reason?: string) {
+  async reverse(
+    companyId: string,
+    userId: string,
+    id: string,
+    reason?: string,
+    options: { discloseBalance?: boolean } = {},
+  ) {
     const voucher = await this.prisma.cashVoucher.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { allocations: true },
@@ -619,6 +647,8 @@ export class CashVouchersService {
         userId,
         voucher.journalEntryId as string,
         reason?.trim() || `Reversal of voucher ${voucher.voucherNumber}`,
+        new Date(),
+        options.discloseBalance,
       );
     });
 

@@ -56,6 +56,10 @@ export interface PostingRequest {
   entryDescription?: string;
   /// Overrides the period code used when a message has to name the period.
   currency?: string;
+  /// When true, a cash-balance refusal may carry the actual figures (the
+  /// caller has checked the user may read cash balances). Default false:
+  /// the refusal names the account but no amounts.
+  discloseBalance?: boolean;
 }
 
 /**
@@ -219,7 +223,9 @@ export class PostingService {
 
     // A payment voucher, a transfer out, or any other document that takes
     // money out of a box or a bank may not take out more than it holds.
-    await this.assertCashBalancesCover(tx, request.companyId, lines);
+    await this.assertCashBalancesCover(tx, request.companyId, lines, request.entryDate, {
+      discloseBalance: request.discloseBalance,
+    });
 
     const entryNumber = await this.numbers.next(
       tx,
@@ -288,6 +294,7 @@ export class PostingService {
     journalEntryId: string,
     description: string,
     entryDate: Date = new Date(),
+    discloseBalance = false,
   ): Promise<{ id: string; entryNumber: string }> {
     const original = await tx.journalEntry.findFirst({
       where: { id: journalEntryId, companyId },
@@ -318,6 +325,8 @@ export class PostingService {
         debit: line.credit,
         credit: line.debit,
       })),
+      entryDate,
+      { discloseBalance },
     );
 
     const claimed = await tx.journalEntry.updateMany({
@@ -423,8 +432,71 @@ export class PostingService {
   }
 
   /**
+   * The lowest running balance an account reaches from `fromDate` onward, in
+   * the same order the box statement prints: entryDate, then entryNumber.
+   * A new entry carries the next entry number, so it lands at the end of its
+   * own date; the whole of `fromDate` therefore counts before it. Returned
+   * WITHOUT any lock: save-time checks use it as an advisory, posting checks
+   * call it while holding the cash account's row lock.
+   */
+  async lowestCashBalanceFrom(
+    db: Prisma.TransactionClient,
+    companyId: string,
+    accountId: string,
+    fromDate: Date,
+    excludeEntryId?: string,
+  ): Promise<Prisma.Decimal> {
+    // Per-day aggregates, not per-line scans: within a day the entries are
+    // ordered by entryNumber, which follows posting order, and every posting
+    // through this guard was itself checked, so no intra-day dip can exist
+    // that the day totals would hide. The guard's own invariant carries the
+    // day; the aggregate carries the years.
+    const rows = excludeEntryId
+      ? await db.$queryRaw<Array<{ d: Date; net: Prisma.Decimal | string }>>(Prisma.sql`
+          SELECT e."entryDate" AS d, SUM(l.debit - l.credit) AS net
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l."journalEntryId"
+           WHERE e."companyId" = ${companyId}::uuid
+             AND e.status IN ('POSTED', 'REVERSED')
+             AND l."accountId" = ${accountId}::uuid
+             AND e.id <> ${excludeEntryId}::uuid
+           GROUP BY e."entryDate"
+           ORDER BY e."entryDate"
+        `)
+      : await db.$queryRaw<Array<{ d: Date; net: Prisma.Decimal | string }>>(Prisma.sql`
+          SELECT e."entryDate" AS d, SUM(l.debit - l.credit) AS net
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l."journalEntryId"
+           WHERE e."companyId" = ${companyId}::uuid
+             AND e.status IN ('POSTED', 'REVERSED')
+             AND l."accountId" = ${accountId}::uuid
+           GROUP BY e."entryDate"
+           ORDER BY e."entryDate"
+        `);
+    const day = fromDate.toISOString().slice(0, 10);
+    let running = new Prisma.Decimal(0);
+    let atDate = new Prisma.Decimal(0);
+    let later: Prisma.Decimal | null = null;
+    for (const row of rows) {
+      running = running.plus(row.net);
+      const rowDay =
+        row.d instanceof Date ? row.d.toISOString().slice(0, 10) : String(row.d).slice(0, 10);
+      if (rowDay <= day) {
+        atDate = running;
+      } else {
+        later = later === null ? running : Prisma.Decimal.min(later, running);
+      }
+    }
+    return later === null ? atDate : Prisma.Decimal.min(atDate, later);
+  }
+
+  /**
    * A cash box or a bank account can never go negative: its balance is the
-   * money physically in it, and a safe cannot hold less than nothing.
+   * money physically in it, and a safe cannot hold less than nothing. Never
+   * means at no date: a receipt dated next week cannot fund a payment dated
+   * today, so the running balance is checked from the candidate entry's date
+   * onward, not only as an end-of-history total. Backdating inside an open
+   * period stays allowed whenever the box was actually covered at every date.
    *
    * Every ledger write funnels through PostingService (vouchers, transfers,
    * invoices, opening balances, year-end) except manual journal transitions,
@@ -432,21 +504,34 @@ export class PostingService {
    * all of them. Only the net movement per account matters: an entry that
    * moves money between two boxes is checked on the box it leaves.
    *
+   * History written before this guard existed can already dip below zero.
+   * Such a dip never blocks a receipt (money coming in always helps), and it
+   * never blocks an outflow dated after it whose own dates forward stay
+   * covered; an outflow that would land on or before the dip and deepen it is
+   * refused. That is the explicit rule: the guard polices the timeline from
+   * the candidate's date forward, and leaves yesterday's books to correction.
+   *
    * Concurrency: the cash account's row is locked FOR UPDATE before its
-   * balance is read, and every writer takes the same lock in id order, so two
-   * payments posted at the same moment queue behind it and the second one
-   * reads a balance that already includes the first. Accounts are locked in a
-   * deterministic order so two opposite transfers cannot deadlock.
+   * timeline is read, and every writer takes the same lock in id order, so
+   * two payments posted at the same moment queue behind it and the second
+   * one reads a timeline that already includes the first. Accounts are
+   * locked in a deterministic order so two opposite transfers cannot
+   * deadlock.
    *
    * `excludeEntryId` is for the manual-journal transition, which claims its
    * entry (flips it to POSTED) before validating: the entry's own lines would
    * otherwise be counted into the balance it is checked against.
+   *
+   * `discloseBalance` carries the caller's permission check: only a user who
+   * may read cash balances (cash.accounts.read) gets the figures in a
+   * refusal. Everyone else gets the account code and the rule, no amounts.
    */
   async assertCashBalancesCover(
     tx: Prisma.TransactionClient,
     companyId: string,
     lines: Array<{ accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal }>,
-    options: { excludeEntryId?: string } = {},
+    entryDate: Date,
+    options: { excludeEntryId?: string; discloseBalance?: boolean; lock?: boolean } = {},
   ): Promise<void> {
     const netByAccount = new Map<string, Prisma.Decimal>();
     for (const line of lines) {
@@ -469,30 +554,46 @@ export class PostingService {
     });
 
     for (const cashAccount of cashAccounts) {
-      await tx.$queryRaw(Prisma.sql`
-        SELECT id FROM cash_accounts WHERE id = ${cashAccount.id}::uuid FOR UPDATE
-      `);
-      const balance = await this.postedBalanceFor(
+      if (options.lock !== false) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM cash_accounts WHERE id = ${cashAccount.id}::uuid FOR UPDATE
+        `);
+      }
+      const floor = await this.lowestCashBalanceFrom(
         tx,
         companyId,
         cashAccount.accountId,
+        entryDate,
         options.excludeEntryId,
       );
       const movement = netByAccount.get(cashAccount.accountId)!;
       const requested = movement.abs();
-      if (balance.minus(requested).isNegative()) {
+      if (floor.minus(requested).isNegative()) {
+        // The account code is safe for anyone holding the voucher or entry:
+        // they picked the account themselves. The figures are not.
+        if (options.discloseBalance) {
+          throw new BadRequestException({
+            code: 'CASH_BALANCE_NEGATIVE',
+            message:
+              `رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب في أي تاريخ: أدنى رصيد تصل إليه «${cashAccount.nameAr}» (${cashAccount.code}) من تاريخ هذا القيد فصاعدًا هو ${floor.toFixed(MONEY_SCALE)} والمطلوب صرفه ${requested.toFixed(MONEY_SCALE)}. ` +
+              `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض بتاريخ لا يتأخر عن هذا القيد. لم يُرحَّل أي قيد. / ` +
+              `A cash or bank balance can never go negative at any date: "${cashAccount.nameEn}" (${cashAccount.code}) runs as low as ${floor.toFixed(MONEY_SCALE)} from this entry's date onward and this pays out ${requested.toFixed(MONEY_SCALE)}. ` +
+              `Lower the amount to the available balance or record a receipt dated no later than this entry. Nothing was posted.`,
+            errors: {
+              cashAccountCode: cashAccount.code,
+              requested: requested.toFixed(MONEY_SCALE),
+              available: floor.toFixed(MONEY_SCALE),
+            },
+          });
+        }
         throw new BadRequestException({
           code: 'CASH_BALANCE_NEGATIVE',
           message:
-            `رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب: رصيد «${cashAccount.nameAr}» (${cashAccount.code}) هو ${balance.toFixed(MONEY_SCALE)} والمطلوب صرفه ${requested.toFixed(MONEY_SCALE)}. ` +
-            `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض أولًا. لم يُرحَّل أي قيد. / ` +
-            `A cash or bank balance can never go negative: "${cashAccount.nameEn}" (${cashAccount.code}) holds ${balance.toFixed(MONEY_SCALE)} and this pays out ${requested.toFixed(MONEY_SCALE)}. ` +
-            `Lower the amount to the available balance or record a receipt first. Nothing was posted.`,
-          errors: {
-            cashAccountCode: cashAccount.code,
-            requested: requested.toFixed(MONEY_SCALE),
-            available: balance.toFixed(MONEY_SCALE),
-          },
+            `رصيد الخزنة أو البنك (${cashAccount.code}) لا يكفي لهذا الصرف: الرصيد لا يمكن أن يصبح بالسالب في أي تاريخ. ` +
+            `قلّل المبلغ أو سجّل سند قبض بتاريخ لا يتأخر عن هذا القيد. لم يُرحَّل أي قيد. / ` +
+            `The cash or bank account (${cashAccount.code}) cannot cover this payment: a balance can never go negative at any date. ` +
+            `Lower the amount or record a receipt dated no later than this entry. Nothing was posted.`,
+          errors: { cashAccountCode: cashAccount.code },
         });
       }
     }
