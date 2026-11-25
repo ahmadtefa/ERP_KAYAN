@@ -234,6 +234,15 @@ void main() {
     },
   );
 
+  testWidgets('cancel allocation closes dialog without changing stock', (tester) async {
+    final data=Map<String,dynamic>.from(jsonDecode(File('test/fixtures/item_locations.json').readAsStringSync()) as Map);
+    final api=_Api(data);await pump(tester,api);
+    await tester.tap(find.text('Assign location'));await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField,'Quantity'),'4');
+    await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();
+    expect(find.text('Assign existing stock'),findsNothing);expect(api.posted,isEmpty);
+  });
+
   testWidgets('uncertain relocation blocks duplicate save and keeps input', (
     tester,
   ) async {

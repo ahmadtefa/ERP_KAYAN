@@ -145,3 +145,8 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Repeated equal quantity/equal book cost lines on distinct lots and shelves, adjustment and transfer, both exact inverse in own PGlite tests (not merely permitted refusal),2/2. This proves the exercised order only; movement-to-line key remains absent, so do not generalize to arbitrary ordering/legacy identity.
 - Added three batch-list controls: expired/expiring/all filter cycle, trimmed search/clear, refresh without stock submission. Batch widget suite32/32 passes. Partial original191-site register45 mapped/146 open. Evidence remains widget-only for these controls.
 - TypeScript clean after repeated-line probes; full Flutter analyze clean after controls. No production/backend behavior changed in this checkpoint.
+
+### 05:55 item-location controls and batch backend coverage
+- Batches operations SQL16/16 non-opt-in cases pass in two8-case groups: receive/issue/transfer/writeoff/list. The opt-in actual Flutter receipt bridge is not counted as rerun here.
+- Item-location widget9/9 pass including new cancel-without-mutation and prior scoped target/quantity/reason/retained-refusal/uncertain-block/refresh checks. Mapped8 original source sites to these tests, callback branches only where exercised. MAPPED_WIDGET never means every branch or SQL acceptance.
+- Partial original191-site register now53 mapped/138 open, with substantial dedicated transfer/voucher/count forms still unqualified in the register. Full Flutter analyze clean.

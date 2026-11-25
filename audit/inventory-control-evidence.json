@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 45,
-    "OPEN_UNMAPPED": 146
+    "MAPPED_WIDGET": 53,
+    "OPEN_UNMAPPED": 138
   },
   "controls": [
     {
@@ -233,57 +233,105 @@
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 149,
       "source": "onChanged: busy",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "assign has quantity guard, preserves rejected input and sends neutral contract",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 163,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "assign has quantity guard, preserves rejected input and sends neutral contract",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 169,
       "source": "onChanged: (_) => update(() => error = null),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "assign has quantity guard, preserves rejected input and sends neutral contract",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 195,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "historical deficit correction requires physical source and reason",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 223,
       "source": "onPressed: busy ? null : () => Navigator.pop(context, false),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "cancel allocation closes dialog without changing stock",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 227,
       "source": "onPressed: busy || uncertain",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "uncertain relocation blocks duplicate save and keeps input",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 302,
       "source": "onPressed: _load,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "item locations refresh reloads authoritative balances",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
       "line": 428,
       "source": "onPressed: () => _relocate(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_locations_screen_test.dart",
+          "test": "assign has quantity guard, preserves rejected input and sends neutral contract",
+          "proofLevel": "widget with synthetic API; callback branch only where named, not every move/reconcile branch; local 2026-11-25 05:55 run passes"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/item_thresholds_screen.dart",
