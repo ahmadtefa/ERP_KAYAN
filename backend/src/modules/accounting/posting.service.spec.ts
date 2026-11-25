@@ -16,18 +16,22 @@ describe('PostingService guards', () => {
     original?: Record<string, unknown> | null;
     cashAccounts?: Array<Record<string, unknown>>;
     balance?: string;
-    ledgerRows?: Array<{ d: string; net: string }>;
+    minAfter?: string;
   } = {}) {
     const created: Array<Record<string, unknown>> = [];
     const tx = {
       $queryRaw: jest.fn(async (sql: { strings?: readonly string[] }) => {
-        // The balance probe reads journal lines as per-day aggregates; every
-        // other raw statement (account locks, the cash account row lock)
-        // returns no rows.
+        // The position probe reads journal lines through a window aggregate
+        // and returns the running balance up to the candidate's position
+        // plus the lowest running balance after it; every other raw
+        // statement (account locks, the cash account row lock) is empty.
         if (sql?.strings?.some((part) => part.includes('journal_lines'))) {
-          return (
-            overrides.ledgerRows ?? [{ d: '2026-01-01', net: overrides.balance ?? '0' }]
-          ).map((row) => ({ d: new Date(row.d), net: row.net }));
+          return [
+            {
+              before_sum: overrides.balance ?? '0',
+              min_after: overrides.minAfter ?? null,
+            },
+          ];
         }
         return [];
       }),
@@ -258,11 +262,12 @@ describe('PostingService guards', () => {
     });
 
     it('refuses a backdated payment a later-dated receipt cannot cover', async () => {
-      // The only funding is dated after the payment: the total is enough,
-      // the timeline is not.
+      // Nothing stands before the payment's position; the funding (100)
+      // only comes after it.
       const { service, tx, created } = makeService({
         cashAccounts: [box],
-        ledgerRows: [{ d: '2026-03-20', net: '100' }],
+        balance: '0',
+        minAfter: '100',
       });
       const failure = await service
         .post(tx, { ...paymentRequest, entryDate: new Date('2026-03-10') })
@@ -271,13 +276,11 @@ describe('PostingService guards', () => {
       expect(created).toHaveLength(0);
     });
 
-    it('allows a backdated payment the box covered at every date', async () => {
+    it('allows a backdated payment the box covered at every position', async () => {
       const { service, tx, created } = makeService({
         cashAccounts: [box],
-        ledgerRows: [
-          { d: '2026-02-05', net: '100' },
-          { d: '2026-03-20', net: '100' },
-        ],
+        balance: '100',
+        minAfter: '200',
       });
       const entry = await service.post(tx, {
         ...paymentRequest,
@@ -287,15 +290,13 @@ describe('PostingService guards', () => {
       expect(created).toHaveLength(1);
     });
 
-    it('refuses a payment that only dips below zero on a later date', async () => {
-      // 100 in on day one, 80 out on day three: a payment of 50 dated day
-      // two fits on its own date (100) but not on day three (20).
+    it('refuses a payment that only dips below zero at a later position', async () => {
+      // 100 stands at the payment's own position, but the running balance
+      // falls to 20 after it: a payment of 50 fits here, not there.
       const { service, tx, created } = makeService({
         cashAccounts: [box],
-        ledgerRows: [
-          { d: '2026-03-01', net: '100' },
-          { d: '2026-03-03', net: '-80' },
-        ],
+        balance: '100',
+        minAfter: '20',
       });
       const failure = await service
         .post(tx, {
@@ -312,14 +313,11 @@ describe('PostingService guards', () => {
     });
 
     it('never blocks an outflow dated after a pre-existing dip it cannot deepen', async () => {
-      // Legacy books from before the guard: -80 then +100. A payment dated
-      // after the dip runs against dates that are all covered.
+      // Legacy books dipped before the candidate's position; everything
+      // from its position forward is covered.
       const { service, tx, created } = makeService({
         cashAccounts: [box],
-        ledgerRows: [
-          { d: '2026-02-05', net: '-80' },
-          { d: '2026-02-10', net: '100' },
-        ],
+        balance: '20',
       });
       const entry = await service.post(tx, {
         ...paymentRequest,
@@ -336,10 +334,8 @@ describe('PostingService guards', () => {
     it('refuses a backdated outflow that would deepen a pre-existing dip', async () => {
       const { service, tx, created } = makeService({
         cashAccounts: [box],
-        ledgerRows: [
-          { d: '2026-02-05', net: '-80' },
-          { d: '2026-02-10', net: '100' },
-        ],
+        balance: '0',
+        minAfter: '-80',
       });
       const failure = await service
         .post(tx, {
@@ -353,6 +349,20 @@ describe('PostingService guards', () => {
         .catch((error) => error);
       expect(failure.response?.code).toBe('CASH_BALANCE_NEGATIVE');
       expect(created).toHaveLength(0);
+    });
+
+    it('checks the candidate at its own entry number, not at the end of the day', async () => {
+      // The guard's position probe must receive the entry's real number:
+      // a manual journal keeps its draft number and can sort before
+      // same-day entries that posted days ago.
+      const { service, tx } = makeService({ cashAccounts: [box], balance: '100' });
+      await service.post(tx, paymentRequest);
+      const raw = tx as unknown as { $queryRaw: jest.Mock };
+      const probe = raw.$queryRaw.mock.calls.find(([sql]: [{ strings: readonly string[] }]) =>
+        sql.strings.some((part) => part.includes('journal_lines')),
+      );
+      const values = (probe![0] as { values: unknown[] }).values;
+      expect(values).toContain('JV-0001');
     });
 
     it('locks the box row before reading its balance, inside the same transaction', async () => {

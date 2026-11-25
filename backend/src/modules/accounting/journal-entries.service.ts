@@ -502,6 +502,7 @@ export class JournalEntriesService {
     entry: {
       id: string;
       entryDate: Date;
+      entryNumber: string;
       totalDebit: Prisma.Decimal; totalCredit: Prisma.Decimal; reversalOfId: string | null;
       lines: Array<{accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal}>;
     },
@@ -545,8 +546,12 @@ export class JournalEntriesService {
     // than it holds is refused here exactly as it is for a payment voucher.
     // The entry was already claimed above, so its own lines are excluded from
     // the balance it is checked against.
+    // The entry keeps the number it took as a draft, which can place it
+    // before same-day entries posted since: its true statement position,
+    // not the end of the day, is what the guard must check.
     await this.posting.assertCashBalancesCover(tx, companyId, entry.lines, entry.entryDate, {
       excludeEntryId: entry.id,
+      candidateNumber: entry.entryNumber,
       discloseBalance: options.discloseBalance,
     });
   }
@@ -624,6 +629,16 @@ export class JournalEntriesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // The mirror's number first: it fixes the mirror's position in the
+      // statement order the guard checks. A refused reversal rolls the
+      // number back with everything else, so nothing is burned.
+      const entryNumber = await this.numbers.next(
+        tx,
+        companyId,
+        'JOURNAL',
+        'JV',
+      );
+
       // The mirror hands back whatever the original took: reversing an entry
       // that put money into a box takes it out again, and that may not
       // overdraw the box. Guarded before the claim for the same reason as in
@@ -634,7 +649,7 @@ export class JournalEntriesService {
         companyId,
         original.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit })),
         reversalDate,
-        { discloseBalance: options.discloseBalance },
+        { discloseBalance: options.discloseBalance, candidateNumber: entryNumber },
       );
 
       // Claim the original first. The pre-checks above run outside the
@@ -649,12 +664,6 @@ export class JournalEntriesService {
         throw new BadRequestException('This entry has already been reversed');
       }
 
-      const entryNumber = await this.numbers.next(
-        tx,
-        companyId,
-        'JOURNAL',
-        'JV',
-      );
 
       const created = await tx.journalEntry.create({
         data: {

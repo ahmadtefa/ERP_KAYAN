@@ -445,4 +445,66 @@ const vmReady =
       await other.$disconnect();
     }
   });
+
+  it('a manual draft keeps its number: money numbered after it cannot fund it', async () => {
+    await seedBox(13);
+    // The draft takes its JV number now, before anything else posts today.
+    const draft = await journals.create(COMPANY, BRANCH, USER, {
+      entryDate: '2026-01-10',
+      description: 'draft payment',
+      lines: [
+        { accountId: EXP, debit: '100' },
+        { accountId: glId(13), credit: '100' },
+      ],
+    } as never);
+    // A receipt dated the same day posts after it and takes a later number.
+    const rc = await receipt(13, '100', '2026-01-10');
+    await vouchers.post(COMPANY, USER, rc.id);
+    // Statement order puts the draft before the receipt, where the box is
+    // empty: the draft cannot post, however the day ends.
+    const failure = await journals
+      .post(COMPANY, USER, draft.id, { discloseBalance: true })
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure.response).toMatchObject({ code: 'CASH_BALANCE_NEGATIVE' });
+    expect(
+      (await query(`SELECT status FROM journal_entries WHERE id='${draft.id}'`))[0].status,
+    ).toBe('DRAFT');
+
+    // Money that genuinely stood before the draft's position does fund it.
+    const early = await receipt(13, '100', '2026-01-05');
+    await vouchers.post(COMPANY, USER, early.id);
+    await journals.post(COMPANY, USER, draft.id);
+    expect((await balance(13)).toFixed(4)).toBe('100.0000');
+  });
+
+  it('a number past the pad width is honoured in the statement\'s own lexical order', async () => {
+    await seedBox(14);
+    // A posted entry whose number outgrew the pad width, funding the box
+    // with 100 on the same day the payment below is dated.
+    await run(`INSERT INTO journal_entries(id,"companyId","branchId","entryNumber","entryDate",description,status,"totalDebit","totalCredit","createdBy","updatedAt")
+               VALUES ('c0000000-0000-4000-8000-c00000000011','${COMPANY}','${BRANCH}','JV-999999','2026-01-06','legacy wide number','POSTED',100,100,'${USER}',now())`);
+    await run(`INSERT INTO journal_lines(id,"journalEntryId","lineNumber","accountId",debit,credit)
+               VALUES ('c0000000-0000-4000-8000-c00000000012','c0000000-0000-4000-8000-c00000000011',1,'${glId(14)}',100,0),
+                      ('c0000000-0000-4000-8000-c00000000013','c0000000-0000-4000-8000-c00000000011',2,'${EXP}',0,100)`);
+    expect((await balance(14)).toFixed(4)).toBe('100.0000');
+
+    // A fresh payment takes a number inside the pad width (JV-0000xx), which
+    // sorts BEFORE 'JV-999999' on the same date - exactly where the
+    // statement shows it. There the box is empty, so the payment is refused
+    // even though the book's total would cover it: the statement is the
+    // truth the guard protects.
+    const pay = await payment(14, '100', '2026-01-06');
+    const failure = await vouchers
+      .post(COMPANY, USER, pay.id, { discloseBalance: true })
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure.response).toMatchObject({ code: 'CASH_BALANCE_NEGATIVE' });
+    expect((await voucherState(pay.id))[0].status).toBe('DRAFT');
+
+    // Inflows stay possible, and the total is untouched by the refusal.
+    const rc = await receipt(14, '50', '2026-01-07');
+    await vouchers.post(COMPANY, USER, rc.id);
+    expect((await balance(14)).toFixed(4)).toBe('150.0000');
+  });
 });

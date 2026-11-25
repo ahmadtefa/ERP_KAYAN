@@ -221,18 +221,23 @@ export class PostingService {
       );
     }
 
-    // A payment voucher, a transfer out, or any other document that takes
-    // money out of a box or a bank may not take out more than it holds.
-    await this.assertCashBalancesCover(tx, request.companyId, lines, request.entryDate, {
-      discloseBalance: request.discloseBalance,
-    });
-
+    // The number comes first: it decides where this entry lands in the cash
+    // statement's date/number order, and the guard checks that exact
+    // position. The allocation shares this transaction, so a refused posting
+    // returns the number to the sequence with everything else.
     const entryNumber = await this.numbers.next(
       tx,
       request.companyId,
       'JOURNAL',
       'JV',
     );
+
+    // A payment voucher, a transfer out, or any other document that takes
+    // money out of a box or a bank may not take out more than it holds.
+    await this.assertCashBalancesCover(tx, request.companyId, lines, request.entryDate, {
+      discloseBalance: request.discloseBalance,
+      candidateNumber: entryNumber,
+    });
 
     const entry = await tx.journalEntry.create({
       data: {
@@ -312,6 +317,12 @@ export class PostingService {
       throw new BadRequestException('Only a posted journal entry can be reversed');
     }
 
+    // The mirror's number decides where it lands in the cash statement's
+    // date/number order, and the guard checks that exact position. The
+    // allocation shares this transaction, so a refused reversal returns the
+    // number to the sequence with everything else.
+    const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
+
     // Reversing a receipt takes its money back out of the box, so a reversal
     // can overdraw a cash account exactly like a payment can. The guard runs
     // before the original is claimed: once the original reads REVERSED without
@@ -326,7 +337,7 @@ export class PostingService {
         credit: line.debit,
       })),
       entryDate,
-      { discloseBalance },
+      { discloseBalance, candidateNumber: entryNumber },
     );
 
     const claimed = await tx.journalEntry.updateMany({
@@ -350,7 +361,6 @@ export class PostingService {
       );
     }
 
-    const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
     const reversal = await tx.journalEntry.create({
       data: {
         companyId,
@@ -432,71 +442,97 @@ export class PostingService {
   }
 
   /**
-   * The lowest running balance an account reaches from `fromDate` onward, in
-   * the same order the box statement prints: entryDate, then entryNumber.
-   * A new entry carries the next entry number, so it lands at the end of its
-   * own date; the whole of `fromDate` therefore counts before it. Returned
-   * WITHOUT any lock: save-time checks use it as an advisory, posting checks
-   * call it while holding the cash account's row lock.
+   * The lowest running balance an account reaches from the position a new
+   * entry would occupy, in exactly the order the box statement prints:
+   * entryDate, then entryNumber (cash-accounts.service.ts statement()).
+   *
+   * `candidateNumber` matters twice. A manual journal keeps the number it
+   * was given as a draft, so when it posts days later its true position can
+   * be BEFORE same-day entries that were posted (and numbered) after the
+   * draft was created. And the six-digit series grows a seventh digit at one
+   * million, where lexical order flips against numeric order. The query
+   * compares numbers as strings exactly like the statement's ORDER BY, so
+   * the guard and the statement can never disagree about either case.
+   *
+   * A caller that does not know the number yet (the save-time advisory for
+   * a voucher, whose journal number is only allocated at posting) passes
+   * none and the candidate is placed after every same-day entry: the exact
+   * position a fresh number takes anywhere below the million boundary, and
+   * re-checked with the real number at posting.
+   *
+   * One indexed single-pass statement; the window aggregate is the same
+   * work the statement endpoint itself performs to print the box's history.
    */
   async lowestCashBalanceFrom(
     db: Prisma.TransactionClient,
     companyId: string,
     accountId: string,
     fromDate: Date,
+    candidateNumber?: string,
     excludeEntryId?: string,
   ): Promise<Prisma.Decimal> {
-    // Per-day aggregates, not per-line scans: within a day the entries are
-    // ordered by entryNumber, which follows posting order, and every posting
-    // through this guard was itself checked, so no intra-day dip can exist
-    // that the day totals would hide. The guard's own invariant carries the
-    // day; the aggregate carries the years.
+    // A number no real entry can sort past, for callers without a number.
+    const number = candidateNumber ?? '~~~~~~~~~~';
+    // Two plain templates rather than a conditional fragment: the position
+    // rule must stay exactly the one the statement prints.
     const rows = excludeEntryId
-      ? await db.$queryRaw<Array<{ d: Date; net: Prisma.Decimal | string }>>(Prisma.sql`
-          SELECT e."entryDate" AS d, SUM(l.debit - l.credit) AS net
-            FROM journal_lines l
-            JOIN journal_entries e ON e.id = l."journalEntryId"
-           WHERE e."companyId" = ${companyId}::uuid
-             AND e.status IN ('POSTED', 'REVERSED')
-             AND l."accountId" = ${accountId}::uuid
-             AND e.id <> ${excludeEntryId}::uuid
-           GROUP BY e."entryDate"
-           ORDER BY e."entryDate"
+      ? await db.$queryRaw<
+          Array<{ before_sum: Prisma.Decimal | string; min_after: Prisma.Decimal | string | null }>
+        >(Prisma.sql`
+          SELECT COALESCE(SUM(t.net) FILTER (WHERE t.is_before), 0) AS before_sum,
+                 MIN(t.running) FILTER (WHERE NOT t.is_before) AS min_after
+            FROM (
+              SELECT (l.debit - l.credit) AS net,
+                     (e."entryDate" < ${fromDate}::date
+                      OR (e."entryDate" = ${fromDate}::date
+                          AND e."entryNumber" < ${number})) AS is_before,
+                     SUM(l.debit - l.credit) OVER (
+                       ORDER BY e."entryDate", e."entryNumber", l."lineNumber"
+                     ) AS running
+                FROM journal_lines l
+                JOIN journal_entries e ON e.id = l."journalEntryId"
+               WHERE e."companyId" = ${companyId}::uuid
+                 AND e.status IN ('POSTED', 'REVERSED')
+                 AND l."accountId" = ${accountId}::uuid
+                 AND e.id <> ${excludeEntryId}::uuid
+            ) t
         `)
-      : await db.$queryRaw<Array<{ d: Date; net: Prisma.Decimal | string }>>(Prisma.sql`
-          SELECT e."entryDate" AS d, SUM(l.debit - l.credit) AS net
-            FROM journal_lines l
-            JOIN journal_entries e ON e.id = l."journalEntryId"
-           WHERE e."companyId" = ${companyId}::uuid
-             AND e.status IN ('POSTED', 'REVERSED')
-             AND l."accountId" = ${accountId}::uuid
-           GROUP BY e."entryDate"
-           ORDER BY e."entryDate"
+      : await db.$queryRaw<
+          Array<{ before_sum: Prisma.Decimal | string; min_after: Prisma.Decimal | string | null }>
+        >(Prisma.sql`
+          SELECT COALESCE(SUM(t.net) FILTER (WHERE t.is_before), 0) AS before_sum,
+                 MIN(t.running) FILTER (WHERE NOT t.is_before) AS min_after
+            FROM (
+              SELECT (l.debit - l.credit) AS net,
+                     (e."entryDate" < ${fromDate}::date
+                      OR (e."entryDate" = ${fromDate}::date
+                          AND e."entryNumber" < ${number})) AS is_before,
+                     SUM(l.debit - l.credit) OVER (
+                       ORDER BY e."entryDate", e."entryNumber", l."lineNumber"
+                     ) AS running
+                FROM journal_lines l
+                JOIN journal_entries e ON e.id = l."journalEntryId"
+               WHERE e."companyId" = ${companyId}::uuid
+                 AND e.status IN ('POSTED', 'REVERSED')
+                 AND l."accountId" = ${accountId}::uuid
+            ) t
         `);
-    const day = fromDate.toISOString().slice(0, 10);
-    let running = new Prisma.Decimal(0);
-    let atDate = new Prisma.Decimal(0);
-    let later: Prisma.Decimal | null = null;
-    for (const row of rows) {
-      running = running.plus(row.net);
-      const rowDay =
-        row.d instanceof Date ? row.d.toISOString().slice(0, 10) : String(row.d).slice(0, 10);
-      if (rowDay <= day) {
-        atDate = running;
-      } else {
-        later = later === null ? running : Prisma.Decimal.min(later, running);
-      }
-    }
-    return later === null ? atDate : Prisma.Decimal.min(atDate, later);
+    const before = new Prisma.Decimal(rows[0]?.before_sum ?? 0);
+    const after = rows[0]?.min_after;
+    if (after === null || after === undefined) return before;
+    return Prisma.Decimal.min(before, new Prisma.Decimal(after));
   }
 
   /**
    * A cash box or a bank account can never go negative: its balance is the
    * money physically in it, and a safe cannot hold less than nothing. Never
-   * means at no date: a receipt dated next week cannot fund a payment dated
-   * today, so the running balance is checked from the candidate entry's date
-   * onward, not only as an end-of-history total. Backdating inside an open
-   * period stays allowed whenever the box was actually covered at every date.
+   * means at no point of the statement: a receipt dated next week cannot
+   * fund a payment dated today, and a receipt numbered after a manual
+   * entry cannot fund that entry's own earlier position either. The running
+   * balance is checked from the candidate's exact statement position
+   * onward, never as an end-of-history total. Backdating inside an open
+   * period stays allowed whenever the box was actually covered at every
+   * position from the candidate's own on.
    *
    * Every ledger write funnels through PostingService (vouchers, transfers,
    * invoices, opening balances, year-end) except manual journal transitions,
@@ -520,7 +556,10 @@ export class PostingService {
    *
    * `excludeEntryId` is for the manual-journal transition, which claims its
    * entry (flips it to POSTED) before validating: the entry's own lines would
-   * otherwise be counted into the balance it is checked against.
+   * otherwise be counted into the balance it is checked against. The same
+   * path passes `candidateNumber`, because a manual entry keeps the number
+   * it took as a draft: its statement position can sit before same-day
+   * entries that posted days earlier, and only the real number finds it.
    *
    * `discloseBalance` carries the caller's permission check: only a user who
    * may read cash balances (cash.accounts.read) gets the figures in a
@@ -531,7 +570,12 @@ export class PostingService {
     companyId: string,
     lines: Array<{ accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal }>,
     entryDate: Date,
-    options: { excludeEntryId?: string; discloseBalance?: boolean; lock?: boolean } = {},
+    options: {
+      excludeEntryId?: string;
+      candidateNumber?: string;
+      discloseBalance?: boolean;
+      lock?: boolean;
+    } = {},
   ): Promise<void> {
     const netByAccount = new Map<string, Prisma.Decimal>();
     for (const line of lines) {
@@ -564,6 +608,7 @@ export class PostingService {
         companyId,
         cashAccount.accountId,
         entryDate,
+        options.candidateNumber,
         options.excludeEntryId,
       );
       const movement = netByAccount.get(cashAccount.accountId)!;
@@ -575,9 +620,9 @@ export class PostingService {
           throw new BadRequestException({
             code: 'CASH_BALANCE_NEGATIVE',
             message:
-              `رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب في أي تاريخ: أدنى رصيد تصل إليه «${cashAccount.nameAr}» (${cashAccount.code}) من تاريخ هذا القيد فصاعدًا هو ${floor.toFixed(MONEY_SCALE)} والمطلوب صرفه ${requested.toFixed(MONEY_SCALE)}. ` +
+              `رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب في أي موضع: أدنى رصيد تصل إليه «${cashAccount.nameAr}» (${cashAccount.code}) من موضع هذا القيد في كشف الحساب فصاعدًا هو ${floor.toFixed(MONEY_SCALE)} والمطلوب صرفه ${requested.toFixed(MONEY_SCALE)}. ` +
               `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض بتاريخ لا يتأخر عن هذا القيد. لم يُرحَّل أي قيد. / ` +
-              `A cash or bank balance can never go negative at any date: "${cashAccount.nameEn}" (${cashAccount.code}) runs as low as ${floor.toFixed(MONEY_SCALE)} from this entry's date onward and this pays out ${requested.toFixed(MONEY_SCALE)}. ` +
+              `A cash or bank balance can never go negative at any position: "${cashAccount.nameEn}" (${cashAccount.code}) runs as low as ${floor.toFixed(MONEY_SCALE)} from this entry's position in the statement onward and this pays out ${requested.toFixed(MONEY_SCALE)}. ` +
               `Lower the amount to the available balance or record a receipt dated no later than this entry. Nothing was posted.`,
             errors: {
               cashAccountCode: cashAccount.code,
