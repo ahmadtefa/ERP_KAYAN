@@ -175,6 +175,22 @@ void main() {
         final row = r.resolve(const ApiFailure('x', statusCode: 400, code: 'ISSUE_ALLOCATION_SUM', fieldErrors: {'row': '2 Mona'})).businessMessage!;
         expect(row, isNot(contains('Mona')));
       });
+      test('backup and restore refusals show reviewed guidance for their own status only, never the detail (arabic=$arabic)', () {
+        const expected = <String, int>{
+          'BACKUP_DELETE_LAST': 409, 'BACKUP_DELETE_IN_USE': 409, 'FULL_BACKUP_INCOMPLETE': 503,
+          'FULL_BACKUP_FAILURE_NOT_RECORDED': 503, 'FULL_RESTORE_UNAVAILABLE': 503, 'RESTORE_FAILED_RECOVERY_FAILED': 503,
+        };
+        expected.forEach((code, status) {
+          final shown = r.resolve(ApiFailure('C:\\Users\\Mona\\backups\\kayan.dump Original error: password=hunter2', statusCode: status, code: code)).businessMessage ?? '';
+          expect(shown, contains(code), reason: code);
+          expect(shown, isNot(contains('Mona')), reason: code);
+          expect(shown, isNot(contains('hunter2')), reason: code);
+          expect(shown, isNot(contains('kayan.dump')), reason: code);
+          expect(RegExp(r'[\u0600-\u06FF]').hasMatch(shown.split('\n').first), arabic, reason: code);
+          final wrong = r.resolve(ApiFailure('detail', statusCode: status == 409 ? 400 : 409, code: code)).businessMessage ?? '';
+          expect(wrong, isNot(contains(code)), reason: '$code wrong status');
+        });
+      });
       test('an unlisted code with a readable body is not shown (arabic=$arabic)', () {
         final out = r.resolve(const ApiFailure('Line 1: something readable / Line 1: something readable', statusCode: 400, code: 'STOCK_DOC_SOMETHING_NEW'));
         expect(out.businessMessage ?? '', isNot(contains('something readable')));

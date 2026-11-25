@@ -314,6 +314,36 @@ class AppErrorMessageResolver {
     ],
   };
 
+  /// Backup and restore refusals that are not 400s. Each code is valid for one
+  /// status only; the sentence is reviewed, the server detail is never shown
+  /// (it can name files, folders and original errors).
+  static const _backupRefusals = <String, ({int status, List<String> text})>{
+    'BACKUP_DELETE_LAST': (status: 409, text: [
+      'هذه آخر نسخة احتياطية على الخادم، وحذفها لا يترك طريقًا للرجوع. أنشئ نسخة احتياطية أخرى أولًا ثم احذف هذه.',
+      'This is the last backup on the server, and deleting it would leave no way back. Create another backup first, then delete this one.',
+    ]),
+    'BACKUP_DELETE_IN_USE': (status: 409, text: [
+      'لا يمكن حذف هذه النسخة الآن: إما أن استعادة تعمل حاليًا أو أنها نسخة الحماية التي تحتاجها استعادة متوقفة. انتظر انتهاء الاستعادة أو أنهِ الاسترداد أولًا ثم حاول مرة أخرى.',
+      'This backup cannot be deleted now: a restore is running, or it is the protective copy an interrupted restore still needs. Wait for the restore to finish, or resolve the recovery first, then try again.',
+    ]),
+    'FULL_BACKUP_INCOMPLETE': (status: 503, text: [
+      'تعذر إكمال النسخة الاحتياطية الكاملة ولم تُنشأ نسخة صالحة. بياناتك لم تتأثر. تأكد من وجود مساحة فارغة وأن أدوات النسخ الاحتياطي موجودة ثم حاول مرة أخرى، وإن تكرر الخطأ فتواصل مع الدعم.',
+      'The complete backup could not be finished and no usable backup was created. Your data is not affected. Check that there is free disk space and the backup tools are installed, then try again; if it repeats, contact support.',
+    ]),
+    'FULL_BACKUP_FAILURE_NOT_RECORDED': (status: 503, text: [
+      'النسخة الاحتياطية الكاملة غير متاحة ولم تُنشأ أي نسخة، كما تعذر تسجيل المحاولة. بياناتك لم تتأثر. حاول لاحقًا وإن تكرر الخطأ فتواصل مع الدعم.',
+      'The complete backup is unavailable, no backup was created, and the attempt could not be recorded. Your data is not affected. Try again later; if it repeats, contact support.',
+    ]),
+    'FULL_RESTORE_UNAVAILABLE': (status: 503, text: [
+      'الاستعادة الكاملة متوقفة على هذا الجهاز لحماية البيانات حتى تكتمل ضمانات الأمان. لم يتغير شيء. استخدم استعادة الشركة أو تواصل مع الدعم.',
+      'Full restore is turned off on this machine to protect your data until every safeguard is in place. Nothing was changed. Use a company restore instead, or contact support.',
+    ]),
+    'RESTORE_FAILED_RECOVERY_FAILED': (status: 503, text: [
+      'فشلت الاستعادة وفشل الاسترداد التلقائي أيضًا. لا تدخل بيانات. استعد يدويًا من نسخة الحماية الموجودة في مجلد النسخ الاحتياطية أو تواصل مع الدعم فورًا.',
+      'The restore failed and the automatic recovery failed too. Do not enter data. Restore manually from the safety backup in the backup folder, or contact support right away.',
+    ]),
+  };
+
   String _stockDocContext(Map<String, String> fields) {
     final line = fields['lineNumber'];
     if (line != null && RegExp(r'^[0-9]{1,4}$').hasMatch(line)) {
@@ -416,6 +446,17 @@ class AppErrorMessageResolver {
             severity: AppErrorSeverity.warning,
             businessMessage:
                 '$sentence\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
+          );
+        }
+      }
+      if (error is ApiFailure) {
+        final backup = _backupRefusals[error.code];
+        if (backup != null && backup.status == error.statusCode) {
+          return AppErrorText(
+            reason: AppErrorReason.conflict,
+            severity: AppErrorSeverity.warning,
+            businessMessage:
+                '${backup.text[isArabic ? 0 : 1]}\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
           );
         }
       }
