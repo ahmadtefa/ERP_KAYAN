@@ -1,3 +1,10 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/services.dart';
+
+import 'package:flutter/rendering.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -21,6 +28,8 @@ class _Api extends ApiClient {
   final posts = <(String, Object?)>[];
   final keys = <String?>[];
   int reads = 0;
+  bool refuse = false;
+  bool definite = false;
   Map<String, dynamic> get row => {
     'id': 't',
     'documentNumber': 'TR-OPS',
@@ -64,13 +73,42 @@ class _Api extends ApiClient {
     String? idempotencyKey,
   }) async {
     posts.add((path, body));
+    if (definite) {
+      throw const ApiFailure(
+        "Source quantity changed. Reduce the amount.",
+        statusCode: 400,
+      );
+    }
+    if (refuse) throw StateError("PRIVATE_TRANSFER_DIAGNOSTIC");
     keys.add(idempotencyKey);
     return {};
   }
 }
 
+final visualKey = GlobalKey();
 void main() {
   Future<void> pump(WidgetTester tester, _Api api) async {
+    await tester.runAsync(() async {
+      await (FontLoader('IBMPlexSansArabic')..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                    .readAsBytesSync(),
+              ),
+            ),
+          ))
+          .load();
+      await (FontLoader('MaterialIcons')..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          ))
+          .load();
+    });
     tester.view.physicalSize = const Size(1500, 1100);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -99,11 +137,15 @@ void main() {
             ),
           ),
         ],
-        child: MaterialApp.router(
-          locale: const Locale('en'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          routerConfig: router,
+        child: RepaintBoundary(
+          key: visualKey,
+          child: MaterialApp.router(
+            theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
+            locale: const Locale('en'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
         ),
       ),
     );
@@ -216,4 +258,103 @@ void main() {
       expect(api.posts.single.$2, {'reason': 'check source'});
     },
   );
+  testWidgets(
+    'uncertain dispatch retains quantity hides diagnostics and blocks duplicate',
+    (tester) async {
+      final api = _Api('APPROVED')..refuse = true;
+      await pump(tester, api);
+      await tester.tap(find.text('Dispatch'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1.25');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'), findsNothing);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'Qty'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Qty'))
+            .controller!
+            .text,
+        '1.25',
+      );
+      expect(api.posts, hasLength(1));
+      expect(find.textContaining('may have completed'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'definite receive refusal retains input and permits corrected retry',
+    (tester) async {
+      final api = _Api('DISPATCHED')..definite = true;
+      await pump(tester, api);
+      await tester.tap(find.text('Receive'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1.25');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Qty'))
+            .controller!
+            .text,
+        '1.25',
+      );
+      api.definite = false;
+      await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      expect(api.posts, hasLength(2));
+      expect(api.keys[1],isNot(api.keys[0]));
+      expect(api.posts.last.$2, {
+        'lines': [
+          {'lineId': 'line', 'quantity': '1'},
+        ],
+      });
+    },
+  );
+  testWidgets('uncertain settlement keeps all amounts and blocks submit', (
+    tester,
+  ) async {
+    final api = _Api('DISPATCHED')..refuse = true;
+    await pump(tester, api);
+    await tester.tap(find.text('Settle differences'));
+    await tester.pumpAndSettle();
+    final fields = find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.byType(TextField),
+    );
+    for (var i = 0; i < 4; i++) {
+      await tester.enterText(fields.at(i), ['1', '0.5', '0.25', 'verified'][i]);
+    }
+    await tester.tap(find.text('Submit settlement'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'), findsNothing);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+      'verified',
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Submit settlement'),
+          )
+          .onPressed,
+      isNull,
+    );
+    final boundary =
+        visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final image = await boundary.toImage();
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      await File('/downloads/transfer-settlement-retained.png')
+          .writeAsBytes(bytes!.buffer.asUint8List());
+      image.dispose();
+    });
+  });
 }
