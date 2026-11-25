@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -30,6 +31,7 @@ class _TransferApi extends ApiClient {
 }
 
 void main() {
+  setUp(() { SharedPreferences.setMockInitialValues({}); });
   for (final locale in [const Locale('en'), const Locale('ar')]) {
     testWidgets('transfer details scroll vertically and horizontally in ${locale.languageCode}', (tester) async {
       tester.view.physicalSize = const Size(580, 600);

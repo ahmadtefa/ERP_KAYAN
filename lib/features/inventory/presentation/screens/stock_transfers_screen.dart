@@ -3,6 +3,8 @@ import '../../../../shared/widgets/persistent_table_scroll.dart';
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -785,13 +787,50 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
     _load();
   }
 
+  String get recoveryScope {
+    final user = ref.read(currentUserProvider);
+    final server = ref.read(apiClientProvider).raw.options.baseUrl;
+    return 'transfer-recovery:${Uri.encodeComponent(server)}:${user?.companyId}:${user?.id}:${widget.id}';
+  }
+
+  Future<void> persistOperation(_UncertainTransferOperation? operation) async {
+    final preferences = await SharedPreferences.getInstance();
+    final ok = operation == null
+        ? await preferences.remove(recoveryScope)
+        : await preferences.setString(
+            recoveryScope,
+            jsonEncode({
+              'action': operation.action,
+              'key': operation.key,
+              'lines': operation.lines,
+            }),
+          );
+    if (!ok) {
+      throw const ValidationFailure(
+        'The recovery record could not be saved. No new request was sent.',
+      );
+    }
+  }
+
   Json? approvalPath;
   String? reconciliation;
   Future<void> _load() async {
     try {
       final api = ref.read(apiClientProvider);
+      final preferences = await SharedPreferences.getInstance();
+      final stored = preferences.getString(recoveryScope);
+      if (stored != null) {
+        final data = jsonDecode(stored) as Map<String, dynamic>;
+        ref.read(
+          _uncertainTransferOperations,
+        )[recoveryScope] = _UncertainTransferOperation(
+          data['action'] as String,
+          data['key'] as String,
+          listOf(data['lines']),
+        );
+      }
       final x = await api.getObject('/inventory/stock-transfers/${widget.id}');
-      final pending = ref.read(_uncertainTransferOperations)[widget.id];
+      final pending = ref.read(_uncertainTransferOperations)[recoveryScope];
       if (pending != null) {
         final actions = listOf(x['actions']);
         final confirmed = actions.any(
@@ -801,7 +840,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
               a['stockDocumentId'] != null,
         );
         if (confirmed) {
-          ref.read(_uncertainTransferOperations).remove(widget.id);
+          await persistOperation(null);
+          ref.read(_uncertainTransferOperations).remove(recoveryScope);
           reconciliation = t(
             'تم تأكيد العملية السابقة من سجل التحويل. راجع الكميات المحدثة.',
             'The earlier operation is confirmed in the transfer record. Review the updated quantities.',
@@ -855,7 +895,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (reconciliation != null) Text(reconciliation!),
-                  if (ref.read(_uncertainTransferOperations)[widget.id] != null)
+                  if (ref.read(_uncertainTransferOperations)[recoveryScope] !=
+                      null)
                     Text(
                       t(
                         'توجد عملية غير مؤكدة محفوظة. افتح نفس الإجراء لمراجعة بياناته. الإرسال محظور حتى يؤكد سجل التحويل النتيجة. حدّث أو راجع المدير.',
@@ -1082,12 +1123,15 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
     child: Text(label),
   );
   Future<void> _run(String action) async {
+    if (loading || row == null) return;
     final api = ref.read(apiClientProvider);
     final lines = (row?['lines'] as List? ?? const [])
         .whereType<Map>()
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
-    final existingPending = ref.read(_uncertainTransferOperations)[widget.id];
+    final existingPending = ref.read(
+      _uncertainTransferOperations,
+    )[recoveryScope];
     if (existingPending != null && existingPending.action != action) {
       await showAppError(
         context,
@@ -1101,7 +1145,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
     final key = '$action-${DateTime.now().microsecondsSinceEpoch}';
     if (action == 'dispatch' || action == 'receive' || action == 'settle') {
       final savedOperations = ref.read(_uncertainTransferOperations);
-      final pending = savedOperations[widget.id];
+      final pending = savedOperations[recoveryScope];
       if (pending != null && pending.action != action) {
         await showAppError(
           context,
@@ -1113,23 +1157,34 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
       }
       Future<void> send(List<Json> selected) async {
         final requestKey = '$action-${DateTime.now().microsecondsSinceEpoch}';
+        final operation = _UncertainTransferOperation(
+          action,
+          requestKey,
+          selected.map((e) => Map<String, dynamic>.from(e)).toList(),
+        );
+        await persistOperation(operation);
+        savedOperations[recoveryScope] = operation;
         try {
           await api.post(
             '/inventory/stock-transfers/${widget.id}/$action',
             body: {'lines': selected},
             idempotencyKey: requestKey,
           );
-          savedOperations.remove(widget.id);
+          await persistOperation(null);
+          savedOperations.remove(recoveryScope);
         } catch (error) {
           if (!(error is ApiFailure &&
               error.statusCode != null &&
               error.statusCode! >= 400 &&
               error.statusCode! < 500)) {
-            savedOperations[widget.id] = _UncertainTransferOperation(
+            savedOperations[recoveryScope] = _UncertainTransferOperation(
               action,
               requestKey,
               selected.map((e) => Map<String, dynamic>.from(e)).toList(),
             );
+          } else {
+            await persistOperation(null);
+            savedOperations.remove(recoveryScope);
           }
           rethrow;
         }
@@ -1153,7 +1208,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                 pending: pending?.lines,
               ),
       );
-      if (mounted && (saved == true || savedOperations[widget.id] != null)) {
+      if (mounted &&
+          (saved == true || savedOperations[recoveryScope] != null)) {
         await _load();
       }
       return;

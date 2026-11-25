@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -51,6 +52,7 @@ class _Api extends ApiClient {
 }
 
 void main() {
+  setUp(() { SharedPreferences.setMockInitialValues({}); });
   testWidgets('transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key', (tester) async {
     tester.view.physicalSize = const Size(1400, 1000);
     tester.view.devicePixelRatio = 1;
