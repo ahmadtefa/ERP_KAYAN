@@ -72,7 +72,7 @@ jobs:
         run: |
           [ -f "$RUNNER_TEMP/noskip/noskip-report.json" ] && node -e '
           const r=require(process.env.RUNNER_TEMP+"/noskip/noskip-report.json");
-          console.log(JSON.stringify({discovered:r.filesDiscovered,executed:r.filesExecuted,signingExcluded:r.signingExcluded.length,passedCases:r.passedCases,pendingCases:r.pendingCases,bridgePendingFiles:r.bridgePendingFiles,failedFiles:r.failedFiles},null,1))'
+          console.log(JSON.stringify({discovered:r.filesDiscovered,executed:r.filesExecuted,signingExcluded:r.signingExcluded.length,passedCases:r.passedCases,pendingCases:r.pendingCases,manifestedBridgePending:r.manifestedBridgePending,unresolvedPending:r.unresolvedPending.length,failedFiles:r.failedFiles},null,1))'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

@@ -6,10 +6,9 @@
 // Explicit scope boundaries (listed in the report, never silent):
 //  * SIGNING_EXCLUDED: the 12 licence signing/store specs that need the
 //    approved VM. They are not executed here.
-//  * BRIDGE_SCOPE: files whose remaining cases are Flutter bridge cases. They
-//    run without the bridge flag here (failures still fail) and their pending
-//    count is recorded. The bridges are qualified by the separate bridge
-//    workflow, not by this runner.
+//  * BRIDGE manifest (scripts/noskip-bridge-manifest.json): exact pending case
+//    identities per file that the separate Flutter bridge workflow covers. They
+//    are the only pending cases allowed; any other pending case fails the file.
 //
 // Usage: DATABASE_ADMIN_URL=postgresql://u:p@host:port/postgres \
 //        node scripts/noskip-backend-runner.mjs <out-dir> [substring-filter]
@@ -31,8 +30,6 @@ const SIGNING_EXCLUDED = new Set([
   'license-proof', 'license-store', 'licensing-http-guard', 'licensing-key-replacement',
   'licensing-keyring-integration', 'licensing-upgrade-model', 'licensing.enforcement', 'licensing.service',
 ]);
-const BRIDGE_FLAGS = ['KAYAN_STOCKDOC_LOCATION_UI', 'KAYAN_TRANSFER_LOCATION_UI', 'KAYAN_SALES_LOCATION_UI',
-  'KAYAN_LOCATION_UI', 'KAYAN_COUNT_LOCATION_UI', 'KAYAN_PURCHASE_LOCATION_UI'];
 const PG_FLAGS = ['KAYAN_MASTER_DATA_BACKUP_PG', 'KAYAN_COMPANY_BACKUP_PG', 'KAYAN_AUTH_PASSWORD_PG',
   'KAYAN_WAREHOUSE_ACCESS_PG', 'KAYAN_AUTH_SESSION_PG', 'KAYAN_BARRIER_PG', 'KAYAN_RATE_LIMIT_PG',
   'KAYAN_TX_LIFETIME_PG', 'KAYAN_DASHBOARD_PG', 'KAYAN_AGING_PG', 'KAYAN_APPROVALS_PG', 'KAYAN_REAL_PG_TESTS'];
@@ -52,9 +49,11 @@ const base = (f) => f.replace(/^.*\//, '').replace(/\.spec\.ts$/, '');
 const signing = all.filter((f) => SIGNING_EXCLUDED.has(base(f)) && f.includes('/licensing/'));
 const runnable = all.filter((f) => !signing.includes(f));
 const needsDb = (f) => /DATABASE_URL|KAYAN_[A-Z_]*_PG\b|KAYAN_REAL_PG_TESTS/.test(readFileSync(join(backend, f), 'utf8'));
-const bridgeScoped = (f) => BRIDGE_FLAGS.some((k) => readFileSync(join(backend, f), 'utf8').includes(k));
 
-const u = new URL(adminUrl);
+const manifestPath = resolve(backend, 'scripts/noskip-bridge-manifest.json');
+// Exact pending case identities that are covered by the separate Flutter bridge
+// proof. Anything pending that is not listed here, exactly, fails its file.
+const bridgeManifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
 const dbUrl = (name) => { const x = new URL(adminUrl); x.pathname = `/${name}`; x.searchParams.set('schema', 'public'); return x.toString(); };
 const admin = new pg.Client({ connectionString: adminUrl });
 await admin.connect();
@@ -80,7 +79,6 @@ let n = 0;
 for (const f of runnable) {
   const id = f.replace(/[\/.]/g, '_');
   const db = needsDb(f);
-  const bridge = bridgeScoped(f);
   const env = { ...env0 };
   let dbName = null;
   if (db) {
@@ -97,22 +95,32 @@ for (const f of runnable) {
     }
   }
   const jsonPath = join(out, `${id}.jest.json`);
-  const r = spawnSync('npx', ['jest', '--runInBand', '--json', `--outputFile=${jsonPath}`, f], { cwd: backend, env, encoding: 'utf8', timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 });
-  writeFileSync(join(out, `${id}.log`), (r.stdout ?? '') + (r.stderr ?? ''));
+  const regPath = join(out, `${id}.registration.json`);
+  const run = (extra, outFile) => spawnSync('npx', ['jest', '--runInBand', ...extra, '--json', `--outputFile=${outFile}`, f], { cwd: backend, env, encoding: 'utf8', timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 });
+  const reg = run(['--collectTests'], regPath);
+  const r = run([], jsonPath);
+  writeFileSync(join(out, `${id}.log`), (reg.stdout ?? '') + (reg.stderr ?? '') + (r.stdout ?? '') + (r.stderr ?? ''));
   let verdict = 'FAIL'; let reason = 'no result';
-  let j = null;
-  if (existsSync(jsonPath)) {
-    j = JSON.parse(readFileSync(jsonPath, 'utf8'));
-    const cases = (j.testResults ?? []).flatMap((s) => s.assertionResults ?? []);
-    const bad = cases.filter((c) => c.status !== 'passed');
-    if (r.status !== 0 || j.numFailedTests || j.numFailedTestSuites || j.numRuntimeErrorTestSuites) reason = 'failed cases or suites';
+  const ident = (file) => (JSON.parse(readFileSync(file, 'utf8')).testResults ?? []).flatMap((x) => (x.assertionResults ?? []).map((c) => c.fullName)).sort();
+  if (existsSync(jsonPath) && existsSync(regPath)) {
+    const j = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    const registered = ident(regPath);
+    const cases = (j.testResults ?? []).flatMap((x) => x.assertionResults ?? []);
+    const executed = cases.map((c) => c.fullName).sort();
+    const pendingIds = cases.filter((c) => c.status === 'pending').map((c) => c.fullName).sort();
+    const allowed = new Set(bridgeManifest[f] ?? []);
+    const unmanifested = pendingIds.filter((n) => !allowed.has(n));
+    const bad = cases.filter((c) => !['passed', 'pending'].includes(c.status));
+    if (r.status !== 0 || j.numFailedTests || j.numFailedTestSuites || j.numRuntimeErrorTestSuites || bad.length) reason = 'failed cases or suites';
+    else if (!registered.length || JSON.stringify(registered) !== JSON.stringify(executed)) reason = `registered ${registered.length} vs executed ${executed.length} case identities differ`;
     else if (!j.numPassedTests) reason = 'no case ran';
     else if (j.numTodoTests) reason = 'todo cases';
-    else if (j.numPendingTests && !bridge) reason = `${j.numPendingTests} pending/skipped`;
-    else { verdict = j.numPendingTests ? 'PASS_BRIDGE_PENDING' : 'PASS'; reason = ''; }
-    results.push({ file: f, verdict, reason, db, bridgeScoped: bridge, passed: j.numPassedTests, pending: j.numPendingTests, failed: j.numFailedTests,
+    else if (unmanifested.length) reason = `${unmanifested.length} pending/skipped case identities are not in the bridge manifest`;
+    else { verdict = pendingIds.length ? 'PASS_BRIDGE_MANIFESTED_PENDING' : 'PASS'; reason = ''; }
+    results.push({ file: f, verdict, reason, db, passed: j.numPassedTests, pending: j.numPendingTests, failed: j.numFailedTests,
+      registeredCount: registered.length, executedCount: executed.length, pendingIdentities: pendingIds,
       identities: cases.map((c) => `${c.status}\t${c.fullName}`) });
-  } else results.push({ file: f, verdict, reason, db, bridgeScoped: bridge });
+  } else results.push({ file: f, verdict, reason, db });
   console.log(`${verdict.padEnd(20)} ${f} ${reason}`);
   if (dbName) await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`).catch(() => {});
 }
@@ -122,7 +130,8 @@ const sum = (k) => results.reduce((a, r) => a + (r[k] ?? 0), 0);
 const report = {
   scope: 'Backend spec files executed one at a time with required flags; NOT full-product: signing/store specs and Flutter bridge cases are separate scopes.',
   filesDiscovered: all.length, filesExecuted: runnable.length, signingExcluded: signing,
-  bridgePendingFiles: results.filter((r) => r.verdict === 'PASS_BRIDGE_PENDING').map((r) => ({ file: r.file, pending: r.pending })),
+  manifestedBridgePending: results.filter((r) => r.verdict === 'PASS_BRIDGE_MANIFESTED_PENDING').map((r) => ({ file: r.file, pending: r.pending })),
+  unresolvedPending: results.filter((r) => r.verdict === 'FAIL' && r.pendingIdentities?.length).map((r) => ({ file: r.file, pendingIdentities: r.pendingIdentities })),
   passedCases: sum('passed'), pendingCases: sum('pending'), failedFiles: results.filter((r) => r.verdict === 'FAIL').map((r) => ({ file: r.file, reason: r.reason })),
   results,
 };
