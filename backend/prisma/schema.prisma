@@ -3167,6 +3167,9 @@ model StockTakeSession {
   createdAt DateTime @default(now())
   createdBy String?  @db.Uuid
   updatedAt DateTime @updatedAt
+  /// Client key of the create request and a fingerprint of its content; NULL on older sessions.
+  createRequestKey  String? @db.VarChar(120)
+  createRequestHash String? @db.VarChar(64)
 
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)

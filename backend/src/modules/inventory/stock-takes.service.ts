@@ -6,6 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma, StockDocumentKind } from '@prisma/client';
+import { createHash } from 'crypto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { STOCKTAKE_PENDING_APPROVAL, dedupeKey } from '../notifications/notification-kinds';
 
@@ -191,6 +192,37 @@ export class StockTakesService {
     };
   }
 
+  private createKey(raw: string): string {
+    const key = String(raw).trim();
+    if (!key || key.length > 120) throw new BadRequestException('The request key must be 1 to 120 characters.');
+    return key;
+  }
+
+  private async keyedSession(companyId: string, userId: string, key: string) {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; createRequestHash: string | null }>>(Prisma.sql`
+      SELECT id, "createRequestHash" FROM "stock_take_sessions"
+       WHERE "companyId"=${companyId}::uuid AND "createdBy"=${userId}::uuid AND "createRequestKey"=${key} LIMIT 1`);
+    return rows[0] ?? null;
+  }
+
+  /// Read-only: what is committed under one create key for THIS actor. COMPLETED
+  /// means the session exists (its status is whatever it is now). ABSENT only
+  /// means nothing is committed under the key yet: it never proves the request
+  /// will not still commit. Replaying the same key and content is safe.
+  /// Never exposes the fingerprint, costs or other users' counts.
+  async createOutcome(companyId: string, userId: string, rawKey: string, scope: WarehouseScope = null) {
+    const key = this.createKey(rawKey);
+    const prior = await this.keyedSession(companyId, userId, key);
+    if (!prior) return { key, state: 'ABSENT' as const, session: null };
+    const row = await this.prisma.stockTakeSession.findFirst({
+      where: { id: prior.id, companyId },
+      select: { id: true, code: true, status: true, scope: true, warehouseId: true, branchId: true, createdAt: true },
+    });
+    if (!row) return { key, state: 'ABSENT' as const, session: null };
+    if (scope !== null && !scope.includes(row.branchId)) return { key, state: 'ABSENT' as const, session: null };
+    return { key, state: 'COMPLETED' as const, session: { id: row.id, code: row.code, status: row.status, scope: row.scope, warehouseId: row.warehouseId, createdAt: row.createdAt } };
+  }
+
   /// Opens a session and freezes what the system believes, right now.
   ///
   /// The freeze is the whole point: a receipt posted while somebody is counting
@@ -207,7 +239,25 @@ export class StockTakesService {
       notes?: string;
     },
     scope: WarehouseScope = null,
+    rawKey?: string | null,
   ) {
+    // Optional client key. Without one the legacy behaviour applies and the
+    // outcome of a lost response cannot be reconciled by key.
+    const key = rawKey === undefined || rawKey === null || rawKey === '' ? null : this.createKey(rawKey);
+    const fingerprint = createHash('sha256').update(JSON.stringify({
+      company: companyId, actor: userId, warehouseId: dto.warehouseId,
+      scope: dto.scope ?? 'FULL', itemIds: [...new Set((dto.itemIds ?? []).filter(Boolean))].sort(),
+      notes: dto.notes?.trim() || null,
+    })).digest('hex');
+    if (key) {
+      const prior = await this.keyedSession(companyId, userId, key);
+      if (prior) {
+        if (prior.createRequestHash !== fingerprint) {
+          throw new ConflictException('This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.');
+        }
+        return this.findOne(companyId, prior.id, scope);
+      }
+    }
     const warehouse = await this.prisma.warehouse.findFirst({
       where: { id: dto.warehouseId, companyId, deletedAt: null, isActive: true },
       select: { id: true, branchId: true },
@@ -242,7 +292,9 @@ export class StockTakesService {
     // commits. Reading it from inside - which this used to do - asks a
     // connection that cannot yet see the row, so the create answered "session
     // not found" and rolled itself back: no count could ever be opened.
-    const sessionId = await this.prisma.$transaction(async (tx) => {
+    let sessionId: { id: string; code: string };
+    try {
+    sessionId = await this.prisma.$transaction(async (tx) => {
       const code = await this.numbers.next(tx, companyId, 'STOCK_TAKE', 'STK');
       const session = await tx.stockTakeSession.create({
         data: {
@@ -378,8 +430,27 @@ export class StockTakesService {
         });
       }
 
+      // Key and fingerprint commit with the session. A concurrent twin loses on
+      // the unique index, rolls back whole (its number too) and re-reads the winner.
+      if (key) {
+        await tx.$executeRaw(Prisma.sql`UPDATE "stock_take_sessions" SET "createRequestKey"=${key}, "createRequestHash"=${fingerprint} WHERE id=${session.id}::uuid`);
+      }
       return { id: session.id, code };
     });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      const code = (error as { code?: unknown }).code;
+      if (key && (code === 'P2002' || code === '23505' || /unique|duplicate|create_request_key/i.test(text))) {
+        const winner = await this.keyedSession(companyId, userId, key);
+        if (winner) {
+          if (winner.createRequestHash !== fingerprint) {
+            throw new ConflictException('This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.');
+          }
+          return this.findOne(companyId, winner.id, scope);
+        }
+      }
+      throw error;
+    }
 
     await this.audit.record({
       companyId,

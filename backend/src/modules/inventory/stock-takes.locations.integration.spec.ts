@@ -145,6 +145,28 @@ const vmReady =
   const shelf = async (loc: string | null) =>
     Number((await one(db, `SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "itemId"=$1 AND "storageLocationId" ${loc ? '= $2' : 'IS NULL'}`, loc ? [ITEM, loc] : [ITEM])).q);
 
+
+  it('patch54 own-key creation replay changed intent and safe read are exact',async()=>{
+    const body={warehouseId:WAREHOUSE,scope:'PARTIAL' as const,itemIds:[ITEM],notes:'shelf check'};
+    const first=await takes.start(COMPANY,USER,body,null,'own-create');
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L2',quantity:2,unitCost:2});
+    const again=await takes.start(COMPANY,USER,{...body,notes:' shelf check ',itemIds:[ITEM,ITEM]},null,'own-create');
+    expect(again.id).toBe(first.id);expect(again.lines).toEqual(first.lines);
+    await expect(takes.start(COMPANY,USER,{...body,notes:'changed'},null,'own-create')).rejects.toThrow('different count');
+    expect((await takes.createOutcome(COMPANY,USER,'own-create')).session?.id).toBe(first.id);
+    expect((await takes.createOutcome(COMPANY,'99999999-9999-4999-8999-999999999999','own-create')).state).toBe('ABSENT');
+    expect((await takes.createOutcome(COMPANY,USER,'own-create',[])).state).toBe('ABSENT');
+    const read=JSON.stringify(await takes.createOutcome(COMPANY,USER,'own-create'));expect(read).not.toMatch(/Hash|notes|unitCost|systemQuantity|createdBy/);
+  });
+  it('patch54 keyed marker failure rolls back frozen rows and number then permits original request',async()=>{
+    const before=await db.query(`SELECT * FROM document_sequences`);
+    await db.exec(`CREATE FUNCTION fail_count_key() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW."createRequestKey" IS NOT NULL THEN RAISE EXCEPTION 'create-key-failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_count_create BEFORE UPDATE ON stock_take_sessions FOR EACH ROW EXECUTE FUNCTION fail_count_key();`);
+    await expect(takes.start(COMPANY,USER,{warehouseId:WAREHOUSE,scope:'PARTIAL',itemIds:[ITEM]},null,'rollback-key')).rejects.toThrow('create-key-failure');
+    expect((await db.query('SELECT * FROM stock_take_sessions')).rows).toHaveLength(0);expect((await db.query('SELECT * FROM stock_take_lines')).rows).toHaveLength(0);expect((await db.query('SELECT * FROM document_sequences')).rows).toEqual(before.rows);
+    expect((await takes.createOutcome(COMPANY,USER,'rollback-key')).state).toBe('ABSENT');
+    await db.exec('DROP TRIGGER fail_count_create ON stock_take_sessions');
+    const success=await takes.start(COMPANY,USER,{warehouseId:WAREHOUSE,scope:'PARTIAL',itemIds:[ITEM]},null,'rollback-key');expect(success.lines.length).toBeGreaterThan(1);expect((await takes.createOutcome(COMPANY,USER,'rollback-key')).state).toBe('COMPLETED');
+  });
   it('freezes one row per shelf plus an unlocated row, and a shelf shortfall posts against that shelf only', async () => {
     const session = await takes.start(COMPANY, USER, { warehouseId: WAREHOUSE, scope: 'PARTIAL', itemIds: [ITEM] }) as unknown as { id: string; lines: Array<{ id: string; storageLocationCode: string | null; systemQuantity: string }> };
     const rows = Object.fromEntries(session.lines.map((l) => [l.storageLocationCode ?? 'none', l.systemQuantity]));

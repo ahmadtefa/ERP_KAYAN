@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -196,12 +199,56 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
         // Full counts do not need the item catalogue.
       }
       if (!mounted) return;
-      var warehouseId = text(warehouses.first, 'id');
-      var scope = 'FULL';
-      final selected = <String>{};
-      var notes = '';
-      final draft = await showDialog<Map<String, dynamic>>(
+      final user = ref.read(currentUserProvider);
+      final recoveryScope =
+          'count-create:${ref.read(appConfigProvider).apiBaseUrl}:${user?.id}:${user?.companyId}';
+      final preferences = await SharedPreferences.getInstance();
+      final stored = preferences.getString(recoveryScope);
+      Json? pending = stored == null ? null : jsonDecode(stored) as Json;
+      if (pending != null) {
+        try {
+          final outcome = await client.getObject(
+            '/inventory/stock-takes/by-key/${Uri.encodeComponent(pending['key'] as String)}',
+          );
+          final session = outcome['session'];
+          if (outcome['key'] == pending['key'] &&
+              outcome['state'] == 'COMPLETED' &&
+              session is Map &&
+              session['id'] is String &&
+              session['warehouseId'] ==
+                  (pending['body'] as Map)['warehouseId']) {
+            if (!await preferences.remove(recoveryScope)) {
+              throw StateError('Recovery clear failed');
+            }
+            await ref.read(stockTakesProvider.notifier).refreshQuietly();
+            if (mounted) await _openSession({'id': session['id']});
+            return;
+          }
+        } catch (_) {
+          /* Unverifiable proof must not enable another create. */
+        }
+      }
+      final savedBody = pending?['body'] as Map?;
+      var warehouseId =
+          savedBody?['warehouseId'] as String? ?? text(warehouses.first, 'id');
+      var scope = savedBody?['scope'] as String? ?? 'FULL';
+      final selected = (savedBody?['itemIds'] as List? ?? const [])
+          .cast<String>()
+          .toSet();
+      var notes = savedBody?['notes'] as String? ?? '';
+      final notesController = TextEditingController(text: notes);
+      var sending = false;
+      var blocked = pending != null;
+      final requestKey =
+          pending?['key'] as String? ??
+          'count-${DateTime.now().microsecondsSinceEpoch}';
+      if (!mounted) {
+        notesController.dispose();
+        return;
+      }
+      final createRoute = DialogRoute<Map<String, dynamic>>(
         context: context,
+        barrierDismissible: false,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, setDialogState) => AlertDialog(
             title: Text(_arabic ? 'فتح جرد جديد' : 'Open a new stock take'),
@@ -211,22 +258,43 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: warehouseId,
-                    decoration: InputDecoration(
-                      labelText: _arabic ? 'المستودع' : 'Warehouse',
+                  if (blocked)
+                    Text(
+                      _arabic
+                          ? 'لم تتأكد نتيجة فتح الجرد السابق. بياناتك محفوظة والإرسال محظور حتى التحقق من الطلب الأصلي. أغلق النافذة وأعد فتحها للتحقق.'
+                          : 'The earlier count creation is not confirmed. Your entries are saved and submission is blocked until the original request is verified. Close and reopen to check.',
                     ),
-                    items: [
-                      for (final warehouse in warehouses)
-                        DropdownMenuItem(
-                          value: text(warehouse, 'id'),
-                          child: Text(
-                            '${text(warehouse, 'code')} — ${_arabic ? text(warehouse, 'nameAr', fallback: text(warehouse, 'nameEn')) : text(warehouse, 'nameEn', fallback: text(warehouse, 'nameAr'))}',
+                  IgnorePointer(
+                    ignoring: sending || blocked,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: warehouseId,
+                      decoration: InputDecoration(
+                        labelText: _arabic ? 'المستودع' : 'Warehouse',
+                      ),
+                      items: [
+                        if (!warehouses.any(
+                          (w) => text(w, 'id') == warehouseId,
+                        ))
+                          DropdownMenuItem(
+                            value: warehouseId,
+                            child: Text(
+                              _arabic
+                                  ? 'المستودع المحفوظ غير متاح'
+                                  : 'Saved warehouse unavailable',
+                            ),
                           ),
-                        ),
-                    ],
-                    onChanged: (value) => setDialogState(
-                      () => warehouseId = value ?? warehouseId,
+
+                        for (final warehouse in warehouses)
+                          DropdownMenuItem(
+                            value: text(warehouse, 'id'),
+                            child: Text(
+                              '${text(warehouse, 'code')} — ${_arabic ? text(warehouse, 'nameAr', fallback: text(warehouse, 'nameEn')) : text(warehouse, 'nameEn', fallback: text(warehouse, 'nameAr'))}',
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setDialogState(
+                        () => warehouseId = value ?? warehouseId,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -242,8 +310,10 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                       ),
                     ],
                     selected: {scope},
-                    onSelectionChanged: (values) =>
-                        setDialogState(() => scope = values.first),
+                    onSelectionChanged: sending || blocked
+                        ? null
+                        : (values) =>
+                              setDialogState(() => scope = values.first),
                   ),
                   const SizedBox(height: 8),
                   if (scope == 'PARTIAL')
@@ -267,13 +337,15 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                                   title: Text(
                                     '${text(item, 'code')} — ${_arabic ? text(item, 'nameAr', fallback: text(item, 'nameEn')) : text(item, 'nameEn', fallback: text(item, 'nameAr'))}',
                                   ),
-                                  onChanged: (value) => setDialogState(() {
-                                    if (value == true) {
-                                      selected.add(id);
-                                    } else {
-                                      selected.remove(id);
-                                    }
-                                  }),
+                                  onChanged: sending || blocked
+                                      ? null
+                                      : (value) => setDialogState(() {
+                                          if (value == true) {
+                                            selected.add(id);
+                                          } else {
+                                            selected.remove(id);
+                                          }
+                                        }),
                                 );
                               },
                             ),
@@ -281,6 +353,8 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                   else
                     const Spacer(),
                   TextField(
+                    controller: notesController,
+                    enabled: !sending && !blocked,
                     onChanged: (value) => notes = value,
                     decoration: InputDecoration(
                       labelText: _arabic ? 'ملاحظات' : 'Notes',
@@ -291,26 +365,68 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
+                onPressed: sending ? null : () => Navigator.pop(dialogContext),
                 child: Text(_arabic ? 'إلغاء' : 'Cancel'),
               ),
               FilledButton(
-                onPressed: scope == 'PARTIAL' && selected.isEmpty
+                onPressed:
+                    sending ||
+                        blocked ||
+                        (scope == 'PARTIAL' && selected.isEmpty)
                     ? null
-                    : () => Navigator.pop(dialogContext, {
-                        'warehouseId': warehouseId,
-                        'scope': scope,
-                        if (scope == 'PARTIAL') 'itemIds': selected.toList(),
-                        if (notes.trim().isNotEmpty) 'notes': notes.trim(),
-                      }),
+                    : () async {
+                        final body = <String, dynamic>{
+                          'warehouseId': warehouseId,
+                          'scope': scope,
+                          if (scope == 'PARTIAL') 'itemIds': selected.toList(),
+                          if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+                        };
+                        setDialogState(() => sending = true);
+                        try {
+                          final ok = await preferences.setString(
+                            recoveryScope,
+                            jsonEncode({'key': requestKey, 'body': body}),
+                          );
+                          if (!ok) {
+                            throw const ValidationFailure(
+                              'The recovery record could not be saved. No request was sent.',
+                            );
+                          }
+                          pending = {'key': requestKey, 'body': body};
+                          final result = await client.post(
+                            '/inventory/stock-takes',
+                            body: body,
+                            idempotencyKey: requestKey,
+                          );
+                          if (!await preferences.remove(recoveryScope)) {
+                            throw const ValidationFailure(
+                              'The count may have opened. Keep this request for verification.',
+                            );
+                          }
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext, result);
+                          }
+                        } catch (error) {
+                          if (dialogContext.mounted) {
+                            setDialogState(() => blocked = pending != null);
+                            await showAppError(dialogContext, error);
+                          }
+                        } finally {
+                          if (dialogContext.mounted) {
+                            setDialogState(() => sending = false);
+                          }
+                        }
+                      },
                 child: Text(_arabic ? 'فتح الجرد' : 'Open count'),
               ),
             ],
           ),
         ),
       );
-      if (draft == null || !mounted) return;
-      final created = await client.post('/inventory/stock-takes', body: draft);
+      final created = await Navigator.of(context).push(createRoute);
+      await createRoute.completed;
+      notesController.dispose();
+      if (created == null || !mounted) return;
       await ref.read(stockTakesProvider.notifier).refreshQuietly();
       if (!mounted) return;
       showMessage(

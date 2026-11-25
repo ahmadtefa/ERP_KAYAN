@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -28,6 +30,9 @@ class _StockTakesApi extends ApiClient {
   int listCalls = 0;
   bool failList;
   ApiFailure? failCount;
+  bool failCreate = false;
+  bool confirmedCreate = false;
+  final createKeys = <String?>[];
 
   /// A list of sessions that are all still being counted. The approval tests
   /// need a session in REVIEW next to the ones being counted, but the test
@@ -229,6 +234,15 @@ class _StockTakesApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    if (path.contains('/by-key/')) {
+      return {
+        'key': Uri.decodeComponent(path.split('/').last),
+        'state': confirmedCreate ? 'COMPLETED' : 'ABSENT',
+        'session': confirmedCreate
+            ? {'id': 'st-new', 'warehouseId': 'wh-2'}
+            : null,
+      };
+    }
     if (path == '/inventory/stock-takes/st-1' ||
         path == '/inventory/stock-takes/st-new') {
       return Map<String, dynamic>.from(detail);
@@ -244,7 +258,13 @@ class _StockTakesApi extends ApiClient {
   }) async {
     posts.add(path);
     bodies[path] = body;
-    if (path == '/inventory/stock-takes') return {'id': 'st-new'};
+    if (path == '/inventory/stock-takes') {
+      createKeys.add(idempotencyKey);
+      if (failCreate) {
+        throw const ApiFailure('PRIVATE_COUNT_CREATE', statusCode: 409);
+      }
+      return {'id': 'st-new'};
+    }
     if (path.endsWith('/locations')) return Map<String, dynamic>.from(detail);
     if (path.endsWith('/count') && failCount != null) throw failCount!;
     if (path.endsWith('/count')) return Map<String, dynamic>.from(detail);
@@ -263,6 +283,7 @@ Finder tableText(String value) =>
 
 final visualKey = GlobalKey();
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   Future<void> pump(
     WidgetTester tester,
     _StockTakesApi api, {
@@ -679,6 +700,124 @@ void main() {
         'scope': 'FULL',
         'notes': 'second warehouse audit',
       });
+    },
+  );
+
+  testWidgets(
+    'create refusal preserves durable warehouse scope items notes and exact key until read proof',
+    (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                      .readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      await tester.runAsync(() async {
+        await (FontLoader('MaterialIcons')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File(
+                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                  ).readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      final api = _StockTakesApi()..failCreate = true;
+      Future<void> open() async {
+        await pump(
+          tester,
+          api,
+          permissions: [
+            'inventory.stocktake.read',
+            'inventory.stocktake.create',
+          ],
+        );
+        await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('SECOND').last);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Partial'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Notes'),
+        'retained draft',
+      );
+      await tester.tap(find.text('Open count'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRIVATE_COUNT_CREATE'), findsNothing);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Open count'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(api.createKeys.single, isNotNull);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await open();
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Notes'))
+            .controller!
+            .text,
+        'retained draft',
+      );
+      expect(find.textContaining('SECOND'), findsOneWidget);
+      expect(
+        tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        isTrue,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Open count'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(api.createKeys, hasLength(1));
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/count-create-retained.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      api.confirmedCreate = true;
+      await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+      await tester.pumpAndSettle();
+      expect(find.text('ST-001 — Stock take details'), findsOneWidget);
+      expect(api.createKeys, hasLength(1));
     },
   );
   testWidgets('creates a full stock take and opens its frozen count lines', (

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
@@ -75,6 +75,15 @@ export class StockTakesController {
     );
   }
 
+  /// Reconcile a create whose response was lost. Only the caller's own keys.
+  @Get('by-key/:key')
+  @RequirePermissions('inventory.stocktake.create')
+  async createOutcome(@CurrentUser() user: AuthUser, @Param('key') key: string) {
+    const outcome = await this.service.createOutcome(user.companyId, user.userId, key, warehouseScopeOf(user));
+    if (outcome.session?.warehouseId) assertWarehouseAccess(user, outcome.session.warehouseId, 'count');
+    return outcome;
+  }
+
   @Get(':id')
   @RequirePermissions('inventory.stocktake.read')
   async findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -84,13 +93,14 @@ export class StockTakesController {
 
   @Post()
   @RequirePermissions('inventory.stocktake.create')
-  start(@CurrentUser() user: AuthUser, @Body() dto: StartStockTakeDto) {
+  start(@CurrentUser() user: AuthUser, @Body() dto: StartStockTakeDto, @Headers('idempotency-key') key?: string) {
     assertWarehouseAccess(user, dto.warehouseId, 'count');
     return this.service.start(
       user.companyId,
       user.userId,
       { ...dto, branchId: user.branchId ?? null },
       warehouseScopeOf(user),
+      key,
     ).then((result) => this.redactCosts(user, dto.warehouseId, result));
   }
 
