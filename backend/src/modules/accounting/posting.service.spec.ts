@@ -14,10 +14,22 @@ describe('PostingService guards', () => {
     existingEntry?: { entryNumber: string } | null;
     period?: { status: string; code: string } | null;
     original?: Record<string, unknown> | null;
+    cashAccounts?: Array<Record<string, unknown>>;
+    balance?: string;
   } = {}) {
     const created: Array<Record<string, unknown>> = [];
     const tx = {
-      $queryRaw: jest.fn(async () => []),
+      $queryRaw: jest.fn(async (sql: { strings?: readonly string[] }) => {
+        // The balance probe reads journal lines; every other raw statement
+        // (account locks, the cash account row lock) returns no rows.
+        if (sql?.strings?.some((part) => part.includes('journal_lines'))) {
+          return [{ net: overrides.balance ?? '0' }];
+        }
+        return [];
+      }),
+      cashAccount: {
+        findMany: jest.fn(async () => overrides.cashAccounts ?? []),
+      },
       account: {
         findMany: jest.fn(async () => [
           { id: 'acc-cash', code: '1101', isPostable: true, isActive: true },
@@ -189,5 +201,116 @@ describe('PostingService guards', () => {
       ),
     ).rejects.toThrow(/reversal cannot be dated/);
     expect(created).toHaveLength(0);
+  });
+
+  describe('cash balance guard', () => {
+    const box = {
+      id: 'box-1',
+      code: 'CASH',
+      nameAr: 'الخزنة',
+      nameEn: 'Main cash',
+      accountId: 'acc-cash',
+    };
+    const paymentRequest = {
+      ...request,
+      sourceType: 'CASH_VOUCHER' as const,
+      sourceNumber: 'PV-1',
+      lines: [
+        { accountId: 'acc-revenue', debit: '100' },
+        { accountId: 'acc-cash', credit: '100' },
+      ],
+    };
+
+    it('refuses a posting that takes more out of a box than it holds, and writes nothing', async () => {
+      const { service, tx, created } = makeService({ cashAccounts: [box], balance: '40' });
+      const failure = await service.post(tx, paymentRequest).catch((error) => error);
+      expect(failure).toBeInstanceOf(BadRequestException);
+      expect(failure.response.code).toBe('CASH_BALANCE_NEGATIVE');
+      expect(failure.response.errors).toEqual({
+        cashAccountCode: 'CASH',
+        requested: '100.0000',
+        available: '40.0000',
+      });
+      expect(failure.response.message).toMatch(/بالسالب/);
+      expect(failure.response.message).toMatch(/can never go negative/);
+      expect(created).toHaveLength(0);
+    });
+
+    it('locks the box row before reading its balance, inside the same transaction', async () => {
+      const { service, tx } = makeService({ cashAccounts: [box], balance: '100' });
+      await service.post(tx, paymentRequest);
+      const raw = tx as unknown as { $queryRaw: jest.Mock };
+      const lockCall = raw.$queryRaw.mock.calls.find(([sql]: [{ strings: readonly string[] }]) =>
+        sql.strings.some((part) => part.includes('FOR UPDATE')),
+      );
+      const balanceCall = raw.$queryRaw.mock.calls.find(([sql]: [{ strings: readonly string[] }]) =>
+        sql.strings.some((part) => part.includes('journal_lines')),
+      );
+      expect(lockCall).toBeDefined();
+      expect(balanceCall).toBeDefined();
+      expect(raw.$queryRaw.mock.invocationCallOrder[raw.$queryRaw.mock.calls.indexOf(lockCall!)])
+        .toBeLessThan(raw.$queryRaw.mock.invocationCallOrder[raw.$queryRaw.mock.calls.indexOf(balanceCall!)]);
+    });
+
+    it('accepts a payment equal to the whole balance: zero is not negative', async () => {
+      const { service, tx, created } = makeService({ cashAccounts: [box], balance: '100' });
+      const entry = await service.post(tx, paymentRequest);
+      expect(entry.entryNumber).toBe('JV-0001');
+      expect(created).toHaveLength(1);
+    });
+
+    it('nets several lines on one account before comparing', async () => {
+      const { service, tx, created } = makeService({ cashAccounts: [box], balance: '40' });
+      // 70 out and 40 in on the same box in one entry is a net 30 out, which 40 covers.
+      const entry = await service.post(tx, {
+        ...paymentRequest,
+        lines: [
+          { accountId: 'acc-revenue', debit: '30' },
+          { accountId: 'acc-cash', credit: '70' },
+          { accountId: 'acc-cash', debit: '40' },
+        ],
+      });
+      expect(entry.entryNumber).toBe('JV-0001');
+      expect(created).toHaveLength(1);
+    });
+
+    it('ignores accounts no box or bank is bound to', async () => {
+      const { service, tx, created } = makeService({ cashAccounts: [], balance: '0' });
+      await service.post(tx, paymentRequest);
+      expect(created).toHaveLength(1);
+    });
+
+    it('refuses a reversal whose mirror would overdraw the box', async () => {
+      // The original put 114 into the box; only 40 of it is still there.
+      const { service, tx, created } = makeService({
+        original,
+        cashAccounts: [box],
+        balance: '40',
+      });
+      const failure = await service
+        .reverse(tx, companyId, 'user-1', 'entry-0', 'Reversal', new Date('2026-03-02'))
+        .catch((error) => error);
+      expect(failure).toBeInstanceOf(BadRequestException);
+      expect(failure.response.code).toBe('CASH_BALANCE_NEGATIVE');
+      expect(created).toHaveLength(0);
+    });
+
+    it('lets a reversal through while the money it returns is still in the box', async () => {
+      const { service, tx, created } = makeService({
+        original,
+        cashAccounts: [box],
+        balance: '114',
+      });
+      const reversal = await service.reverse(
+        tx,
+        companyId,
+        'user-1',
+        'entry-0',
+        'Reversal',
+        new Date('2026-03-02'),
+      );
+      expect(reversal.entryNumber).toBe('JV-0001');
+      expect(created).toHaveLength(1);
+    });
   });
 });

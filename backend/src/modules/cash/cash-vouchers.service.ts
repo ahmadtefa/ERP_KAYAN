@@ -238,6 +238,33 @@ export class CashVouchersService {
       await this.validateAllocations(companyId, kind, cashAccount.currency, party, allocations);
     }
 
+    // A payment the box cannot cover is refused now, at save, not later at
+    // posting: the clerk hears about it while the entries are still on the
+    // screen. Posting re-checks under a row lock, because the balance can
+    // change between the two.
+    if (kind === CashVoucherKind.PAYMENT) {
+      const available = await this.posting.postedBalanceFor(
+        this.prisma as never,
+        companyId,
+        cashAccount.accountId,
+      );
+      if (amount.greaterThan(available)) {
+        throw new BadRequestException({
+          code: 'CASH_SAVE_BALANCE_SHORT',
+          message:
+            `لم يُحفظ سند الصرف: رصيد الخزنة أو البنك (${cashAccount.code}) هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
+            `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض أولًا، ثم احفظ مرة أخرى. لم يُنشأ أي سند. / ` +
+            `The payment voucher was not saved: the cash or bank account (${cashAccount.code}) holds ${available.toFixed(MONEY_SCALE)} and the payment is ${amount.toFixed(MONEY_SCALE)}. ` +
+            `Lower the amount to the available balance or record a receipt first, then save again. No voucher was created.`,
+          errors: {
+            cashAccountCode: cashAccount.code,
+            requested: amount.toFixed(MONEY_SCALE),
+            available: available.toFixed(MONEY_SCALE),
+          },
+        });
+      }
+    }
+
     const created = await this.prisma.$transaction(async (tx) => {
       const key = kind === CashVoucherKind.RECEIPT ? 'RECEIPT_VOUCHER' : 'PAYMENT_VOUCHER';
       const prefix = kind === CashVoucherKind.RECEIPT ? 'RC' : 'PV';

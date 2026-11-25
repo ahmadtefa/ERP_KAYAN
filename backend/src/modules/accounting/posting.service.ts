@@ -217,6 +217,9 @@ export class PostingService {
       );
     }
 
+    // A payment voucher, a transfer out, or any other document that takes
+    // money out of a box or a bank may not take out more than it holds.
+    await this.assertCashBalancesCover(tx, request.companyId, lines);
 
     const entryNumber = await this.numbers.next(
       tx,
@@ -302,6 +305,21 @@ export class PostingService {
       throw new BadRequestException('Only a posted journal entry can be reversed');
     }
 
+    // Reversing a receipt takes its money back out of the box, so a reversal
+    // can overdraw a cash account exactly like a payment can. The guard runs
+    // before the original is claimed: once the original reads REVERSED without
+    // its mirror committed, a concurrent balance check would miss those lines.
+    // Holding the box's row lock from here to commit closes that window.
+    await this.assertCashBalancesCover(
+      tx,
+      companyId,
+      original.lines.map((line) => ({
+        accountId: line.accountId,
+        debit: line.credit,
+        credit: line.debit,
+      })),
+    );
+
     const claimed = await tx.journalEntry.updateMany({
       where: { id: original.id, companyId, status: JournalStatus.POSTED },
       data: { status: JournalStatus.REVERSED },
@@ -368,6 +386,116 @@ export class PostingService {
     });
 
     return reversal;
+  }
+
+  /**
+   * What a ledger account holds right now, read the same way the cash reports
+   * read it: every posted line, including reversed entries and their mirrors,
+   * which cancel each other. Drafts and cancelled entries move nothing.
+   */
+  async postedBalanceFor(
+    db: Prisma.TransactionClient,
+    companyId: string,
+    accountId: string,
+    excludeEntryId?: string,
+  ): Promise<Prisma.Decimal> {
+    // Two plain statements rather than a conditional fragment: the balance
+    // definition must stay exactly the one the cash reports use.
+    const rows = excludeEntryId
+      ? await db.$queryRaw<Array<{ net: Prisma.Decimal | string }>>(Prisma.sql`
+          SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l."journalEntryId"
+           WHERE e."companyId" = ${companyId}::uuid
+             AND e.status IN ('POSTED', 'REVERSED')
+             AND l."accountId" = ${accountId}::uuid
+             AND e.id <> ${excludeEntryId}::uuid
+        `)
+      : await db.$queryRaw<Array<{ net: Prisma.Decimal | string }>>(Prisma.sql`
+          SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l."journalEntryId"
+           WHERE e."companyId" = ${companyId}::uuid
+             AND e.status IN ('POSTED', 'REVERSED')
+             AND l."accountId" = ${accountId}::uuid
+        `);
+    return new Prisma.Decimal(rows[0]?.net ?? 0);
+  }
+
+  /**
+   * A cash box or a bank account can never go negative: its balance is the
+   * money physically in it, and a safe cannot hold less than nothing.
+   *
+   * Every ledger write funnels through PostingService (vouchers, transfers,
+   * invoices, opening balances, year-end) except manual journal transitions,
+   * which call this guard themselves, so the rule lives in this one place for
+   * all of them. Only the net movement per account matters: an entry that
+   * moves money between two boxes is checked on the box it leaves.
+   *
+   * Concurrency: the cash account's row is locked FOR UPDATE before its
+   * balance is read, and every writer takes the same lock in id order, so two
+   * payments posted at the same moment queue behind it and the second one
+   * reads a balance that already includes the first. Accounts are locked in a
+   * deterministic order so two opposite transfers cannot deadlock.
+   *
+   * `excludeEntryId` is for the manual-journal transition, which claims its
+   * entry (flips it to POSTED) before validating: the entry's own lines would
+   * otherwise be counted into the balance it is checked against.
+   */
+  async assertCashBalancesCover(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    lines: Array<{ accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal }>,
+    options: { excludeEntryId?: string } = {},
+  ): Promise<void> {
+    const netByAccount = new Map<string, Prisma.Decimal>();
+    for (const line of lines) {
+      const net = (netByAccount.get(line.accountId) ?? new Prisma.Decimal(0))
+        .plus(line.debit)
+        .minus(line.credit);
+      netByAccount.set(line.accountId, net);
+    }
+    // Only money going out can break the rule.
+    const outgoing = [...netByAccount.entries()]
+      .filter(([, net]) => net.isNegative())
+      .map(([accountId]) => accountId)
+      .sort();
+    if (outgoing.length === 0) return;
+
+    const cashAccounts = await tx.cashAccount.findMany({
+      where: { companyId, deletedAt: null, accountId: { in: outgoing } },
+      select: { id: true, code: true, nameAr: true, nameEn: true, accountId: true },
+      orderBy: { id: 'asc' },
+    });
+
+    for (const cashAccount of cashAccounts) {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM cash_accounts WHERE id = ${cashAccount.id}::uuid FOR UPDATE
+      `);
+      const balance = await this.postedBalanceFor(
+        tx,
+        companyId,
+        cashAccount.accountId,
+        options.excludeEntryId,
+      );
+      const movement = netByAccount.get(cashAccount.accountId)!;
+      const requested = movement.abs();
+      if (balance.minus(requested).isNegative()) {
+        throw new BadRequestException({
+          code: 'CASH_BALANCE_NEGATIVE',
+          message:
+            `رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب: رصيد «${cashAccount.nameAr}» (${cashAccount.code}) هو ${balance.toFixed(MONEY_SCALE)} والمطلوب صرفه ${requested.toFixed(MONEY_SCALE)}. ` +
+            `قلّل المبلغ إلى الرصيد المتاح أو سجّل سند قبض أولًا. لم يُرحَّل أي قيد. / ` +
+            `A cash or bank balance can never go negative: "${cashAccount.nameEn}" (${cashAccount.code}) holds ${balance.toFixed(MONEY_SCALE)} and this pays out ${requested.toFixed(MONEY_SCALE)}. ` +
+            `Lower the amount to the available balance or record a receipt first. Nothing was posted.`,
+          errors: {
+            cashAccountCode: cashAccount.code,
+            requested: requested.toFixed(MONEY_SCALE),
+            available: balance.toFixed(MONEY_SCALE),
+          },
+        });
+      }
+    }
   }
 
   private amount(value: Prisma.Decimal | string | undefined): Prisma.Decimal {

@@ -83,6 +83,22 @@ void main() {
       expect(ar, contains('SALES_SAVE_STOCK_SHORT'));
       expect(en, contains('SALES_SAVE_STOCK_SHORT'));
     });
+    for (final code in ['CASH_BALANCE_NEGATIVE', 'CASH_SAVE_BALANCE_SHORT']) {
+      test('$code shows the active-language sentence with the amounts', () {
+        final f = ApiFailure(
+          'رصيد الخزنة أو البنك لا يمكن أن يصبح بالسالب: الرصيد 100.0000 والمطلوب 160.0000. / '
+          'A cash or bank balance can never go negative: holds 100.0000 and this pays out 160.0000.',
+          statusCode: 400,
+          code: code,
+        );
+        final ar = const AppErrorMessageResolver(isArabic: true).resolve(f).businessMessage!;
+        final en = const AppErrorMessageResolver(isArabic: false).resolve(f).businessMessage!;
+        expect(ar, contains('160.0000'));
+        expect(ar, isNot(contains('never go negative')));
+        expect(en, contains('pays out 160.0000'));
+        expect(en, contains(code));
+      });
+    }
     test('a server error with the same code is never relayed', () {
       final r = const AppErrorMessageResolver(isArabic: false).resolve(
         const ApiFailure('private SQL password=do-not-show', statusCode: 500, code: 'SALES_SAVE_STOCK_SHORT'));

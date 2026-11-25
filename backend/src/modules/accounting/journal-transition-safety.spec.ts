@@ -36,6 +36,7 @@ describe('manual journal state transitions', () => {
       { periodFor: jest.fn().mockResolvedValue(null) } as never,
       { get: jest.fn().mockResolvedValue({approvalRequiredForJournal:false,segregationOfDuties:false}) } as never,
       {} as never,
+      { assertCashBalancesCover: jest.fn().mockResolvedValue(undefined) } as never,
     );
     jest.spyOn(service as any, 'toResponse').mockImplementation((value: unknown) => value);
     return { service, prisma, tx, audit, posted };
@@ -140,7 +141,8 @@ describe('manual journal creation and reversal audit', () => {
     const service = new JournalEntriesService(prisma as never,
       {next:jest.fn().mockResolvedValue('JV-2')} as never, audit as never,
       {periodFor:jest.fn().mockResolvedValue(null)} as never, {} as never,
-      {assertPostable:jest.fn().mockResolvedValue(undefined)} as never);
+      {assertPostable:jest.fn().mockResolvedValue(undefined)} as never,
+      {assertCashBalancesCover:jest.fn().mockResolvedValue(undefined)} as never);
     jest.spyOn(service as any,'toResponse').mockImplementation((value:unknown)=>value);
     return {service,prisma,tx,audit};
   }

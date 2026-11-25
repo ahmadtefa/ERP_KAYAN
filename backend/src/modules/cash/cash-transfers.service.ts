@@ -106,6 +106,29 @@ export class CashTransfersService {
     }
     const date = this.date(dto.transferDate);
 
+    // A transfer the source box cannot cover is refused at save, like a
+    // payment voucher; posting re-checks under a row lock.
+    const available = await this.posting.postedBalanceFor(
+      this.prisma as never,
+      companyId,
+      from.accountId,
+    );
+    if (amount.greaterThan(available)) {
+      throw new BadRequestException({
+        code: 'CASH_SAVE_BALANCE_SHORT',
+        message:
+          `لم يُحفظ التحويل: رصيد «${from.nameAr}» (${from.code}) هو ${available.toFixed(MONEY_SCALE)} والمبلغ المطلوب ${amount.toFixed(MONEY_SCALE)}. ` +
+          `قلّل المبلغ إلى الرصيد المتاح أو موّل الحساب أولًا. لم يُنشأ أي تحويل. / ` +
+          `The transfer was not saved: "${from.nameEn}" (${from.code}) holds ${available.toFixed(MONEY_SCALE)} and the transfer is ${amount.toFixed(MONEY_SCALE)}. ` +
+          `Lower the amount to the available balance or fund the account first. No transfer was created.`,
+        errors: {
+          cashAccountCode: from.code,
+          requested: amount.toFixed(MONEY_SCALE),
+          available: available.toFixed(MONEY_SCALE),
+        },
+      });
+    }
+
     const created = await this.prisma.$transaction(async (tx) => {
       const transferNumber = await this.numbers.next(tx, companyId, 'CASH_TRANSFER', 'TR');
       return tx.cashTransfer.create({
@@ -252,7 +275,7 @@ export class CashTransfersService {
     }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
-      select: { id: true, accountId: true, currency: true, isActive: true, code: true },
+      select: { id: true, accountId: true, currency: true, isActive: true, code: true, nameAr: true, nameEn: true },
     });
     if (!cashAccount) throw new BadRequestException(`The ${side} cash account does not exist`);
     if (!cashAccount.isActive) throw new BadRequestException(`The ${side} cash account is inactive`);

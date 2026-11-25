@@ -18,6 +18,7 @@ import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
 import { FiscalPeriodsService } from './fiscal-periods.service';
+import { PostingService } from './posting.service';
 
 const MONEY_SCALE = 4;
 
@@ -56,6 +57,7 @@ export class JournalEntriesService {
     private readonly periods: FiscalPeriodsService,
     private readonly settings: CompanySettingsService,
     private readonly costCenters: CostCentersService,
+    private readonly posting: PostingService,
     @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
@@ -494,6 +496,7 @@ export class JournalEntriesService {
     tx: Prisma.TransactionClient,
     companyId: string,
     entry: {
+      id: string;
       totalDebit: Prisma.Decimal; totalCredit: Prisma.Decimal; reversalOfId: string | null;
       lines: Array<{accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal}>;
     },
@@ -532,6 +535,13 @@ export class JournalEntriesService {
     if (accounts.some(account => [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(account.code as never))) {
       throw new BadRequestException('Manual entries cannot post directly to a control account');
     }
+    // A manual entry can name a box or a bank directly, and taking more out
+    // than it holds is refused here exactly as it is for a payment voucher.
+    // The entry was already claimed above, so its own lines are excluded from
+    // the balance it is checked against.
+    await this.posting.assertCashBalancesCover(tx, companyId, entry.lines, {
+      excludeEntryId: entry.id,
+    });
   }
 
   private async requireStatus(
@@ -602,6 +612,17 @@ export class JournalEntriesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // The mirror hands back whatever the original took: reversing an entry
+      // that put money into a box takes it out again, and that may not
+      // overdraw the box. Guarded before the claim for the same reason as in
+      // PostingService.reverse: a REVERSED original without its committed
+      // mirror would be invisible to a concurrent balance check.
+      await this.posting.assertCashBalancesCover(
+        tx,
+        companyId,
+        original.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit })),
+      );
+
       // Claim the original first. The pre-checks above run outside the
       // transaction, so two people reversing at the same moment could both
       // pass them; this conditional update lets exactly one of them write

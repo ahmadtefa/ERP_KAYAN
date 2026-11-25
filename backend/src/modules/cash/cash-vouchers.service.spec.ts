@@ -86,6 +86,7 @@ describe('CashVouchersService allocation validation', () => {
     const posting = {
       post: jest.fn().mockResolvedValue({ id: 'journal-1', entryNumber: 'JE-0001' }),
       reverse: jest.fn(),
+      postedBalanceFor: jest.fn().mockResolvedValue(new Prisma.Decimal('1000000')),
     };
     const accounts = {
       resolve: jest.fn().mockResolvedValue({
@@ -394,5 +395,46 @@ describe('CashVouchersService allocation validation', () => {
       BadRequestException,
     );
     expect(tx.salesInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to save a payment voucher the box cannot cover, and creates nothing', async () => {
+    const { service, prisma, tx, posting, numbers } = buildService();
+    posting.postedBalanceFor.mockResolvedValue(new Prisma.Decimal('40'));
+
+    const failure = await service
+      .create(companyId, branchId, userId, {
+        kind: 'PAYMENT',
+        cashAccountId: 'cash-1',
+        voucherDate: '2026-10-24',
+        amount: '100',
+        supplierId,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect((failure as BadRequestException).getResponse()).toMatchObject({
+      code: 'CASH_SAVE_BALANCE_SHORT',
+      errors: { cashAccountCode: 'CASH', requested: '100.0000', available: '40.0000' },
+    });
+    // No number is consumed and no voucher row is written.
+    expect(numbers.next).not.toHaveBeenCalled();
+    expect(tx.cashVoucher.create).not.toHaveBeenCalled();
+  });
+
+  it('saves a payment voucher the box exactly covers: zero is not negative', async () => {
+    const { service, tx, posting } = buildService();
+    posting.postedBalanceFor.mockResolvedValue(new Prisma.Decimal('100'));
+    // The read-back after save is not what this test pins down.
+    jest.spyOn(service, 'findOne').mockResolvedValue({} as never);
+
+    await service.create(companyId, branchId, userId, {
+      kind: 'PAYMENT',
+      cashAccountId: 'cash-1',
+      voucherDate: '2026-10-24',
+      amount: '100',
+      supplierId,
+    });
+
+    expect(tx.cashVoucher.create).toHaveBeenCalled();
   });
 });

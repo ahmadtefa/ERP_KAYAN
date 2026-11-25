@@ -833,6 +833,10 @@ export function pglitePrisma(db: PgliteLike) {
     journalEntry: plainModel('journalEntry', 'journal_entries'),
     journalLine: plainModel('journalLine', 'journal_lines'),
     account: plainModel('account', 'accounts'),
+    // PostingService.assertCashBalancesCover looks up the boxes and banks bound
+    // to the accounts an entry moves; without this model every posting through
+    // the adapter would fail on a missing method instead of being checked.
+    cashAccount: plainModel('cashAccount', 'cash_accounts'),
     customer: plainModel('customer', 'customers'),
     supplier: plainModel('supplier', 'suppliers'),
     purchaseInvoice: plainModel('purchaseInvoice', 'purchase_invoices'),

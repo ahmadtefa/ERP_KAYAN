@@ -87,6 +87,14 @@ class AppErrorMessageResolver {
     'SALES_POST_RULE_REJECTED': ['لم تُرحّل الفاتورة بسبب قاعدة عمل. احتفظ بالمسودة وأرسل رمز المساعدة للدعم؛ لا تكرر موافقة الائتمان دون معرفة السبب.', 'Invoice not posted because of a business rule. Keep the draft and report the support code; do not repeat credit approval without knowing the reason.'],
   };
 
+  /// Refusals whose server sentence is bounded, written per language and joined
+  /// by " / ": over-stock saves and cash or bank balances that would go negative.
+  static const _bilingualRefusalCodes = <String>{
+    'SALES_SAVE_STOCK_SHORT',
+    'CASH_BALANCE_NEGATIVE',
+    'CASH_SAVE_BALANCE_SHORT',
+  };
+
   String _postingContext(Map<String, String> fields) {
     final parts = <String>[];
     void numeric(String key, String ar, String en) {
@@ -140,7 +148,7 @@ class AppErrorMessageResolver {
       // fallback would hide which line to change.
       if (error is ApiFailure &&
           error.statusCode == 400 &&
-          error.code == 'SALES_SAVE_STOCK_SHORT') {
+          _bilingualRefusalCodes.contains(error.code)) {
         final halves = error.message.split(' / ');
         final chosen = halves.length >= 2
             ? (isArabic ? halves.first : halves.sublist(1).join(' / '))
