@@ -523,6 +523,44 @@ void main() {
     expect(api.posts, isEmpty);
   });
 
+  for (final action in ['approve', 'post']) {
+    testWidgets('detail $action confirms cancels and targets exact session', (
+      tester,
+    ) async {
+      final api = _StockTakesApi();
+      api.detail['status'] = action == 'approve' ? 'REVIEW' : 'APPROVED';
+      await pump(tester, api);
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      final label = action == 'approve' ? 'Approve' : 'Post';
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text(label),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(api.posts, isEmpty);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text(label),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog).last,
+          matching: find.widgetWithText(FilledButton, label),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(api.posts, ['/inventory/stock-takes/st-1/$action']);
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets('confirming post targets the approved session and refreshes', (
     tester,
   ) async {
