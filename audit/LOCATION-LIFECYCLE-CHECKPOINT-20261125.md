@@ -101,3 +101,9 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Changed UI broad regression65/65 pass; current generic stockdoc22/22 pass. Explicit source lot null clearing is sent, written-off lots excluded. Destination change clears stale split preview.
 - After synthetic save refusal, reopening split now retains typed part2/1 and chosen lot in editable fields, then reapply/retry/post/reverse passes actual Flutter/native bridge. Evidence patch42-retained-edit.out. Analyze clean.
 - Generic COUNT positive12 also confirmed lot12 after reverse instead10; correction remains with backend owner. Transfer qualification is not generic reversal acceptance.
+
+## locpatch43 provisional, 05:29
+
+- Own positive ADJUSTMENT and COUNT± inverse tests now pass exact remaining/received/status/cost/warehouse/shelf restoration, basic writeoff inverse retained. Null and conflicting original batch refuses atomically. Exact original lot shortage with unrelated stock on same shelf refuses LOT_SHELF_SHORT unchanged.
+- Native43 actual adjustment+/count± restores remaining10/received10/statusOPEN/lotcost12 and warehouse10/value120. Reverse-first versus issue overlap valid, final lot=movement ledger=warehouse. All journal totals balanced, server stopped. TypeScript noEmit clean.
+- New transfer omitted-lot case remains FAIL: line omits batch but post auto-selects sole covering lot into existing destination lot; reverse restores shelf/books but skips lot restoration, leaving source7/target8 instead10/5. Backend notified, regression saved. No universal reversal acceptance.

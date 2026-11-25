@@ -1727,6 +1727,15 @@ export class StockDocumentsService {
               errors: { lineNumber: String(line.lineNumber) },
             });
           }
+          if (document.kind !== StockDocumentKind.TRANSFER && line.batchId && originalBatch !== line.batchId) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
+              message:
+                `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): دفعة الحركة الأصلية لا تطابق دفعة السطر. لم يتغير أي رصيد؛ راجع المحاسب أو المدير للتحقق من الدفعة الأصلية قبل أي تصحيح. / ` +
+                `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): the original movement's lot does not match the line's lot. No balance changed; ask the accountant or administrator to verify the original lot before any correction.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
           if (!wasOut && target.warehouseId && originalBatch) {
             const [onLotShelf] = await tx.$queryRaw<Array<{ q: Prisma.Decimal }>>(Prisma.sql`
               SELECT COALESCE(SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END), 0) AS q
@@ -1870,21 +1879,43 @@ export class StockDocumentsService {
         }
       }
 
-      // A reversal of a write-off returns the goods to their lot.
-      for (const line of document.lines) {
-        if (!line.batchId || line.quantity.isZero()) continue;
-        if (document.kind === StockDocumentKind.WRITE_OFF ||
-            (document.kind === StockDocumentKind.ADJUSTMENT && line.quantity.lessThan(0))) {
-          await tx.itemBatch.updateMany({
-            where: { id: line.batchId, companyId },
-            data: { remainingQuantity: { increment: line.quantity.abs() } },
-          });
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE "item_batches"
-               SET "status" = 'OPEN'
-             WHERE "id" = ${line.batchId}::uuid
-               AND "status" = 'CLOSED'
-          `);
+      // A reversal gives every lot-named line back exactly what the post did to
+      // its lot: goods that left (write-off, negative adjustment, count
+      // shortfall) return to the lot; goods that arrived (positive adjustment,
+      // count surplus) leave it again. The lot cost is untouched by these
+      // documents on the way in, so it is untouched on the way back.
+      if (document.kind !== StockDocumentKind.TRANSFER) {
+        for (const line of document.lines) {
+          if (!line.batchId || line.quantity.isZero()) continue;
+          const lotQty = line.quantity.abs();
+          if (line.quantity.lessThan(0) || (document.kind === StockDocumentKind.WRITE_OFF)) {
+            await tx.itemBatch.updateMany({
+              where: { id: line.batchId, companyId },
+              data: { remainingQuantity: { increment: lotQty } },
+            });
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "item_batches" SET "status" = 'OPEN'
+               WHERE "id" = ${line.batchId}::uuid AND "status" = 'CLOSED'
+            `);
+          } else {
+            const claimed = await tx.itemBatch.updateMany({
+              where: { id: line.batchId, companyId, remainingQuantity: { gte: lotQty }, receivedQuantity: { gte: lotQty } },
+              data: { remainingQuantity: { decrement: lotQty }, receivedQuantity: { decrement: lotQty } },
+            });
+            if (claimed.count !== 1) {
+              throw new BadRequestException({
+                code: 'STOCK_DOC_REVERSE_LOT_SHORT',
+                message:
+                  `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): الدفعة لم تعد تحمل ${lotQty.toFixed(MONEY_SCALE)} التي أضافها المستند (بيعت أو نُقلت). لم يتغير أي رصيد؛ راجع المحاسب أو المدير قبل أي تصحيح. / ` +
+                  `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): the lot no longer holds the ${lotQty.toFixed(MONEY_SCALE)} this document added (sold or moved). No balance changed; ask the accountant or administrator before any correction.`,
+                errors: { lineNumber: String(line.lineNumber) },
+              });
+            }
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "item_batches" SET "status" = 'CLOSED'
+               WHERE "id" = ${line.batchId}::uuid AND "remainingQuantity" = 0 AND "status" <> 'WRITTEN_OFF'
+            `);
+          }
         }
       }
 

@@ -182,6 +182,16 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const ores=await Promise.allSettled([da.post(C,U,od[0].id),db.post(C,U,od[1].id)]);assert.equal(ores.filter(x=>x.status==='fulfilled').length,2,JSON.stringify(ores));for(const wh of [W,targetW])assert.equal(Number((await p.itemBatch.findFirst({where:{warehouseId:wh,itemId:OI}})).remainingQuantity),5);reports.push({mode:'opposite warehouse stock document transfers',posted:2,eachLot:5});
 
 
+
+ if(process.env.KAYAN_GENERIC_REVERSE==='1'){
+  for(const mode of ['adjust-positive','count-negative','count-positive','positive-issue-overlap']){
+   const item=randomUUID();await p.item.create({data:{id:item,companyId:C,code:'GEN-'+mode,nameEn:mode,nameAr:mode,unit:'piece',requiresBatch:true,isStockTracked:true}});const lot=await a.receive(C,U,{branchId:B,warehouseId:W,itemId:item,batchNumber:'GEN',quantity:10,unitCost:12,storageLocationId:L});const count=mode.startsWith('count');const doc=await da.create(C,B,U,{kind:count?'count':'adjustment',documentDate:'2026-11-25',toWarehouseId:W,lines:[{itemId:item,quantity:count?0:2,...(count?{countedQuantity:mode==='count-negative'?8:12}:{}),unitCost:12,batchId:lot.batchId,storageLocationId:L}]});await da.post(C,U,doc.id);
+   const full=async()=>({lot:await p.itemBatch.findUnique({where:{id:lot.batchId},select:{remainingQuantity:true,receivedQuantity:true,unitCost:true,status:true}}),w:await p.warehouseStockBalance.findFirst({where:{itemId:item,warehouseId:W},select:{quantity:true,value:true}})});
+   if(mode==='positive-issue-overlap'){
+    let release,enter;const ready=new Promise(r=>enter=r),gate=new Promise(r=>release=r),orig=a.lockItemStock.bind(a);a.lockItemStock=async(tx,w,i)=>{await orig(tx,w,i);enter();await gate;};const issue=a.issue(C,U,{branchId:B,warehouseId:W,itemId:item,batchId:lot.batchId,quantity:11,storageLocationId:L});await ready;const reverse=db.reverse(C,U,doc.id);await sleep(200);release();const result=await Promise.allSettled([issue,reverse]);a.lockItemStock=orig;const end=await full();const ledger=await sql.query(`SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "batchId"=$1`,[lot.batchId]);assert.equal(result.filter(r=>r.status==='fulfilled').length,1);assert.equal(Number(end.lot.remainingQuantity),Number(ledger.rows[0].q));assert.equal(Number(end.w.quantity),Number(end.lot.remainingQuantity));reports.push({mode:'native generic reverse issue overlap',results:result.map(r=>r.status),end});
+   }else{await da.reverse(C,U,doc.id);const end=await full();assert.equal(Number(end.lot.remainingQuantity),10);assert.equal(Number(end.lot.receivedQuantity),10);assert.equal(Number(end.lot.unitCost),12);assert.equal(end.lot.status,'OPEN');assert.equal(Number(end.w.quantity),10);assert.equal(Number(end.w.value),120);reports.push({mode:'native generic reverse '+mode,end});}
+  }
+ }
  if(process.env.KAYAN_DOC_REVERSE==='1'){
   const results=[];
   for(const mode of ['lot-shelf-short','source-reprice','target-reprice','issue-overlap']){
