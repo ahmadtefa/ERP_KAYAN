@@ -302,12 +302,12 @@ void main() {
         '1.25',
       );
       expect(api.posts, hasLength(1));
-      expect(find.textContaining('may have completed'), findsOneWidget);
+      expect(find.textContaining('outcome is not confirmed'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'definite receive refusal retains input and permits corrected retry',
+    'HTTP400 receive refusal retains original identity and blocks unproven retry',
     (tester) async {
       final api = _Api('DISPATCHED')..definite = true;
       await pump(tester, api);
@@ -325,17 +325,37 @@ void main() {
             .text,
         '1.25',
       );
-      api.definite = false;
-      await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1');
-      await tester.tap(find.text('Confirm'));
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<TextField>(find.widgetWithText(TextField, 'Qty')).enabled,
+        isFalse,
+      );
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(api.posts, hasLength(2));
-      expect(api.keys[1], isNot(api.keys[0]));
-      expect(api.posts.last.$2, {
-        'lines': [
-          {'lineId': 'line', 'quantity': '1'},
-        ],
-      });
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await pump(tester, api);
+      await tester.tap(find.text('Receive'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Qty'))
+            .controller!
+            .text,
+        '1.25',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+            .onPressed,
+        isNull,
+      );
+      expect(api.posts, hasLength(1));
     },
   );
   testWidgets('uncertain settlement keeps all amounts and blocks submit', (

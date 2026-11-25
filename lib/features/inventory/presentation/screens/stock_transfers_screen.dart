@@ -1163,14 +1163,9 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
         );
         await persistOperation(null);
         savedOperations.remove(recoveryScope);
-      } catch (error) {
-        if (error is ApiFailure &&
-            error.statusCode != null &&
-            error.statusCode! >= 400 &&
-            error.statusCode! < 500) {
-          await persistOperation(null);
-          savedOperations.remove(recoveryScope);
-        }
+      } catch (_) {
+        // Multi-stage actions can reject after a reservation, decision or stock
+        // movement has committed. HTTP 4xx alone is not no-effect evidence.
         rethrow;
       }
     }
@@ -1316,20 +1311,11 @@ mixin _RetainedTransferSubmission<T extends StatefulWidget> on State<T> {
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
-      final definite =
-          error is ApiFailure &&
-          error.statusCode != null &&
-          error.statusCode! >= 400 &&
-          error.statusCode! < 500;
       setState(() {
-        uncertain = !definite;
-        submissionMessage = uncertain
-            ? (arabic
-                  ? 'ربما اكتملت العملية. بياناتك محفوظة؛ أغلق النافذة وحدّث التحويل وراجع الكميات قبل المحاولة من جديد. لا ترسل مرة أخرى الآن.'
-                  : 'The operation may have completed. Your entries are retained. Close this dialog, refresh the transfer and check quantities before trying again. Do not submit again now.')
-            : (arabic
-                  ? 'لم يُقبل الطلب. بياناتك محفوظة؛ صحح السبب الموضح ثم أرسل من جديد.'
-                  : 'The request was refused. Your entries are retained. Correct the reported problem, then submit again.');
+        uncertain = true;
+        submissionMessage = arabic
+            ? 'لم يتأكد اكتمال العملية. بياناتك محفوظة والإرسال محظور حتى التحقق من الطلب الأصلي. قد يحدث رفض بعد حفظ جزء من العملية؛ لا ترسل طلبا جديدا.'
+            : 'The outcome is not confirmed. Your entries are retained and submission is blocked until the original request is verified. A refusal can occur after part of the operation was saved. Do not send a new request.';
       });
       await showAppError(context, error);
     } finally {
