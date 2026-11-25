@@ -38,6 +38,9 @@ const reviewed = [
   // Work-only tests: disposable PostgreSQL on Linux/Windows and Flutter;
   // no signing, packaging, install, deployment, production secrets or writes.
   'work-restore-safety.yml',
+  // Reviewed 2026-11-25: backend spec files only, disposable PostgreSQL 14 service,
+  // contents:read, no secrets, no environment, no signing, install, release or deploy.
+  'kayan-noskip-backend.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {

@@ -1,0 +1,81 @@
+name: KAYAN backend no-skip file-by-file proof
+
+# Runs every backend spec file on its own with the exact flags it needs.
+# A file fails on any failed, pending or todo case, or when no case ran.
+# Scope limits are listed in the report, never silent: the 12 licence
+# signing/store specs (approved VM only) and the Flutter bridge cases (the
+# separate bridge workflow) are NOT covered here. This is not full-product proof.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['instinct/six-fixes-on-arena-98e79137']
+    paths:
+      - '.github/workflows/kayan-noskip-backend.yml'
+      - 'backend/scripts/noskip-backend-runner.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  noskip:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install PostgreSQL 14 client tools (must match the server major)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-14
+          echo "/usr/lib/postgresql/14/bin" >> "$GITHUB_PATH"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: |
+          node scripts/patch-adapter-pg-name-type.mjs
+          npx prisma generate
+      - name: Build (the approvals suite seeds with the compiled seed)
+        run: npm run build
+      - name: Run every spec file with its required flags
+        env:
+          DATABASE_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+          KAYAN_PG_DUMP: /usr/lib/postgresql/14/bin/pg_dump
+          KAYAN_PG_RESTORE: /usr/lib/postgresql/14/bin/pg_restore
+        run: node scripts/noskip-backend-runner.mjs "$RUNNER_TEMP/noskip" | tee "$RUNNER_TEMP/noskip.log"
+      - name: Summarise
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/noskip/noskip-report.json" ] && node -e '
+          const r=require(process.env.RUNNER_TEMP+"/noskip/noskip-report.json");
+          console.log(JSON.stringify({discovered:r.filesDiscovered,executed:r.filesExecuted,signingExcluded:r.signingExcluded.length,passedCases:r.passedCases,pendingCases:r.pendingCases,bridgePendingFiles:r.bridgePendingFiles,failedFiles:r.failedFiles},null,1))'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: kayan-noskip-backend-${{ github.sha }}
+          path: ${{ runner.temp }}/noskip/
+          if-no-files-found: warn
