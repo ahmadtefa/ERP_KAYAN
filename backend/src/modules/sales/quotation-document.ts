@@ -202,6 +202,15 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
     rules.push('html,body{background:transparent !important}');
     rules.push('@media print{body{background:transparent !important}}');
     rules.push('.page-bg .frame,.page-bg .watermark{display:none !important}');
+    // Keep the text clear of the letterhead's own artwork. The zones were
+    // measured from the uploaded file; a hidden band reserves nothing, a shown
+    // band still reserves its own height when that is larger.
+    const top = Number(design.backgroundTopMm);
+    const bottom = Number(design.backgroundBottomMm);
+    const topReserve = Math.max(design.hideHeader === true ? 0 : QUOTATION_TOP_BAND_MM, Number.isFinite(top) ? Math.min(top, 100) : 0);
+    const bottomReserve = Math.max(design.hideFooter === true ? 0 : QUOTATION_BOTTOM_BAND_MM, Number.isFinite(bottom) ? Math.min(bottom, 100) : 0);
+    rules.push(`.page-flow > thead > tr > td{height:${Math.min(topReserve + 4, MAX_REPEATED_BAND_MM)}mm !important}`);
+    rules.push(`.page-flow > tfoot > tr > td{height:${Math.min(bottomReserve + BACKGROUND_NUMBER_ROOM_MM, MAX_REPEATED_BAND_MM)}mm !important}`);
   }
   return rules.join('\n');
 }
@@ -308,6 +317,22 @@ export const QUOTATION_FOOTER_INSET_MM = 9.5;
 /// starts at {@link QUOTATION_FOOTER_INSET_MM} (27 pt): the two cannot touch,
 /// and both are inside the {@link QUOTATION_BOTTOM_BAND_MM} band.
 export const QUOTATION_PAGE_NUMBER = { y: 10, size: 9 };
+
+/// Chromium repeats a table header/footer group on every page only while it is
+/// shorter than a quarter of the page (measured: 70 mm repeats, 75 mm does not),
+/// so the room kept for letterhead artwork is capped just under that.
+export const MAX_REPEATED_BAND_MM = 70;
+
+/// Room kept under the text, above a letterhead's artwork, for the page number.
+export const BACKGROUND_NUMBER_ROOM_MM = 9;
+
+/// Where the page number sits on a sheet that carries a letterhead: just above
+/// the artwork's top edge, so it never lands on the footer logo, and dark so it
+/// can be read on the paper's own colour.
+export function backgroundPageNumber(bottomInsetMm: number, hideFooter: boolean) {
+  const y = (Math.max(hideFooter ? 0 : QUOTATION_BOTTOM_BAND_MM, bottomInsetMm) + 1.5) * (72 / 25.4);
+  return { y, size: QUOTATION_PAGE_NUMBER.size };
+}
 
 export interface PageNumberInk {
   r: number;

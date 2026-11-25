@@ -86,6 +86,7 @@ class QuotationDocumentDesign {
     this.hideFooter = false,
     this.backgroundId,
     this.backgroundName,
+    this.backgroundStretch = false,
   });
 
   final QuotationDocumentElementStyle? title;
@@ -108,11 +109,16 @@ class QuotationDocumentDesign {
   final String? backgroundId;
   final String? backgroundName;
 
+  /// الافتراضي: تُحفظ نسبة أبعاد الخلفية. عند التفعيل تُمدّ لتملأ ورقة A4 كاملة
+  /// (قد يتغير شكل الشعارات قليلًا إن كانت أبعاد الملف غير A4).
+  final bool backgroundStretch;
+
   QuotationDocumentDesign withLetterhead({
     bool? hideHeader,
     bool? hideFooter,
     String? backgroundId,
     String? backgroundName,
+    bool? backgroundStretch,
     bool clearBackground = false,
   }) => QuotationDocumentDesign(
     title: title,
@@ -132,6 +138,9 @@ class QuotationDocumentDesign {
     backgroundName: clearBackground
         ? null
         : (backgroundName ?? this.backgroundName),
+    backgroundStretch: clearBackground
+        ? false
+        : (backgroundStretch ?? this.backgroundStretch),
   );
 
   /// نسخة بتنسيق عنصر واحد مستبدل، مع الاحتفاظ بخيارات الورق والخلفية.
@@ -154,6 +163,7 @@ class QuotationDocumentDesign {
     hideFooter: hideFooter,
     backgroundId: backgroundId,
     backgroundName: backgroundName,
+    backgroundStretch: backgroundStretch,
   );
 
   /// الأنماط الافتراضية (بدون تجاوزات).
@@ -178,6 +188,7 @@ class QuotationDocumentDesign {
       hideFooter: other.hideFooter || hideFooter,
       backgroundId: other.backgroundId ?? backgroundId,
       backgroundName: other.backgroundName ?? backgroundName,
+      backgroundStretch: other.backgroundStretch || backgroundStretch,
     );
   }
 
@@ -223,6 +234,7 @@ class QuotationDocumentDesign {
       backgroundName: raw['backgroundName'] is String
           ? raw['backgroundName'] as String
           : null,
+      backgroundStretch: raw['backgroundFit'] == 'stretch',
     );
   }
 
@@ -266,6 +278,7 @@ class QuotationDocumentDesign {
     if (backgroundId != null) {
       result['backgroundId'] = backgroundId;
       if (backgroundName != null) result['backgroundName'] = backgroundName;
+      if (backgroundStretch) result['backgroundFit'] = 'stretch';
     }
     return result;
   }

@@ -23,7 +23,6 @@ import {
   UpdateQuotationDto,
 } from './dto/quotation.dto';
 import {
-  QUOTATION_PAGE_NUMBER,
   quotationDocumentFileName,
 } from './quotation-document';
 import { QuotationsService } from './quotations.service';
@@ -160,9 +159,10 @@ export class QuotationsController {
       // same composed document as Download PDF, inline in the browser viewer.
       const file = await this.pdf.render(document.html, {
         fullBleed: true, pageNumberColor: document.pageNumberInk,
-        pageNumberY: QUOTATION_PAGE_NUMBER.y,
-        pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+        pageNumberY: document.pageNumber.y,
+        pageNumberSize: document.pageNumber.size,
         backgroundPdf: document.backgroundPdf,
+        backgroundFit: document.backgroundFit,
       });
       response.type('application/pdf');
       response.setHeader('Content-Disposition', `inline; filename="${quotationDocumentFileName(document.quotationNumber, id)}"`);
@@ -201,9 +201,10 @@ export class QuotationsController {
     const file = await this.pdf.render(document.html, {
       fullBleed: true,
       pageNumberColor: document.pageNumberInk,
-      pageNumberY: QUOTATION_PAGE_NUMBER.y,
-      pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+      pageNumberY: document.pageNumber.y,
+      pageNumberSize: document.pageNumber.size,
       backgroundPdf: document.backgroundPdf ?? undefined,
+      backgroundFit: document.backgroundFit,
     });
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(

@@ -1,6 +1,9 @@
 import '../../../../shared/widgets/persistent_table_scroll.dart';
+
 import 'dart:convert';
+
 import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/platform/picked_file.dart';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +29,18 @@ import '../../../../shared/widgets/discount_kind_label.dart';
 import '../document/quotation_document.dart';
 import '../providers/quotation_providers.dart';
 
+/// The file chooser behind the letterhead button. A seam so tests can hand
+/// the editor a file without a system dialogue.
+final quotationBackgroundPickerProvider =
+    Provider<Future<PickedFile?> Function(List<String> extensions)>(
+      (ref) =>
+          (extensions) => pickFile(extensions: extensions),
+    );
+
+/// The biggest letterhead file the server takes (it sends it as base64 inside
+/// a 6 MB request body).
+const quotationBackgroundMaxBytes = 4 * 1024 * 1024;
+
 class _QLineDraft {
   _QLineDraft({
     this.itemId,
@@ -49,8 +64,10 @@ class _QLineDraft {
   final TextEditingController unit;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
+
   /// Values for user-defined columns, keyed by the column's key.
   final Map<String, String> customValues;
+
   /// Controllers for custom value fields, created lazily and disposed with
   /// the line draft.
   final Map<String, TextEditingController> customValueControllers;
@@ -116,6 +133,7 @@ class _QColumnDraft {
   final TextEditingController labelAr;
   bool visible;
   int width;
+
   /// Whether the column holds a monetary quantity. User-defined columns
   /// default to text unless the user marks them numeric.
   bool numeric;
@@ -165,7 +183,8 @@ class _QTableDraft {
   final List<_QColumnDraft> columns;
   final List<_QLineDraft> lines;
 
-  Decimal get gross => lines.fold(Decimal.zero, (sum, line) => sum + line.lineTotal);
+  Decimal get gross =>
+      lines.fold(Decimal.zero, (sum, line) => sum + line.lineTotal);
 
   ResolvedDiscount get discount => resolveDiscount(
     gross,
@@ -380,8 +399,7 @@ class _AddColumnDialogState extends State<_AddColumnDialog> {
                             child: Text('$option'),
                           ),
                       ],
-                      onChanged: (value) =>
-                          setState(() => _width = value ?? 2),
+                      onChanged: (value) => setState(() => _width = value ?? 2),
                     ),
                   ),
                 ],
@@ -406,7 +424,11 @@ class _AddColumnDialogState extends State<_AddColumnDialog> {
 }
 
 class QuotationEditorScreen extends ConsumerStatefulWidget {
-  const QuotationEditorScreen({super.key, this.quotationId, this.navigationKey});
+  const QuotationEditorScreen({
+    super.key,
+    this.quotationId,
+    this.navigationKey,
+  });
 
   final String? quotationId;
   final ValueKey<String>? navigationKey;
@@ -447,6 +469,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
     });
   }
+
   final _sentTableLines = <List<_QLineDraft>>[];
 
   final _errorFieldKeys = <String, GlobalKey>{
@@ -477,8 +500,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   void _clearFieldError(String field) {
-    if (_serverErrors.containsKey(field)) setState(() => _serverErrors.remove(field));
+    if (_serverErrors.containsKey(field))
+      setState(() => _serverErrors.remove(field));
   }
+
   String _currency = 'EGP';
   late String _date;
   String? _validUntil;
@@ -490,17 +515,52 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   late final DraftExitGuard _exitGuard;
 
   String _snapshot() => jsonEncode({
-    'customer':_customerId, 'currency':_currency, 'date':_date, 'validUntil':_validUntil,
-    'subject':_subject.text, 'terms':_terms.text, 'notes':_notes.text, 'taxId':_showTaxId,
-    'manager':_managerName.text, 'responsible':_responsibleName.text, 'phone':_responsiblePhone.text,
-    'discountKind':_discountKind.name, 'discount':_discountValue.text, 'design':_design.toJson(),
-    'tables':[for (final table in _tables) {
-      'title':table.title.text, 'discountKind':table.discountKind.name, 'discount':table.discountValue.text,
-      'columns':[for (final column in table.columns) [column.key,column.labelEn.text,column.labelAr.text,
-        column.visible,column.width,column.numeric,column.kind]],
-      'lines':[for (final line in table.lines) [line.itemId,line.description.text,line.origin.text,line.unit.text,
-        line.quantity.text,line.unitPrice.text,line.customValues]],
-    }],
+    'customer': _customerId,
+    'currency': _currency,
+    'date': _date,
+    'validUntil': _validUntil,
+    'subject': _subject.text,
+    'terms': _terms.text,
+    'notes': _notes.text,
+    'taxId': _showTaxId,
+    'manager': _managerName.text,
+    'responsible': _responsibleName.text,
+    'phone': _responsiblePhone.text,
+    'discountKind': _discountKind.name,
+    'discount': _discountValue.text,
+    'design': _design.toJson(),
+    'tables': [
+      for (final table in _tables)
+        {
+          'title': table.title.text,
+          'discountKind': table.discountKind.name,
+          'discount': table.discountValue.text,
+          'columns': [
+            for (final column in table.columns)
+              [
+                column.key,
+                column.labelEn.text,
+                column.labelAr.text,
+                column.visible,
+                column.width,
+                column.numeric,
+                column.kind,
+              ],
+          ],
+          'lines': [
+            for (final line in table.lines)
+              [
+                line.itemId,
+                line.description.text,
+                line.origin.text,
+                line.unit.text,
+                line.quantity.text,
+                line.unitPrice.text,
+                line.customValues,
+              ],
+          ],
+        },
+    ],
   });
 
   Future<bool> _confirmExit() async {
@@ -509,18 +569,26 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     _confirmingExit = true;
     try {
       final ar = Localizations.localeOf(context).languageCode == 'ar';
-      return await confirmAction(context,
+      return await confirmAction(
+        context,
         title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
-        message: ar ? 'الخروج دون حفظ عرض السعر؟' : 'Leave without saving the quotation?',
-        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
-    } finally { _confirmingExit = false; }
+        message: ar
+            ? 'الخروج دون حفظ عرض السعر؟'
+            : 'Leave without saving the quotation?',
+        confirmLabel: ar ? 'خروج' : 'Discard',
+        destructive: true,
+      );
+    } finally {
+      _confirmingExit = false;
+    }
   }
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _date = '${now.year.toString().padLeft(4, '0')}-'
+    _date =
+        '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _tables.add(_QTableDraft());
@@ -623,14 +691,20 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() { _loading = false; _loadFailed = true; });
+      setState(() {
+        _loading = false;
+        _loadFailed = true;
+      });
       showAppError(context, error);
     }
   }
 
   void _retryLoad() {
     if (_loading || widget.quotationId == null) return;
-    setState(() { _loading = true; _loadFailed = true; });
+    setState(() {
+      _loading = true;
+      _loadFailed = true;
+    });
     _load();
   }
 
@@ -644,8 +718,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     'unitPrice',
     'lineTotal',
   ];
-
-
 
   String _columnName(String key) {
     final l10n = context.l10n;
@@ -717,7 +789,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             child: Text(l10n.cancel),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(titleController.text),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(titleController.text),
             child: Text(l10n.save),
           ),
         ],
@@ -725,10 +798,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     );
     if (title == null || title.trim().isEmpty || !mounted) return;
     try {
-      await ref.read(apiClientProvider).post(
-        '/sales/quotation-terms',
-        body: {'title': title.trim(), 'body': body},
-      );
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/sales/quotation-terms',
+            body: {'title': title.trim(), 'body': body},
+          );
       ref.invalidate(quotationTermsProvider);
       if (mounted) showMessage(context, l10n.termsSaved);
     } on Failure catch (error) {
@@ -781,7 +856,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       lastDate: DateTime(2100),
     );
     if (picked == null || !mounted) return;
-    final iso = '${picked.year.toString().padLeft(4, '0')}-'
+    final iso =
+        '${picked.year.toString().padLeft(4, '0')}-'
         '${picked.month.toString().padLeft(2, '0')}-'
         '${picked.day.toString().padLeft(2, '0')}';
     setState(() {
@@ -814,7 +890,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     }
     if (line.unitPrice.text.trim().isEmpty ||
         line.unitPrice.text.trim() == '0') {
-      line.unitPrice.text = formatQuantity(text(item, 'salePrice'), decimals: 2);
+      line.unitPrice.text = formatQuantity(
+        text(item, 'salePrice'),
+        decimals: 2,
+      );
     }
   }
 
@@ -830,26 +909,40 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     _inputErrors.clear();
     _sentTableLines.clear();
     for (final table in _tables) {
-      if (table.title.text.trim().isEmpty) _inputErrors[table.title] = l10n.tableTitle;
-      final active = table.lines.where((l) => l.description.text.trim().isNotEmpty || l.itemId != null).toList();
+      if (table.title.text.trim().isEmpty)
+        _inputErrors[table.title] = l10n.tableTitle;
+      final active = table.lines
+          .where(
+            (l) => l.description.text.trim().isNotEmpty || l.itemId != null,
+          )
+          .toList();
       if (active.isEmpty) _inputErrors[table.title] = l10n.quotationNeedsTable;
       for (final line in active) {
         final qty = Decimal.tryParse(line.quantity.text.trim());
-        if (qty == null || qty <= Decimal.zero) _inputErrors[line.quantity] = l10n.mustBePositive;
+        if (qty == null || qty <= Decimal.zero)
+          _inputErrors[line.quantity] = l10n.mustBePositive;
         final rawPrice = line.unitPrice.text.trim();
-        final price = rawPrice.isEmpty ? Decimal.zero : Decimal.tryParse(rawPrice);
+        final price = rawPrice.isEmpty
+            ? Decimal.zero
+            : Decimal.tryParse(rawPrice);
         if (price == null || price < Decimal.zero) {
-          _inputErrors[line.unitPrice] = Localizations.localeOf(context).languageCode == 'ar'
-              ? 'اكتب سعرًا صحيحًا بدون سالب' : 'Enter a valid price, zero or more';
+          _inputErrors[line.unitPrice] =
+              Localizations.localeOf(context).languageCode == 'ar'
+              ? 'اكتب سعرًا صحيحًا بدون سالب'
+              : 'Enter a valid price, zero or more';
         }
       }
       if (table.discountKind != DiscountKind.none) {
         final raw = table.discountValue.text.trim();
         final value = raw.isEmpty ? Decimal.zero : Decimal.tryParse(raw);
-        if (value == null || value < Decimal.zero ||
-            (table.discountKind == DiscountKind.percent && value > Decimal.fromInt(100)) ||
-            (table.discountKind == DiscountKind.amount && value > table.gross)) {
-          _inputErrors[table.discountValue] = Localizations.localeOf(context).languageCode == 'ar'
+        if (value == null ||
+            value < Decimal.zero ||
+            (table.discountKind == DiscountKind.percent &&
+                value > Decimal.fromInt(100)) ||
+            (table.discountKind == DiscountKind.amount &&
+                value > table.gross)) {
+          _inputErrors[table.discountValue] =
+              Localizations.localeOf(context).languageCode == 'ar'
               ? 'اكتب خصمًا صحيحًا لا يتجاوز قيمة الجدول أو ١٠٠٪'
               : 'Enter a valid discount within the table value or 100%';
         }
@@ -871,7 +964,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       for (final line in table.lines) {
         final quantity = line.quantity.text.trim();
         final parsed = Decimal.tryParse(quantity);
-        if (line.description.text.trim().isEmpty && line.itemId == null) continue;
+        if (line.description.text.trim().isEmpty && line.itemId == null)
+          continue;
         if (parsed == null || parsed <= Decimal.zero) {
           showMessage(context, l10n.mustBePositive, error: true);
           return;
@@ -885,8 +979,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           'unitPrice': line.unitPrice.text.trim().isEmpty
               ? '0'
               : line.unitPrice.text.trim(),
-          if (line.customValues.isNotEmpty)
-            'customValues': line.customValues,
+          if (line.customValues.isNotEmpty) 'customValues': line.customValues,
         });
       }
       if (lines.isEmpty) {
@@ -903,7 +996,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         if (table.discountKind == DiscountKind.percent &&
             discountText.isNotEmpty)
           'discountPercent': discountText,
-        if (table.discountKind == DiscountKind.amount && discountText.isNotEmpty)
+        if (table.discountKind == DiscountKind.amount &&
+            discountText.isNotEmpty)
           'discountAmount': discountText,
         'lines': lines,
       });
@@ -960,7 +1054,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       if (mounted) {
         // From this point only the exact submitted snapshot is clean. If a
         // route transition is delayed, later edits must still be protected.
-        setState(() { _savedSnapshot = _snapshot(); _saving = false; });
+        setState(() {
+          _savedSnapshot = _snapshot();
+          _saving = false;
+        });
         showMessage(context, l10n.quotationSaved);
         context.go(AppRoutes.quotations);
       }
@@ -970,10 +1067,18 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         final unmatched = <String, String>{};
         _inputErrors.clear();
         for (final entry in error.fieldErrors.entries) {
-          final m = RegExp(r'^tables\.(\d+)\.(?:lines\.(\d+)\.)?(title|quantity|unitPrice|description|countryOfOrigin|unit)$').firstMatch(entry.key);
-          if (m == null) { unmatched[entry.key] = entry.value; continue; }
+          final m = RegExp(
+            r'^tables\.(\d+)\.(?:lines\.(\d+)\.)?(title|quantity|unitPrice|description|countryOfOrigin|unit)$',
+          ).firstMatch(entry.key);
+          if (m == null) {
+            unmatched[entry.key] = entry.value;
+            continue;
+          }
           final ti = int.parse(m.group(1)!);
-          if (ti >= _tables.length) { unmatched[entry.key] = entry.value; continue; }
+          if (ti >= _tables.length) {
+            unmatched[entry.key] = entry.value;
+            continue;
+          }
           final field = m.group(3)!;
           TextEditingController? target;
           if (m.group(2) == null && field == 'title') {
@@ -983,14 +1088,20 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             if (li < _sentTableLines[ti].length) {
               final line = _sentTableLines[ti][li];
               target = switch (field) {
-                'quantity' => line.quantity, 'unitPrice' => line.unitPrice,
-                'description' => line.description, 'countryOfOrigin' => line.origin,
-                'unit' => line.unit, _ => null,
+                'quantity' => line.quantity,
+                'unitPrice' => line.unitPrice,
+                'description' => line.description,
+                'countryOfOrigin' => line.origin,
+                'unit' => line.unit,
+                _ => null,
               };
             }
           }
-          if (target == null) { unmatched[entry.key] = entry.value; }
-          else { _inputErrors[target] = entry.value; }
+          if (target == null) {
+            unmatched[entry.key] = entry.value;
+          } else {
+            _inputErrors[target] = entry.value;
+          }
         }
         setState(() {});
         _revealInputError();
@@ -1020,7 +1131,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     // without the dropdown asserting on a value it no longer offers.
     final customers = ref.watch(customersProvider).value ?? const <Json>[];
     final items = ref.watch(itemsProvider).value ?? const <Json>[];
-    final savedTerms = ref.watch(quotationTermsProvider).value ?? const <Json>[];
+    final savedTerms =
+        ref.watch(quotationTermsProvider).value ?? const <Json>[];
 
     // The screen lives inside the application shell, which already draws the
     // window chrome. A second AppBar would put two titles on one page, so the
@@ -1031,10 +1143,20 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         children: [
           PageHeader(
             dense: true,
-            leading:IconButton(key:const Key('quotation-editor-back'),tooltip:MaterialLocalizations.of(context).backButtonTooltip,
-              icon:const Icon(Icons.arrow_back),onPressed:_saving ? null : () {
-                if (context.canPop()) { context.pop(); } else { context.go(AppRoutes.quotations); }
-              }),
+            leading: IconButton(
+              key: const Key('quotation-editor-back'),
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+              icon: const Icon(Icons.arrow_back),
+              onPressed: _saving
+                  ? null
+                  : () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go(AppRoutes.quotations);
+                      }
+                    },
+            ),
             title: widget.quotationId == null
                 ? l10n.newQuotation
                 : l10n.editQuotation,
@@ -1054,271 +1176,324 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _loadFailed
-                  ? Center(child:OutlinedButton(
-                      key:const Key('quotation-retry-load'),
-                      onPressed:_retryLoad,
-                      child:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'إعادة المحاولة' : 'Retry')))
-                  : AbsorbPointer(key:const Key('quotation-edit-lock'),absorbing:_saving,child: ListView(
-                    padding: const EdgeInsets.all(AppSpacing.xl),
-                    children: [
-                Text(
-                  l10n.quotationDraftHint,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
+                ? Center(
+                    child: OutlinedButton(
+                      key: const Key('quotation-retry-load'),
+                      onPressed: _retryLoad,
+                      child: Text(
+                        Localizations.localeOf(context).languageCode == 'ar'
+                            ? 'إعادة المحاولة'
+                            : 'Retry',
+                      ),
+                    ),
+                  )
+                : AbsorbPointer(
+                    key: const Key('quotation-edit-lock'),
+                    absorbing: _saving,
+                    child: ListView(
+                      padding: const EdgeInsets.all(AppSpacing.xl),
                       children: [
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            SizedBox(
-                              key: _errorFieldKeys['customerId'],
-                              width: 300,
-                              child: DropdownButtonFormField<String>(
-                                initialValue: _choice(customers, _customerId),
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  errorText: _serverErrors['customerId'],
-                                  labelText: l10n.customer,
-                                  border: const OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                items: [
-                                  for (final customer in customers)
-                                    DropdownMenuItem(
-                                      value: text(customer, 'id'),
-                                      child: Text(
-                                        '${text(customer, 'code')} — '
-                                        '${text(customer, 'nameEn')}',
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                ],
-                                onChanged: (value) {
-                                  _serverErrors.remove('customerId');
-                                  setState(() => _customerId = value);
-                                },
-                              ),
-                            ),
-                            SizedBox(
-                              width: 180,
-                              child: Column(
-                                key: _errorFieldKeys['quotationDate'],
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  OutlinedButton.icon(
-                                onPressed: () => _pickDate(validUntil: false),
-                                icon: const Icon(Icons.event),
-                                label: Text('${l10n.quotationDate}: $_date'),
-                              ),
-                                  if (_serverErrors['quotationDate'] != null)
-                                    Text(_serverErrors['quotationDate']!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              width: 200,
-                              child: Column(
-                                key: _errorFieldKeys['validUntil'],
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  OutlinedButton.icon(
-                                onPressed: () => _pickDate(validUntil: true),
-                                icon: const Icon(Icons.event_available),
-                                label: Text(
-                                  _validUntil == null
-                                      ? l10n.validUntil
-                                      : '${l10n.validUntil}: $_validUntil',
-                                ),
-                              ),
-                                  if (_serverErrors['validUntil'] != null)
-                                    Text(_serverErrors['validUntil']!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              width: 120,
-                              child: TextFormField(
-                                initialValue: _currency,
-                                decoration: InputDecoration(
-                                  labelText: l10n.currency,
-                                  border: const OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onChanged: (value) =>
-                                    setState(() => _currency = value.toUpperCase()),
-                              ),
-                            ),
-                          ],
+                        Text(
+                          l10n.quotationDraftHint,
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          key: _errorFieldKeys['terms'],
-                          controller: _terms,
-                          onChanged: (_) => _clearFieldError('terms'),
-                          minLines: 2,
-                          maxLines: 6,
-                          decoration: InputDecoration(
-                            errorText: _serverErrors['terms'],
-                            labelText: l10n.termsAndConditions,
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                        Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            PopupMenuButton<Json>(
-                              tooltip: l10n.insertSavedTerms,
-                              enabled: savedTerms.isNotEmpty,
-                              onSelected: _insertSavedTerm,
-                              itemBuilder: (context) => [
-                                for (final term in savedTerms)
-                                  PopupMenuItem<Json>(
-                                    value: term,
-                                    child: ListTile(
-                                      dense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(text(term, 'title')),
-                                      subtitle: Text(
-                                        text(term, 'body'),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              children: [
+                                Wrap(
+                                  spacing: 12,
+                                  runSpacing: 12,
+                                  children: [
+                                    SizedBox(
+                                      key: _errorFieldKeys['customerId'],
+                                      width: 300,
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: _choice(
+                                          customers,
+                                          _customerId,
+                                        ),
+                                        isExpanded: true,
+                                        decoration: InputDecoration(
+                                          errorText:
+                                              _serverErrors['customerId'],
+                                          labelText: l10n.customer,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        items: [
+                                          for (final customer in customers)
+                                            DropdownMenuItem(
+                                              value: text(customer, 'id'),
+                                              child: Text(
+                                                '${text(customer, 'code')} — '
+                                                '${text(customer, 'nameEn')}',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: (value) {
+                                          _serverErrors.remove('customerId');
+                                          setState(() => _customerId = value);
+                                        },
                                       ),
                                     ),
-                                  ),
-                              ],
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.playlist_add, size: 18),
-                                    const SizedBox(width: 6),
-                                    Text(l10n.insertSavedTerms),
+                                    SizedBox(
+                                      width: 180,
+                                      child: Column(
+                                        key: _errorFieldKeys['quotationDate'],
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          OutlinedButton.icon(
+                                            onPressed: () =>
+                                                _pickDate(validUntil: false),
+                                            icon: const Icon(Icons.event),
+                                            label: Text(
+                                              '${l10n.quotationDate}: $_date',
+                                            ),
+                                          ),
+                                          if (_serverErrors['quotationDate'] !=
+                                              null)
+                                            Text(
+                                              _serverErrors['quotationDate']!,
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .error,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 200,
+                                      child: Column(
+                                        key: _errorFieldKeys['validUntil'],
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          OutlinedButton.icon(
+                                            onPressed: () =>
+                                                _pickDate(validUntil: true),
+                                            icon: const Icon(
+                                              Icons.event_available,
+                                            ),
+                                            label: Text(
+                                              _validUntil == null
+                                                  ? l10n.validUntil
+                                                  : '${l10n.validUntil}: $_validUntil',
+                                            ),
+                                          ),
+                                          if (_serverErrors['validUntil'] !=
+                                              null)
+                                            Text(
+                                              _serverErrors['validUntil']!,
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .error,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 120,
+                                      child: TextFormField(
+                                        initialValue: _currency,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.currency,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        onChanged: (value) => setState(
+                                          () => _currency = value.toUpperCase(),
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
-                              ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  key: _errorFieldKeys['terms'],
+                                  controller: _terms,
+                                  onChanged: (_) => _clearFieldError('terms'),
+                                  minLines: 2,
+                                  maxLines: 6,
+                                  decoration: InputDecoration(
+                                    errorText: _serverErrors['terms'],
+                                    labelText: l10n.termsAndConditions,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                ),
+                                Wrap(
+                                  spacing: 8,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    PopupMenuButton<Json>(
+                                      tooltip: l10n.insertSavedTerms,
+                                      enabled: savedTerms.isNotEmpty,
+                                      onSelected: _insertSavedTerm,
+                                      itemBuilder: (context) => [
+                                        for (final term in savedTerms)
+                                          PopupMenuItem<Json>(
+                                            value: term,
+                                            child: ListTile(
+                                              dense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              title: Text(text(term, 'title')),
+                                              subtitle: Text(
+                                                text(term, 'body'),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.playlist_add,
+                                              size: 18,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(l10n.insertSavedTerms),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: _saveTermsToLibrary,
+                                      icon: const Icon(
+                                        Icons.bookmark_add_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(l10n.saveTermsToLibrary),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: _openTermsLibrary,
+                                      icon: const Icon(
+                                        Icons.library_books_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(l10n.manageSavedTerms),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                TextField(
+                                  key: _errorFieldKeys['notes'],
+                                  controller: _notes,
+                                  onChanged: (_) => _clearFieldError('notes'),
+                                  minLines: 1,
+                                  maxLines: 4,
+                                  decoration: InputDecoration(
+                                    errorText: _serverErrors['notes'],
+                                    labelText: l10n.notesLabel,
+                                    helperText: l10n.optional,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                KeyedSubtree(
+                                  key: _errorFieldKeys['subject'],
+                                  child: TextField(
+                                    key: const ValueKey('quotation-subject'),
+                                    controller: _subject,
+                                    onChanged: (_) =>
+                                        _clearFieldError('subject'),
+                                    maxLength: 200,
+                                    decoration: InputDecoration(
+                                      errorText: _serverErrors['subject'],
+                                      labelText: l10n.subject,
+                                      helperText: l10n.subjectHint,
+                                      border: const OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                  ),
+                                ),
+                                SwitchListTile(
+                                  key: const ValueKey(
+                                    'quotation-show-tax-number',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  value: _showTaxId,
+                                  onChanged: (value) =>
+                                      setState(() => _showTaxId = value),
+                                  title: Text(l10n.showTaxNumberOnOffer),
+                                  subtitle: Text(l10n.showTaxNumberOnOfferHint),
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 12,
+                                  runSpacing: 12,
+                                  children: [
+                                    SizedBox(
+                                      width: 220,
+                                      child: TextField(
+                                        controller: _managerName,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.managerName,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 220,
+                                      child: TextField(
+                                        controller: _responsibleName,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.responsibleName,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 200,
+                                      child: TextField(
+                                        controller: _responsiblePhone,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.responsiblePhone,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                            TextButton.icon(
-                              onPressed: _saveTermsToLibrary,
-                              icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-                              label: Text(l10n.saveTermsToLibrary),
-                            ),
-                            TextButton.icon(
-                              onPressed: _openTermsLibrary,
-                              icon: const Icon(Icons.library_books_outlined, size: 18),
-                              label: Text(l10n.manageSavedTerms),
-                            ),
-                          ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _designCard(context),
+                        const SizedBox(height: 12),
+                        for (var index = 0; index < _tables.length; index++)
+                          _tableCard(index, language, items),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: () =>
+                                setState(() => _tables.add(_QTableDraft())),
+                            icon: const Icon(Icons.add),
+                            label: Text(l10n.addTable),
+                          ),
                         ),
                         const SizedBox(height: 8),
-                        TextField(
-                          key: _errorFieldKeys['notes'],
-                          controller: _notes,
-                          onChanged: (_) => _clearFieldError('notes'),
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            errorText: _serverErrors['notes'],
-                            labelText: l10n.notesLabel,
-                            helperText: l10n.optional,
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        KeyedSubtree(
-                          key: _errorFieldKeys['subject'],
-                          child: TextField(
-                          key: const ValueKey('quotation-subject'),
-                          controller: _subject,
-                          onChanged: (_) => _clearFieldError('subject'),
-                          maxLength: 200,
-                          decoration: InputDecoration(
-                            errorText: _serverErrors['subject'],
-                            labelText: l10n.subject,
-                            helperText: l10n.subjectHint,
-                            border: const OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                        )),
-                        SwitchListTile(
-                          key: const ValueKey('quotation-show-tax-number'),
-                          contentPadding: EdgeInsets.zero,
-                          value: _showTaxId,
-                          onChanged: (value) =>
-                              setState(() => _showTaxId = value),
-                          title: Text(l10n.showTaxNumberOnOffer),
-                          subtitle: Text(l10n.showTaxNumberOnOfferHint),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            SizedBox(
-                              width: 220,
-                              child: TextField(
-                                controller: _managerName,
-                                decoration: InputDecoration(
-                                  labelText: l10n.managerName,
-                                  border: const OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 220,
-                              child: TextField(
-                                controller: _responsibleName,
-                                decoration: InputDecoration(
-                                  labelText: l10n.responsibleName,
-                                  border: const OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 200,
-                              child: TextField(
-                                controller: _responsiblePhone,
-                                decoration: InputDecoration(
-                                  labelText: l10n.responsiblePhone,
-                                  border: const OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        _summary(context),
                       ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                _designCard(context),
-                const SizedBox(height: 12),
-                for (var index = 0; index < _tables.length; index++)
-                  _tableCard(index, language, items),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () =>
-                        setState(() => _tables.add(_QTableDraft())),
-                    icon: const Icon(Icons.add),
-                    label: Text(l10n.addTable),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _summary(context),
-                    ],
-                  )),
           ),
         ],
       ),
@@ -1327,49 +1502,75 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
 
   Widget _designCard(BuildContext context) {
     final labels = <String, String>{
-      'title': 'عنوان العرض', 'company': 'اسم الشركة', 'customer': 'بيانات العميل',
-      'sectionTitle': 'عناوين الجداول', 'tableHeader': 'رؤوس الجداول',
-      'tableCell': 'خلايا الجداول', 'totalsLabel': 'عناوين الإجماليات',
-      'totalsValue': 'قيم الإجماليات', 'finalTotal': 'الإجمالي النهائي',
-      'header': 'الهيدر', 'footer': 'الفوتر',
+      'title': 'عنوان العرض',
+      'company': 'اسم الشركة',
+      'customer': 'بيانات العميل',
+      'sectionTitle': 'عناوين الجداول',
+      'tableHeader': 'رؤوس الجداول',
+      'tableCell': 'خلايا الجداول',
+      'totalsLabel': 'عناوين الإجماليات',
+      'totalsValue': 'قيم الإجماليات',
+      'finalTotal': 'الإجمالي النهائي',
+      'header': 'الهيدر',
+      'footer': 'الفوتر',
     };
     final enabled = _design.toJson().keys.where(labels.containsKey).length;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(children: [Row(children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('تنسيق عرض السعر', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 4),
-            Text('تحكم مستقل في الخط والحجم واللون والمحاذاة والمسافات والخلفية والحدود لكل جزء.', style: Theme.of(context).textTheme.bodySmall),
-            if (enabled > 0) Text('$enabled عناصر مخصصة', style: Theme.of(context).textTheme.bodySmall),
-          ])),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                key: const ValueKey('quotation-design-editor'),
-                onPressed: _editDesign,
-                icon: const Icon(Icons.palette_outlined, size: 18),
-                label: const Text('تخصيص التصميم'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _saveDesignTemplate,
-                icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-                label: const Text('حفظ كقالب'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _openDesignTemplates,
-                icon: const Icon(Icons.style_outlined, size: 18),
-                label: const Text('القوالب المحفوظة'),
-              ),
-            ],
-          ),
-        ]),
-          const Divider(height: 20),
-          _paperOptions(context),
-        ]),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'تنسيق عرض السعر',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'تحكم مستقل في الخط والحجم واللون والمحاذاة والمسافات والخلفية والحدود لكل جزء.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (enabled > 0)
+                        Text(
+                          '$enabled عناصر مخصصة',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      key: const ValueKey('quotation-design-editor'),
+                      onPressed: _editDesign,
+                      icon: const Icon(Icons.palette_outlined, size: 18),
+                      label: const Text('تخصيص التصميم'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _saveDesignTemplate,
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                      label: const Text('حفظ كقالب'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _openDesignTemplates,
+                      icon: const Icon(Icons.style_outlined, size: 18),
+                      label: const Text('القوالب المحفوظة'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            _paperOptions(context),
+          ],
+        ),
       ),
     );
   }
@@ -1385,25 +1586,48 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           key: const ValueKey('quotation-hide-header'),
           label: const Text('إخفاء الهيدر'),
           selected: _design.hideHeader,
-          onSelected: (v) => setState(() => _design = _design.withLetterhead(hideHeader: v)),
+          onSelected: (v) =>
+              setState(() => _design = _design.withLetterhead(hideHeader: v)),
         ),
         FilterChip(
           key: const ValueKey('quotation-hide-footer'),
           label: const Text('إخفاء الفوتر'),
           selected: _design.hideFooter,
-          onSelected: (v) => setState(() => _design = _design.withLetterhead(hideFooter: v)),
+          onSelected: (v) =>
+              setState(() => _design = _design.withLetterhead(hideFooter: v)),
         ),
         OutlinedButton.icon(
           key: const ValueKey('quotation-pick-background'),
           onPressed: _pickBackground,
-          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-          label: Text(_design.backgroundId == null
-              ? 'خلفية لملف PDF المُصدَّر'
-              : 'خلفية ملف PDF: ${_design.backgroundName ?? 'PDF'}'),
+          icon: const Icon(Icons.wallpaper_outlined, size: 18),
+          label: Text(
+            _design.backgroundId == null
+                ? 'خلفية العرض (PDF أو صورة)'
+                : 'الخلفية: ${_design.backgroundName ?? 'ملف'}',
+          ),
         ),
         if (_design.backgroundId != null)
+          FilterChip(
+            key: const ValueKey('quotation-background-stretch'),
+            label: const Text('تمديد لملء الصفحة'),
+            tooltip: 'يملأ الورقة كاملة وقد يغيّر شكل الشعارات قليلًا إن لم تكن أبعاد الملف A4',
+            selected: _design.backgroundStretch,
+            onSelected: (v) => setState(
+              () => _design = _design.withLetterhead(backgroundStretch: v),
+            ),
+          ),
+        if (_design.backgroundId != null &&
+            (!_design.hideHeader || !_design.hideFooter))
+          const Text(
+            key: ValueKey('quotation-background-bands-hint'),
+            'هيدر وفوتر البرنامج ما زالا ظاهرين فوق الخلفية وقد يغطيان ترويستك.',
+            style: TextStyle(fontSize: 12),
+          ),
+        if (_design.backgroundId != null)
           TextButton(
-            onPressed: () => setState(() => _design = _design.withLetterhead(clearBackground: true)),
+            onPressed: () => setState(
+              () => _design = _design.withLetterhead(clearBackground: true),
+            ),
             child: const Text('إزالة الخلفية'),
           ),
       ],
@@ -1411,20 +1635,131 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Future<void> _pickBackground() async {
-    final file = await pickFile(extensions: const ['pdf']);
+    final file = await ref.read(quotationBackgroundPickerProvider)(const [
+      'pdf',
+      'png',
+      'jpg',
+      'jpeg',
+    ]);
     if (file == null || !mounted) return;
+    if (file.bytes.length > quotationBackgroundMaxBytes) {
+      await showAppError(context, 'الملف أكبر من 4 ميجابايت');
+      return;
+    }
+    final name = file.name.length > 120
+        ? file.name.substring(0, 120)
+        : file.name;
+    final data = base64Encode(file.bytes);
     try {
-      final created = await ref.read(apiClientProvider).post('/sales/quotation-backgrounds', body: {
-        'name': file.name.length > 120 ? file.name.substring(0, 120) : file.name,
-        'dataBase64': base64Encode(file.bytes),
-      });
+      Map<String, dynamic> created;
+      try {
+        created = await ref
+            .read(apiClientProvider)
+            .post(
+              '/sales/quotation-backgrounds',
+              body: {'name': name, 'dataBase64': data},
+            );
+      } on ApiFailure catch (failure) {
+        // A PDF with several pages: the server never picks one silently.
+        if (failure.code != 'BACKGROUND_PAGE_REQUIRED') rethrow;
+        if (!mounted) return;
+        final page = await _askBackgroundPage(failure.message);
+        if (page == null || !mounted) return;
+        created = await ref
+            .read(apiClientProvider)
+            .post(
+              '/sales/quotation-backgrounds',
+              body: {'name': name, 'dataBase64': data, 'page': page},
+            );
+      }
       if (!mounted) return;
-      setState(() => _design = _design.withLetterhead(
-            backgroundId: '${created['id']}', backgroundName: '${created['name']}'));
+      setState(
+        () => _design = _design.withLetterhead(
+          backgroundId: '${created['id']}',
+          backgroundName: '${created['name']}',
+        ),
+      );
+      if (!_design.hideHeader || !_design.hideFooter) await _askHideBands();
     } catch (error) {
       if (!mounted) return;
       await showAppError(context, error);
     }
+  }
+
+  /// The program's own header and footer sit on top of the letterhead; the
+  /// user decides whether they stay, never the program.
+  Future<void> _askHideBands() async {
+    final hide = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('إخفاء هيدر وفوتر البرنامج؟'),
+        content: const Text(
+          'الخلفية تحمل ترويستك. هيدر وفوتر البرنامج قد يغطيان جزءًا منها. هل تريد إخفاءهما؟',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('quotation-keep-bands'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إبقاؤهما'),
+          ),
+          FilledButton(
+            key: const ValueKey('quotation-hide-bands'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('إخفاء'),
+          ),
+        ],
+      ),
+    );
+    if (hide == true && mounted) {
+      setState(
+        () => _design = _design.withLetterhead(
+          hideHeader: true,
+          hideFooter: true,
+        ),
+      );
+    }
+  }
+
+  Future<int?> _askBackgroundPage(String message) async {
+    final controller = TextEditingController(text: '1');
+    // Not disposed here: the dialog is still animating out when this returns.
+    return await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('اختيار صفحة الخلفية'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('quotation-background-page'),
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'رقم الصفحة',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final n = int.tryParse(controller.text.trim());
+              if (n != null && n >= 1) Navigator.pop(dialogContext, n);
+            },
+            child: const Text('استخدام هذه الصفحة'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<String?> _askDesignTemplateName({String initial = ''}) async {
@@ -1442,7 +1777,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               labelText: 'اسم القالب',
               border: OutlineInputBorder(),
             ),
-            onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
+            onSubmitted: (value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
           ),
           actions: [
             TextButton(
@@ -1450,7 +1786,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               child: Text(context.l10n.cancel),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
               child: Text(context.l10n.save),
             ),
           ],
@@ -1471,11 +1808,18 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final name = await _askDesignTemplateName(initial: existingName ?? '');
     if (name == null || name.trim().isEmpty || !mounted) return;
     try {
-      final body = <String, dynamic>{'name': name.trim(), 'design': _design.toJson()};
+      final body = <String, dynamic>{
+        'name': name.trim(),
+        'design': _design.toJson(),
+      };
       if (id == null) {
-        await ref.read(apiClientProvider).post('/sales/quotation-design-templates', body: body);
+        await ref
+            .read(apiClientProvider)
+            .post('/sales/quotation-design-templates', body: body);
       } else {
-        await ref.read(apiClientProvider).put('/sales/quotation-design-templates/$id', body: body);
+        await ref
+            .read(apiClientProvider)
+            .put('/sales/quotation-design-templates/$id', body: body);
       }
       ref.invalidate(quotationDesignTemplatesProvider);
       if (mounted) showMessage(context, context.l10n.templateSaved);
@@ -1488,7 +1832,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
 
   Future<void> _openDesignTemplates() async {
     try {
-      final initial = await ref.read(apiClientProvider).getList('/sales/quotation-design-templates');
+      final initial = await ref
+          .read(apiClientProvider)
+          .getList('/sales/quotation-design-templates');
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -1500,7 +1846,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               child: initial.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.all(20),
-                      child: Text('لا توجد قوالب محفوظة بعد. استخدم «حفظ كقالب» لحفظ التصميم الحالي.'),
+                      child: Text(
+                        'لا توجد قوالب محفوظة بعد. استخدم «حفظ كقالب» لحفظ التصميم الحالي.',
+                      ),
                     )
                   : ListView.separated(
                       shrinkWrap: true,
@@ -1512,7 +1860,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         final name = text(template, 'name');
                         return ListTile(
                           title: Text(name),
-                          subtitle: const Text('قالب تصميم الشركة — لا يحتوي بيانات العميل أو الأسعار'),
+                          subtitle: const Text(
+                            'قالب تصميم الشركة — لا يحتوي بيانات العميل أو الأسعار',
+                          ),
                           leading: const Icon(Icons.style_outlined),
                           trailing: Wrap(
                             spacing: 2,
@@ -1523,11 +1873,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                 onPressed: () {
                                   final raw = template['design'];
                                   if (raw is Map) {
-                                    setState(() => _design = QuotationDocumentDesign.fromJson(
-                                      Map<String, dynamic>.from(raw),
-                                    ));
+                                    setState(
+                                      () => _design =
+                                          QuotationDocumentDesign.fromJson(
+                                            Map<String, dynamic>.from(raw),
+                                          ),
+                                    );
                                     Navigator.of(dialogContext).pop();
-                                    showMessage(context, context.l10n.templateApplied);
+                                    showMessage(
+                                      context,
+                                      context.l10n.templateApplied,
+                                    );
                                   }
                                 },
                               ),
@@ -1536,24 +1892,41 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                 icon: const Icon(Icons.save_outlined),
                                 onPressed: () async {
                                   Navigator.of(dialogContext).pop();
-                                  await _saveDesignTemplate(id: id, existingName: name);
+                                  await _saveDesignTemplate(
+                                    id: id,
+                                    existingName: name,
+                                  );
                                 },
                               ),
                               IconButton(
                                 tooltip: context.l10n.templateDelete,
-                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.red,
+                                ),
                                 onPressed: () async {
                                   try {
-                                    await ref.read(apiClientProvider).delete('/sales/quotation-design-templates/$id');
+                                    await ref
+                                        .read(apiClientProvider)
+                                        .delete(
+                                          '/sales/quotation-design-templates/$id',
+                                        );
                                     if (!dialogContext.mounted) return;
                                     initial.removeAt(index);
-                                    ref.invalidate(quotationDesignTemplatesProvider);
+                                    ref.invalidate(
+                                      quotationDesignTemplatesProvider,
+                                    );
                                     setDialogState(() {});
                                     if (initial.isEmpty) {
                                       Navigator.of(dialogContext).pop();
                                     }
                                   } on Failure catch (error) {
-                                    if (dialogContext.mounted) showMessage(dialogContext, error, error: true);
+                                    if (dialogContext.mounted)
+                                      showMessage(
+                                        dialogContext,
+                                        error,
+                                        error: true,
+                                      );
                                   }
                                 },
                               ),
@@ -1580,11 +1953,31 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Future<void> _editDesign() async {
-    const keys = ['title','company','customer','sectionTitle','tableHeader','tableCell','totalsLabel','totalsValue','finalTotal','header','footer'];
+    const keys = [
+      'title',
+      'company',
+      'customer',
+      'sectionTitle',
+      'tableHeader',
+      'tableCell',
+      'totalsLabel',
+      'totalsValue',
+      'finalTotal',
+      'header',
+      'footer',
+    ];
     const labels = {
-      'title':'عنوان العرض','company':'اسم الشركة','customer':'بيانات العميل','sectionTitle':'عناوين الجداول',
-      'tableHeader':'رؤوس الجداول','tableCell':'خلايا الجداول','totalsLabel':'عناوين الإجماليات','totalsValue':'قيم الإجماليات',
-      'finalTotal':'الإجمالي النهائي','header':'الهيدر','footer':'الفوتر',
+      'title': 'عنوان العرض',
+      'company': 'اسم الشركة',
+      'customer': 'بيانات العميل',
+      'sectionTitle': 'عناوين الجداول',
+      'tableHeader': 'رؤوس الجداول',
+      'tableCell': 'خلايا الجداول',
+      'totalsLabel': 'عناوين الإجماليات',
+      'totalsValue': 'قيم الإجماليات',
+      'finalTotal': 'الإجمالي النهائي',
+      'header': 'الهيدر',
+      'footer': 'الفوتر',
     };
     String selected = 'title';
     final family = TextEditingController();
@@ -1601,10 +1994,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     void load() {
       final j = _design.toJson()[selected];
       if (j is Map) {
-        family.text = '${j['fontFamily'] ?? ''}'; size.text = '${j['fontSizeMultiplier'] ?? 1.0}';
-        color.text = '${j['color'] ?? ''}'; background.text = '${j['backgroundColor'] ?? ''}';
-        border.text = '${j['borderColor'] ?? ''}'; borderWidth.text = '${j['borderWidth'] ?? 0}';
-        lineHeight.text = '${j['lineHeight'] ?? ''}'; customText.text = '${j['customText'] ?? ''}';
+        family.text = '${j['fontFamily'] ?? ''}';
+        size.text = '${j['fontSizeMultiplier'] ?? 1.0}';
+        color.text = '${j['color'] ?? ''}';
+        background.text = '${j['backgroundColor'] ?? ''}';
+        border.text = '${j['borderColor'] ?? ''}';
+        borderWidth.text = '${j['borderWidth'] ?? 0}';
+        lineHeight.text = '${j['lineHeight'] ?? ''}';
+        customText.text = '${j['customText'] ?? ''}';
         weight = switch ('${j['fontWeight'] ?? 'w400'}') {
           'w500' => FontWeight.w500,
           'w600' => FontWeight.w600,
@@ -1613,56 +2010,307 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           _ => FontWeight.w400,
         };
         final a = '${j['textAlign'] ?? 'start'}';
-        align = switch (a) { 'left'=>TextAlign.left, 'right'=>TextAlign.right, 'center'=>TextAlign.center, 'justify'=>TextAlign.justify, _=>TextAlign.start };
+        align = switch (a) {
+          'left' => TextAlign.left,
+          'right' => TextAlign.right,
+          'center' => TextAlign.center,
+          'justify' => TextAlign.justify,
+          _ => TextAlign.start,
+        };
         visible = j['visible'] != false;
-      } else { family.clear(); size.text='1.0'; color.clear(); background.clear(); border.clear(); borderWidth.text='0'; lineHeight.clear(); customText.clear(); visible=true; align=TextAlign.start; weight=FontWeight.w400; }
+      } else {
+        family.clear();
+        size.text = '1.0';
+        color.clear();
+        background.clear();
+        border.clear();
+        borderWidth.text = '0';
+        lineHeight.clear();
+        customText.clear();
+        visible = true;
+        align = TextAlign.start;
+        weight = FontWeight.w400;
+      }
     }
+
     load();
-    await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (dialogContext, setDialogState) {
-      final current = _design.toJson()[selected];
-      if (current is Map && family.text.isEmpty && size.text == '1.0') load();
-      return AlertDialog(
-        title: const Text('تخصيص عنصر العرض'),
-        content: SizedBox(width: 720, child: SingleChildScrollView(child: Column(children: [
-          DropdownButtonFormField<String>(initialValue: selected, decoration: const InputDecoration(labelText:'العنصر', border:OutlineInputBorder()), items:[for(final k in keys) DropdownMenuItem(value:k, child:Text(labels[k]!))], onChanged:(v){ if(v==null)return; setDialogState((){selected=v; load();}); }),
-          const SizedBox(height:10),
-          Wrap(spacing:10, runSpacing:10, children:[
-            SizedBox(width:180, child:TextField(controller:family, decoration:const InputDecoration(labelText:'نوع الخط', hintText:'Tahoma / Arial / Segoe UI', border:OutlineInputBorder()))),
-            SizedBox(width:130, child:TextField(controller:size, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'حجم الخط', border:OutlineInputBorder()))),
-            SizedBox(width:160, child:TextField(controller:lineHeight, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'ارتفاع السطر', border:OutlineInputBorder()))),
-            SizedBox(width:150, child:DropdownButtonFormField<FontWeight>(initialValue:weight, decoration:const InputDecoration(labelText:'السمك', border:OutlineInputBorder()), items:[for(final w in [FontWeight.w400,FontWeight.w500,FontWeight.w600,FontWeight.w700,FontWeight.w800]) DropdownMenuItem(value:w, child:Text(w==FontWeight.w400?'عادي':w==FontWeight.w500?'متوسط':w==FontWeight.w600?'شبه عريض':w==FontWeight.w700?'عريض':'عريض جدًا'))], onChanged:(v)=>setDialogState(()=>weight=v??FontWeight.w400))),
-            SizedBox(width:150, child:DropdownButtonFormField<TextAlign>(initialValue:align, decoration:const InputDecoration(labelText:'المحاذاة', border:OutlineInputBorder()), items:[for(final a in [TextAlign.start,TextAlign.center,TextAlign.end,TextAlign.justify]) DropdownMenuItem(value:a, child:Text(a==TextAlign.center?'وسط':a==TextAlign.justify?'ضبط':a==TextAlign.end?'نهاية':'بداية'))], onChanged:(v)=>setDialogState(()=>align=v??TextAlign.start))),
-            SizedBox(width:150, child:TextField(controller:color, decoration:const InputDecoration(labelText:'لون النص', hintText:'#1E60AA', border:OutlineInputBorder()))),
-            SizedBox(width:150, child:TextField(controller:background, decoration:const InputDecoration(labelText:'لون الخلفية', hintText:'#FFFFFF', border:OutlineInputBorder()))),
-            SizedBox(width:150, child:TextField(controller:border, decoration:const InputDecoration(labelText:'لون الحدود', hintText:'#D3E4FE', border:OutlineInputBorder()))),
-            SizedBox(width:130, child:TextField(controller:borderWidth, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'سمك الحدود', border:OutlineInputBorder()))),
-            SizedBox(width:320, child:TextField(controller:customText, decoration:const InputDecoration(labelText:'نص مخصص للهيدر/الفوتر', border:OutlineInputBorder()))),
-            Switch(value:visible,onChanged:(v)=>setDialogState(()=>visible=v)),
-            const Text('إظهار العنصر'),
-          ]),
-        ]))),
-        actions:[
-          TextButton(onPressed:()=>Navigator.of(dialogContext).pop(), child:const Text('إلغاء')),
-          FilledButton(onPressed:(){
-            QuotationDocumentElementStyle make(){
-              return QuotationDocumentElementStyle(fontSizeMultiplier:double.tryParse(size.text.trim())??1,fontWeight:weight,color:color.text.trim().isEmpty?null:color.text.trim(),fontFamily:family.text.trim().isEmpty?null:family.text.trim(),textAlign:align,lineHeight:double.tryParse(lineHeight.text.trim()),backgroundColor:background.text.trim().isEmpty?null:background.text.trim(),borderColor:border.text.trim().isEmpty?null:border.text.trim(),borderWidth:double.tryParse(borderWidth.text.trim())??0,visible:visible,customText:customText.text.trim().isEmpty?null:customText.text.trim());
-            }
-            final s=make();
-            setState((){ _design = _replaceDesign(_design, selected, s); });
-            Navigator.of(dialogContext).pop();
-          }, child:const Text('حفظ')),
-        ],
-      );
-    }));
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final current = _design.toJson()[selected];
+          if (current is Map && family.text.isEmpty && size.text == '1.0')
+            load();
+          return AlertDialog(
+            title: const Text('تخصيص عنصر العرض'),
+            content: SizedBox(
+              width: 720,
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selected,
+                      decoration: const InputDecoration(
+                        labelText: 'العنصر',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final k in keys)
+                          DropdownMenuItem(value: k, child: Text(labels[k]!)),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setDialogState(() {
+                          selected = v;
+                          load();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        SizedBox(
+                          width: 180,
+                          child: TextField(
+                            controller: family,
+                            decoration: const InputDecoration(
+                              labelText: 'نوع الخط',
+                              hintText: 'Tahoma / Arial / Segoe UI',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 130,
+                          child: TextField(
+                            controller: size,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'حجم الخط',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 160,
+                          child: TextField(
+                            controller: lineHeight,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'ارتفاع السطر',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 150,
+                          child: DropdownButtonFormField<FontWeight>(
+                            initialValue: weight,
+                            decoration: const InputDecoration(
+                              labelText: 'السمك',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final w in [
+                                FontWeight.w400,
+                                FontWeight.w500,
+                                FontWeight.w600,
+                                FontWeight.w700,
+                                FontWeight.w800,
+                              ])
+                                DropdownMenuItem(
+                                  value: w,
+                                  child: Text(
+                                    w == FontWeight.w400
+                                        ? 'عادي'
+                                        : w == FontWeight.w500
+                                        ? 'متوسط'
+                                        : w == FontWeight.w600
+                                        ? 'شبه عريض'
+                                        : w == FontWeight.w700
+                                        ? 'عريض'
+                                        : 'عريض جدًا',
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setDialogState(
+                              () => weight = v ?? FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 150,
+                          child: DropdownButtonFormField<TextAlign>(
+                            initialValue: align,
+                            decoration: const InputDecoration(
+                              labelText: 'المحاذاة',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final a in [
+                                TextAlign.start,
+                                TextAlign.center,
+                                TextAlign.end,
+                                TextAlign.justify,
+                              ])
+                                DropdownMenuItem(
+                                  value: a,
+                                  child: Text(
+                                    a == TextAlign.center
+                                        ? 'وسط'
+                                        : a == TextAlign.justify
+                                        ? 'ضبط'
+                                        : a == TextAlign.end
+                                        ? 'نهاية'
+                                        : 'بداية',
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setDialogState(
+                              () => align = v ?? TextAlign.start,
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 150,
+                          child: TextField(
+                            controller: color,
+                            decoration: const InputDecoration(
+                              labelText: 'لون النص',
+                              hintText: '#1E60AA',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 150,
+                          child: TextField(
+                            controller: background,
+                            decoration: const InputDecoration(
+                              labelText: 'لون الخلفية',
+                              hintText: '#FFFFFF',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 150,
+                          child: TextField(
+                            controller: border,
+                            decoration: const InputDecoration(
+                              labelText: 'لون الحدود',
+                              hintText: '#D3E4FE',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 130,
+                          child: TextField(
+                            controller: borderWidth,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'سمك الحدود',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 320,
+                          child: TextField(
+                            controller: customText,
+                            decoration: const InputDecoration(
+                              labelText: 'نص مخصص للهيدر/الفوتر',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: visible,
+                          onChanged: (v) => setDialogState(() => visible = v),
+                        ),
+                        const Text('إظهار العنصر'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  QuotationDocumentElementStyle make() {
+                    return QuotationDocumentElementStyle(
+                      fontSizeMultiplier:
+                          double.tryParse(size.text.trim()) ?? 1,
+                      fontWeight: weight,
+                      color: color.text.trim().isEmpty
+                          ? null
+                          : color.text.trim(),
+                      fontFamily: family.text.trim().isEmpty
+                          ? null
+                          : family.text.trim(),
+                      textAlign: align,
+                      lineHeight: double.tryParse(lineHeight.text.trim()),
+                      backgroundColor: background.text.trim().isEmpty
+                          ? null
+                          : background.text.trim(),
+                      borderColor: border.text.trim().isEmpty
+                          ? null
+                          : border.text.trim(),
+                      borderWidth:
+                          double.tryParse(borderWidth.text.trim()) ?? 0,
+                      visible: visible,
+                      customText: customText.text.trim().isEmpty
+                          ? null
+                          : customText.text.trim(),
+                    );
+                  }
+
+                  final s = make();
+                  setState(() {
+                    _design = _replaceDesign(_design, selected, s);
+                  });
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('حفظ'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
     // Deferred past the exiting route's last rebuild — see
     // _askDesignTemplateName for why immediate disposal is unsafe here.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      family.dispose(); size.dispose(); color.dispose(); background.dispose(); border.dispose(); borderWidth.dispose(); lineHeight.dispose(); customText.dispose();
+      family.dispose();
+      size.dispose();
+      color.dispose();
+      background.dispose();
+      border.dispose();
+      borderWidth.dispose();
+      lineHeight.dispose();
+      customText.dispose();
     });
   }
 
-  QuotationDocumentDesign _replaceDesign(QuotationDocumentDesign d, String key, QuotationDocumentElementStyle s) =>
-      d.withStyle(key, s);
+  QuotationDocumentDesign _replaceDesign(
+    QuotationDocumentDesign d,
+    String key,
+    QuotationDocumentElementStyle s,
+  ) => d.withStyle(key, s);
 
   /// One table's column summary and the button that edits *its* layout.
   /// Columns live on the table now, so the control lives on the table too:
@@ -1686,10 +2334,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  l10n.tableColumns,
-                  style: theme.textTheme.titleSmall,
-                ),
+                Text(l10n.tableColumns, style: theme.textTheme.titleSmall),
                 const SizedBox(height: 2),
                 Text(
                   visible.isEmpty
@@ -1722,7 +2367,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// set, the built-in translation for a built-in field, and for a
   /// user-defined column the name they typed — never a built-in's name.
   String _columnLabel(_QColumnDraft column, String language) {
-    final override = language == 'ar' ? column.labelAr.text : column.labelEn.text;
+    final override = language == 'ar'
+        ? column.labelAr.text
+        : column.labelEn.text;
     if (override.trim().isNotEmpty) return override.trim();
     return _columnDisplayName(column, language);
   }
@@ -1824,9 +2471,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   Future<void> _editColumns(_QTableDraft table) async {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
-    final available = [
-      ...?ref.read(quotationColumnTemplatesProvider).value,
-    ];
+    final available = [...?ref.read(quotationColumnTemplatesProvider).value];
     final working = [for (final column in table.columns) column.copy()];
     final templateName = TextEditingController();
     String? templateId;
@@ -1879,7 +2524,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     }
                                     working
                                       ..clear()
-                                      ..addAll(_columnDraftsFrom(template['columns']));
+                                      ..addAll(
+                                        _columnDraftsFrom(template['columns']),
+                                      );
                                     setDialogState(() => templateId = value);
                                   },
                           ),
@@ -1926,7 +2573,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.view_column_outlined, size: 18),
+                                const Icon(
+                                  Icons.view_column_outlined,
+                                  size: 18,
+                                ),
                                 const SizedBox(width: 4),
                                 Text(l10n.builtinColumns),
                               ],
@@ -1959,9 +2609,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     Expanded(
                                       child: Text(
                                         _columnDisplayName(column, language),
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodyMedium,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium,
                                       ),
                                     ),
                                     SizedBox(
@@ -2008,7 +2658,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                           isDense: true,
                                         ),
                                         items: [
-                                          for (var width = 1; width <= 6; width++)
+                                          for (
+                                            var width = 1;
+                                            width <= 6;
+                                            width++
+                                          )
                                             DropdownMenuItem(
                                               value: width,
                                               child: Text('$width'),
@@ -2027,9 +2681,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       width: 152,
                                       child: column.isBuiltIn
                                           ? Padding(
-                                              padding: const EdgeInsets.symmetric(
-                                                vertical: 12,
-                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 12,
+                                                  ),
                                               child: Text(
                                                 _kindLabel(column.kind),
                                                 style: Theme.of(context)
@@ -2050,14 +2705,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                               isExpanded: true,
                                               decoration: InputDecoration(
                                                 labelText: l10n.columnType,
-                                                border: const OutlineInputBorder(),
+                                                border:
+                                                    const OutlineInputBorder(),
                                                 isDense: true,
                                               ),
                                               items: [
                                                 for (final kind in _columnKinds)
                                                   DropdownMenuItem(
                                                     value: kind,
-                                                    child: Text(_kindLabel(kind)),
+                                                    child: Text(
+                                                      _kindLabel(kind),
+                                                    ),
                                                   ),
                                               ],
                                               onChanged: (value) =>
@@ -2162,7 +2820,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                               });
                             }
                           },
-                          icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                          icon: const Icon(
+                            Icons.bookmark_add_outlined,
+                            size: 18,
+                          ),
                           label: Text(l10n.saveColumnTemplate),
                         ),
                       ],
@@ -2224,7 +2885,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       setDialogState(() => working.add(draft));
     }
   }
-
 
   Future<Json?> _saveColumnTemplate(
     String name,
@@ -2289,7 +2949,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
-                    onChanged: (_) => setState(() { _inputErrors.remove(table.title); }),
+                    onChanged: (_) => setState(() {
+                      _inputErrors.remove(table.title);
+                    }),
                   ),
                 ),
                 IconButton(
@@ -2371,7 +3033,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       border: const OutlineInputBorder(),
                       isDense: true,
                     ),
-                    onChanged: (_) => setState(() { _inputErrors.remove(table.discountValue); }),
+                    onChanged: (_) => setState(() {
+                      _inputErrors.remove(table.discountValue);
+                    }),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -2385,9 +3049,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             ),
             _tableColumnsRow(index, table, language),
             const Divider(height: 24),
-            for (var lineIndex = 0;
-                lineIndex < table.lines.length;
-                lineIndex++)
+            for (var lineIndex = 0; lineIndex < table.lines.length; lineIndex++)
               _lineRow(
                 index,
                 table,
@@ -2399,8 +3061,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
-                onPressed: () =>
-                    setState(() => table.lines.add(_QLineDraft())),
+                onPressed: () => setState(() => table.lines.add(_QLineDraft())),
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(l10n.addQuotationLine),
               ),
@@ -2435,7 +3096,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        key: ValueKey('quotation-item-${line.itemId ?? 'null'}'),
+                        key: ValueKey(
+                          'quotation-item-${line.itemId ?? 'null'}',
+                        ),
                         initialValue: line.itemId,
                         isExpanded: true,
                         decoration: InputDecoration(
@@ -2489,25 +3152,28 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                  key: _inputKey(line.description),
+                key: _inputKey(line.description),
                 flex: 3,
                 child: TextField(
                   controller: line.description,
                   decoration: InputDecoration(
-                      errorText: _inputErrors[line.description],
-                      errorMaxLines: 3,
+                    errorText: _inputErrors[line.description],
+                    errorMaxLines: 3,
                     labelText: l10n.description,
                     border: const OutlineInputBorder(),
                     isDense: true,
                   ),
-                  onChanged: (_) => setState(() { _inputErrors.remove(line.description); }),
+                  onChanged: (_) => setState(() {
+                    _inputErrors.remove(line.description);
+                  }),
                 ),
               ),
               IconButton(
                 tooltip: l10n.removeLine,
                 onPressed: table.lines.length == 1
                     ? null
-                    : () => setState(() => table.lines.removeAt(index).dispose()),
+                    : () =>
+                          setState(() => table.lines.removeAt(index).dispose()),
                 icon: const Icon(Icons.delete_outline, size: 18),
               ),
             ],
@@ -2558,9 +3224,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       ),
                       controller: _customValueController(line, column.key),
                       keyboardType: column.numeric
-                          ? const TextInputType.numberWithOptions(
-                              decimal: true,
-                            )
+                          ? const TextInputType.numberWithOptions(decimal: true)
                           : null,
                       decoration: InputDecoration(
                         labelText: _columnLabel(column, language),
@@ -2585,13 +3249,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   List<_QColumnDraft> _customColumnsOf(_QTableDraft table) =>
       table.columns.where((c) => c.visible && !c.isBuiltIn).toList();
 
-
-
   /// يعيد المتحكم في حقل قيمة العمود المخصص لسطر معين، ينشئه عند الحاجة.
-  TextEditingController _customValueController(
-    _QLineDraft line,
-    String key,
-  ) {
+  TextEditingController _customValueController(_QLineDraft line, String key) {
     final initial = line.customValues[key] ?? '';
     return line.customValueController(key, initial);
   }
@@ -2619,7 +3278,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           border: const OutlineInputBorder(),
           isDense: true,
         ),
-        onChanged: (_) => setState(() { _inputErrors.remove(controller); }),
+        onChanged: (_) => setState(() {
+          _inputErrors.remove(controller);
+        }),
       ),
     );
   }
@@ -2629,8 +3290,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final document = _documentDiscount;
     final shares = allocateByWeight(_tableNets, document.amount);
     final gross = _tables.fold(Decimal.zero, (sum, table) => sum + table.gross);
-    final tableDiscounts =
-        _tables.fold(Decimal.zero, (sum, table) => sum + table.discount.amount);
+    final tableDiscounts = _tables.fold(
+      Decimal.zero,
+      (sum, table) => sum + table.discount.amount,
+    );
     final finalTotal = document.net;
     final theme = Theme.of(context);
 
@@ -2666,15 +3329,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           children: [
             Text(l10n.quotationSummary, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            row(
-              [
-                l10n.quotationTables,
-                l10n.grossValue,
-                l10n.tableDiscount,
-                l10n.netValue,
-              ],
-              header: true,
-            ),
+            row([
+              l10n.quotationTables,
+              l10n.grossValue,
+              l10n.tableDiscount,
+              l10n.netValue,
+            ], header: true),
             const Divider(height: 8),
             for (var index = 0; index < _tables.length; index++)
               row([
@@ -2694,9 +3354,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               l10n.totalDiscounts,
               '',
               '',
-              formatAmount(
-                (tableDiscounts + document.amount).toString(),
-              ),
+              formatAmount((tableDiscounts + document.amount).toString()),
             ]),
             if (document.amount > Decimal.zero)
               row([
@@ -2783,11 +3441,13 @@ class _QuotationTermsDialog extends ConsumerWidget {
                               content: Text(l10n.removeSavedTerm),
                               actions: [
                                 TextButton(
-                                  onPressed: () => Navigator.of(confirm).pop(false),
+                                  onPressed: () =>
+                                      Navigator.of(confirm).pop(false),
                                   child: Text(l10n.cancel),
                                 ),
                                 FilledButton(
-                                  onPressed: () => Navigator.of(confirm).pop(true),
+                                  onPressed: () =>
+                                      Navigator.of(confirm).pop(true),
                                   child: Text(l10n.remove),
                                 ),
                               ],
@@ -2797,7 +3457,9 @@ class _QuotationTermsDialog extends ConsumerWidget {
                           try {
                             await ref
                                 .read(apiClientProvider)
-                                .delete('/sales/quotation-terms/${text(term, 'id')}');
+                                .delete(
+                                  '/sales/quotation-terms/${text(term, 'id')}',
+                                );
                             ref.invalidate(quotationTermsProvider);
                           } on Failure catch (error) {
                             if (context.mounted) {

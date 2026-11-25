@@ -1,4 +1,5 @@
 import { branchWhere } from '../../common/auth/branch-read-scope';
+import { zonesOnSheet } from './quotation-background-media';
 import { QuotationBackgroundsService } from './quotation-backgrounds.service';
 import {
   BadRequestException,
@@ -39,7 +40,9 @@ import {
   standardColumns,
 } from './quotation-columns';
 import {
+  backgroundPageNumber,
   PageNumberInk,
+  QUOTATION_PAGE_NUMBER,
   QuotationSnapshot,
   quotationPageNumberInk,
   renderQuotationDocument,
@@ -850,6 +853,10 @@ export class QuotationsService {
     pageNumberInk: PageNumberInk;
     /// The one-page letterhead the design sits on, when it names one.
     backgroundPdf: Buffer | null;
+    /// How the letterhead is fitted to the page (keeps its proportions by default).
+    backgroundFit: 'contain' | 'stretch';
+    /// Height and size the page number is stamped at.
+    pageNumber: { y: number; size: number };
   }> {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -857,20 +864,36 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
     const company = await this.companyHeader(companyId);
-    const content =
+    const stored =
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
         ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
         : await this.snapshotContent(companyId, quotation);
+    const backgroundId = (stored.design as Record<string, unknown> | null | undefined)?.backgroundId;
+    const backgroundPdf = (await this.backgrounds?.bytes(companyId, backgroundId)) ?? null;
+    // The letterhead's measured artwork zones travel with this one render only;
+    // they are not saved into the quotation's design.
+    const fit: 'contain' | 'stretch' =
+      (stored.design as Record<string, unknown> | null | undefined)?.backgroundFit === 'stretch' ? 'stretch' : 'contain';
+    const measured = backgroundPdf ? await this.backgrounds?.meta(companyId, backgroundId) : null;
+    const zones = measured ? zonesOnSheet(measured, fit) : null;
+    const content = zones
+      ? ({
+          ...stored,
+          design: { ...(stored.design as Record<string, unknown>), backgroundTopMm: zones.topInsetMm, backgroundBottomMm: zones.bottomInsetMm },
+        } as unknown as QuotationSnapshot)
+      : stored;
+    const design = content.design as Record<string, unknown> | null | undefined;
+    const hideFooter = design?.hideFooter === true;
     return {
       html: renderQuotationDocument(content, company, lang, autoPrint),
       quotationNumber: content.quotationNumber,
-      pageNumberInk: quotationPageNumberInk(
-        content.design as Record<string, unknown> | null | undefined,
-      ),
-      backgroundPdf: (await this.backgrounds?.bytes(
-        companyId,
-        (content.design as Record<string, unknown> | null | undefined)?.backgroundId,
-      )) ?? null,
+      pageNumberInk:
+        backgroundPdf && hideFooter
+          ? { r: 0.086, g: 0.161, b: 0.29 }
+          : quotationPageNumberInk(design),
+      pageNumber: backgroundPdf && zones ? backgroundPageNumber(zones.bottomInsetMm, hideFooter) : QUOTATION_PAGE_NUMBER,
+      backgroundPdf,
+      backgroundFit: fit,
     };
   }
 

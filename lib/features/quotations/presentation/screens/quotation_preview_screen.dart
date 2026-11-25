@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,10 +10,45 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../features/settings/presentation/providers/text_scale_provider.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../document/quotation_document.dart';
 import '../widgets/quotation_document_view.dart';
+
+/// A letterhead as the preview needs it: the page picture and the room the
+/// artwork takes at the top and bottom of an A4 sheet, in millimetres.
+class QuotationBackgroundPreview {
+  const QuotationBackgroundPreview(this.bytes, {this.topMm = 0, this.bottomMm = 0});
+  final Uint8List bytes;
+  final double topMm;
+  final double bottomMm;
+}
+
+/// The chosen letterhead of a quotation, or null when it has none or the server
+/// cannot give it. The preview then simply shows no background instead of
+/// failing; print and PDF are produced by the server regardless.
+final quotationBackgroundPreviewProvider =
+    FutureProvider.autoDispose.family<QuotationBackgroundPreview?, ({String id, bool stretch})>((ref, key) async {
+  final id = key.id;
+  if (id.isEmpty) return null;
+  try {
+    final response = await ref.read(apiClientProvider).raw.get<List<int>>(
+          '/sales/quotation-backgrounds/$id/preview',
+          queryParameters: {if (key.stretch) 'fit': 'stretch'},
+          options: Options(responseType: ResponseType.bytes),
+        );
+    final data = response.data;
+    if (data == null || data.isEmpty) return null;
+    return QuotationBackgroundPreview(
+      Uint8List.fromList(data),
+      topMm: double.tryParse(response.headers.value('x-background-top-mm') ?? '') ?? 0,
+      bottomMm: double.tryParse(response.headers.value('x-background-bottom-mm') ?? '') ?? 0,
+    );
+  } on Object {
+    return null;
+  }
+});
 
 /// Opens the offer as the customer will see it, without leaving the desk.
 Future<void> showQuotationPreview(
@@ -65,6 +103,13 @@ class QuotationPreviewScreen extends ConsumerWidget {
       company: profile,
       language: language,
     );
+    final background = ref
+        .watch(quotationBackgroundPreviewProvider((
+          id: document.design?.backgroundId ?? '',
+          stretch: document.design?.backgroundStretch ?? false,
+        )))
+        .asData
+        ?.value;
 
     // On a narrow window the two actions move below the title, where they
     // have the full width instead of squeezing the app bar.
@@ -148,6 +193,10 @@ class QuotationPreviewScreen extends ConsumerWidget {
                   document: document,
                   logoUrl: logoUrl,
                   textScale: textScale,
+                  backgroundImage: background?.bytes,
+                  backgroundTopMm: background?.topMm ?? 0,
+                  backgroundBottomMm: background?.bottomMm ?? 0,
+                  backgroundStretch: document.design?.backgroundStretch ?? false,
                 ),
               ],
             ),

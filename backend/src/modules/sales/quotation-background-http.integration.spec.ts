@@ -1,7 +1,9 @@
 import { Module, ValidationPipe, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { PDFDocument, rgb } from 'pdf-lib';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+import sharp from 'sharp';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
@@ -21,7 +23,7 @@ const CUSTOMER='44444444-4444-4444-8444-444444444444';
 const ready=!!process.env.DATABASE_URL && (process.env.NODE_OPTIONS ?? '').includes('--experimental-vm-modules');
 jest.setTimeout(180_000);
 (ready ? describe : describe.skip)('quotation upload/save/reopen/print/download (real PG, pipe/filter/browser)',()=>{
- let app:INestApplication;let p:PrismaService;let base:string;
+ let app:NestExpressApplication;let p:PrismaService;let base:string;
  const call=async(method:string,path:string,body?:unknown)=>fetch(base+'/api/v1'+path,{method,headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
  beforeAll(async()=>{
   @Module({controllers:[QuotationsController,QuotationBackgroundsController],providers:[
@@ -30,7 +32,7 @@ jest.setTimeout(180_000);
    {provide:QuotationBackgroundsService,useFactory:(p:PrismaService)=>new QuotationBackgroundsService(p),inject:[PrismaService]},
    {provide:QuotationsService,useFactory:(p:PrismaService,n:DocumentNumberService,s:CompanySettingsService,a:AuditService,b:QuotationBackgroundsService)=>new QuotationsService(p,n,s,{} as never,a,b),inject:[PrismaService,DocumentNumberService,CompanySettingsService,AuditService,QuotationBackgroundsService]},
   ]}) class M {}
-  app=await NestFactory.create(M,{logger:false});app.setGlobalPrefix('api/v1');
+  app=await NestFactory.create<NestExpressApplication>(M,{logger:false,bodyParser:false});app.useBodyParser('json',{limit:'6mb'});app.setGlobalPrefix('api/v1');
   // Scope is document transport/composition, not auth. Existing auth guards
   // have separate tests; this isolated controller test injects a fixture user.
   app.use((req:any,_res:any,next:()=>void)=>{req.user={companyId:CO,userId:USER,branchId:BR,isSuperAdmin:true};next();});
@@ -66,5 +68,58 @@ jest.setTimeout(180_000);
   const cleared=await call('PUT',`/sales/quotations/${q.id}`,{...dto,design:{hideHeader:true,hideFooter:true}});expect(cleared.status).toBe(200);
   const noBg:any=await (await call('GET',`/sales/quotations/${q.id}`)).json();expect(noBg.design.backgroundId).toBeUndefined();
   const plain=await call('GET',`/sales/quotations/${q.id}/print?auto=1`);expect(plain.headers.get('content-type')).toContain('text/html');expect(await plain.text()).toContain('window.print()');
+ });
+
+ it('accepts a picture background, previews it, refuses bad files, and asks for the page of a multi-page PDF',async()=>{
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123"><rect width="100%" height="100%" fill="#fff"/><rect width="794" height="90" fill="#1a4d99"/><rect y="1040" width="794" height="83" fill="#3377cc"/></svg>`;
+  const png=await sharp(Buffer.from(svg)).png().toBuffer();
+  const up=await call('POST','/sales/quotation-backgrounds',{name:'synthetic.png',dataBase64:png.toString('base64')});
+  expect(up.status).toBe(201);const bg:any=await up.json();expect(bg.kind).toBe('image');
+  const pv=await fetch(base+'/api/v1/sales/quotation-backgrounds/'+bg.id+'/preview');
+  expect(pv.status).toBe(200);expect(pv.headers.get('content-type')).toContain('image/png');
+  expect((await sharp(Buffer.from(await pv.arrayBuffer())).metadata()).format).toBe('png');
+  const list:any=await (await call('GET','/sales/quotation-backgrounds')).json();
+  expect(list.find((r:any)=>r.id===bg.id).kind).toBe('image');
+  const lines=Array.from({length:40},(_,i)=>({description:'Synthetic line '+i,quantity:'1',unitPrice:'10'}));
+  const dto={quotationDate:'2026-11-25',customerId:CUSTOMER,design:{backgroundId:bg.id,backgroundName:bg.name,hideHeader:true,hideFooter:true},tables:[{title:'Picture background',lines}]};
+  const q:any=await (await call('POST','/sales/quotations',dto)).json();
+  for(const route of ['print?lang=en','pdf?lang=en']){
+   const r=await call('GET',`/sales/quotations/${q.id}/${route}`);expect(r.status).toBe(200);
+   const bytes=Buffer.from(await r.arrayBuffer());expect((await PDFDocument.load(bytes)).getPageCount()).toBeGreaterThan(1);
+   if(process.env.KAYAN_BACKGROUND_PROOF_DIR)writeFileSync(`${process.env.KAYAN_BACKGROUND_PROOF_DIR}/picture-${route.startsWith('print')?'print':'download'}.pdf`,bytes);
+  }
+  const stretched:any=await (await call('POST','/sales/quotations',{...dto,design:{...dto.design,backgroundFit:'stretch'}})).json();
+  expect(((await (await call('GET',`/sales/quotations/${stretched.id}`)).json()) as any).design.backgroundFit).toBe('stretch');
+  const sp=await call('GET',`/sales/quotations/${stretched.id}/pdf?lang=en`);expect(sp.status).toBe(200);
+  const pv2=await fetch(base+'/api/v1/sales/quotation-backgrounds/'+bg.id+'/preview?fit=stretch');
+  expect(Number(pv2.headers.get('x-background-top-mm'))).toBeGreaterThan(0);
+  for(const bad of [Buffer.from('not a file'),Buffer.alloc(0),Buffer.from('%PDF-1.4 damaged')]){
+   const r=await call('POST','/sales/quotation-backgrounds',{name:'bad',dataBase64:bad.length?bad.toString('base64'):'AAAAAAAA'});
+   expect(r.status).toBe(400);
+  }
+  const many=await PDFDocument.create();many.addPage([595,842]).drawText('a');many.addPage([595,842]).drawText('b');
+  const manyB64=Buffer.from(await many.save()).toString('base64');
+  const need=await call('POST','/sales/quotation-backgrounds',{name:'two.pdf',dataBase64:manyB64});
+  expect(need.status).toBe(400);expect((await need.json() as any).errorCode).toBe('BACKGROUND_PAGE_REQUIRED');
+  expect((await call('POST','/sales/quotation-backgrounds',{name:'two.pdf',dataBase64:manyB64,page:2})).status).toBe(201);
+ });
+
+ (process.env.KAYAN_BG_FILE?it:it.skip)('private: a real letterhead file through upload, save, reopen, print and download',async()=>{
+  const bytes=readFileSync(process.env.KAYAN_BG_FILE as string);
+  const up=await call('POST','/sales/quotation-backgrounds',{name:'private-letterhead',dataBase64:bytes.toString('base64')});
+  expect(up.status).toBe(201);const bg:any=await up.json();
+  const lines=Array.from({length:40},(_,i)=>({description:'Synthetic line '+i,quantity:'1',unitPrice:'10'}));
+  for(const hide of [true,false]){
+   for(const stretch of [false,true]){
+   const dto={quotationDate:'2026-11-25',customerId:CUSTOMER,design:{backgroundId:bg.id,backgroundName:bg.name,hideHeader:hide,hideFooter:hide,...(stretch?{backgroundFit:'stretch'}:{})},tables:[{title:'Real file',lines}]};
+   const q:any=await (await call('POST','/sales/quotations',dto)).json();
+   expect(((await (await call('GET',`/sales/quotations/${q.id}`)).json()) as any).design.backgroundId).toBe(bg.id);
+   for(const route of ['print?lang=ar','pdf?lang=ar']){
+    const r=await call('GET',`/sales/quotations/${q.id}/${route}`);expect(r.status).toBe(200);
+    const out=Buffer.from(await r.arrayBuffer());
+    if(process.env.KAYAN_BACKGROUND_PROOF_DIR)writeFileSync(`${process.env.KAYAN_BACKGROUND_PROOF_DIR}/real-${hide?'hidden':'bands'}-${stretch?'stretch':'contain'}-${route.startsWith('print')?'print':'download'}.pdf`,out);
+   }
+   }
+  }
  });
 });

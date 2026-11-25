@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PDFDocument } from 'pdf-lib';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { analyseBackground, type BackgroundZones } from './quotation-background-media';
 
 /// Largest PDF a company may upload as a letterhead.
 export const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024;
@@ -39,18 +40,21 @@ export class QuotationBackgroundsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(companyId: string) {
-    return this.prisma.$queryRaw<{ id: string; name: string; createdAt: Date }[]>(Prisma.sql`
-      SELECT id, name, "createdAt" FROM quotation_backgrounds
+    return this.prisma.$queryRaw<{ id: string; name: string; createdAt: Date; kind: string; pageCount: number }[]>(Prisma.sql`
+      SELECT id, name, "createdAt", kind, "pageCount" FROM quotation_backgrounds
        WHERE "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL ORDER BY "createdAt" DESC
     `);
   }
 
+  /// Accepts a PDF, PNG or JPEG. A PDF with several pages needs `page`; it is
+  /// refused with BACKGROUND_PAGE_REQUIRED instead of silently taking page 1.
   async create(companyId: string, userId: string, dto: { name: string; dataBase64: string; page?: number }) {
-    const pdf = await extractBackgroundPage(Buffer.from(dto.dataBase64, 'base64'), dto.page ?? 1);
-    const rows = await this.prisma.$queryRaw<{ id: string; name: string; createdAt: Date }[]>(Prisma.sql`
-      INSERT INTO quotation_backgrounds (id, "companyId", name, pdf, "createdBy")
-      VALUES (gen_random_uuid(), ${companyId}::uuid, ${dto.name.trim()}, ${pdf}, ${userId}::uuid)
-      RETURNING id, name, "createdAt"
+    const analysed = await analyseBackground(Buffer.from(dto.dataBase64, 'base64'), dto.page);
+    const rows = await this.prisma.$queryRaw<{ id: string; name: string; createdAt: Date; kind: string; pageCount: number }[]>(Prisma.sql`
+      INSERT INTO quotation_backgrounds (id, "companyId", name, pdf, preview, kind, "pageCount", "topFraction", "bottomFraction", "widthPt", "heightPt", "createdBy")
+      VALUES (gen_random_uuid(), ${companyId}::uuid, ${dto.name.trim()}, ${analysed.pdf}, ${analysed.preview},
+              ${analysed.kind}, ${analysed.pageCount}, ${analysed.zones.topFraction}, ${analysed.zones.bottomFraction}, ${analysed.zones.widthPt}, ${analysed.zones.heightPt}, ${userId}::uuid)
+      RETURNING id, name, "createdAt", kind, "pageCount"
     `);
     return rows[0];
   }
@@ -63,6 +67,59 @@ export class QuotationBackgroundsService {
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
     `);
     return rows[0] ? Buffer.from(rows[0].pdf) : null;
+  }
+
+  /// The PNG preview, built on first use for backgrounds saved before previews existed.
+  async preview(companyId: string, id: unknown): Promise<Buffer | null> {
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+    const rows = await this.prisma.$queryRaw<{ preview: Buffer | null; pdf: Buffer }[]>(Prisma.sql`
+      SELECT preview, pdf FROM quotation_backgrounds
+       WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
+    `);
+    const row = rows[0];
+    if (!row) return null;
+    if (row.preview) return Buffer.from(row.preview);
+    const analysed = await this.backfill(companyId, id, Buffer.from(row.pdf));
+    return analysed?.preview ?? null;
+  }
+
+  /// The artwork zones and page size, so printed text can keep clear of the
+  /// letterhead whichever way it is fitted to A4.
+  async meta(companyId: string, id: unknown): Promise<BackgroundZones | null> {
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+    const rows = await this.prisma.$queryRaw<
+      { topFraction: number | null; bottomFraction: number | null; widthPt: number | null; heightPt: number | null; pdf: Buffer }[]
+    >(Prisma.sql`
+      SELECT "topFraction", "bottomFraction", "widthPt", "heightPt", pdf FROM quotation_backgrounds
+       WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
+    `);
+    const row = rows[0];
+    if (!row) return null;
+    if (row.topFraction !== null && row.bottomFraction !== null && row.widthPt !== null && row.heightPt !== null) {
+      return {
+        topFraction: Number(row.topFraction),
+        bottomFraction: Number(row.bottomFraction),
+        widthPt: Number(row.widthPt),
+        heightPt: Number(row.heightPt),
+      };
+    }
+    return (await this.backfill(companyId, id, Buffer.from(row.pdf)))?.zones ?? null;
+  }
+
+  private async backfill(companyId: string, id: string, pdf: Buffer) {
+    try {
+      const analysed = await analyseBackground(pdf, 1);
+      const z = analysed.zones;
+      await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE quotation_backgrounds
+           SET preview = ${analysed.preview}, "topFraction" = ${z.topFraction}, "bottomFraction" = ${z.bottomFraction},
+               "widthPt" = ${z.widthPt}, "heightPt" = ${z.heightPt}
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+      `);
+      return analysed;
+    } catch {
+      return null;
+    }
   }
 
   async remove(companyId: string, id: string) {

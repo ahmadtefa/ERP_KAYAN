@@ -174,12 +174,16 @@ export class PdfService {
       // all, so it gets the plain grey number in the white margin instead of
       // white-on-white.
       const layered = options.backgroundPdf
-        ? await underlayBackground(pdf, options.backgroundPdf)
+        ? await underlayBackground(pdf, options.backgroundPdf, options.backgroundFit)
         : pdf;
       return await stampPageNumbers(
         layered,
         options.fullBleed && !fullBleed
-          ? { pageNumberSize: PAGE_NUMBER_GEOMETRY.size, pageNumberY: PAGE_NUMBER_GEOMETRY.y }
+          ? {
+              pageNumberSize: PAGE_NUMBER_GEOMETRY.size,
+              // A letterhead keeps the number clear of its own artwork.
+              pageNumberY: options.backgroundPdf ? options.pageNumberY : PAGE_NUMBER_GEOMETRY.y,
+            }
           : options,
       );
     } catch (error) {
@@ -290,12 +294,52 @@ export interface PdfRenderOptions {
   pageNumberSize?: number;
   /// A one-page PDF laid under every page of the output (a letterhead).
   backgroundPdf?: Buffer;
+  /// How the background is fitted to the page (default keeps its proportions).
+  backgroundFit?: BackgroundFit;
 }
 
-/// Draws `background` (first page) under every page of `content`, scaled to
-/// the content page. The content must have been printed with a transparent
-/// page, or it will cover the background.
-export async function underlayBackground(content: Buffer, background: Buffer): Promise<Buffer> {
+/// How a background is fitted to the page.
+///  - `contain` (the default): the background keeps its own proportions, is
+///    scaled to the largest size that fits inside the page, centred across and
+///    anchored to the top edge. Nothing is cropped or distorted.
+///  - `stretch`: the background is stretched to cover the whole page, which
+///    distorts it by the difference between the two shapes (US Letter on A4 is
+///    about 9% taller). Only used when the user asks for it.
+export type BackgroundFit = 'contain' | 'stretch';
+
+/// A background this close to the page's shape (half a percent) fills it
+/// exactly; the gap would be under a millimetre and only shows as a hairline.
+const BACKGROUND_SAME_SHAPE = 0.005;
+
+export function placeBackground(
+  pageWidth: number,
+  pageHeight: number,
+  bgWidth: number,
+  bgHeight: number,
+  fit: BackgroundFit = 'contain',
+): { x: number; y: number; width: number; height: number } {
+  const pageRatio = pageHeight / pageWidth;
+  const ratio = bgHeight / bgWidth;
+  if (fit === 'stretch' || Math.abs(ratio - pageRatio) / pageRatio <= BACKGROUND_SAME_SHAPE) {
+    return { x: 0, y: 0, width: pageWidth, height: pageHeight };
+  }
+  let width = pageWidth;
+  let height = width * ratio;
+  if (height > pageHeight) {
+    height = pageHeight;
+    width = height / ratio;
+  }
+  return { x: (pageWidth - width) / 2, y: pageHeight - height, width, height };
+}
+
+/// Draws `background` (first page) under every page of `content`, fitted as
+/// asked (see {@link placeBackground}). The content must have been printed
+/// with a transparent page, or it will cover the background.
+export async function underlayBackground(
+  content: Buffer,
+  background: Buffer,
+  fit: BackgroundFit = 'contain',
+): Promise<Buffer> {
   const out = await PDFDocument.create();
   const src = await PDFDocument.load(content);
   const bg = await PDFDocument.load(background);
@@ -304,7 +348,7 @@ export async function underlayBackground(content: Buffer, background: Buffer): P
   pages.forEach((embedded, i) => {
     const { width, height } = src.getPage(i).getSize();
     const page = out.addPage([width, height]);
-    page.drawPage(bgPage, { x: 0, y: 0, width, height });
+    page.drawPage(bgPage, placeBackground(width, height, bgPage.width, bgPage.height, fit));
     page.drawPage(embedded, { x: 0, y: 0, width, height });
   });
   return Buffer.from(await out.save());

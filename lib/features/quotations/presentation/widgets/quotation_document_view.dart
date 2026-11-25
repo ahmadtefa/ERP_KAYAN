@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/json/amount_format.dart';
@@ -19,10 +21,27 @@ class QuotationDocumentView extends StatelessWidget {
     required this.document,
     this.logoUrl,
     this.textScale = 1.0,
+    this.backgroundImage,
+    this.backgroundTopMm = 0,
+    this.backgroundBottomMm = 0,
+    this.backgroundStretch = false,
   });
 
   final QuotationDocument document;
   final String? logoUrl;
+
+  /// Room the letterhead's artwork takes at the top and bottom of an A4 sheet.
+  final double backgroundTopMm;
+  final double backgroundBottomMm;
+
+  /// Whether the letterhead is stretched to fill A4 (the user's explicit choice)
+  /// instead of keeping its own proportions.
+  final bool backgroundStretch;
+
+  /// The chosen letterhead as a PNG (the server renders one for a PDF or a
+  /// picture alike). Painted behind the sheet, one page-height tile at a time,
+  /// the way the printed pages carry it.
+  final Uint8List? backgroundImage;
 
   /// The user's program-wide text size (Settings), applied on top of the
   /// layout scale. Defaults to the design's own size so the view works
@@ -40,13 +59,22 @@ class QuotationDocumentView extends StatelessWidget {
         final width = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : _referenceWidth;
-        final scale =
-            ((width / _referenceWidth).clamp(0.72, 1.0) * textScale).toDouble();
+        final scale = ((width / _referenceWidth).clamp(0.72, 1.0) * textScale)
+            .toDouble();
         return Directionality(
           textDirection: document.arabic
               ? TextDirection.rtl
               : TextDirection.ltr,
-          child: _Sheet(document: document, logoUrl: logoUrl, scale: scale),
+          child: _Sheet(
+            document: document,
+            logoUrl: logoUrl,
+            scale: scale,
+            sheetWidth: width,
+            backgroundImage: backgroundImage,
+            backgroundTopMm: backgroundTopMm,
+            backgroundBottomMm: backgroundBottomMm,
+            backgroundStretch: backgroundStretch,
+          ),
         );
       },
     );
@@ -57,12 +85,22 @@ class _Sheet extends StatelessWidget {
   const _Sheet({
     required this.document,
     required this.scale,
+    required this.sheetWidth,
     this.logoUrl,
+    this.backgroundImage,
+    this.backgroundTopMm = 0,
+    this.backgroundBottomMm = 0,
+    this.backgroundStretch = false,
   });
 
   final QuotationDocument document;
   final double scale;
+  final double sheetWidth;
   final String? logoUrl;
+  final Uint8List? backgroundImage;
+  final double backgroundTopMm;
+  final double backgroundBottomMm;
+  final bool backgroundStretch;
 
   /// يطبق نمط التصميم المخزن على نمط نص أساسي، مع keeping الحجم الأساسي.
   TextStyle _styled(TextStyle base, QuotationDocumentElementStyle? style) {
@@ -101,7 +139,13 @@ class _Sheet extends StatelessWidget {
     final footerStyle = d.design?.footer;
     return Container(
       width: double.infinity,
-      constraints: BoxConstraints(minHeight: 1123 * scale),
+      // With a letterhead the sheet is a true A4 page (210 x 297), so the artwork
+      // is drawn at the proportions it prints with.
+      constraints: BoxConstraints(
+        minHeight: backgroundImage == null
+            ? 1123 * scale
+            : sheetWidth * 297 / 210,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: _Doc.line),
@@ -114,36 +158,62 @@ class _Sheet extends StatelessWidget {
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(
-        40 * scale,
-        36 * scale,
-        40 * scale,
-        28 * scale,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      // With a letterhead the text starts below its header artwork and ends
+      // above its footer artwork (an A4 page is 297 mm, drawn 1123 points tall).
+      child: Stack(
         children: [
-          if (headerStyle?.visible != false) _masthead(),
-          SizedBox(height: 22 * scale),
-          _titleBand(),
-          SizedBox(height: 20 * scale),
-          _panels(),
-          if (d.subject.trim().isNotEmpty) ...[
-            SizedBox(height: 18 * scale),
-            _subjectStrip(),
-          ],
-          SizedBox(height: 22 * scale),
-          for (var index = 0; index < d.sections.length; index += 1)
-            _section(d.sections[index], index),
-          _summary(),
-          if (d.terms.trim().isNotEmpty)
-            _prose(d.arabic ? 'الشروط والأحكام' : 'Terms and conditions', d.terms),
-          if (d.notes.trim().isNotEmpty)
-            _prose(d.arabic ? 'ملاحظات' : 'Notes', d.notes),
-          if (d.managerName.isNotEmpty || d.responsibleName.isNotEmpty)
-            _signatures(),
-          SizedBox(height: 22 * scale),
-          if (footerStyle?.visible != false) _footer(),
+          if (backgroundImage != null)
+            Positioned.fill(
+              child: _BackgroundLayer(
+                bytes: backgroundImage!,
+                stretch: backgroundStretch,
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              40 * scale,
+              backgroundImage == null
+                  ? 36 * scale
+                  : 36 * scale + backgroundTopMm * sheetWidth / 210,
+              40 * scale,
+              backgroundImage == null
+                  ? 28 * scale
+                  : 28 * scale + backgroundBottomMm * sheetWidth / 210,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (headerStyle?.visible != false &&
+                    d.design?.hideHeader != true)
+                  _masthead(),
+                SizedBox(height: 22 * scale),
+                _titleBand(),
+                SizedBox(height: 20 * scale),
+                _panels(),
+                if (d.subject.trim().isNotEmpty) ...[
+                  SizedBox(height: 18 * scale),
+                  _subjectStrip(),
+                ],
+                SizedBox(height: 22 * scale),
+                for (var index = 0; index < d.sections.length; index += 1)
+                  _section(d.sections[index], index),
+                _summary(),
+                if (d.terms.trim().isNotEmpty)
+                  _prose(
+                    d.arabic ? 'الشروط والأحكام' : 'Terms and conditions',
+                    d.terms,
+                  ),
+                if (d.notes.trim().isNotEmpty)
+                  _prose(d.arabic ? 'ملاحظات' : 'Notes', d.notes),
+                if (d.managerName.isNotEmpty || d.responsibleName.isNotEmpty)
+                  _signatures(),
+                SizedBox(height: 22 * scale),
+                if (footerStyle?.visible != false &&
+                    d.design?.hideFooter != true)
+                  _footer(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -233,11 +303,7 @@ class _Sheet extends StatelessWidget {
     final design = document.design;
     return Column(
       children: [
-        Container(
-          width: 42 * scale,
-          height: 3 * scale,
-          color: _Doc.royalTint,
-        ),
+        Container(width: 42 * scale, height: 3 * scale, color: _Doc.royalTint),
         SizedBox(height: 12 * scale),
         Text(
           document.arabic ? 'عرض سعر' : 'QUOTATION',
@@ -306,9 +372,15 @@ class _Sheet extends StatelessWidget {
           ],
           SizedBox(height: 6 * scale),
           if (document.customer.phone.isNotEmpty)
-            _fact(document.arabic ? 'الهاتف' : 'Phone', document.customer.phone),
+            _fact(
+              document.arabic ? 'الهاتف' : 'Phone',
+              document.customer.phone,
+            ),
           if (document.customer.email.isNotEmpty)
-            _fact(document.arabic ? 'البريد' : 'Email', document.customer.email),
+            _fact(
+              document.arabic ? 'البريد' : 'Email',
+              document.customer.email,
+            ),
           if (document.customer.taxNumber.isNotEmpty)
             _fact(
               document.arabic ? 'الرقم الضريبي' : 'Tax number',
@@ -328,7 +400,11 @@ class _Sheet extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _fact(document.arabic ? 'الرقم' : 'Number', document.number, strong: true),
+          _fact(
+            document.arabic ? 'الرقم' : 'Number',
+            document.number,
+            strong: true,
+          ),
           _fact(document.arabic ? 'التاريخ' : 'Date', document.date),
           if (document.validUntil.isNotEmpty)
             _fact(
@@ -336,10 +412,7 @@ class _Sheet extends StatelessWidget {
               document.validUntil,
             ),
           _fact(document.arabic ? 'العملة' : 'Currency', document.currency),
-          _fact(
-            document.arabic ? 'الإصدار' : 'Version',
-            '${document.version}',
-          ),
+          _fact(document.arabic ? 'الإصدار' : 'Version', '${document.version}'),
           SizedBox(height: 6 * scale),
           Align(
             alignment: AlignmentDirectional.centerStart,
@@ -574,9 +647,7 @@ class _Sheet extends StatelessWidget {
     }
 
     return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: _Doc.line),
-      ),
+      decoration: BoxDecoration(border: Border.all(color: _Doc.line)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -587,7 +658,9 @@ class _Sheet extends StatelessWidget {
               color: index.isEven ? Colors.white : _Doc.rows,
               child: Container(
                 decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: _Doc.line, width: 0.6)),
+                  border: Border(
+                    bottom: BorderSide(color: _Doc.line, width: 0.6),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -597,9 +670,11 @@ class _Sheet extends StatelessWidget {
                       width: 22 * scale,
                       style: style.copyWith(color: _Doc.muted),
                     ),
-                    for (var columnIndex = 0;
-                        columnIndex < columns.length;
-                        columnIndex += 1)
+                    for (
+                      var columnIndex = 0;
+                      columnIndex < columns.length;
+                      columnIndex += 1
+                    )
                       cell(
                         section.rows[index].cell(columnIndex),
                         flex: columns[columnIndex].weight,
@@ -619,7 +694,7 @@ class _Sheet extends StatelessWidget {
           if (section.hasDiscount) ...[
             _totalRow(
               '${document.arabic ? 'خصم القسم' : 'Section discount'}'
-              '${_percent(section.discountPercent)}',
+                  '${_percent(section.discountPercent)}',
               '− ${_money(section.discountAmount)}',
               shade: _Doc.rows,
             ),
@@ -639,7 +714,10 @@ class _Sheet extends StatelessWidget {
     return SizedBox(
       width: width,
       child: Padding(
-        padding: EdgeInsets.symmetric(vertical: 5 * scale, horizontal: 2 * scale),
+        padding: EdgeInsets.symmetric(
+          vertical: 5 * scale,
+          horizontal: 2 * scale,
+        ),
         child: Text(
           value,
           textAlign: TextAlign.center,
@@ -659,10 +737,7 @@ class _Sheet extends StatelessWidget {
   }) {
     return Container(
       color: shade,
-      padding: EdgeInsets.symmetric(
-        horizontal: 8 * scale,
-        vertical: 6 * scale,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 8 * scale, vertical: 6 * scale),
       child: Row(
         children: [
           Expanded(
@@ -715,21 +790,20 @@ class _Sheet extends StatelessWidget {
       bool numeric = false,
       bool header = false,
       TextStyle? style,
-    }) =>
-        Expanded(
-          flex: flex,
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              vertical: 6 * scale,
-              horizontal: 4 * scale,
-            ),
-            child: Text(
-              label,
-              textAlign: numeric ? TextAlign.end : TextAlign.start,
-              style: style ?? (header ? headerStyle : bodyStyle),
-            ),
-          ),
-        );
+    }) => Expanded(
+      flex: flex,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          vertical: 6 * scale,
+          horizontal: 4 * scale,
+        ),
+        child: Text(
+          label,
+          textAlign: numeric ? TextAlign.end : TextAlign.start,
+          style: style ?? (header ? headerStyle : bodyStyle),
+        ),
+      ),
+    );
 
     Widget tableRow(QuotationDocumentSection section) {
       final discount = num.tryParse(section.discountAmount) ?? 0;
@@ -794,9 +868,7 @@ class _Sheet extends StatelessWidget {
           color: grand ? _Doc.royal : (tax ? _Doc.wash : null),
           border: grand
               ? null
-              : const Border(
-                  bottom: BorderSide(color: _Doc.line, width: 0.6),
-                ),
+              : const Border(bottom: BorderSide(color: _Doc.line, width: 0.6)),
         ),
         padding: EdgeInsets.symmetric(
           vertical: grand ? 8 * scale : 5 * scale,
@@ -845,16 +917,34 @@ class _Sheet extends StatelessWidget {
                   color: _Doc.wash,
                   child: Row(
                     children: [
-                      cell(document.arabic ? 'الجدول' : 'Table', flex: 4, header: true),
-                      cell(document.arabic ? 'قبل الخصم' : 'Before discount', numeric: true, header: true),
-                      cell(document.arabic ? 'خصم الجدول' : 'Table discount', numeric: true, header: true),
-                      cell(document.arabic ? 'الصافي' : 'Net', numeric: true, header: true),
+                      cell(
+                        document.arabic ? 'الجدول' : 'Table',
+                        flex: 4,
+                        header: true,
+                      ),
+                      cell(
+                        document.arabic ? 'قبل الخصم' : 'Before discount',
+                        numeric: true,
+                        header: true,
+                      ),
+                      cell(
+                        document.arabic ? 'خصم الجدول' : 'Table discount',
+                        numeric: true,
+                        header: true,
+                      ),
+                      cell(
+                        document.arabic ? 'الصافي' : 'Net',
+                        numeric: true,
+                        header: true,
+                      ),
                     ],
                   ),
                 ),
                 for (final section in document.sections) tableRow(section),
                 totalRow(
-                  document.arabic ? 'الإجمالي قبل الخصم' : 'Subtotal before discount',
+                  document.arabic
+                      ? 'الإجمالي قبل الخصم'
+                      : 'Subtotal before discount',
                   _money(totals.subTotal),
                 ),
                 if (quotationDiscount > 0)
@@ -949,9 +1039,7 @@ class _Sheet extends StatelessWidget {
         Container(
           height: 34 * scale,
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: _Doc.signature, width: 1),
-            ),
+            border: Border(bottom: BorderSide(color: _Doc.signature, width: 1)),
           ),
         ),
         SizedBox(height: 4 * scale),
@@ -1094,4 +1182,46 @@ abstract final class _Doc {
   static const wash = Color(0xFFEFF4FF);
   static const rows = Color(0xFFFBFCFE);
   static const signature = Color(0xFF95A0B0);
+}
+
+/// The letterhead behind the sheet, one A4-shaped page per tile, fitted the way
+/// the printed pages fit it: proportions kept and top-anchored by default,
+/// stretched over the whole page only when the user chose that.
+class _BackgroundLayer extends StatelessWidget {
+  const _BackgroundLayer({required this.bytes, required this.stretch});
+
+  final Uint8List bytes;
+  final bool stretch;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final tile = width * 297 / 210;
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topCenter,
+            minHeight: 0,
+            maxHeight: tile * 8,
+            child: Column(
+              children: [
+                for (var i = 0; i < 8; i += 1)
+                  SizedBox(
+                    width: width,
+                    height: tile,
+                    child: Image.memory(
+                      bytes,
+                      fit: stretch ? BoxFit.fill : BoxFit.contain,
+                      alignment: Alignment.topCenter,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
