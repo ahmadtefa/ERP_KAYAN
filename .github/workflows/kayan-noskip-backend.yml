@@ -66,7 +66,10 @@ jobs:
           DATABASE_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
           KAYAN_PG_DUMP: /usr/lib/postgresql/14/bin/pg_dump
           KAYAN_PG_RESTORE: /usr/lib/postgresql/14/bin/pg_restore
-        run: node scripts/noskip-backend-runner.mjs "$RUNNER_TEMP/noskip" | tee "$RUNNER_TEMP/noskip.log"
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/noskip-backend-runner.mjs "$RUNNER_TEMP/noskip" 2>&1 | tee "$RUNNER_TEMP/noskip.log"
       - name: Summarise
         if: always()
         run: |
