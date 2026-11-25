@@ -1587,11 +1587,11 @@
   "genericTransferLotCreate": {
     "status": "PASS_SCOPED",
     "evidence": "stock_document_lot_create_http_test.dart native bridge",
-    "scope": "barcode create explicit source lot qty3 post reverse; direct picker and draft split correction still need qualification"
+    "scope": "direct item picker and barcode create explicit source lot qty3 post reverse native SQL; scoped UI bridge no controller/auth"
   },
   "genericTransferDraftSplit": {
     "status": "PASS_SCOPED_MORE_COVERAGE_OPEN",
-    "evidence": "stock_document_lot_split_http_test.dart; native KAYAN_STOCKDOC_SPLIT_UI=1; distinct-lot factor3 SQL probe",
-    "scope": "two-part entered-unit draft split retains synthetic refusal then save/post/reverse; controller/auth and native split overlap still open"
+    "evidence": "stock_document_lot_split_http_test.dart; native KAYAN_STOCKDOC_SPLIT_UI=1; distinct-lot factor3 SQL probe; patch42 independent multi-original numbering/rollback",
+    "scope": "two-part entered-unit draft split retains synthetic refusal then save/post/reverse; separate Nest guards/controller DTO and native two-original split/post overlap qualified; signature decoder fixture not login"
   }
 }

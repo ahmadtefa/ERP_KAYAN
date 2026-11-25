@@ -101,12 +101,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Lot UI target').last);
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('stock-document-barcode')),
-      'LOTUI',
-    );
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await settle();
+    if (Platform.environment['KAYAN_DIRECT_ITEM'] == '1') {
+      await tester.tap(find.text('Add line'));
+      await settle();
+      await tester.tap(find.text('UI-LOT-I').last);
+      await settle();
+    } else {
+      await tester.enterText(
+        find.byKey(const ValueKey('stock-document-barcode')),
+        'LOTUI',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle();
+    }
     Future<void> pick(String button, String option) async {
       await tester.tap(find.text(button));
       await settle();

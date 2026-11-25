@@ -20,6 +20,8 @@ void main() {
   testWidgets('existing transfer draft explicit lot split save post reverse', (
     tester,
   ) async {
+    final arabic = Platform.environment['KAYAN_SPLIT_AR'] == '1';
+    String tr(String en, String ar) => arabic ? ar : en;
     HttpOverrides.global = null;
     await tester.runAsync(() async {
       await (FontLoader('IBMPlexSansArabic')..addFont(
@@ -70,6 +72,7 @@ void main() {
             ),
           ],
           child: MaterialApp(
+            locale: arabic ? const Locale('ar') : const Locale('en'),
             theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
@@ -89,31 +92,42 @@ void main() {
     }
 
     await settle();
-    await tester.tap(find.byTooltip('Correct draft locations').first);
+    await tester.tap(
+      find
+          .byTooltip(tr('Correct draft locations', 'تصحيح مواقع المسودة'))
+          .first,
+    );
     await settle();
-    await tester.tap(find.text('Split line quantity'));
+    await tester.tap(find.text(tr('Split line quantity', 'تقسيم كمية السطر')));
     await settle();
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Part 1 quantity'),
+      find.widgetWithText(TextFormField, tr('Part 1 quantity', 'كمية الجزء 1')),
       '2',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Part 2 quantity'),
+      find.widgetWithText(TextFormField, tr('Part 2 quantity', 'كمية الجزء 2')),
       '1',
     );
     for (var i = 1; i <= 2; i++) {
-      await tester.tap(find.text('Part $i lot: not selected'));
+      await tester.tap(
+        find.text(
+          arabic ? 'دفعة الجزء $i: غير محددة' : 'Part $i lot: not selected',
+        ),
+      );
       await settle();
       await tester.tap(
-        find.widgetWithText(DropdownButtonFormField<String>, 'Lot'),
+        find.widgetWithText(
+          DropdownButtonFormField<String>,
+          tr('Lot', 'الدفعة'),
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('LOT-UI').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Apply'));
+      await tester.tap(find.text(tr('Apply', 'تطبيق')));
       await settle();
     }
-    await tester.tap(find.text('Apply split'));
+    await tester.tap(find.text(tr('Apply split', 'تطبيق التقسيم')));
     await settle();
     expect(find.textContaining('2 × LOT-UI + 1 × LOT-UI'), findsOneWidget);
     final boundary =
@@ -121,24 +135,34 @@ void main() {
     await tester.runAsync(() async {
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('/downloads/stock-document-lot-split.png')
-          .writeAsBytes(bytes!.buffer.asUint8List());
+      await File(
+        arabic
+            ? '/downloads/stock-document-lot-split-ar.png'
+            : '/downloads/stock-document-lot-split.png',
+      ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });
-    await tester.tap(find.text('Save locations'));
+    await tester.tap(find.text(tr('Save locations', 'حفظ المواقع')));
     await settle();
     expect(find.textContaining('Synthetic refusal'), findsOneWidget);
     expect(find.textContaining('2 × LOT-UI + 1 × LOT-UI'), findsOneWidget);
-    await tester.tap(find.text('Save locations'));
+    await tester.tap(find.text(tr('Save locations', 'حفظ المواقع')));
     await settle();
-    expect(find.text('Correct draft locations'), findsNothing);
-    await tester.tap(find.byTooltip('Post').first);
+    expect(
+      find.text(tr('Correct draft locations', 'تصحيح مواقع المسودة')),
+      findsNothing,
+    );
+    await tester.tap(find.byTooltip(tr('Post', 'ترحيل')).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Post').last);
+    await tester.tap(
+      find.widgetWithText(FilledButton, tr('Post', 'ترحيل')).last,
+    );
     await settle();
-    await tester.tap(find.byTooltip('Reverse').first);
+    await tester.tap(find.byTooltip(tr('Reverse', 'عكس')).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Reverse').last);
+    await tester.tap(
+      find.widgetWithText(FilledButton, tr('Reverse', 'عكس')).last,
+    );
     await settle();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 6));

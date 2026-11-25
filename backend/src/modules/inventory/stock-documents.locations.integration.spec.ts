@@ -361,4 +361,15 @@ const vmReady =
     const before={a:await shelf(SHELF),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);expect({a:await shelf(SHELF),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);expect(Number((await lot(WAREHOUSE)).r)).toBe(10);expect(Number((await one(db,`SELECT "remainingQuantity"::text r FROM item_batches WHERE id=$1`,[lot2])).r)).toBe(5);
   });
 
+  it('splitting two original lines in one correction preserves unique line numbering atomically',async()=>{
+    const lotId=await batch();const doc=await documents.create(COMPANY,BRANCH,USER,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:BRANCH,fromWarehouseId:WAREHOUSE,toWarehouseId:WAREHOUSE_2,lines:[1,2].map(()=>({itemId:ITEM,quantity:2,batchId:lotId,storageLocationId:SHELF,toStorageLocationId:SHELF_W2}))} as never) as unknown as {id:string};
+    await documents.updateDraftLocations(COMPANY,USER,doc.id,{expectedVersion:0,lines:[1,2].map(lineNumber=>({lineNumber,splits:[1,2].map(()=>({batchId:lotId,quantity:1,storageLocationId:SHELF,toStorageLocationId:SHELF_W2}))}))});
+    const rows=(await db.query<{lineNumber:number}>(`SELECT "lineNumber" FROM stock_document_lines WHERE "documentId"=$1 ORDER BY "lineNumber"`,[doc.id])).rows;expect(rows.map(r=>r.lineNumber)).toEqual([1,2,3,4]);await documents.post(COMPANY,USER,doc.id);await documents.reverse(COMPANY,USER,doc.id);expect(await shelf(SHELF)).toBe(6);
+  });
+
+  it('multi-original split later invalid lot rolls back all earlier parts and version',async()=>{
+    const lotId=await batch();const doc=await documents.create(COMPANY,BRANCH,USER,{kind:'transfer',documentDate:'2026-11-25',fromBranchId:BRANCH,fromWarehouseId:WAREHOUSE,toWarehouseId:WAREHOUSE_2,lines:[1,2].map(()=>({itemId:ITEM,quantity:2,batchId:lotId,storageLocationId:SHELF,toStorageLocationId:SHELF_W2}))} as never) as unknown as {id:string};
+    const err=await failure(documents.updateDraftLocations(COMPANY,USER,doc.id,{expectedVersion:0,lines:[{lineNumber:1,splits:[1,2].map(()=>({batchId:lotId,quantity:1}))},{lineNumber:2,splits:[{batchId:lotId,quantity:1},{batchId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',quantity:1}]}]}));expect(err?.code).toBe('STOCK_DOC_LOT_INVALID');const rows=(await db.query<{lineNumber:number,quantity:string}>(`SELECT "lineNumber",quantity::text FROM stock_document_lines WHERE "documentId"=$1 ORDER BY "lineNumber"`,[doc.id])).rows;expect(rows).toEqual([{lineNumber:1,quantity:'2.0000'},{lineNumber:2,quantity:'2.0000'}]);expect((await one(db,`SELECT "editVersion"::text v FROM stock_documents WHERE id=$1`,[doc.id])).v).toBe('0');expect(await shelf(SHELF)).toBe(6);
+  });
+
 });

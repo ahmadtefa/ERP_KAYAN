@@ -81,3 +81,13 @@ Production service hunk integrated. Worker test hunk overlapped independent prob
 - Native41 split/post overlap exact orders pass: split edit-first commits two lines/version1 then post succeeds; post-first commits original single line/version0 and split refuses. Synthetic harness setup quantity typo corrected before final rerun. Evidence patch41-native-split.out.
 - Own shelf-overdraw fixture rechecked: positive transfer5 from B shelf4, expected STOCK_DOC_SHELF_SHORT, target lot5 and shelf4 unchanged, passing SQL chunk. Worker reported a different negative fixture, not copied here.
 - Correction destination code fetch implemented; create EN/AR actual shelf labels rendered and inspected. AR split/controller HTTP split/direct item picker remain unqualified.
+
+## locpatch42 qualification, 05:22
+
+- AR existing-draft split bridge save/refusal/retry/post/reverse passes. Actual RTL pixels inspected with sourceA, targetT, retained2+1 lot summary.
+- Actual direct item-picker generic transfer create/post/reverse passes nativePG via KAYAN_DIRECT_ITEM=1. Catalog item and batch truth from SQL/services; stock/picture metadata deliberately synthetic. No controller/auth claim on UI bridge.
+- Split Nest HTTP production session/principal guard, permissions, branch guard, controller, service and nativeSQL pass: live adjust deny403 unchanged, entered2+1 DTO retains lot ids, refreshed2 lines/version1, stale409 no duplicate. Signature decoder fixture, not real JWT signing/login/licence.
+- Independent multi-original split exposed duplicate next-line allocator41;42 fixes request-wide allocation. Former failure now four unique lines and post/reverse PASS. Later invalid second-row lot rolls back all earlier split writes/version0/stock unchanged. Distinct-lot frozen carton split still passes.
+- Native42 two-original split/post exact orders pass: edit-first4 lines/version1 then post, post-first2 original lines/version0 and split refuses. Server stopped, all synthetic journal sums0.
+- Analyze and TypeScript noEmit clean. Worker test hunks excluded when overlapping independent regression cases. Logs patch41-ar-split.out, patch41-split-auth.out, patch41-direct-item.out, patch42-split.out, patch42-rollback.out, patch42-native.out.
+- Remaining acceptance: full every-control register unchanged35 mapped/156 open; installed Windows login/licence/device/installer; generic reversal other kinds, repeated-equal-line historical ambiguity/sourceLineId coverage; no universal multi-lot feature claim (explicit one-lot per line supported, split limited2 per UI operation).

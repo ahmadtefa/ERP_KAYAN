@@ -2218,6 +2218,9 @@ export class StockDocumentsService {
       const locationModel = (tx as { storageLocation?: typeof this.prisma.storageLocation }).storageLocation ?? this.prisma.storageLocation;
       const sourceWarehouse = isTransfer ? document.fromWarehouseId : document.toWarehouseId;
       const seen = new Set<number>();
+      // One allocator for the whole request: every split in this PUT draws its
+      // new line numbers from here, so two split rows can never collide.
+      let nextFreeLine = Math.max(0, ...document.lines.map((l) => l.lineNumber)) + 1;
       for (const change of body.lines!) {
         const line = document.lines.find((l) => l.lineNumber === Number(change.lineNumber));
         if (!line || seen.has(line.lineNumber)) {
@@ -2300,8 +2303,6 @@ export class StockDocumentsService {
             perLot.set(key, (perLot.get(key) ?? new Prisma.Decimal(0)).plus(quantities[i]));
           }
           for (const [lotId, need] of perLot) await checkLot(lotId, need);
-          const nextNumber = Math.max(...document.lines.map((l) => l.lineNumber), ...Array.from(seen)) + 1;
-          let used = 0;
           let unitUsed = new Prisma.Decimal(0);
           let costUsed = new Prisma.Decimal(0);
           const created: number[] = [];
@@ -2332,11 +2333,11 @@ export class StockDocumentsService {
                   notes: line.notes,
                   unitName: line.unitName,
                   unitFactor: line.unitFactor,
-                  lineNumber: nextNumber + used,
+                  lineNumber: nextFreeLine,
                 } as never,
               });
-              created.push(nextNumber + used);
-              used += 1;
+              created.push(nextFreeLine);
+              nextFreeLine += 1;
             }
           }
           continue;
