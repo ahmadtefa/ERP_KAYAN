@@ -88,7 +88,7 @@ class _StockTakesApi extends ApiClient {
       ];
     }
     if (path == '/inventory/warehouses') {
-      if (missingWarehouse)
+      if (missingWarehouse) {
         return [
           {
             'id': 'wh-1',
@@ -97,6 +97,7 @@ class _StockTakesApi extends ApiClient {
             'nameAr': 'الرئيسي',
           },
         ];
+      }
       return [
         {
           'id': 'wh-1',
