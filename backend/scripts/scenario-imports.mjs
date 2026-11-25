@@ -144,7 +144,7 @@ async function main() {
         const form = new FormData();
         form.append('file', new Blob([
           'As-of date,Branch code,Warehouse code,Account code,Debit,Credit,Item code,Opening quantity,Unit cost\n' +
-          '2026-01-01,,,1101,1,0,,,\n2026-01-01,,,3103,0,1,,,\n',
+          '2026-01-01,,,01010101,1,0,,,\n2026-01-01,,,03010301,0,1,,,\n',
         ], { type: 'text/csv' }), 'reader-opening.csv');
         return form;
       })(),
@@ -164,12 +164,13 @@ async function main() {
       `HTTP ${anonymousSheet.status}`);
   }
 
-  const parentCode = `E2E-${stamp}`;
-  const childCode = `${parentCode}-01`;
+  // Eight digit chart: a new 6-digit total under 0502 (operating expenses), one 8-digit account under it.
+  const parentCode = `05029${stamp.slice(-1)}`;
+  const childCode = `${parentCode}01`;
   const accountCsv = [
     'Code,Name (English),Name (Arabic),Account type,Parent code,Can receive postings,Active,Currency,Description',
     `${childCode},Imported child account,حساب فرعي مستورد,EXPENSE,${parentCode},yes,yes,EGP,API import scenario`,
-    `${parentCode},Imported test group,مجموعة اختبار مستوردة,EXPENSE,,yes,yes,EGP,API import scenario`,
+    `${parentCode},Imported test group,مجموعة اختبار مستوردة,EXPENSE,0502,no,yes,EGP,API import scenario`,
   ].join('\n');
   const accountPreview = await uploadCsv('chart-of-accounts', accountCsv, {
     dryRun: true,
@@ -197,7 +198,7 @@ async function main() {
       accountReplay.data?.skipped === 2 && accountReplay.data?.errors?.length === 0,
     `HTTP ${accountReplay.status}, created ${accountReplay.data?.created ?? 0}, skipped ${accountReplay.data?.skipped ?? 0}`);
 
-  const duplicateCode = `E2E-DUP-${stamp}`;
+  const duplicateCode = '05020199';
   const duplicateAccounts = [
     'Code,Name (English),Name (Arabic),Account type,Parent code,Can receive postings,Active',
     `${duplicateCode},Duplicate one,مكرر أول,EXPENSE,,yes,yes`,
@@ -214,8 +215,8 @@ async function main() {
 
   const openingCsv = [
     'As-of date,Branch code,Warehouse code,Account code,Debit,Credit,Customer code,Supplier code,Item code,Opening quantity,Unit cost,Description',
-    '2026-01-01,,,1101,1000.0000,0,,,,,,Imported opening cash',
-    '2026-01-01,,,3101,0,1000.0000,,,,,,Imported opening equity',
+    '2026-01-01,,,01010101,1000.0000,0,,,,,,Imported opening cash',
+    '2026-01-01,,,03010301,0,1000.0000,,,,,,Imported opening equity',
   ].join('\n');
   const openingPreview = await uploadCsv('opening-balances', openingCsv, {
     dryRun: true,
@@ -275,9 +276,9 @@ async function main() {
   if (testItem.status < 300 && testItem.data?.id) {
     const duplicateStockCsv = [
       'As-of date,Branch code,Warehouse code,Account code,Debit,Credit,Item code,Opening quantity,Unit cost',
-      `2026-01-01,,,1104,10,0,${testItemCode},1,10`,
-      `2026-01-01,,,1104,10,0,${testItemCode},1,10`,
-      '2026-01-01,,,3101,0,20,,,',
+      `2026-01-01,,,01010301,10,0,${testItemCode},1,10`,
+      `2026-01-01,,,01010301,10,0,${testItemCode},1,10`,
+      '2026-01-01,,,03010301,0,20,,,',
     ].join('\n');
     const duplicateStock = await uploadCsv('opening-balances', duplicateStockCsv, {
       dryRun: false,
