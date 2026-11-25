@@ -34,7 +34,7 @@ const reviewed = [
   // and four `flutter test` files on a hosted runner. Flutter is pinned to
   // 3.47.6, the version every other workflow here uses.
   'barcode-quantity-focused.yml',
-  // Reviewed 2026-11-25: dispatch only; flutter analyze and three flutter test files on a hosted runner;
+  // Reviewed 2026-11-25: dispatch plus a push trigger narrowed to this file and two tests; flutter analyze and three flutter test files on a hosted runner;
   // contents:read, no secrets, no environment, no signing, install, release or deploy.
   'kayan-invoice-stock-ui.yml',
   'kayan-acceptance.yml', 'windows-evaluation-setup.yml',

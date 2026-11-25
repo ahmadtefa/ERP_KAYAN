@@ -2,11 +2,17 @@ name: KAYAN invoice stock refusal UI proof
 
 # Targeted Flutter proof for the invoice over-stock refusal: the editor keeps
 # what was typed, the refusal shows the server's reason with the item and the
-# quantities, and the corrected save goes through. Dispatch only, so a push
-# never starts it. flutter analyze plus three test files; nothing is built.
+# quantities, and the corrected save goes through. Runs on dispatch, or on a push
+# that changes this file or the two new test files. flutter analyze plus three test files; nothing is built.
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['instinct/six-fixes-on-arena-98e79137']
+    paths:
+      - '.github/workflows/kayan-invoice-stock-ui.yml'
+      - 'test/widget/invoice_stock_short_error_test.dart'
+      - 'test/core/error/app_error_text_test.dart'
 
 permissions:
   contents: read
