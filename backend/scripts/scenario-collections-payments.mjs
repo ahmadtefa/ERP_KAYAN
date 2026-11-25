@@ -754,7 +754,10 @@ async function main() {
   );
 
   // ───────────────────────────────────── 7. supplier: one payment, two invoices
-  const payment3 = await must('pay 360.00 spread over purchase invoices S2 and S3', '/cash/vouchers', {
+  // Paid from the bank: the cash box holds only the 50.00 collected on account
+  // above, and a payment may never take a cash box or bank below zero, so a
+  // 360.00 payment from the box is refused by design. The bank holds 870.00 here.
+  await refuse('a payment larger than the cash box holds is refused, nothing is saved', '/cash/vouchers', {
     method: 'POST',
     json: {
       kind: 'PAYMENT',
@@ -768,9 +771,23 @@ async function main() {
       ],
     },
   });
+  const payment3 = await must('pay 360.00 spread over purchase invoices S2 and S3', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'PAYMENT',
+      voucherDate: today,
+      cashAccountId: bank.id,
+      supplierId: supplierA.id,
+      amount: '360',
+      allocations: [
+        { purchaseInvoiceId: payA2.id, amount: '240' },
+        { purchaseInvoiceId: payA3.id, amount: '120' },
+      ],
+    },
+  });
   if (!payment3) return false;
   await post('post the split payment', `/cash/vouchers/${payment3.id}/post`);
-  record('PAYMENT', 360, cashLedger.code, 1, 'supplier');
+  record('PAYMENT', 360, bankLedger.code, 1, 'supplier');
   const [s2, s3] = await Promise.all([
     readInvoice(`/purchases/invoices/${payA2.id}`),
     readInvoice(`/purchases/invoices/${payA3.id}`),
@@ -785,7 +802,7 @@ async function main() {
     amount: 360,
     currency: 'EGP',
     date: today,
-    cashAccountCode: cashLedger.code,
+    cashAccountCode: bankLedger.code,
     partyCode: AP,
   });
 
