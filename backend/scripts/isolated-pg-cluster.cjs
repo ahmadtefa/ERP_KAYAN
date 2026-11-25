@@ -21,7 +21,10 @@ const MAX_SOCKET_PATH = 100; // sun_path limit is 107 on Linux
 function findPgBin(env = process.env, fsApi = fs) {
   const has = (dir) => ['initdb', 'pg_ctl', 'postgres'].every((n) => { try { fsApi.accessSync(path.join(dir, n), fsApi.constants.X_OK); return true; } catch { return false; } });
   const candidates = [];
-  if (env.KAYAN_PG_BIN) candidates.push(env.KAYAN_PG_BIN);
+  if (env.KAYAN_PG_BIN) {
+    if (!has(env.KAYAN_PG_BIN)) throw new Error('No PostgreSQL server binaries at explicit KAYAN_PG_BIN; refusing fallback.');
+    return env.KAYAN_PG_BIN;
+  }
   try { candidates.push(execFileSync('pg_config', ['--bindir'], {encoding: 'utf8'}).trim()); } catch { /* not installed */ }
   try {
     const root = '/usr/lib/postgresql';
