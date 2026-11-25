@@ -73,6 +73,7 @@ class _Api extends ApiClient {
     String? idempotencyKey,
   }) async {
     posts.add((path, body));
+    keys.add(idempotencyKey);
     if (definite) {
       throw const ApiFailure(
         "Source quantity changed. Reduce the amount.",
@@ -80,7 +81,6 @@ class _Api extends ApiClient {
       );
     }
     if (refuse) throw StateError("PRIVATE_TRANSFER_DIAGNOSTIC");
-    keys.add(idempotencyKey);
     return {};
   }
 }
