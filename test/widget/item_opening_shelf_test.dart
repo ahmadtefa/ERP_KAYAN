@@ -355,12 +355,31 @@ void main() {
     });
   }
 
-  testWidgets('target cannot be determined: the form is not opened', (
-    tester,
-  ) async {
-    final api = await openForm(tester, (a) => a.targetFails = true);
-    expect(api.targetCalls, 1);
-    expect(find.text('Opening quantity'), findsNothing);
-    expect(find.textContaining('could not be determined'), findsOneWidget);
-  });
+  testWidgets(
+    'target cannot be determined: no opening stock offered, item still savable',
+    (tester) async {
+      final api = await openForm(tester, (a) => a.targetFails = true);
+      expect(api.targetCalls, 1);
+      expect(find.text('Opening quantity'), findsNothing);
+      expect(find.textContaining('could not be determined'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextFormField, 'Code'), 'X-9');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Name (English)'),
+        'Plain item',
+      );
+      // The error snackbar may sit over the button, so press it directly.
+      final save = tester.widget<ButtonStyleButton>(
+        find.ancestor(
+          of: find.text('Save').last,
+          matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+        ),
+      );
+      save.onPressed!();
+      await tester.pumpAndSettle();
+      expect(api.posts, 1);
+      expect(api.submitted, containsPair('code', 'X-9'));
+      expect(api.submitted!.containsKey('openingQuantity'), isFalse);
+      expect(api.submitted!.containsKey('openingWarehouseId'), isFalse);
+    },
+  );
 }

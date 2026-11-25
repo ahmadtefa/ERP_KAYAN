@@ -267,6 +267,13 @@ const vmLacksDynamicImport = !(
     expect(r.status).toBe(403);
     expect(r.json.code).toBe('ITEM_OPENING_WAREHOUSE_FORBIDDEN');
     expect(await itemRows('NO-RECV')).toBe(0);
+    // The same restricted login can still create an item WITHOUT opening stock.
+    const plain = await post({ code: 'PLAIN-1', nameEn: 'Plain', nameAr: 'عادي', unit: 'piece', isStockTracked: true }, B, grants);
+    expect(plain.status).toBe(201);
+    expect(await itemRows('PLAIN-1')).toBe(1);
+    expect(await movementRows('PLAIN-1')).toBe(0);
+    // The static route is not swallowed by ':id'.
+    expect((await getTarget(B, grants)).status).toBe(200);
     expect(await journalRows()).toBe(journalsBefore);
   });
 

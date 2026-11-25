@@ -115,6 +115,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         ? 'حسابك غير مرتبط بفرع، فلا يمكن حفظ كمية افتتاحية.'
         : 'Your login has no branch, so opening stock cannot be saved.';
     String? openingWarehouseId;
+    var openingAvailable = true;
     if (!isEdit && canManageInventoryCost && user?.branchId != null) {
       try {
         final client = ref.read(apiClientProvider);
@@ -191,18 +192,21 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               : 'The opening stock warehouse could not be determined.';
         }
       } on Object {
-        // Never open a form that could write stock to a warehouse it could not
-        // name: the user retries once the target can be determined.
+        // The target could not be named, so the form offers no opening stock at
+        // all (it must never write stock to an unnamed warehouse). Creating the
+        // item itself is unaffected.
+        openingAvailable = false;
+        openingLocations.clear();
+        openingWarehouseId = null;
         if (mounted) {
           showMessage(
             context,
             openingArabic
-                ? 'تعذّر تحديد المخزن المستهدف للرصيد الافتتاحي الآن، فلم يُفتح النموذج. حاول مرة أخرى.'
-                : 'The opening stock warehouse could not be determined now, so the form was not opened. Try again.',
+                ? 'تعذّر تحديد المخزن المستهدف، فلن يظهر الرصيد الافتتاحي في هذا النموذج. يمكنك حفظ الصنف بدونه.'
+                : 'The opening stock warehouse could not be determined, so opening stock is not offered in this form. You can still save the item without it.',
             error: true,
           );
         }
-        return;
       }
     }
     if (!mounted) return;
@@ -240,7 +244,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ? 'تتبّع المخزون لا يضيف كمية. الرصيد الافتتاحي أدناه يُرحّل عند الحفظ.'
               : 'Tracking adds no stock. Opening stock below posts when you save.',
         ),
-        if (!isEdit && canManageInventoryCost) ...[
+        if (!isEdit && canManageInventoryCost && openingAvailable) ...[
           FieldSpec(
             'openingQuantity',
             l10n.openingQuantity,
