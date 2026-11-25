@@ -1242,6 +1242,7 @@ export class StockDocumentsService {
             totalCost,
             referenceType: 'STOCK_TRANSFER_OUT',
             referenceId: document.id,
+            sourceLineId: line.id,
             referenceNumber: document.documentNumber,
             userId,
             requireStock: !settings.allowNegativeStock,
@@ -1322,6 +1323,7 @@ export class StockDocumentsService {
             totalCost,
             referenceType: 'STOCK_TRANSFER_IN',
             referenceId: document.id,
+            sourceLineId: line.id,
             referenceNumber: document.documentNumber,
             userId,
             requireStock: false,
@@ -1487,6 +1489,7 @@ export class StockDocumentsService {
                 ? 'STOCK_WRITE_OFF'
                 : 'STOCK_ADJUSTMENT',
           referenceId: document.id,
+          sourceLineId: line.id,
           referenceNumber: document.documentNumber,
           userId,
           requireStock: direction === StockDirection.OUT && !settings.allowNegativeStock,
@@ -1717,7 +1720,12 @@ export class StockDocumentsService {
             document.kind === StockDocumentKind.TRANSFER
               ? index === 0
               : line.quantity.lessThan(0);
-          const original = takeOriginalStockMovement(originals, usedOriginals, {
+          // Tied by line: a movement written with this line's id belongs to it and
+          // to nothing else. Legacy movements (no line id) fall back to the
+          // unique full-evidence match, which refuses when ambiguous.
+          const tiedToLine = originals.filter((o) => (o as { sourceLineId?: string | null }).sourceLineId === line.id);
+          const legacyPool = originals.filter((o) => !(o as { sourceLineId?: string | null }).sourceLineId);
+          const original = takeOriginalStockMovement(tiedToLine.length > 0 ? tiedToLine : legacyPool, usedOriginals, {
             itemId: line.itemId,
             branchId,
             warehouseId: target.warehouseId,
@@ -2175,6 +2183,8 @@ export class StockDocumentsService {
       baseUnitName?: string | null;
       batchId?: string | null;
       storageLocationId?: string | null;
+      /** The document line this movement belongs to: the durable key reversal uses. */
+      sourceLineId?: string | null;
     },
   ) {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
@@ -2216,6 +2226,7 @@ export class StockDocumentsService {
         totalCost: input.totalCost,
         batchId: input.batchId ?? null,
         storageLocationId: input.storageLocationId ?? null,
+        ...(input.sourceLineId ? { sourceLineId: input.sourceLineId } : {}),
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         referenceNumber: input.referenceNumber,
