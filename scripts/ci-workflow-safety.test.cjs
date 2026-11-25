@@ -143,14 +143,11 @@ assert.deepEqual(guardedSteps, setup.jobs['windows-evaluation'].steps, 'Reuse th
 const trial = read('windows-packaging-probe.yml');
 assert.deepEqual(trial.on, {workflow_dispatch: null});
 assert.deepEqual(trial.permissions, {contents: 'read'});
-assert.deepEqual(Object.keys(trial.jobs), ['windows-evaluation']);
-// The trial route adds payload inspection (extract without installing, verify the tree,
-// report contents, upload the report) to the separately reviewed build; it never removes a step.
-const inspectionSteps = ['Build the pinned extractor', 'Extract the built Setup', 'Verify the extracted payload', 'Report what the payload contains', 'Upload the payload inspection report'];
-const trialSteps = trial.jobs['windows-evaluation'].steps;
-assert.deepEqual(trialSteps.filter(step => !inspectionSteps.includes(step.name)), optionalWindows.steps);
-assert.deepEqual(trialSteps.filter(step => inspectionSteps.includes(step.name)).map(step => step.name), inspectionSteps);
-assert.ok(trialSteps.findIndex(step => step.name === 'Build licence-protected Setup') < trialSteps.findIndex(step => step.name === 'Extract the built Setup'));
+assert.deepEqual(Object.keys(trial.jobs), ['windows-evaluation', 'inspect-final']);
+assert.equal(trial.jobs['inspect-final'].needs, 'windows-evaluation');
+assert.equal(trial.jobs['inspect-final'].environment, undefined);
+assert.ok(trial.jobs['inspect-final'].steps.some(step => String(step.run || '').includes('inspect-final-inno.mjs')), 'The trial route must inspect the extracted payload');
+assert.deepEqual(trial.jobs['windows-evaluation'].steps, optionalWindows.steps);
 assert.equal(trial.jobs['windows-evaluation'].environment, undefined);
 assert.equal(trial.jobs['windows-evaluation'].needs, undefined);
 const installer = read('windows-installer.yml');

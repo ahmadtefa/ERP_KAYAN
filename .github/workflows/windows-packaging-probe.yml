@@ -51,94 +51,6 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{ sourceCommit = (git rev-parse HEAD).Trim(); mode = 'product-build-unreleased'; name = $setup.Name; bytes = $setup.Length; sha256 = $hash; createdUtc = $setup.CreationTimeUtc.ToString('o') } |
             ConvertTo-Json | Set-Content -LiteralPath 'build\windows-evaluation-setup\identity.json' -Encoding utf8
-      # Extraction, not installation. The payload is a tree, and the only
-      # honest way to check it is to unpack the package without running its
-      # installer: a silent install would create services, write to ProgramData
-      # and leave the runner in a state nobody asked for.
-      - name: Build the pinned extractor
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch 1.9 https://github.com/dscharrer/innoextract.git "$RUNNER_TEMP/innoextract-src"
-          cmake -S "$RUNNER_TEMP/innoextract-src" -B "$RUNNER_TEMP/innoextract-build" \
-            -DCMAKE_BUILD_TYPE=Release -DUSE_STATIC_LIBS=ON
-          cmake --build "$RUNNER_TEMP/innoextract-build" --parallel 2
-          find "$RUNNER_TEMP/innoextract-build" -name 'innoextract' -type f -perm -u+x
-
-      - name: Extract the built Setup
-        id: extract
-        shell: bash
-        run: |
-          set -euo pipefail
-          extractor="$(find "$RUNNER_TEMP/innoextract-build" -name 'innoextract' -type f -perm -u+x | head -1)"
-          test -n "$extractor"
-          sha256sum "$extractor"
-          mkdir -p "$RUNNER_TEMP/kayan-extracted"
-          "$extractor" --silent --lowercase --output-dir "$RUNNER_TEMP/kayan-extracted" \
-            'build/windows-evaluation-setup/KAYAN-ERP-Setup.exe'
-          test -d "$RUNNER_TEMP/kayan-extracted"
-          echo "dir=$RUNNER_TEMP/kayan-extracted" >> "$GITHUB_OUTPUT"
-
-      - name: Verify the extracted payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --experimental-transform-types scripts/verify-extracted-windows-installer.mjs \
-            --artifact 'build/windows-evaluation-setup/KAYAN-ERP-Setup.exe' \
-            --root "${{ steps.extract.outputs.dir }}" \
-            --source-commit "${{ github.sha }}" \
-            --report "$RUNNER_TEMP/payload-report.json"
-
-      - name: Report what the payload contains
-        shell: bash
-        run: |
-          set -euo pipefail
-          root='${{ steps.extract.outputs.dir }}'
-          echo '::notice title=Payload checks::runtime expectations against the extracted tree'
-          node --experimental-transform-types scripts/verify-installed-runtime.mjs "$root" || \
-            echo '::warning title=Runtime expectations::verify-installed-runtime reported a problem; see the step log'
-
-          echo '── migration.sql files in the package ──'
-          find "$root" -name 'migration.sql' | wc -l
-          echo '── migration folders ──'
-          find "$root" -type d -path '*prisma/migrations/*' -maxdepth 6 | wc -l
-          echo '── runtimes present ──'
-          find "$root" \( -name 'node.exe' -o -name 'pg_ctl.exe' -o -name 'pg_dump.exe' -o -name 'pg_restore.exe' -o -name 'erp_kayan.exe' -o -name 'RepairTool.exe' \) | sort
-
-          echo '── nothing empty or a stub ──'
-          # A file that exists but is zero bytes is not "present" in any useful
-          # sense; the installer would fail at the customer.
-          empties=0
-          for required in \
-            backend/scripts/apply-migrations.mjs \
-            backend/scripts/prepare-database.mjs \
-            backend/scripts/migrate-deploy.mjs \
-            backend/node/node.exe \
-            backend/postgres/bin/pg_ctl.exe \
-            backend/postgres/bin/pg_dump.exe \
-            backend/postgres/bin/pg_restore.exe \
-            remove-everything.ps1 \
-            remove-runtime.ps1 \
-            RepairTool.exe \
-            erp_kayan.exe; do
-            file="$root/$required"
-            if [ ! -s "$file" ]; then
-              echo "MISSING OR EMPTY: $required"
-              empties=$((empties + 1))
-            else
-              printf '  %8s  %s\n' "$(stat -c%s "$file")" "$required"
-            fi
-          done
-          test "$empties" -eq 0
-
-          echo '── no private key anywhere in the package ──'
-          if grep -rlI --include='*.pem' --include='*.key' --include='*.txt' \
-               'BEGIN .*PRIVATE KEY' "$root" 2>/dev/null | head -5 | grep -q .; then
-            echo 'A private key is inside the payload'
-            exit 1
-          fi
-          echo 'no private key found'
-
       - name: Upload unreleased Setup and build evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -155,11 +67,66 @@ jobs:
           path: build/windows-evaluation-setup/identity.json
           if-no-files-found: warn
           retention-days: 7
-      - name: Upload the payload inspection report
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+
+  # Extraction, not installation: the Setup built above is unpacked on Linux with
+  # the pinned, fixture-tested extractor already used by windows-installer.yml
+  # and its payload is verified. Nothing is installed or run.
+  inspect-final:
+    name: Extract and verify the actual payload
+    needs: windows-evaluation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          name: windows-payload-report-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/payload-report.json
-          if-no-files-found: warn
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno 6.7-compatible extractor and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/innoextract-src"
+          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$src"
+          git -C "$src" fetch --depth=1 origin refs/heads/support-inno-7.1
+          git -C "$src" checkout --detach FETCH_HEAD
+          test "$(git -C "$src" rev-parse HEAD)" = 34f65747e4a57d5de2582bb1ad3d540f440a3983
+          cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake --build "$src/build" --parallel 2
+          ctest --test-dir "$src/build" --output-on-failure
+          extractor="$(find "$src/build" -type f -name innoextract -perm -111 -print -quit)"
+          test -n "$extractor"
+          "$extractor" --version
+          sha256sum "$extractor"
+          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
+          fixture_zip="$RUNNER_TEMP/fixtures.zip"
+          curl -fsSL https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip -o "$fixture_zip"
+          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
+          unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
+          python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/fixture-results"
+          echo "KAYAN_INNOEXTRACT_SHA256=$(sha256sum "$extractor" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: kayan-unreleased-setup-${{ github.sha }}
+          path: candidate
+      - name: Inspect the final Inno including temporary payload files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l candidate
+          sha256sum candidate/KAYAN-ERP-Setup.exe
+          node scripts/inspect-final-inno.mjs --artifact candidate/KAYAN-ERP-Setup.exe --mode product \
+            --extractor "$KAYAN_INNOEXTRACT" --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report candidate/payload-verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-payload-report-${{ github.sha }}
+          path: candidate/payload-verification.json
+          if-no-files-found: error
           retention-days: 7
