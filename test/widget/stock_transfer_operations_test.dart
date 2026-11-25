@@ -105,7 +105,11 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
-  Future<void> pump(WidgetTester tester, _Api api) async {
+  Future<void> pump(
+    WidgetTester tester,
+    _Api api, {
+    bool arabic = false,
+  }) async {
     await tester.runAsync(() async {
       await (FontLoader('IBMPlexSansArabic')..addFont(
             Future.value(
@@ -159,7 +163,7 @@ void main() {
           key: visualKey,
           child: MaterialApp.router(
             theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
-            locale: const Locale('en'),
+            locale: Locale(arabic ? 'ar' : 'en'),
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
             routerConfig: router,
@@ -168,7 +172,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Details'));
+    await tester.tap(find.byTooltip(arabic ? 'التفاصيل' : 'Details'));
     await tester.pumpAndSettle();
   }
 
@@ -395,7 +399,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
-      await pump(tester,api);
+      await pump(tester, api);
       await tester.tap(find.text('Dispatch'));
       await tester.pumpAndSettle();
       expect(
@@ -429,18 +433,139 @@ void main() {
       expect(api.posts, hasLength(1));
     },
   );
-  testWidgets('uncertain reject retains reason after recreation and blocks duplicate', (tester) async {
-    final api=_Api('REVIEWED')..refuse=true;await pump(tester,api);
-    await tester.tap(find.text('Reject'));await tester.pumpAndSettle();await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'verify source lot');await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();
-    expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'),findsNothing);await tester.tap(find.text('OK'));await tester.pumpAndSettle();expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNull);
-    await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();await tester.pumpWidget(const SizedBox.shrink());await tester.pumpAndSettle();await pump(tester,api);await tester.tap(find.text('Reject'));await tester.pumpAndSettle();
-    final reason=find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField));expect(tester.widget<TextField>(reason).controller!.text,'verify source lot');expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNull);expect(api.posts,hasLength(1));
-    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/transfer-rejection-retained.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
-  });
-  testWidgets('review requires confirmation and cancel sends nothing', (tester) async {
-    final api=_Api('DRAFT');await pump(tester,api);await tester.tap(find.text('Review'));await tester.pumpAndSettle();expect(api.posts,isEmpty);await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();expect(api.posts,isEmpty);
-    await tester.tap(find.text('Review'));await tester.pumpAndSettle();await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();expect(api.posts.single.$1,'/inventory/stock-transfers/t/review');
+  testWidgets(
+    'uncertain reject retains reason after recreation and blocks duplicate',
+    (tester) async {
+      final api = _Api('REVIEWED')..refuse = true;
+      await pump(tester, api);
+      await tester.tap(find.text('Reject'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog).last,
+          matching: find.byType(TextField),
+        ),
+        'verify source lot',
+      );
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'), findsNothing);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await pump(tester, api);
+      await tester.tap(find.text('Reject'));
+      await tester.pumpAndSettle();
+      final reason = find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.byType(TextField),
+      );
+      expect(
+        tester.widget<TextField>(reason).controller!.text,
+        'verify source lot',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+            .onPressed,
+        isNull,
+      );
+      expect(api.posts, hasLength(1));
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/transfer-rejection-retained.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    },
+  );
+  testWidgets('review requires confirmation and cancel sends nothing', (
+    tester,
+  ) async {
+    final api = _Api('DRAFT');
+    await pump(tester, api);
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    expect(api.posts, isEmpty);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(api.posts, isEmpty);
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single.$1, '/inventory/stock-transfers/t/review');
   });
 
+  testWidgets(
+    'Arabic uncertain rejection retains exact reason and restart block pixels',
+    (tester) async {
+      final api = _Api('REVIEWED')..refuse = true;
+      await pump(tester, api, arabic: true);
+      await tester.tap(find.text('رفض'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog).last,
+          matching: find.byType(TextField),
+        ),
+        'تحقق من دفعة المصدر',
+      );
+      await tester.tap(find.text('تأكيد'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'), findsNothing);
+      // Dismiss only the acknowledged error. The original reason stays behind it.
+      final ok = find.byType(AlertDialog).last;
+      await tester.tap(
+        find.descendant(of: ok, matching: find.byType(FilledButton)).last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('إلغاء'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await pump(tester, api, arabic: true);
+      await tester.tap(find.text('رفض'));
+      await tester.pumpAndSettle();
+      final reason = find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.byType(TextField),
+      );
+      expect(
+        tester.widget<TextField>(reason).controller!.text,
+        'تحقق من دفعة المصدر',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'تأكيد'))
+            .onPressed,
+        isNull,
+      );
+      expect(api.posts, hasLength(1));
+      expect(tester.takeException(), isNull);
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/transfer-rejection-retained-ar.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    },
+  );
 }
