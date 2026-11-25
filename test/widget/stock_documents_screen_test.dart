@@ -510,6 +510,56 @@ void main() {
 
   }
 
+  const _adjuster = AppUser(
+    id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+    permissions: ['inventory.stock.adjust'],
+  );
+
+  testWidgets('post confirmation: a transfer says no journal entry, a write-off says one may be made', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: _adjuster);
+    await tester.tap(find.byTooltip('Post').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Post TRF-001'), findsOneWidget);
+    expect(find.textContaining('no journal entry is made'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(api.posts, isEmpty);
+    await tester.tap(find.byTooltip('Post').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Post WO-001'), findsOneWidget);
+    expect(find.textContaining('a journal entry is made when the value changes'), findsOneWidget);
+    expect(api.posts, isEmpty);
+  });
+
+  testWidgets('a refused post keeps the list and the draft, and says why', (tester) async {
+    final api = _DocumentsApi()..refusePost = const ApiFailure(
+      'Choose the lot to move on line 1 or split the quantity over lots, then post again; no balance changed and your data is kept.',
+      statusCode: 400, code: 'STOCK_DOC_TRANSFER_LOT_REQUIRED',
+    );
+    await pump(tester, api, user: _adjuster);
+    await tester.tap(find.byTooltip('Post').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Post'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-2/post');
+    expect(find.text('TRF-001'), findsOneWidget);
+    expect(find.text('Document posted.'), findsNothing);
+  });
+
+  testWidgets('reversing asks first, names the effect, then reverses', (tester) async {
+    final api = _DocumentsApi();
+    await pump(tester, api, user: _adjuster);
+    await tester.tap(find.byTooltip('Reverse').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reversing ADJ-001 cancels its effect'), findsOneWidget);
+    expect(api.posts, isEmpty);
+    await tester.tap(find.widgetWithText(FilledButton, 'Reverse'));
+    await tester.pumpAndSettle();
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-1/reverse');
+    expect(find.text('Document reversed.'), findsOneWidget);
+  });
+
   testWidgets('posts a draft and reloads the stock documents', (tester) async {
     final api = _DocumentsApi();
     await pump(tester, api, user: const AppUser(
