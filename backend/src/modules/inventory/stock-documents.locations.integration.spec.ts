@@ -353,4 +353,12 @@ const vmReady =
     const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);await db.query(`UPDATE stock_movements SET "batchId"=$1 WHERE "referenceId"=$2 AND "referenceType"='STOCK_TRANSFER_IN'`,[await batch(),id]);const before={a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};expect(await failure(documents.reverse(COMPANY,USER,id))).not.toBeNull();expect({a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);
   });
 
+  it('draft split across distinct lots persists entered-unit frozen conversion and posts reverses both identities',async()=>{
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L2',quantity:5,unitCost:20,storageLocationId:SHELF,expiryDate:'2027-03-01'});const lot2=(await one(db,`SELECT id FROM item_batches WHERE "warehouseId"=$1 AND "batchNumber"='L2'`,[WAREHOUSE])).id;
+    const id=await draft({quantity:3,batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await db.query(`UPDATE stock_document_lines SET "unitName"='carton',"unitFactor"=3,"unitQuantity"=1 WHERE "documentId"=$1`,[id]);
+    await documents.updateDraftLocations(COMPANY,USER,id,{expectedVersion:0,lines:[{lineNumber:1,splits:[{batchId:await batch(),quantity:'0.3333',storageLocationId:SHELF,toStorageLocationId:SHELF_W2},{batchId:lot2,quantity:'0.6667',storageLocationId:SHELF,toStorageLocationId:SHELF_W2}]}]});
+    const rows=(await db.query<{quantity:string,unitQuantity:string,unitFactor:string,batchId:string}>(`SELECT quantity::text,"unitQuantity"::text,"unitFactor"::text,"batchId" FROM stock_document_lines WHERE "documentId"=$1 ORDER BY "lineNumber"`,[id])).rows;expect(rows.map(r=>r.quantity)).toEqual(['0.9999','2.0001']);expect(rows.map(r=>r.unitQuantity)).toEqual(['0.3333','0.6667']);expect(rows.every(r=>r.unitFactor==='3.000000')).toBe(true);
+    const before={a:await shelf(SHELF),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);expect({a:await shelf(SHELF),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);expect(Number((await lot(WAREHOUSE)).r)).toBe(10);expect(Number((await one(db,`SELECT "remainingQuantity"::text r FROM item_batches WHERE id=$1`,[lot2])).r)).toBe(5);
+  });
+
 });

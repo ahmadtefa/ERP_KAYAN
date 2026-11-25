@@ -45,6 +45,8 @@ class _DraftLine {
   String? toStorageLocationId;
   String? batchId;
   String? batchLabel;
+  String? storageLocationLabel;
+  String? toStorageLocationLabel;
 
   void dispose() => quantity.dispose();
 }
@@ -383,6 +385,168 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     return null;
   }
 
+  Future<List<Json>?> _splitTransferLine(
+    BuildContext parent,
+    Json document,
+    Json line,
+  ) async {
+    var amount1 = '';
+    var amount2 = '';
+    final parts = <Json>[
+      for (var i = 0; i < 2; i++)
+        {
+          'storageLocationId': line['storageLocationId'],
+          'toStorageLocationId': line['toStorageLocationId'],
+        },
+    ];
+    String? error;
+    try {
+      return await showDialog<List<Json>>(
+        context: parent,
+        barrierDismissible: false,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: Text(_arabic ? 'تقسيم كمية السطر' : 'Split line quantity'),
+            content: SizedBox(
+              width: 620,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      _arabic
+                          ? 'إجمالي السطر: ${line['unitQuantity'] ?? line['quantity']} ${line['unit'] ?? ""}. أدخل جزأين بنفس وحدة السطر. لا تحفظ حتى يساوي المجموع الإجمالي.'
+                          : 'Line total: ${line['unitQuantity'] ?? line['quantity']} ${line['unit'] ?? ""}. Enter two parts in the same line unit. Their sum must equal the total.',
+                    ),
+                    for (var i = 0; i < 2; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextButton(
+                              onPressed: () async {
+                                final picked = await _pickDocumentLocation(
+                                  context,
+                                  asString(document['fromWarehouseId']),
+                                  asString(parts[i]['storageLocationId']),
+                                  source: true,
+                                );
+                                if (picked != null && context.mounted) {
+                                  update(
+                                    () => parts[i].addAll({
+                                      'storageLocationId': picked['id'],
+                                      'sourceLabel': picked['label'],
+                                      'batchId': null,
+                                      'label': null,
+                                    }),
+                                  );
+                                }
+                              },
+                              child: Text(
+                                _arabic
+                                    ? 'موقع الجزء ${i + 1}: ${parts[i]['sourceLabel'] ?? line['storageLocationCode'] ?? "بدون موقع"}'
+                                    : 'Part ${i + 1} source: ${parts[i]['sourceLabel'] ?? line['storageLocationCode'] ?? "unlocated"}',
+                              ),
+                            ),
+                            TextFormField(
+                              initialValue: i == 0 ? amount1 : amount2,
+                              onChanged: (value) {
+                                if (i == 0) {
+                                  amount1 = value;
+                                } else {
+                                  amount2 = value;
+                                }
+                              },
+                              decoration: InputDecoration(
+                                labelText: _arabic
+                                    ? 'كمية الجزء ${i + 1}'
+                                    : 'Part ${i + 1} quantity',
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final picked = await _pickTransferLot(
+                                  context,
+                                  text(line, 'itemId'),
+                                  asString(document['fromWarehouseId']),
+                                  asString(parts[i]['storageLocationId']),
+                                  asString(parts[i]['batchId']),
+                                );
+                                if (picked != null && context.mounted) {
+                                  update(
+                                    () => parts[i].addAll({
+                                      'batchId': picked['id'],
+                                      'label': picked['label'],
+                                    }),
+                                  );
+                                }
+                              },
+                              child: Text(
+                                _arabic
+                                    ? 'دفعة الجزء ${i + 1}: ${parts[i]['label'] ?? "غير محددة"}'
+                                    : 'Part ${i + 1} lot: ${parts[i]['label'] ?? "not selected"}',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (error != null)
+                      Text(
+                        error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final a = Decimal.tryParse(amount1.trim()),
+                      b = Decimal.tryParse(amount2.trim()),
+                      total = Decimal.tryParse(
+                        '${line['unitQuantity'] ?? line['quantity']}',
+                      );
+                  if (a == null ||
+                      b == null ||
+                      a <= Decimal.zero ||
+                      b <= Decimal.zero ||
+                      a + b != total ||
+                      parts.any((p) => p['batchId'] == null)) {
+                    update(
+                      () => error = _arabic
+                          ? 'اختر دفعة لكل جزء وأدخل كميتين موجبتين مجموعهما يساوي كمية السطر.'
+                          : 'Choose each lot and positive quantities that add up to the line total.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(context, [
+                    for (var i = 0; i < 2; i++)
+                      {
+                        ...parts[i],
+                        'quantity': i == 0 ? amount1.trim() : amount2.trim(),
+                      },
+                  ]);
+                },
+                child: Text(_arabic ? 'تطبيق التقسيم' : 'Apply split'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      // TextFormField owns the input lifetime through the closing transition.
+    }
+  }
+
   Future<void> _correctDraftLocations(Json row) async {
     Json document;
     try {
@@ -397,6 +561,27 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     final lines = listOf(document['lines'])
         .map((line) => Map<String, dynamic>.from(line))
         .toList();
+    if (text(document, 'kind').toUpperCase() == 'TRANSFER' &&
+        document['toWarehouseId'] != null) {
+      try {
+        final targets = await ref
+            .read(apiClientProvider)
+            .getList(
+              '/inventory/locations',
+              query: {'warehouseId': document['toWarehouseId']},
+            );
+        for (final line in lines) {
+          for (final target in targets) {
+            if (target['id'] == line['toStorageLocationId']) {
+              line['toStorageLocationCode'] = text(target, 'code');
+            }
+          }
+        }
+      } catch (_) {
+        /* Keep the saved id and explicit unavailable label on read failure. */
+      }
+    }
+    if (!mounted) return;
     var saving = false;
     String? failure;
     await showDialog<void>(
@@ -416,8 +601,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 children: [
                   Text(
                     _arabic
-                        ? 'راجع مواقع المصدر والاستلام صراحة. الكميات والوحدات لا تتغير. الحفظ لا يرحّل المستند.'
-                        : 'Review source and destination explicitly. Quantities and units stay unchanged. Saving does not post the document.',
+                        ? 'راجع مواقع المصدر والاستلام صراحة. الإجمالي والوحدة لا يتغيران. مجموع الأجزاء يجب أن يساوي الإجمالي. الحفظ لا يرحّل المستند.'
+                        : 'Review source and destination explicitly. The total and unit stay unchanged. Split parts must add up exactly. Saving does not post the document.',
                   ),
                   for (final line in lines)
                     Padding(
@@ -431,6 +616,72 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                           Wrap(
                             spacing: 8,
                             children: [
+                              if (text(document, 'kind').toUpperCase() ==
+                                  'TRANSFER') ...[
+                                TextButton(
+                                  onPressed: saving
+                                      ? null
+                                      : () async {
+                                          final picked = await _pickTransferLot(
+                                            dialogContext,
+                                            text(line, 'itemId'),
+                                            asString(
+                                              document['fromWarehouseId'],
+                                            ),
+                                            asString(line['storageLocationId']),
+                                            asString(line['batchId']),
+                                          );
+                                          if (picked != null &&
+                                              dialogContext.mounted) {
+                                            update(
+                                              () => line.addAll({
+                                                'batchId': picked['id'],
+                                                'batchLabel': picked['label'],
+                                                'batchChanged': true,
+                                                'splits': null,
+                                              }),
+                                            );
+                                          }
+                                        },
+                                  child: Text(
+                                    _arabic
+                                        ? 'الدفعة: ${line['batchLabel'] ?? line['batchNumber'] ?? "اختر"}'
+                                        : 'Lot: ${line['batchLabel'] ?? line['batchNumber'] ?? "choose"}',
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: saving
+                                      ? null
+                                      : () async {
+                                          final split =
+                                              await _splitTransferLine(
+                                                dialogContext,
+                                                document,
+                                                line,
+                                              );
+                                          if (split != null &&
+                                              dialogContext.mounted) {
+                                            update(
+                                              () => line['splits'] = split,
+                                            );
+                                          }
+                                        },
+                                  child: Text(
+                                    _arabic
+                                        ? 'تقسيم كمية السطر'
+                                        : 'Split line quantity',
+                                  ),
+                                ),
+                                if (line['splits'] is List)
+                                  Text(
+                                    (line['splits'] as List)
+                                        .map(
+                                          (p) =>
+                                              '${p['quantity']} × ${p['label']}',
+                                        )
+                                        .join(' + '),
+                                  ),
+                              ],
                               TextButton(
                                 onPressed: saving
                                     ? null
@@ -459,6 +710,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                 picked['id'];
                                             line['storageLocationCode'] =
                                                 picked['code'];
+                                            line['batchId'] = null;
+                                            line['batchLabel'] = null;
+                                            line['splits'] = null;
                                             failure = null;
                                           });
                                         }
@@ -540,6 +794,22 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   for (final line in lines)
                                     {
                                       'lineNumber': line['lineNumber'],
+                                      if (line['batchChanged'] == true ||
+                                          line['batchId'] != null)
+                                        'batchId': line['batchId'],
+                                      if (line['splits'] is List)
+                                        'splits': [
+                                          for (final part
+                                              in line['splits'] as List)
+                                            {
+                                              'quantity': part['quantity'],
+                                              'batchId': part['batchId'],
+                                              'storageLocationId':
+                                                  part['storageLocationId'],
+                                              'toStorageLocationId':
+                                                  part['toStorageLocationId'],
+                                            },
+                                        ],
                                       'storageLocationId':
                                           line['storageLocationId'],
                                       if (text(
@@ -822,6 +1092,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                           rows.firstWhere((r) => text(r, 'id') == current),
                           'code',
                         ),
+                        'label':
+                            '${text(rows.firstWhere((r) => text(r, 'id') == current), 'code')} • ${localizedRecordName(rows.firstWhere((r) => text(r, 'id') == current), arabic: _arabic)}',
                       })
                     : null,
                 child: Text(_arabic ? 'تطبيق' : 'Apply'),
@@ -1181,9 +1453,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     kind = value;
                                     for (final line in lines) {
                                       line.storageLocationId = null;
+                                      line.storageLocationLabel = null;
                                       line.batchId = null;
                                       line.batchLabel = null;
                                       line.toStorageLocationId = null;
+                                      line.toStorageLocationLabel = null;
                                     }
                                     errors.clear();
                                   });
@@ -1225,6 +1499,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   fromWarehouseId = value;
                                   for (final line in lines) {
                                     line.storageLocationId = null;
+                                    line.storageLocationLabel = null;
                                     line.batchId = null;
                                     line.batchLabel = null;
                                   }
@@ -1232,6 +1507,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   toWarehouseId = value;
                                   for (final line in lines) {
                                     line.toStorageLocationId = null;
+                                    line.toStorageLocationLabel = null;
                                   }
                                   fromWarehouseId = value;
                                 }
@@ -1266,6 +1542,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   toWarehouseId = value;
                                   for (final line in lines) {
                                     line.toStorageLocationId = null;
+                                    line.toStorageLocationLabel = null;
                                   }
                                 }),
                               ),
@@ -1346,8 +1623,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                       ),
                                                       label: Text(
                                                         _arabic
-                                                            ? 'موقع المصدر: ${line.storageLocationId == null ? "غير محدد" : "محدد"}'
-                                                            : 'Source location: ${line.storageLocationId == null ? "not selected" : "selected"}',
+                                                            ? 'موقع المصدر: ${line.storageLocationId == null ? "غير محدد" : line.storageLocationLabel ?? "محدد"}'
+                                                            : 'Source location: ${line.storageLocationId == null ? "not selected" : line.storageLocationLabel ?? "selected"}',
                                                       ),
                                                       onPressed: saving
                                                           ? null
@@ -1367,6 +1644,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                                 setDialogState(() {
                                                                   line.storageLocationId =
                                                                       picked['id']
+                                                                          as String?;
+                                                                  line.storageLocationLabel =
+                                                                      picked['label']
                                                                           as String?;
                                                                   line.batchId =
                                                                       null;
@@ -1436,8 +1716,12 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                                         line.unitName
                                                                     ..storageLocationId =
                                                                         line.storageLocationId
+                                                                    ..storageLocationLabel =
+                                                                        line.storageLocationLabel
                                                                     ..toStorageLocationId =
-                                                                        line.toStorageLocationId;
+                                                                        line.toStorageLocationId
+                                                                    ..toStorageLocationLabel =
+                                                                        line.toStorageLocationLabel;
                                                               copy.quantity
                                                                   .clear();
                                                               lines.insert(
@@ -1452,8 +1736,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                       ),
                                                       label: Text(
                                                         _arabic
-                                                            ? 'موقع الاستلام: ${line.toStorageLocationId == null ? "بدون موقع" : "محدد"}'
-                                                            : 'Destination location: ${line.toStorageLocationId == null ? "unlocated" : "selected"}',
+                                                            ? 'موقع الاستلام: ${line.toStorageLocationId == null ? "بدون موقع" : line.toStorageLocationLabel ?? "محدد"}'
+                                                            : 'Destination location: ${line.toStorageLocationId == null ? "unlocated" : line.toStorageLocationLabel ?? "selected"}',
                                                       ),
                                                       onPressed: saving
                                                           ? null
@@ -1470,11 +1754,14 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                                       null &&
                                                                   dialogContext
                                                                       .mounted) {
-                                                                setDialogState(
-                                                                  () => line.toStorageLocationId =
+                                                                setDialogState(() {
+                                                                  line.toStorageLocationId =
                                                                       picked['id']
-                                                                          as String?,
-                                                                );
+                                                                          as String?;
+                                                                  line.toStorageLocationLabel =
+                                                                      picked['label']
+                                                                          as String?;
+                                                                });
                                                               }
                                                             },
                                                     ),

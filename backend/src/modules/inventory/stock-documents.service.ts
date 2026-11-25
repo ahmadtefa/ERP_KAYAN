@@ -1834,17 +1834,21 @@ export class StockDocumentsService {
           // The cost the goods arrived with was recorded on the receipt movement
           // (lotUnitCost) when the transfer was posted. Without it (a legacy
           // document) the original cost cannot be proven and nothing is guessed.
-          const [evidence] = await tx.$queryRaw<Array<{ c: Prisma.Decimal | null; n: bigint }>>(Prisma.sql`
-            SELECT MAX(m."lotUnitCost") AS c, COUNT(*)::bigint AS n
+          const [evidence] = await tx.$queryRaw<Array<{ lo: Prisma.Decimal | null; hi: Prisma.Decimal | null; n: bigint; missing: bigint }>>(Prisma.sql`
+            SELECT MIN(m."lotUnitCost") AS lo, MAX(m."lotUnitCost") AS hi, COUNT(*)::bigint AS n,
+                   COUNT(*) FILTER (WHERE m."lotUnitCost" IS NULL)::bigint AS missing
               FROM "stock_movements" m
              WHERE m."companyId" = ${companyId}::uuid AND m."referenceId" = ${document.id}::uuid
                AND m."referenceType" = 'STOCK_TRANSFER_IN' AND m."itemId" = ${line.itemId}::uuid
-               AND m."batchId" = ${destination.id}::uuid AND m."lotUnitCost" IS NOT NULL
+               AND m."batchId" = ${destination.id}::uuid
           `);
-          if (Number(evidence?.n ?? 0) !== 1 || evidence?.c == null) {
-            throw fail('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE', 'لا يوجد سجل لتكلفة الدفعة وقت الاستلام (مستند قديم أو دفعة مختلفة).', 'no record of the lot cost at receipt exists (legacy document or a different lot).');
+          // Several lines of one document may land on the same lot at the same
+          // source cost; the evidence is usable only when every receipt into
+          // that lot recorded one and they all agree.
+          if (Number(evidence?.n ?? 0) < 1 || Number(evidence?.missing ?? 0) > 0 || evidence?.lo == null || evidence?.hi == null || !new Prisma.Decimal(evidence.lo).equals(evidence.hi)) {
+            throw fail('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE', 'لا يوجد سجل متسق لتكلفة الدفعة وقت الاستلام (مستند قديم أو دفعة مختلفة).', 'no consistent record of the lot cost at receipt exists (legacy document or a different lot).');
           }
-          const arrivalCost = new Prisma.Decimal(evidence.c);
+          const arrivalCost = new Prisma.Decimal(evidence.lo);
           await removeFromLotCost(tx, destination.id, quantity, arrivalCost);
           await tx.itemBatch.update({
             where: { id: destination.id },
@@ -2170,7 +2174,13 @@ export class StockDocumentsService {
     id: string,
     body: {
       expectedVersion?: unknown;
-      lines?: Array<{ lineNumber?: number; storageLocationId?: string | null; toStorageLocationId?: string | null }>;
+      lines?: Array<{
+        lineNumber?: number;
+        storageLocationId?: string | null;
+        toStorageLocationId?: string | null;
+        batchId?: string | null;
+        splits?: Array<{ batchId?: string | null; quantity?: unknown; storageLocationId?: string | null; toStorageLocationId?: string | null }>;
+      }>;
     },
     mayReadCost = true,
   ) {
@@ -2215,6 +2225,129 @@ export class StockDocumentsService {
         }
         seen.add(line.lineNumber);
         const data: Record<string, unknown> = {};
+        const lineErr = (code: string, ar: string, en: string) =>
+          bad(code, `السطر ${line.lineNumber}: ${ar} لم يُحفظ شيء وبياناتك كما أدخلتها.`, `Line ${line.lineNumber}: ${en} Nothing was saved; your input is as you entered it.`, { lineNumber: String(line.lineNumber) });
+        const checkLot = async (batchId: string, need: Prisma.Decimal) => {
+          if (!isTransfer) {
+            throw lineErr('STOCK_DOC_LOT_TRANSFER_ONLY', 'اختيار الدفعة وتقسيم الكمية متاحان لمستند التحويل فقط.', 'Choosing a lot and splitting the quantity are available on a transfer only.');
+          }
+          const lot = await tx.itemBatch.findFirst({
+            where: { id: String(batchId), companyId, itemId: line.itemId, warehouseId: document.fromWarehouseId ?? undefined, deletedAt: null },
+            select: { id: true, batchNumber: true, remainingQuantity: true, status: true },
+          });
+          if (!lot) {
+            throw lineErr('STOCK_DOC_LOT_INVALID', 'الدفعة ليست دفعة هذا الصنف في المخزن المحوَّل منه أو محذوفة. اختر دفعة من قائمة دفعات الصنف في ذلك المخزن.', 'the lot is not a lot of this item in the source warehouse, or was deleted. Pick a lot from this item\'s lots in that warehouse.');
+          }
+          if (lot.status === 'WRITTEN_OFF') {
+            throw lineErr('STOCK_DOC_LOT_INVALID', `الدفعة ${lot.batchNumber} مشطوبة ولا يمكن تحويلها. اختر دفعة أخرى.`, `lot ${lot.batchNumber} is written off and cannot be transferred. Pick another lot.`);
+          }
+          if (lot.remainingQuantity.lessThan(need)) {
+            throw lineErr('STOCK_DOC_LOT_SHORT', `الدفعة ${lot.batchNumber} تحمل ${lot.remainingQuantity.toFixed(MONEY_SCALE)} فقط والمطلوب ${need.toFixed(MONEY_SCALE)}. خفّض الكمية أو وزّعها على دفعة أخرى.`, `lot ${lot.batchNumber} holds only ${lot.remainingQuantity.toFixed(MONEY_SCALE)} but ${need.toFixed(MONEY_SCALE)} is needed. Lower the quantity or put the rest on another lot.`);
+          }
+        };
+        const checkShelf = async (id: string | null | undefined, which: 'from' | 'to') => {
+          if (!id) return null;
+          const warehouseId = which === 'from' ? document.fromWarehouseId : document.toWarehouseId;
+          const found = await locationModel.findFirst({
+            where: { id: String(id), companyId, warehouseId: warehouseId ?? undefined, deletedAt: null, ...(which === 'to' ? { isActive: true } : {}) },
+            select: { id: true },
+          });
+          if (!found) {
+            throw lineErr(which === 'from' ? 'STOCK_DOC_LOCATION_INVALID' : 'STOCK_DOC_TARGET_LOCATION_INVALID', which === 'from' ? 'موقع المصدر ليس في المخزن المحوَّل منه. اختر موقعًا من نفس المخزن.' : 'موقع الاستلام يجب أن يكون نشطًا في المخزن المحوَّل إليه.', which === 'from' ? 'the source location is not in the source warehouse or was deleted. Pick a location of that warehouse.' : 'the receiving location must be an active location of the receiving warehouse.');
+          }
+          return found.id;
+        };
+        if (change.splits !== undefined) {
+          if (!isTransfer) {
+            throw lineErr('STOCK_DOC_LOT_TRANSFER_ONLY', 'تقسيم الكمية متاح لمستند التحويل فقط.', 'Splitting the quantity is available on a transfer only.');
+          }
+          const parts = change.splits;
+          if (!Array.isArray(parts) || parts.length < 2 || parts.length > 20) {
+            throw lineErr('STOCK_DOC_SPLIT_INVALID', 'أرسل من 2 إلى 20 جزءًا للتقسيم، لكل جزء دفعة وكمية.', 'send 2 to 20 parts to split, each with a lot and a quantity.');
+          }
+          // Part quantities are in the line's ENTERED unit when it has one
+          // (unitName/unitQuantity/unitFactor), otherwise in base units. The
+          // base quantity of each part is the entered quantity times the
+          // frozen unit factor; the last part takes the exact remainder.
+          const entered = line.unitFactor != null && line.unitQuantity != null;
+          const enteredQty = parts.map((part) => this.decimal(part?.quantity, `splits.quantity (line ${line.lineNumber})`));
+          if (enteredQty.some((q) => q.lessThanOrEqualTo(0))) {
+            throw lineErr('STOCK_DOC_SPLIT_INVALID', 'كل جزء يجب أن تكون كميته أكبر من صفر.', 'every part needs a quantity above zero.');
+          }
+          const totalEntered = enteredQty.reduce((sum, q) => sum.plus(q), new Prisma.Decimal(0));
+          const expectedTotal = entered ? (line.unitQuantity as Prisma.Decimal) : line.quantity;
+          if (!totalEntered.equals(expectedTotal)) {
+            throw lineErr('STOCK_DOC_SPLIT_TOTAL', `مجموع الأجزاء ${totalEntered.toFixed(MONEY_SCALE)} لا يساوي كمية السطر ${expectedTotal.toFixed(MONEY_SCALE)}${entered ? ` ${line.unitName ?? ''}` : ''}. عدّل الكميات حتى يتساوى المجموع.`, `the parts add up to ${totalEntered.toFixed(MONEY_SCALE)} but the line quantity is ${expectedTotal.toFixed(MONEY_SCALE)}${entered ? ` ${line.unitName ?? ''}` : ''}. Change the quantities so they add up exactly.`);
+          }
+          const quantities: Prisma.Decimal[] = [];
+          let baseUsed = new Prisma.Decimal(0);
+          for (let i = 0; i < enteredQty.length; i += 1) {
+            const base = i === enteredQty.length - 1
+              ? line.quantity.minus(baseUsed)
+              : (entered ? enteredQty[i].mul(line.unitFactor as Prisma.Decimal).toDecimalPlaces(MONEY_SCALE) : enteredQty[i]);
+            if (base.lessThanOrEqualTo(0)) {
+              throw lineErr('STOCK_DOC_SPLIT_INVALID', 'كمية أحد الأجزاء بعد التحويل للوحدة الأساسية صفر أو سالبة. غيّر التوزيع.', 'a part rounds to zero or less in base units. Change the distribution.');
+            }
+            quantities.push(base);
+            baseUsed = baseUsed.plus(base);
+          }
+          const perLot = new Map<string, Prisma.Decimal>();
+          for (let i = 0; i < parts.length; i += 1) {
+            if (!parts[i]?.batchId) {
+              throw lineErr('STOCK_DOC_SPLIT_INVALID', `الجزء ${i + 1} بلا دفعة. اختر دفعة لكل جزء.`, `part ${i + 1} has no lot. Pick a lot for every part.`);
+            }
+            const key = String(parts[i].batchId);
+            perLot.set(key, (perLot.get(key) ?? new Prisma.Decimal(0)).plus(quantities[i]));
+          }
+          for (const [lotId, need] of perLot) await checkLot(lotId, need);
+          const nextNumber = Math.max(...document.lines.map((l) => l.lineNumber), ...Array.from(seen)) + 1;
+          let used = 0;
+          let unitUsed = new Prisma.Decimal(0);
+          let costUsed = new Prisma.Decimal(0);
+          const created: number[] = [];
+          for (let i = 0; i < parts.length; i += 1) {
+            const last = i === parts.length - 1;
+            const q = quantities[i];
+            const unitQuantity = entered ? enteredQty[i] : null;
+            const totalCost = last ? line.totalCost.minus(costUsed) : q.mul(line.unitCost).toDecimalPlaces(MONEY_SCALE);
+            if (unitQuantity) unitUsed = unitUsed.plus(unitQuantity);
+            costUsed = costUsed.plus(totalCost);
+            const fields = {
+              quantity: q,
+              unitQuantity,
+              totalCost,
+              batchId: String(parts[i].batchId),
+              storageLocationId: parts[i].storageLocationId === undefined ? line.storageLocationId : await checkShelf(parts[i].storageLocationId, 'from'),
+              toStorageLocationId: parts[i].toStorageLocationId === undefined ? (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null : await checkShelf(parts[i].toStorageLocationId, 'to'),
+            };
+            if (i === 0) {
+              await tx.stockDocumentLine.update({ where: { id: line.id }, data: fields as never });
+            } else {
+              await tx.stockDocumentLine.create({
+                data: {
+                  ...fields,
+                  documentId: id,
+                  itemId: line.itemId,
+                  unitCost: line.unitCost,
+                  notes: line.notes,
+                  unitName: line.unitName,
+                  unitFactor: line.unitFactor,
+                  lineNumber: nextNumber + used,
+                } as never,
+              });
+              created.push(nextNumber + used);
+              used += 1;
+            }
+          }
+          continue;
+        }
+        if (change.batchId !== undefined) {
+          if (change.batchId === null) data.batchId = null;
+          else {
+            await checkLot(String(change.batchId), line.quantity);
+            data.batchId = String(change.batchId);
+          }
+        }
         if (change.storageLocationId !== undefined) {
           if (change.storageLocationId === null) data.storageLocationId = null;
           else {

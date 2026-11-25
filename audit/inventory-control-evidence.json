@@ -1588,5 +1588,10 @@
     "status": "PASS_SCOPED",
     "evidence": "stock_document_lot_create_http_test.dart native bridge",
     "scope": "barcode create explicit source lot qty3 post reverse; direct picker and draft split correction still need qualification"
+  },
+  "genericTransferDraftSplit": {
+    "status": "PASS_SCOPED_MORE_COVERAGE_OPEN",
+    "evidence": "stock_document_lot_split_http_test.dart; native KAYAN_STOCKDOC_SPLIT_UI=1; distinct-lot factor3 SQL probe",
+    "scope": "two-part entered-unit draft split retains synthetic refusal then save/post/reverse; controller/auth and native split overlap still open"
   }
 }
