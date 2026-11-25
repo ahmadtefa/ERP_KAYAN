@@ -107,3 +107,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Own positive ADJUSTMENT and COUNT± inverse tests now pass exact remaining/received/status/cost/warehouse/shelf restoration, basic writeoff inverse retained. Null and conflicting original batch refuses atomically. Exact original lot shortage with unrelated stock on same shelf refuses LOT_SHELF_SHORT unchanged.
 - Native43 actual adjustment+/count± restores remaining10/received10/statusOPEN/lotcost12 and warehouse10/value120. Reverse-first versus issue overlap valid, final lot=movement ledger=warehouse. All journal totals balanced, server stopped. TypeScript noEmit clean.
 - New transfer omitted-lot case remains FAIL: line omits batch but post auto-selects sole covering lot into existing destination lot; reverse restores shelf/books but skips lot restoration, leaving source7/target8 instead10/5. Backend notified, regression saved. No universal reversal acceptance.
+
+## Generic lot cost after later receipts, 05:30
+
+43 exact basic inverse passes, but positive adjustment+2 then real receipt2@24 then reverse from original10@12 yields lot12@13.7143 vs expected14, books12/value168 correct. Negative adjustment-2 then same receipt/reverse also fails lot contribution restoration. Physical lot and book costs remain separate bases, neither should be silently repriced by inverse. Backend owner notified for recorded physical contribution or fail-closed proof. New tests allow an atomic refusal as safe outcome. Evidence patch43-reprice.out, patch43-negative-reprice.out.
