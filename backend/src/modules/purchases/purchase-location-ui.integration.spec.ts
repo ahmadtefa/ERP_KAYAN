@@ -160,7 +160,7 @@ const vmReady =
   }catch(e){res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
   await new Promise<void>(r=>server.listen(3221,'127.0.0.1',r));
   try{
-   const output=await promisify(execFile)(process.env.FLUTTER_BIN??'flutter',['test','test/widget/purchase_location_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(output.stdout);
+   const output=await require(join(process.cwd(),'scripts','bridge-harness.cjs')).runFlutterBridge({id:'purchase',testFile:'test/widget/purchase_location_http_test.dart',cwd:join(process.cwd(),'..')});console.log(output.stdout);
    const read=await service.findOne(COMPANY,draft.id) as unknown as {warehouseId:string;lines:Array<{storageLocationId:string}>};
    expect(read.warehouseId).toBe(WAREHOUSE);expect(read.lines[0].storageLocationId).toBe(shelfB);
    expect(read.lines[0]).toMatchObject({batchNumber:'UI-PURCHASE-LOT',batchProductionDate:'2026-11-01',batchExpiryDate:'2027-04-01'});
@@ -170,6 +170,6 @@ const vmReady =
    await batches.issue(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchId:lot.id,storageLocationId:shelfB,quantity:1});
    expect((await db.query(`SELECT "remainingQuantity"::text q FROM item_batches WHERE id=$1`,[lot.id])).rows).toEqual([{q:'4.0000'}]);
    expect((await db.query(`SELECT "storageLocationId" loc,quantity::text q FROM stock_movements WHERE "referenceType"='PURCHASE_INVOICE'`)).rows).toEqual([{loc:shelfB,q:'5.0000'}]);
-  }finally{await new Promise<void>(r=>server.close(()=>r()));await db.close();}
+  ;require(join(process.cwd(),'scripts','bridge-harness.cjs')).writeParentReceipt('purchase');}finally{await new Promise<void>(r=>server.close(()=>r()));await db.close();}
  },150000);
 });

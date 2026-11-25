@@ -468,13 +468,13 @@ const placedNow = async (db: PGlite) => {
     }catch(e){res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
     await new Promise<void>(r=>server.listen(3220,'127.0.0.1',r));
     try{
-      const output=await promisify(execFile)(process.env.FLUTTER_BIN??'flutter',['test','test/widget/sales_location_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});
+      const output=await require(join(process.cwd(),'scripts','bridge-harness.cjs')).runFlutterBridge({id:'sales',testFile:'test/widget/sales_location_http_test.dart',cwd:join(process.cwd(),'..')});
       console.log(output.stdout);
       const read=await service.findOne(COMPANY,id) as unknown as {warehouseId:string;lines:Array<{locationAllocations:unknown;quantity:string}>};
       expect(read.warehouseId).toBe(WAREHOUSE);expect(read.lines[0].locationAllocations).toEqual([{storageLocationId:LOC_A,quantity:'0.5000'},{storageLocationId:LOC_B,quantity:'1.5000'}]);
       await service.post(COMPANY,USER,id);expect(await placedNow(db)).toEqual({'A-01':14,'B-01':2});expect(await shelf(db)).toBe(16);
       await service.reverse(COMPANY,USER,id);expect(await placedNow(db)).toEqual({'A-01':20,'B-01':20});expect(await shelf(db)).toBe(40);
-    }finally{await new Promise<void>(r=>server.close(()=>r()));}
+    ;require(join(process.cwd(),'scripts','bridge-harness.cjs')).writeParentReceipt('sales');}finally{await new Promise<void>(r=>server.close(()=>r()));}
   },150000);
 
 

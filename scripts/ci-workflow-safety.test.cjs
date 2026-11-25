@@ -113,6 +113,18 @@ for (const step of optionalWindows.steps) {
   assert.equal(step['continue-on-error'], undefined);
   assert.doesNotMatch(String(step.run ?? ''), /generateKeyPair|createPrivateKey|license-generator|gh release|smoke-test-installed|install-runtime\.ps1|TestSignedBuild|EvaluationBuild/);
 }
+const bridges = read('installer-focused-tests.yml');
+assert.deepEqual(bridges.on, {workflow_dispatch: null});
+assert.deepEqual(bridges.permissions, {contents: 'read'});
+assert.deepEqual(Object.keys(bridges.jobs), ['bridges']);
+assert.equal(bridges.jobs.bridges['runs-on'], 'ubuntu-24.04');
+assert.equal(bridges.jobs.bridges.environment, undefined);
+assert.equal(bridges.jobs.bridges.env.NODE_OPTIONS, '--require=${{ github.workspace }}/scripts/ci-no-signing.cjs');
+for (const step of bridges.jobs.bridges.steps) {
+  assert.equal(step['continue-on-error'], undefined);
+  assert.doesNotMatch(String(step.run ?? ''), /generateKeyPair|createPrivateKey|license-generator|gh release|smoke-test-installed|install-runtime\.ps1|build-installer|reset-kayan|EvaluationBuild|TestSignedBuild/);
+}
+assert.ok(bridges.jobs.bridges.steps.some(s => s.run?.includes('verify-location-bridge-evidence.mjs')));
 const setup = read('windows-evaluation-setup.yml');
 assert.deepEqual(Object.keys(setup.on), ['workflow_dispatch']);
 assert.deepEqual(setup.permissions, { contents: 'read' });

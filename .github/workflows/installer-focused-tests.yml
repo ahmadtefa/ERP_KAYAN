@@ -1,8 +1,7 @@
-name: Installer safety focused tests (no installer build)
+name: Standalone nine location bridge qualification
 
-# Retained for historical review. This legacy workflow includes key generation,
-# signing-related tests, or a stale installer; do not dispatch it in GitHub CI.
-# It is not release evidence and its jobs and history remain preserved.
+# Branch-only manual qualification, not comprehensive acceptance or a product
+# build. No Windows install, signing, key generation, release or deployment.
 on:
   workflow_dispatch:
 
@@ -10,49 +9,59 @@ permissions:
   contents: read
 
 jobs:
-  migration-safety:
+  bridges:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+      KAYAN_BRIDGE_EVIDENCE_DIR: ${{ github.workspace }}/build/bridge-evidence
+      KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/bridge-evidence/pixels
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22.22.3'
-      - name: Test missing Prisma CLI handling and packaging policy
-        run: node --test backend/scripts/migrate-deploy.test.mjs scripts/windows-release-policy.test.mjs
-  backup-ui:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
           flutter-version: '3.47.6'
           channel: stable
-          cache: true
-      - name: Get locked Flutter dependencies
+      - name: Install locked backend dependencies and generate Prisma
+        working-directory: backend
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx prisma generate
+      - name: Resolve locked Flutter packages
         run: flutter pub get --enforce-lockfile
-      - name: Analyze only affected UI and test
-        shell: bash
+      - name: Check bridge evidence refusal rules and workflow safety
         run: |
-          for path in lib/features/data/presentation/screens/backup_screen.dart test/features/data/backup_demo_visibility_test.dart; do
-            log="$RUNNER_TEMP/flutter-focused-analyze.log"
-            if ! flutter analyze --no-pub --machine "$path" > "$log" 2>&1; then
-              python3 -c 'import sys; s=open(sys.argv[1],encoding="utf-8").read()[-12000:]; print("::error title=Focused Flutter analysis::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$log"
-              exit 1
-            fi
+          node --test scripts/verify-location-bridge-evidence.test.mjs backend/scripts/bridge-harness.test.cjs backend/scripts/isolated-pg-cluster.test.cjs
+          node scripts/ci-workflow-safety.test.cjs
+      - name: Compile backend without product packaging
+        working-directory: backend
+        run: npx tsc -p tsconfig.json
+      - name: Run six selected PGlite HTTP bridges sequentially
+        run: |
+          export FLUTTER_BIN="$(command -v flutter)"
+          mkdir -p "$KAYAN_BRIDGE_EVIDENCE_DIR"
+          for bridge in receipt transfer purchase sales stockdoc count; do
+            node scripts/run-location-pglite-bridge.mjs "$bridge" "$KAYAN_BRIDGE_EVIDENCE_DIR"
           done
-      - name: Test backup UI visibility and preserved controls
-        shell: bash
+      - name: Run three selected native isolated HTTP bridges
         run: |
-          log="$RUNNER_TEMP/flutter-focused-test.jsonl"
-          if ! flutter test --no-pub --reporter json test/features/data/backup_demo_visibility_test.dart > "$log" 2>&1; then
-            node scripts/report-flutter-test-failures.mjs "$log"
-            exit 1
-          fi
+          export FLUTTER_BIN="$(command -v flutter)"
+          node scripts/run-location-native-bridges.mjs "$KAYAN_BRIDGE_EVIDENCE_DIR"
+      - name: Verify all nine child and parent SQL outcomes
+        run: node scripts/verify-location-bridge-evidence.mjs "$KAYAN_BRIDGE_EVIDENCE_DIR" "$KAYAN_BRIDGE_EVIDENCE_DIR/report.json"
+      - name: Preserve raw selected evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: location-bridge-evidence-${{ github.sha }}
+          path: build/bridge-evidence/
+          if-no-files-found: warn
+          retention-days: 7

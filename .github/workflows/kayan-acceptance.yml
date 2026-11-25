@@ -382,6 +382,10 @@ jobs:
           set +e
           npm test -- --runInBand --testPathIgnorePatterns="/modules/licensing$isolated" --json --outputFile="$RUNNER_TEMP/jest.json"
           status=$?
+          mkdir -p ../build/acceptance-postgres
+          if [ -s "$RUNNER_TEMP/jest.json" ]; then
+            cp "$RUNNER_TEMP/jest.json" ../build/acceptance-postgres/jest-raw.json
+          fi
           node - "$RUNNER_TEMP/jest.json" <<'NODE'
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

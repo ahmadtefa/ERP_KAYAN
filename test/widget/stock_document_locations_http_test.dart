@@ -110,6 +110,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply'));
     await settle();
+    // Changing source intentionally invalidates the old lot. Select it again
+    // at the new physical source instead of pretending a refused post worked.
+    await tester.tap(find.text('Lot: No lot (choose again)'));
+    await settle();
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Lot'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('L1').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply'));
+    await settle();
     final boundary =
         visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     await tester.runAsync(() async {
@@ -126,6 +138,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Post').last);
     await settle();
+    expect(find.text('Posted'), findsOneWidget);
+    expect(find.byTooltip('Post'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 6));
     expect(tester.takeException(), isNull);

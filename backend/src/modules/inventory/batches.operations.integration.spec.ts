@@ -199,10 +199,7 @@ const vmReady =
     });
     await new Promise<void>(resolve => server.listen(3219, '127.0.0.1', resolve));
     try {
-      const output = await promisify(execFile)(process.env.FLUTTER_BIN ?? 'flutter', ['test', 'test/widget/location_http_receipt_test.dart'], {
-        cwd: join(process.cwd(), '..'), timeout: 90000, maxBuffer: 4*1024*1024,
-      }).catch(e => {console.log(e.stdout, e.stderr);throw e;
-      });
+      const output = await require(join(process.cwd(),'scripts','bridge-harness.cjs')).runFlutterBridge({id:'receipt',testFile:'test/widget/location_http_receipt_test.dart',cwd:join(process.cwd(),'..')});
       console.log(output.stdout);
       const persisted = (await db.query<{location:string; quantity:string}>(`SELECT "storageLocationId" AS location, "remainingQuantity"::text AS quantity FROM item_batches WHERE "batchNumber"='UI-ISOLATED-RECEIPT'`)).rows[0];
       expect(persisted).toEqual({location:null, quantity:'3.0000'});
@@ -212,7 +209,7 @@ const vmReady =
       const balances=(await db.query<{quantity:string;value:string}>(`SELECT quantity::text, value::text FROM stock_balances WHERE "itemId"='${ITEM}'`)).rows[0];
       expect(balances).toEqual({quantity:'5.0000',value:'21.2500'});
       console.log('ISOLATED_UI_HTTP_DB_PROOF', JSON.stringify({persisted, stock:rows.items[0].stock}));
-    } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
+    ;require(join(process.cwd(),'scripts','bridge-harness.cjs')).writeParentReceipt('receipt');} finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
   }, 150000);
 
   describe('receive', () => {

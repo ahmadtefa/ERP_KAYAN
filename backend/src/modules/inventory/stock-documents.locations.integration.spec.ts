@@ -173,21 +173,31 @@ const vmReady =
     const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:null});
     await db.query(`UPDATE stock_document_lines SET "storageLocationId"=$1 WHERE "documentId"=$2`,[SHELF_W2,id]);
     jest.restoreAllMocks();const locations=new (await import('./storage-locations.service')).StorageLocationsService(pglitePrisma(db) as never,{record:async()=>undefined} as never);
-    const calls:Array<{method:string;body:unknown}>=[];
-    const server=createServer(async(req,res)=>{try{
-      const url=new URL(req.url!,'http://localhost');let data:unknown;
-      if(url.pathname.endsWith('/locations'))data=await locations.list(COMPANY,{warehouseId:url.searchParams.get('warehouseId')??undefined});
-      else if(req.method==='PUT'){let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);calls.push({method:'PUT',body});data=await documents.updateDraftLocations(COMPANY,USER,id,body);}
-      else if(req.method==='POST'){calls.push({method:'POST',body:null});data=await documents.post(COMPANY,USER,id);}
+    const calls:Array<{method:string;path:string;body:unknown;status:number;response:any}>=[];
+    const server=createServer(async(req,res)=>{let entry:{method:string;path:string;body:unknown;status:number;response:any}|null=null;try{
+      const url=new URL(req.url!,'http://localhost');let data:unknown;let body:unknown=null;
+      if(req.method==='PUT'||req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;body=raw?JSON.parse(raw):null;}
+      entry={method:req.method!,path:url.pathname,body,status:200,response:null};calls.push(entry);
+      if(req.method==='GET'&&url.pathname.endsWith('/locations'))data=await locations.list(COMPANY,{warehouseId:url.searchParams.get('warehouseId')??undefined});
+      else if(url.pathname.endsWith('/inventory/batches')||url.pathname.endsWith('/batches'))data=await batches.list(COMPANY,{itemId:url.searchParams.get('itemId')??undefined,warehouseId:url.searchParams.get('warehouseId')??undefined,includeEmpty:url.searchParams.get('includeEmpty')==='true'?true:undefined,page:1,pageSize:200});
+      else if(req.method==='PUT')data=await documents.updateDraftLocations(COMPANY,USER,id,body as never);
+      else if(req.method==='POST')data=await documents.post(COMPANY,USER,id);
       else if(url.pathname.endsWith('/stock-documents'))data={items:[await documents.findOne(COMPANY,id)]};
       else data=await documents.findOne(COMPANY,id);
-      res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
-    }catch(e){console.log('BRIDGE_ERROR',e);res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
+      entry.response=data;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
+    }catch(e){console.log('BRIDGE_ERROR',(e as any)?.response?.code,(e as Error).message);if(entry){entry.status=400;entry.response={code:(e as any)?.response?.code,message:(e as Error).message};}res.statusCode=400;res.end(JSON.stringify((e as any)?.response??{message:String(e)}));}});
     await new Promise<void>(r=>server.listen(3223,'127.0.0.1',r));
-    try{const out=await promisify(execFile)('/tmp/flutter/bin/flutter',['test','test/widget/stock_document_locations_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(out.stdout);
-      expect(calls.map(x=>x.method)).toEqual(['PUT','POST']);expect(calls[0].body).toMatchObject({expectedVersion:0,lines:[{lineNumber:1,storageLocationId:SHELF,toStorageLocationId:SHELF_W2}]});
+    try{const out=await require(join(process.cwd(),'scripts','bridge-harness.cjs')).runFlutterBridge({id:'stockdoc',testFile:'test/widget/stock_document_locations_http_test.dart',cwd:join(process.cwd(),'..')});console.log(out.stdout);
+      const writes=calls.filter(x=>x.method==='PUT'||x.method==='POST');
+      console.log('BRIDGE_TRACE',JSON.stringify(calls.map(x=>({m:x.method,p:x.path,s:x.status,c:x.response?.code,b:x.body,r:x.method==='GET'&&x.path.endsWith('batches')?x.response:undefined}))));
+      expect(calls.some(x=>x.method==='GET'&&x.path.endsWith('/batches')&&x.status===200)).toBe(true);
+      expect(writes.map(x=>x.method)).toEqual(['PUT','POST']);
+      expect(writes.map(x=>x.status)).toEqual([200,200]);
+      expect(writes[0].body).toMatchObject({expectedVersion:0,lines:[{lineNumber:1,storageLocationId:SHELF,toStorageLocationId:SHELF_W2,batchId:await batch()}]});
+      expect((await one(db,`SELECT status::text s FROM stock_documents WHERE id=$1`,[id])).s).toBe('POSTED');
       expect(await shelf(SHELF)).toBe(3);expect(await shelf(SHELF_W2)).toBe(8);expect((await one(db,`SELECT COUNT(*)::text n FROM stock_documents`)).n).toBe('1');
-    }finally{await new Promise<void>(r=>server.close(()=>r()));}
+      expect((await lot(WAREHOUSE)).r).toBe('7.0000');expect((await lot(WAREHOUSE_2)).r).toBe('8.0000');
+    ;require(join(process.cwd(),'scripts','bridge-harness.cjs')).writeParentReceipt('stockdoc');}finally{await new Promise<void>(r=>server.close(()=>r()));}
   },150000);
 
   it('old transfer draft with former destination shelf in source field refuses safely at posting', async () => {
@@ -441,4 +451,31 @@ const vmReady =
     const snapshot=async()=>({a:await shelf(SHELF),b:await shelf(SHELF_W2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),status:(await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status,n:(await one(db,`SELECT count(*)::text n FROM stock_movements WHERE "referenceId"=$1`,[id])).n});const before=await snapshot();const err=await failure(documents.reverse(COMPANY,USER,id));if(mode==='legacy'){expect(err).toBeNull();const end=await snapshot();expect({a:end.a,b:end.b,l1:end.l1,l2:end.l2,w1:end.w1,w2:end.w2}).toEqual(initial);return;}expect(err).not.toBeNull();expect(await snapshot()).toEqual(before);
   });
 
+
+  it('old draft corrected without a lot refuses atomically and keeps the input; reselecting the lot then posts', async () => {
+    const lotId = await batch();
+    const id = await draft({ batchId: lotId, storageLocationId: SHELF, toStorageLocationId: null });
+    await db.query(`UPDATE stock_document_lines SET "storageLocationId"=$1 WHERE "documentId"=$2`, [SHELF_W2, id]);
+    // the app clears the lot when the source shelf changes: the correction carries no batchId
+    await documents.updateDraftLocations(COMPANY, USER, id, { expectedVersion: 0, lines: [{ lineNumber: 1, storageLocationId: SHELF, toStorageLocationId: SHELF_W2, batchId: null }] } as never);
+    const snap = async () => ({ a: await shelf(SHELF), b: await shelf(SHELF_B), c: await shelf(SHELF_W2), w1: await wh(WAREHOUSE), w2: await wh(WAREHOUSE_2), l1: await lot(WAREHOUSE), l2: await lot(WAREHOUSE_2),
+      mv: (await one(db, `SELECT COUNT(*)::text n FROM stock_movements`)).n });
+    const before = await snap();
+    let err: any;
+    try { await documents.post(COMPANY, USER, id); } catch (e) { err = e; }
+    expect(err?.response?.code).toBe('STOCK_DOC_TRANSFER_LOT_REQUIRED');
+    expect(err.response.message).toContain('L1');
+    expect(await snap()).toEqual(before);
+    const doc = await one(db, `SELECT status::text s FROM stock_documents WHERE id=$1`, [id]);
+    expect(doc.s).toBe('DRAFT');
+    const ln = await one(db, `SELECT "storageLocationId" a,"toStorageLocationId" b,quantity::text q,"batchId" l FROM stock_document_lines WHERE "documentId"=$1`, [id]);
+    expect([ln.a, ln.b, Number(ln.q), ln.l]).toEqual([SHELF, SHELF_W2, 3, null]);
+    const v = (await one(db, `SELECT "editVersion" v FROM stock_documents WHERE id=$1`, [id])).v;
+    await documents.updateDraftLocations(COMPANY, USER, id, { expectedVersion: Number(v), lines: [{ lineNumber: 1, storageLocationId: SHELF, toStorageLocationId: SHELF_W2, batchId: lotId }] } as never);
+    await documents.post(COMPANY, USER, id);
+    expect(await shelf(SHELF)).toBe(3);
+    expect(await shelf(SHELF_W2)).toBe(8);
+    expect((await lot(WAREHOUSE)).r).toBe('7.0000');
+    expect((await lot(WAREHOUSE_2)).r).toBe('8.0000');
+  });
 });

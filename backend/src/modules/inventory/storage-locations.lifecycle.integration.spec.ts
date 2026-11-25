@@ -271,11 +271,11 @@ const vmReady =
       }catch(e){res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
       await new Promise<void>(r=>server.listen(3222,'127.0.0.1',r));
       try{
-        const out=await promisify(execFile)(process.env.FLUTTER_BIN??'/tmp/flutter/bin/flutter',['test','test/widget/batch_transfer_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(out.stdout);
+        const out=await require(join(process.cwd(),'scripts','bridge-harness.cjs')).runFlutterBridge({id:'transfer',testFile:'test/widget/batch_transfer_http_test.dart',cwd:join(process.cwd(),'..')});console.log(out.stdout);
         expect(calls).toHaveLength(1);expect(calls[0]).toMatchObject({fromStorageLocationId:SHELF,toStorageLocationId:SHELF_W2,quantity:3});
         expect(await shelfOf(WAREHOUSE)).toEqual([{code:'A-01',q:'2.0000'}]);expect(await shelfOf(WAREHOUSE_2)).toEqual([{code:'Z-01',q:'3.0000'}]);
         expect((await balances()).branch).toEqual({q:'5.0000',v:'10.0000'});
-      }finally{await new Promise<void>(r=>server.close(()=>r()));}
+      ;require(join(process.cwd(),'scripts','bridge-harness.cjs')).writeParentReceipt('transfer');}finally{await new Promise<void>(r=>server.close(()=>r()));}
     },150000);
 
     it('merging a warehouse transfer into an existing lot preserves destination lot valuation', async () => {
