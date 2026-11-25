@@ -93,6 +93,30 @@ class AppErrorMessageResolver {
     'SALES_SAVE_STOCK_SHORT',
     'CASH_BALANCE_NEGATIVE',
     'CASH_SAVE_BALANCE_SHORT',
+    // Stock document refusals: fixed codes, each written by the server in
+    // Arabic and English (see stock-documents.service.ts). Explicit list, so a
+    // new or unknown code is never relayed on the strength of its wording.
+    'STOCK_DOC_APPROVED',
+    'STOCK_DOC_LINE_UNKNOWN',
+    'STOCK_DOC_LOCATIONS_EMPTY',
+    'STOCK_DOC_LOCATION_INACTIVE',
+    'STOCK_DOC_LOCATION_INVALID',
+    'STOCK_DOC_LOCATION_REQUIRED',
+    'STOCK_DOC_LOT_INVALID',
+    'STOCK_DOC_LOT_SHORT',
+    'STOCK_DOC_LOT_TRANSFER_ONLY',
+    'STOCK_DOC_NOT_DRAFT',
+    'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
+    'STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE',
+    'STOCK_DOC_REVERSE_LOT_SHELF_SHORT',
+    'STOCK_DOC_REVERSE_LOT_SHORT',
+    'STOCK_DOC_REVERSE_SHELF_SHORT',
+    'STOCK_DOC_SHELF_SHORT',
+    'STOCK_DOC_SPLIT_INVALID',
+    'STOCK_DOC_SPLIT_TOTAL',
+    'STOCK_DOC_TARGET_LOCATION_INVALID',
+    'STOCK_DOC_TRANSFER_LOT_COVERAGE',
+    'STOCK_DOC_VERSION_REQUIRED',
   };
 
   String _postingContext(Map<String, String> fields) {
