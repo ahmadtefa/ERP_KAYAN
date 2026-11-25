@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 65,
-    "OPEN_UNMAPPED": 126
+    "MAPPED_WIDGET": 76,
+    "OPEN_UNMAPPED": 115
   },
   "controls": [
     {
@@ -724,8 +724,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 104,
       "source": "onPressed: () => ref.read(stockTakesProvider.notifier).reload(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "refresh reloads counts without a stock action",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -836,15 +842,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 306,
       "source": "onChanged: _refreshAfterAction,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "confirming post targets the approved session and refreshes",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 335,
       "source": "onPressed: null,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "the person who opened a count cannot approve it",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -863,29 +881,53 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 355,
       "source": "onPressed: () => _post(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "confirming post targets the approved session and refreshes",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 679,
       "source": "onTap: () => Navigator.of(dialogContext).pop(line),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_take_barcode_scan_test.dart",
+          "test": "choosing a batch counts that batch and leaves the other",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 686,
       "source": "onPressed: () => Navigator.of(dialogContext).pop(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_take_barcode_scan_test.dart",
+          "test": "cancelling the question leaves the count untouched",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 800,
       "source": "content: TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "cancelling an open count sends its entered reason",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -904,8 +946,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 806,
       "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "back from cancellation and closing details sends nothing",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -924,15 +972,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 931,
       "source": "SizedBox(width: 150, child: TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "saves counted quantities to the session count endpoint",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 948,
       "source": "onChanged: (value) {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "a refused count names the line, keeps the typed figure, and clears on edit",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -991,8 +1051,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 987,
       "source": "TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "back from cancellation and closing details sends nothing",
+          "proofLevel": "widget with synthetic API, 37-case local two-file run 2026-11-25 06:08 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
