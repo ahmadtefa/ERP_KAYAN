@@ -187,3 +187,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 06:35 dedicated transfer draft remaining controls
 - New synthetic test refreshes list without mutation, trims case-insensitive search, selects explicit unit+source lot, enters3 boxes, adds/removes second line, sends one intended line with exact unit/lot/quantity/notes and cancels subsequent draft without mutation. Existing error/idempotent retry preserved.2/2 pass, zero hit-test warnings after targeting dropdown parents. Full analyze clean.
 - Mapped8 original sites, register126 mapped/65 open. Dedicated dispatch/receive/settle/report and other unexercised actions remain open, not inferred from draft test.
+
+### 06:49 dedicated transfer operations callback proof
+- New4 widget cases: dispatch remainder4, receive remainder2 after returns/writeoff, cancel each without mutation, confirm exact1.25 line+idempotency key+reload; settlement cancel/submit exact return/shortage/damage/reason; reject reason cancel/confirm; Done closes details. Full analyze clean.
+- Mapped12 original source sites, shared action callback only dispatch/receive/settle/reject, not all status transitions. Partial register138 mapped/53 open. No SQL acceptance inferred from synthetic operations tests; unknown-outcome handling and retained rejected operation quantities still not qualified.

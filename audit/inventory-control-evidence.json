@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 126,
-    "OPEN_UNMAPPED": 65
+    "MAPPED_WIDGET": 138,
+    "OPEN_UNMAPPED": 53
   },
   "controls": [
     {
@@ -1309,85 +1309,157 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 272,
       "source": "TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "dispatch/receive quantity cancel is neutral and confirm sends exact line",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 301,
       "source": "Widget _action(String action,String label)=>TextButton(onPressed:busy?null:()=>_run(action),child:Text(label));",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "dispatch/receive quantity cancel is neutral and confirm sends exact line",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 362,
       "source": "content: TextField(controller: controller),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "rejection reason cancel is neutral and confirm sends chosen reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 364,
       "source": "TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', 'Cancel'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "rejection reason cancel is neutral and confirm sends chosen reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 365,
       "source": "FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: Text(t('تأكيد', 'Confirm'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "rejection reason cancel is neutral and confirm sends chosen reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 438,
       "source": "child: TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "dispatch/receive quantity cancel is neutral and confirm sends exact line",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 452,
       "source": "onPressed: () => Navigator.pop(context),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "dispatch/receive quantity cancel is neutral and confirm sends exact line",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 456,
       "source": "onPressed: () {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "dispatch/receive quantity cancel is neutral and confirm sends exact line",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 538,
       "source": "child: TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "settlement cancel is neutral and submit keeps return shortage damage and reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 553,
       "source": "onPressed: () => Navigator.pop(context),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "settlement cancel is neutral and submit keeps return shortage damage and reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 557,
       "source": "onPressed: () {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "settlement cancel is neutral and submit keeps return shortage damage and reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 582,
       "source": "child: TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "settlement cancel is neutral and submit keeps return shortage damage and reason",
+          "proofLevel": "widget with synthetic API, 4-case local run 2026-11-25 06:49 passes; action callback only dispatch/receive/settle/reject, not all actions; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
