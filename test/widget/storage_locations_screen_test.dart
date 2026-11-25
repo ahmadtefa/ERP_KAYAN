@@ -24,6 +24,7 @@ class _LocationsApi extends ApiClient {
   final locationQueries = <Map<String, dynamic>?>[];
   final creations = <Map<String, dynamic>>[];
   final deletions = <String>[];
+  final updates = <(String, Object?)>[];
 
   @override
   Future<List<Map<String, dynamic>>> getList(
@@ -99,6 +100,12 @@ class _LocationsApi extends ApiClient {
       throw StateError('UNEXPECTED_POST $path');
     }
     creations.add(Map<String, dynamic>.from(body! as Map));
+    return const {};
+  }
+
+  @override
+  Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
+    updates.add((path, body));
     return const {};
   }
 
@@ -300,6 +307,23 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(api.deletions, isEmpty);
+  });
+
+  testWidgets('editing root location preserves code and kind and targets only that row', (tester) async {
+    final api = _LocationsApi();
+    await pump(tester, api);
+    await tester.tap(find.byTooltip('Edit').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Name (English)'), 'Updated zone');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(api.updates, hasLength(1));
+    expect(api.updates.single.$1, '/inventory/locations/loc-2');
+    final body = api.updates.single.$2 as Map;
+    expect(body['nameEn'], 'Updated zone');
+    expect(body['code'], 'Z-01');
+    expect(body['kind'], 'ZONE');
+    expect(api.creations, isEmpty);
   });
 
   testWidgets('a failed location list shows the error view with a retry', (

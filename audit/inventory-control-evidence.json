@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof.",
   "counts": {
-    "MAPPED_WIDGET": 27,
-    "OPEN_UNMAPPED": 164
+    "MAPPED_WIDGET": 28,
+    "OPEN_UNMAPPED": 163
   },
   "controls": [
     {
@@ -1370,8 +1370,14 @@
       "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
       "line": 233,
       "source": "onPressed: () =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/storage_locations_screen_test.dart",
+          "test": "editing root location preserves code and kind and targets only that row",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
