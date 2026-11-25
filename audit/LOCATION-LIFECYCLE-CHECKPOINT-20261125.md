@@ -268,3 +268,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 08:35 unit management callbacks
 - Five focused callback cases qualify selected unit barcode generation/reactivation/delete endpoint, delete cancel neutrality/confirmation, base unit disabled remove guard and dialog Close neutrality. Synthetic unit bridge only, not barcode uniqueness/deactivation/backend proof.
 -11 full unit widget cases and analyze pass. Partial register151mapped/40open of191 after4 mapped source sites; disabled base branch is extra evidence, not extra denominator. No production code or visual change in this batch.
+
+### 08:47 catalogue search and destinations
+- Three new synthetic API widget cases qualify trimmed search/filter/reset, exact selected item picture editor then return, and exact selected item location screen/read. No image upload or backend effect claim.
+- Existing item create/edit tax cases rerun to map actual save triggers, no extra test count invented. Partial register156mapped/35open of191. Focused catalogue and tax suites/analyze pass; no production code or visual change in this batch.

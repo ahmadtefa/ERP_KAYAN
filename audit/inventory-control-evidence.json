@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 151,
-    "OPEN_UNMAPPED": 40
+    "MAPPED_WIDGET": 156,
+    "OPEN_UNMAPPED": 35
   },
   "controls": [
     {
@@ -479,36 +479,66 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 727,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_catalogue_controls_test.dart",
+          "test": "catalogue search trims query filters and clears to original rows",
+          "proofLevel": "synthetic catalogue API exact selected item/read route or form payload; not backend save/image upload proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 730,
       "source": "onPressed: _busy ? null : () => _save(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_blank_tax_test.dart",
+          "test": "item tax blank sends correct value when creating",
+          "proofLevel": "synthetic catalogue API exact selected item/read route or form payload; not backend save/image upload proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 821,
       "source": "onPressed: () => Navigator.of(context).push(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_catalogue_controls_test.dart",
+          "test": "catalogue location callback opens selected item balance route",
+          "proofLevel": "synthetic catalogue API exact selected item/read route or form payload; not backend save/image upload proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 840,
       "source": "onPressed: _busy ? null : () => _openPicture(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_catalogue_controls_test.dart",
+          "test": "catalogue picture callback opens selected item editor then returns",
+          "proofLevel": "synthetic catalogue API exact selected item/read route or form payload; not backend save/image upload proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 845,
       "source": "onPressed: _busy ? null : () => _save(existing: row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_blank_tax_test.dart",
+          "test": "editing item without touching VAT preserves existing 14 percent",
+          "proofLevel": "synthetic catalogue API exact selected item/read route or form payload; not backend save/image upload proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
