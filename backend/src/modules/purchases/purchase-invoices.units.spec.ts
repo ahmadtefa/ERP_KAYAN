@@ -160,6 +160,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
     ledger as never,
     prices as never,
     audit as never,
+    { recordLotInTx: jest.fn() } as never,
   );
   return { service, prisma, tx, prices, ledger };
 }

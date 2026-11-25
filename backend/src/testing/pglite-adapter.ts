@@ -297,6 +297,9 @@ export function pglitePrisma(db: PgliteLike) {
     salesInvoice: {
       lines: { model: 'salesInvoiceLine', table: 'sales_invoice_lines', foreignKey: 'invoiceId' },
     },
+    purchaseInvoice: {
+      lines: { model: 'purchaseInvoiceLine', table: 'purchase_invoice_lines', foreignKey: 'invoiceId' },
+    },
     stockTransfer: {
       lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
     },
@@ -325,6 +328,14 @@ export function pglitePrisma(db: PgliteLike) {
         foreignKey: 'id',
         parentField: 'customerId',
       },
+    },
+    purchaseInvoice: {
+      lines: { model: 'purchaseInvoiceLine', table: 'purchase_invoice_lines', foreignKey: 'invoiceId' },
+      supplier: { model: 'supplier', table: 'suppliers', foreignKey: 'id', parentField: 'supplierId' },
+      branch: { model: 'branch', table: 'branches', foreignKey: 'id', parentField: 'branchId' },
+    },
+    purchaseInvoiceLine: {
+      item: { model: 'item', table: 'items', foreignKey: 'id', parentField: 'itemId' },
     },
     approvalPolicy: {
       levels: { model: 'approvalLevel', table: 'approval_levels', foreignKey: 'policyId' },
@@ -780,6 +791,9 @@ export function pglitePrisma(db: PgliteLike) {
     journalLine: plainModel('journalLine', 'journal_lines'),
     account: plainModel('account', 'accounts'),
     customer: plainModel('customer', 'customers'),
+    supplier: plainModel('supplier', 'suppliers'),
+    purchaseInvoice: plainModel('purchaseInvoice', 'purchase_invoices'),
+    purchaseInvoiceLine: plainModel('purchaseInvoiceLine', 'purchase_invoice_lines'),
     warehouse: plainModel('warehouse', 'warehouses'),
     branch: plainModel('branch', 'branches'),
     item: plainModel('item', 'items'),

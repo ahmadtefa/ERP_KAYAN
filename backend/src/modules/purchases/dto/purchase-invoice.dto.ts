@@ -40,6 +40,14 @@ export class PurchaseInvoiceLineDto {
   /// The department, administrative unit or project the cost was incurred for.
   @IsOptional() @IsUUID() costCenterId?: string;
 
+  /// The shelf the goods are put on. It must belong to the invoice warehouse.
+  @IsOptional() @IsUUID() storageLocationId?: string;
+
+  /// The lot these goods arrive in. A lot-controlled item needs a lot number at posting.
+  @IsOptional() @IsString() @MaxLength(60) batchNumber?: string;
+  @IsOptional() @IsDateString() batchProductionDate?: string;
+  @IsOptional() @IsDateString() batchExpiryDate?: string;
+
   /// PERCENT or AMOUNT for this line's discount, applied before tax.
   @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
   @IsOptional() @IsString() discountPercent?: string;

@@ -30,6 +30,9 @@ import {
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
+import { BatchesService } from '../inventory/batches.service';
+import { refreshLotPrimaryLocation } from '../inventory/lot-primary-location';
+import { batchPolicyOf, receiptProblems } from '../../common/warehouse/batch-policy';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
@@ -77,6 +80,12 @@ interface PreparedLine {
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
   costCenterId: string | null;
+  /// The shelf the goods are put on. Optional; validated against the posting warehouse.
+  storageLocationId: string | null;
+  /// The lot this line receives (required for a lot-controlled item at posting).
+  batchNumber: string | null;
+  batchProductionDate: string | null;
+  batchExpiryDate: string | null;
   // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` is
   // always the internal base-unit quantity stock actually receives.
   unitName: string | null;
@@ -102,6 +111,7 @@ export class PurchaseInvoicesService {
     private readonly ledger: StockLedgerService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    private readonly batches: BatchesService,
   ) {}
 
   async findAll(companyId: string, query: ListPurchaseInvoicesDto, mayReadCost = true, branchScope: string[] | null = null) {
@@ -159,6 +169,7 @@ export class PurchaseInvoicesService {
     return {
       ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
+      warehouseId: invoice.warehouseId ?? null,
       orderId: invoice.purchaseOrderId,
       updatedAt: invoice.updatedAt.toISOString(),
       notes: invoice.notes,
@@ -197,6 +208,10 @@ export class PurchaseInvoicesService {
         landedCostAmount: mayReadCost ? l.landedCostAmount.toFixed(MONEY_SCALE) : null,
         inventoryCostTotal: mayReadCost ? l.inventoryCostTotal.toFixed(MONEY_SCALE) : null,
         costCenterId: l.costCenterId ?? null,
+        storageLocationId: l.storageLocationId ?? null,
+        batchNumber: l.batchNumber ?? null,
+        batchProductionDate: l.batchProductionDate ? l.batchProductionDate.toISOString().slice(0, 10) : null,
+        batchExpiryDate: l.batchExpiryDate ? l.batchExpiryDate.toISOString().slice(0, 10) : null,
         returnedCostTotal: mayReadCost ? l.returnedCostTotal.toFixed(MONEY_SCALE) : null,
       })),
     };
@@ -261,6 +276,7 @@ export class PurchaseInvoicesService {
       tx,
       landedCosts.tax,
     );
+    await this.assertLineShelves(tx, companyId, dto.warehouseId ?? null, prepared.lines);
     const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((s, l) => s.plus(l.taxAmount), new Prisma.Decimal(0));
@@ -315,6 +331,10 @@ export class PurchaseInvoicesService {
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
+              storageLocationId: l.storageLocationId,
+              batchNumber: l.batchNumber,
+              batchProductionDate: l.batchProductionDate ? new Date(l.batchProductionDate) : null,
+              batchExpiryDate: l.batchExpiryDate ? new Date(l.batchExpiryDate) : null,
               unitName: l.unitName,
               unitFactor: l.unitFactor,
               unitQuantity: l.unitQuantity,
@@ -378,6 +398,7 @@ export class PurchaseInvoicesService {
       this.prisma,
       landedCosts.tax,
     );
+    await this.assertLineShelves(this.prisma, companyId, dto.warehouseId ?? invoice.warehouseId ?? null, prepared.lines);
     const lines = prepared.lines;
     const subTotal = lines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((sum, line) => sum.plus(line.taxAmount), new Prisma.Decimal(0));
@@ -439,6 +460,10 @@ export class PurchaseInvoicesService {
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
+              storageLocationId: line.storageLocationId,
+              batchNumber: line.batchNumber,
+              batchProductionDate: line.batchProductionDate ? new Date(line.batchProductionDate) : null,
+              batchExpiryDate: line.batchExpiryDate ? new Date(line.batchExpiryDate) : null,
               unitName: line.unitName,
               unitFactor: line.unitFactor,
               unitQuantity: line.unitQuantity,
@@ -682,6 +707,8 @@ export class PurchaseInvoicesService {
         });
       }
 
+      await this.assertLineShelves(tx, companyId, warehouseId, invoice.lines);
+
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
@@ -690,7 +717,11 @@ export class PurchaseInvoicesService {
         }
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, isStockTracked: true },
+          select: {
+            id: true, code: true, isStockTracked: true, unit: true, requiresBatch: true,
+            requiresProductionDate: true, requiresExpiryDate: true, useFefo: true,
+            allowExpiredIssue: true, expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) {
@@ -704,12 +735,65 @@ export class PurchaseInvoicesService {
         const costTotal = line.inventoryCostTotal;
         const unitCost = costTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE);
 
+        // A lot-controlled item (or a line that names a lot) receives into a
+        // real lot, so the goods can later be issued by FEFO. A lot-less IN for
+        // such an item would sit in the ledger where no sale could ever take it.
+        const policy = batchPolicyOf(item);
+        let lotId: string | null = null;
+        if (policy.requiresBatch || line.batchNumber || line.batchExpiryDate || line.batchProductionDate) {
+          if (!warehouseId) {
+            throw new BadRequestException({
+              code: 'PURCHASE_LOT_NEEDS_WAREHOUSE',
+              message:
+                `السطر ${line.lineNumber}: الصنف ${item.code} يُستلم في دفعة لكن الفرع بلا مخزن. أضف مخزنًا للفرع أو للفاتورة ثم رحّل من جديد؛ بيانات الفاتورة محفوظة. / ` +
+                `Line ${line.lineNumber}: item ${item.code} is received into a lot but the branch has no warehouse. Add a warehouse to the branch or the invoice, then post again; the invoice data is kept.`,
+              errors: { lineNumber: String(line.lineNumber), itemCode: item.code.slice(0, 64) },
+            });
+          }
+          const problems = receiptProblems(
+            {
+              batchNumber: line.batchNumber,
+              productionDate: line.batchProductionDate,
+              expiryDate: line.batchExpiryDate,
+            },
+            policy,
+          );
+          if (problems.length > 0) {
+            throw new BadRequestException({
+              code: 'PURCHASE_LOT_DETAILS_REQUIRED',
+              message:
+                `السطر ${line.lineNumber} (${item.code}): ${problems.join(' ')} أدخلها في السطر ثم رحّل من جديد؛ بيانات الفاتورة محفوظة. / ` +
+                `Line ${line.lineNumber} (${item.code}): ${problems.join(' ')} Enter it on the line, then post again; the invoice data is kept.`,
+              errors: { lineNumber: String(line.lineNumber), itemCode: item.code.slice(0, 64) },
+            });
+          }
+          const lot = await this.batches.recordLotInTx(tx, {
+            companyId,
+            userId,
+            warehouse: { id: warehouseId, branchId: invoice.branchId },
+            item,
+            batchNumber: line.batchNumber,
+            productionDate: line.batchProductionDate ? line.batchProductionDate.toISOString().slice(0, 10) : null,
+            expiryDate: line.batchExpiryDate ? line.batchExpiryDate.toISOString().slice(0, 10) : null,
+            quantity: line.quantity,
+            unitCost,
+            storageLocationId: line.storageLocationId,
+            sourceType: 'PURCHASE_INVOICE',
+            sourceId: invoice.id,
+            sourceNumber: invoice.invoiceNumber,
+            date: invoice.invoiceDate,
+          });
+          lotId = lot.batchId;
+        }
+
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: invoice.branchId,
             warehouseId,
             itemId: item.id,
+            batchId: lotId,
+            storageLocationId: line.storageLocationId ?? null,
             movementDate: invoice.invoiceDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
@@ -721,6 +805,7 @@ export class PurchaseInvoicesService {
             createdBy: userId,
           },
         });
+        if (lotId) await refreshLotPrimaryLocation(tx, companyId, lotId, null);
 
         // The branch book and the shelf book are moved by the one ledger every
         // other stock-writing path uses. Writing `stock_balances` by hand here
@@ -899,12 +984,68 @@ export class PurchaseInvoicesService {
           reference: invoice.invoiceNumber,
         });
 
+        // The receipt went into a lot and onto a shelf; the reversal takes it
+        // from exactly those, or says plainly why it cannot.
+        let reverseLotId: string | null = null;
+        if (line.batchNumber && warehouseId) {
+          const lot = await tx.itemBatch.findFirst({
+            where: { companyId, warehouseId, itemId: line.itemId, batchNumber: line.batchNumber, deletedAt: null },
+            select: { id: true, remainingQuantity: true },
+          });
+          if (lot) {
+            if (lot.remainingQuantity.lessThan(line.quantity)) {
+              throw new BadRequestException({
+                code: 'PURCHASE_REVERSE_LOT_USED',
+                message:
+                  `لا يمكن عكس السطر ${line.lineNumber}: الدفعة ${line.batchNumber} المتبقي منها ${lot.remainingQuantity.toFixed(MONEY_SCALE)} فقط والمطلوب ${line.quantity.toFixed(MONEY_SCALE)} لأن جزءًا منها بِيع أو نُقل. أرجع مبيعات هذه الدفعة أولًا أو استخدم مرتجع مشتريات بالكمية المتبقية. / ` +
+                  `Cannot reverse line ${line.lineNumber}: lot ${line.batchNumber} has only ${lot.remainingQuantity.toFixed(MONEY_SCALE)} left, not ${line.quantity.toFixed(MONEY_SCALE)}, because part of it was sold or moved. Undo those sales first, or use a purchase return for the remaining quantity.`,
+                errors: { lineNumber: String(line.lineNumber), lot: line.batchNumber.slice(0, 60), remaining: lot.remainingQuantity.toFixed(MONEY_SCALE) },
+              });
+            }
+            reverseLotId = lot.id;
+          }
+        }
+        if (line.storageLocationId && warehouseId) {
+          const there = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
+            SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "warehouseId" = ${warehouseId}::uuid
+               AND "itemId" = ${line.itemId}::uuid
+               AND "storageLocationId" = ${line.storageLocationId}::uuid
+               ${reverseLotId ? Prisma.sql`AND "batchId" = ${reverseLotId}::uuid` : Prisma.empty}
+          `);
+          const have = new Prisma.Decimal(there[0]?.quantity ?? 0);
+          if (have.lessThan(line.quantity)) {
+            throw new BadRequestException({
+              code: 'PURCHASE_REVERSE_SHELF_SHORT',
+              message:
+                `لا يمكن عكس السطر ${line.lineNumber}: الموقع المسجل في السطر يحوي ${have.toFixed(MONEY_SCALE)} فقط والمطلوب ${line.quantity.toFixed(MONEY_SCALE)}، فالبضاعة نُقلت من موقعها. أعدها إلى الموقع بنقل مواقع ثم أعد العكس. / ` +
+                `Cannot reverse line ${line.lineNumber}: the line's location holds only ${have.toFixed(MONEY_SCALE)}, not ${line.quantity.toFixed(MONEY_SCALE)}, because the goods were moved off it. Move them back to that location, then reverse again.`,
+              errors: { lineNumber: String(line.lineNumber), available: have.toFixed(MONEY_SCALE), quantity: line.quantity.toFixed(MONEY_SCALE) },
+            });
+          }
+        }
+        if (reverseLotId) {
+          const claimed = await tx.itemBatch.updateMany({
+            where: { id: reverseLotId, remainingQuantity: { gte: line.quantity } },
+            data: { remainingQuantity: { decrement: line.quantity } },
+          });
+          if (claimed.count !== 1) {
+            throw new BadRequestException(
+              'تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.',
+            );
+          }
+        }
+
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: invoice.branchId,
             itemId: line.itemId,
             warehouseId,
+            batchId: reverseLotId,
+            storageLocationId: line.storageLocationId ?? null,
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
@@ -917,6 +1058,7 @@ export class PurchaseInvoicesService {
             createdBy: userId,
           },
         });
+        if (reverseLotId) await refreshLotPrimaryLocation(tx, companyId, reverseLotId, null);
 
         // Same ledger as the receipt, in the opposite direction, so the shelf
         // book is decremented by exactly the amount the receipt incremented it.
@@ -1025,6 +1167,51 @@ export class PurchaseInvoicesService {
       amount: charge.amount.toFixed(MONEY_SCALE),
       ...(charge.taxRate.isZero() ? {} : { taxRate: charge.taxRate.toFixed(RATE_SCALE) }),
     })) as Prisma.InputJsonValue;
+  }
+
+  /// A shelf named on a line must exist, be active, and belong to the warehouse
+  /// the goods arrive in. The messages say what is wrong, where, and the fix;
+  /// the invoice the user typed is never discarded.
+  private async assertLineShelves(
+    client: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string | null,
+    lines: Array<{ lineNumber: number; storageLocationId: string | null }>,
+  ) {
+    for (const line of lines) {
+      if (!line.storageLocationId) continue;
+      const shelf = await client.storageLocation.findFirst({
+        where: { id: line.storageLocationId, companyId, deletedAt: null },
+        select: { id: true, code: true, isActive: true, warehouseId: true },
+      });
+      if (!shelf) {
+        throw new BadRequestException({
+          code: 'PURCHASE_LOCATION_NOT_FOUND',
+          message:
+            `السطر ${line.lineNumber}: موقع التخزين غير موجود. اختر موقعًا آخر أو اتركه فارغًا؛ بيانات الفاتورة محفوظة. / ` +
+            `Line ${line.lineNumber}: the storage location does not exist. Choose another location or leave it empty; the invoice data is kept.`,
+          errors: { lineNumber: String(line.lineNumber) },
+        });
+      }
+      if (!shelf.isActive) {
+        throw new BadRequestException({
+          code: 'PURCHASE_LOCATION_INACTIVE',
+          message:
+            `السطر ${line.lineNumber}: الموقع ${shelf.code} غير مفعّل. فعّله أو اختر موقعًا آخر؛ بيانات الفاتورة محفوظة. / ` +
+            `Line ${line.lineNumber}: location ${shelf.code} is inactive. Activate it or choose another; the invoice data is kept.`,
+          errors: { lineNumber: String(line.lineNumber), locationCode: shelf.code.slice(0, 64) },
+        });
+      }
+      if (warehouseId && shelf.warehouseId !== warehouseId) {
+        throw new BadRequestException({
+          code: 'PURCHASE_LOCATION_WRONG_WAREHOUSE',
+          message:
+            `السطر ${line.lineNumber}: الموقع ${shelf.code} يتبع مخزنًا آخر غير مخزن الفاتورة. اختر موقعًا من مخزن الفاتورة أو غيّر مخزن الفاتورة؛ بيانات الفاتورة محفوظة. / ` +
+            `Line ${line.lineNumber}: location ${shelf.code} belongs to a different warehouse than the invoice. Choose a location of the invoice warehouse, or change the invoice warehouse; the invoice data is kept.`,
+          errors: { lineNumber: String(line.lineNumber), locationCode: shelf.code.slice(0, 64) },
+        });
+      }
+    }
   }
 
   private async prepareLines(
@@ -1161,6 +1348,10 @@ export class PurchaseInvoicesService {
         landedCostAmount: new Prisma.Decimal(0),
         inventoryCostTotal: lineDiscount.net,
         costCenterId,
+        storageLocationId: raw.storageLocationId ?? null,
+        batchNumber: raw.batchNumber?.trim() || null,
+        batchProductionDate: raw.batchProductionDate ?? null,
+        batchExpiryDate: raw.batchExpiryDate ?? null,
         unitName: resolved.snapshot.unitName,
         unitFactor: resolved.snapshot.unitFactor,
         unitQuantity: resolved.snapshot.unitQuantity,

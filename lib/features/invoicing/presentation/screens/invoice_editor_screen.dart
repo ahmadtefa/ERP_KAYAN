@@ -1,3 +1,4 @@
+import 'receipt_location_picker.dart';
 import 'line_location_picker.dart';
 
 import 'dart:convert';
@@ -63,6 +64,10 @@ class _LineDraft {
        discountValue = TextEditingController(text: discountValue);
 
   List<Json> locationAllocations = [];
+  String? storageLocationId;
+  String batchNumber = '';
+  String batchProductionDate = '';
+  String batchExpiryDate = '';
   String? itemId;
   String? description;
 
@@ -223,6 +228,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         [
           line.itemId,
           line.locationAllocations,
+          line.storageLocationId,
+          line.batchNumber, line.batchProductionDate, line.batchExpiryDate,
           line.unitName,
           line.costCenterId,
           line.quantity.text,
@@ -237,6 +244,21 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
   Future<void> _pickLocations(_LineDraft line) async {
     if (line.itemId == null) return;
+    if (!widget.kind.isSales) {
+      try {
+        final result = await pickReceiptLocation(context, ref.read(apiClientProvider), warehouseId: _warehouseId, storageLocationId: line.storageLocationId);
+        if (result == null || !mounted) return;
+        final warehouse = asString(result['warehouseId']);
+        if (_warehouseId != null && warehouse != _warehouseId && _lines.any((other) => !identical(other, line) && other.storageLocationId != null)) {
+          showMessage(context, Localizations.localeOf(context).languageCode == 'ar'
+              ? 'الفاتورة تستلم في مستودع واحد. احذف مواقع السطور الأخرى قبل تغيير المستودع.'
+              : 'An invoice receives into one warehouse. Clear other lines destinations before changing the warehouse.', error: true);
+          return;
+        }
+        setState(() { _warehouseId = warehouse; line.storageLocationId = asString(result['storageLocationId']); });
+      } catch (error) { if (mounted) showMessage(context, error, error: true); }
+      return;
+    }
     try {
       final result = await pickLineLocations(
         context,
@@ -395,6 +417,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                   ? null
                   : text(row, 'unitName')
               ..locationAllocations = listOf(row['locationAllocations'])
+              ..storageLocationId = asString(row['storageLocationId'])
+              ..batchNumber = text(row, 'batchNumber')
+              ..batchProductionDate = text(row, 'batchProductionDate')
+              ..batchExpiryDate = text(row, 'batchExpiryDate')
               ..description = text(row, 'description')
               ..unitPriceEdited = true
               ..costCenterId = text(row, 'costCenterId').isEmpty
@@ -660,7 +686,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     // below prices the chosen unit rather than whatever the line held a moment
     // ago. The box itself holds the CHOSEN unit: `quantityAfterScan` adds one
     // to the number already there, and never multiplies by the factor.
-    if (!sameSelection) line.locationAllocations = [];
+    if (!sameSelection) { line.locationAllocations = []; line.batchNumber = ''; line.batchProductionDate = ''; line.batchExpiryDate = ''; }
     line.itemId = match.itemId;
     line.unitName = unit;
     line.quantity.text = plainQuantity(
@@ -905,6 +931,20 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.mustBePositive, error: true);
         return;
       }
+      if (!widget.kind.isSales) {
+        bool validDate(String raw) {
+          if (raw.trim().isEmpty) return true;
+          final parsed = DateTime.tryParse(raw.trim());
+          return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(raw.trim()) && parsed != null && parsed.toIso8601String().substring(0, 10) == raw.trim();
+        }
+        if (!validDate(line.batchProductionDate) || !validDate(line.batchExpiryDate) ||
+            (line.batchProductionDate.isNotEmpty && line.batchExpiryDate.isNotEmpty && line.batchExpiryDate.compareTo(line.batchProductionDate) < 0)) {
+          showMessage(context, Localizations.localeOf(context).languageCode == 'ar'
+              ? 'راجع تواريخ الدفعة في السطر. استخدم YYYY-MM-DD وتاريخ انتهاء لا يسبق الإنتاج؛ بياناتك محفوظة.'
+              : 'Check the line batch dates. Use YYYY-MM-DD and an expiry no earlier than production; your entries are kept.', error: true);
+          return;
+        }
+      }
       if (widget.kind.isSales && line.locationAllocations.isNotEmpty) {
         final sum = line.locationAllocations.fold(
           Decimal.zero,
@@ -931,6 +971,13 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'unitName': line.unitName!.trim(),
         if (widget.kind.isSales && line.locationAllocations.isNotEmpty)
           'locationAllocations': line.locationAllocations,
+        if (!widget.kind.isSales && line.storageLocationId != null)
+          'storageLocationId': line.storageLocationId,
+        if (!widget.kind.isSales) ...{
+          'batchNumber': line.batchNumber.trim().isEmpty ? null : line.batchNumber.trim(),
+          'batchProductionDate': line.batchProductionDate.trim().isEmpty ? null : line.batchProductionDate.trim(),
+          'batchExpiryDate': line.batchExpiryDate.trim().isEmpty ? null : line.batchExpiryDate.trim(),
+        },
         'quantity': quantity,
         'unitPrice': price,
         // The form always shows a tax field: blank or whitespace is an
@@ -1579,8 +1626,7 @@ class _LinesTable extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    _ResponsiveLineRow(
                       children: [
                         Expanded(
                           flex: 3,
@@ -1631,6 +1677,7 @@ class _LinesTable extends StatelessWidget {
                                     if (lines[index].itemId != value) {
                                       lines[index].unitName = null;
                                       lines[index].locationAllocations = [];
+                                      lines[index].batchNumber = ''; lines[index].batchProductionDate = ''; lines[index].batchExpiryDate = '';
                                     }
                                     lines[index].itemId = value;
                                     final item = items.firstWhere(
@@ -1657,6 +1704,7 @@ class _LinesTable extends StatelessWidget {
                                   final itemId = text(picked, 'id');
                                   if (lines[index].itemId != itemId) {
                                     lines[index].locationAllocations = [];
+                                    lines[index].batchNumber = ''; lines[index].batchProductionDate = ''; lines[index].batchExpiryDate = '';
                                     lines[index].unitName = null;
                                   }
                                   lines[index].itemId = itemId;
@@ -1907,19 +1955,48 @@ class _LinesTable extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (kind.isSales && lines[index].itemId != null)
+                    if (lines[index].itemId != null)
                       Align(
                         alignment: AlignmentDirectional.centerStart,
                         child: TextButton.icon(
                           onPressed: () => onPickLocations(lines[index]),
                           icon: const Icon(Icons.location_on_outlined),
                           label: Text(
-                            language == 'ar'
+                            !kind.isSales
+                                ? (language == 'ar' ? (lines[index].storageLocationId == null ? 'موقع الاستلام: بدون موقع' : 'موقع الاستلام: محدد') : (lines[index].storageLocationId == null ? 'Receiving location: unlocated' : 'Receiving location: selected'))
+                                : language == 'ar'
                                 ? 'مواقع الصرف (${lines[index].locationAllocations.length})'
                                 : 'Source locations (${lines[index].locationAllocations.length})',
                           ),
                         ),
                       ),
+                    if (!kind.isSales && lines[index].itemId != null)
+                      Padding(padding: const EdgeInsetsDirectional.only(start: 8), child: Text([
+                        if (items.where((i) => text(i, 'id') == lines[index].itemId).firstOrNull?['requiresBatch'] == true) language == 'ar' ? 'رقم الدفعة مطلوب للترحيل' : 'Batch number required for posting',
+                        if (items.where((i) => text(i, 'id') == lines[index].itemId).firstOrNull?['requiresProductionDate'] == true) language == 'ar' ? 'تاريخ الإنتاج مطلوب للترحيل' : 'Production date required for posting',
+                        if (items.where((i) => text(i, 'id') == lines[index].itemId).firstOrNull?['requiresExpiryDate'] == true) language == 'ar' ? 'تاريخ الانتهاء مطلوب للترحيل' : 'Expiry date required for posting',
+                      ].join(' • '))),
+                    if (!kind.isSales && lines[index].itemId != null)
+                      Padding(padding: const EdgeInsets.all(8), child: Wrap(spacing: 12, runSpacing: 8, children: [
+                        SizedBox(width: 220, child: TextFormField(
+                          key: ValueKey('purchase-batch-$index-${lines[index].itemId}'),
+                          initialValue: lines[index].batchNumber,
+                          decoration: InputDecoration(labelText: language == 'ar' ? 'رقم الدفعة' : 'Batch number'),
+                          onChanged: (v) { lines[index].batchNumber = v; onChanged(); },
+                        )),
+                        SizedBox(width: 220, child: TextFormField(
+                          key: ValueKey('purchase-production-$index-${lines[index].itemId}'),
+                          initialValue: lines[index].batchProductionDate,
+                          decoration: InputDecoration(labelText: language == 'ar' ? 'تاريخ الإنتاج' : 'Production date', hintText: 'YYYY-MM-DD'),
+                          onChanged: (v) { lines[index].batchProductionDate = v; onChanged(); },
+                        )),
+                        SizedBox(width: 220, child: TextFormField(
+                          key: ValueKey('purchase-expiry-$index-${lines[index].itemId}'),
+                          initialValue: lines[index].batchExpiryDate,
+                          decoration: InputDecoration(labelText: language == 'ar' ? 'تاريخ الانتهاء' : 'Expiry date', hintText: 'YYYY-MM-DD'),
+                          onChanged: (v) { lines[index].batchExpiryDate = v; onChanged(); },
+                        )),
+                      ])),
                     // The item, unit and quantity in one sentence, under the
                     // controls that hold them. A scanned label changes three
                     // fields at once, and this is the line that says which
@@ -2046,6 +2123,26 @@ class _LinesTable extends StatelessWidget {
 /// Built only from what the row already holds, so it can never disagree with
 /// the fields above it. It listens to the quantity box, so it follows typing as
 /// well as a scan.
+/// Keep invoice controls usable on compact windows instead of squeezing labels.
+class _ResponsiveLineRow extends StatelessWidget {
+  const _ResponsiveLineRow({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
+    if (constraints.maxWidth >= 1100) {
+      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: children);
+    }
+    final width = constraints.maxWidth;
+    return Wrap(spacing: 8, runSpacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      for (final child in children)
+        if (child is Expanded)
+          SizedBox(width: child.flex == 3 || width < 500 ? width : (width - 8) / 2, child: child.child)
+        else if (child is! SizedBox || child.child != null)
+          child,
+    ]);
+  });
+}
+
 class _LineScanSummary extends StatelessWidget {
   const _LineScanSummary({
     super.key,
