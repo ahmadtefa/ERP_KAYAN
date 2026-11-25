@@ -61,6 +61,21 @@ const OUT_DIR = process.env.OUT_DIR ?? join(backendDir, 'dist-demo');
 
 const results = [];
 
+/// Totals computed from the visible rows. The trial balance's own `totals`
+/// block is withheld from logins that are not General or Finance Manager
+/// (company-aggregate-visibility), and the demo administrator is neither, so
+/// the check sums the rows it is allowed to read: debits, credits and the
+/// closing balances, which must net to zero when the books balance.
+function booksOf(report) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const sum = (key) => rows.reduce((total, row) => total + Number(row?.[key] ?? 0), 0);
+  return {
+    debit: sum('debit').toFixed(4),
+    credit: sum('credit').toFixed(4),
+    difference: sum('closing').toFixed(4),
+  };
+}
+
 function check(name, ok, detail) {
   results.push({ name, ok });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
@@ -372,10 +387,10 @@ async function main() {
     ).then((response) => response.json());
     check(
       'the demo books balance before they are backed up',
-      Number(before?.totals?.difference) === 0 &&
-        Number(before?.totals?.debit) === Number(before?.totals?.credit) &&
+      Number(booksOf(before).difference) === 0 &&
+        Number(booksOf(before).debit) === Number(booksOf(before).credit) &&
         (before?.rows?.length ?? 0) >= 20,
-      `${before?.rows?.length ?? 0} accounts with movement, debits ${before?.totals?.debit} / credits ${before?.totals?.credit}, difference ${before?.totals?.difference}`,
+      `${before?.rows?.length ?? 0} accounts with movement, debits ${booksOf(before).debit} / credits ${booksOf(before).credit}, difference ${booksOf(before).difference}`,
     );
 
     // ── 5b. the company JSON backup file ─────────────────────────────────
@@ -508,10 +523,10 @@ async function main() {
     ).then((response) => response.json());
     check(
       'the restored books balance, and match what was backed up',
-      Number(after?.totals?.difference) === 0 &&
-        Number(after?.totals?.debit) === Number(before?.totals?.debit) &&
+      Number(booksOf(after).difference) === 0 &&
+        Number(booksOf(after).debit) === Number(booksOf(before).debit) &&
         after?.rows?.length === before?.rows?.length,
-      `debits ${after?.totals?.debit} (backed up ${before?.totals?.debit}), difference ${after?.totals?.difference}`,
+      `debits ${booksOf(after).debit} (backed up ${booksOf(before).debit}), difference ${booksOf(after).difference}`,
     );
 
     // ── 6b. test restoring the company JSON backup via /backup/restore ───
@@ -562,9 +577,9 @@ async function main() {
     ).then((response) => response.json());
     check(
       'the books balance after restoring from company JSON backup',
-      Number(afterJson?.totals?.difference) === 0 &&
-        Number(afterJson?.totals?.debit) > 0,
-      `debits ${afterJson?.totals?.debit}, difference ${afterJson?.totals?.difference}`,
+      Number(booksOf(afterJson).difference) === 0 &&
+        Number(booksOf(afterJson).debit) > 0,
+      `debits ${booksOf(afterJson).debit}, difference ${booksOf(afterJson).difference}`,
     );
   } finally {
     restore.child.kill('SIGTERM');
