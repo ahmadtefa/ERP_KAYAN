@@ -20,6 +20,7 @@ class _ThresholdsApi extends ApiClient {
       );
 
   bool failList;
+  bool noneBelow = false;
   final puts = <(String, Object?)>[];
 
   @override
@@ -45,7 +46,7 @@ class _ThresholdsApi extends ApiClient {
         'maxQuantity': '100.0000',
         'onHand': '4.0000',
         'suggestedOrder': '96.0000',
-        'isBelowMinimum': true,
+        'isBelowMinimum': !noneBelow,
         'isAboveMaximum': false,
       },
       {
@@ -156,6 +157,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Cable'), findsOneWidget);
     expect(find.text('Glue'), findsNothing);
+  });
+
+  testWidgets('an empty below-minimum result keeps the filter available to turn off', (tester) async {
+    final api = _ThresholdsApi()..noneBelow = true;
+    await pump(tester, api);
+    await tester.tap(find.text('Below minimum only'));
+    await tester.pumpAndSettle();
+    expect(find.text('Below minimum only'), findsOneWidget);
+    await tester.tap(find.text('Below minimum only'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cable'), findsWidgets);
   });
 
   testWidgets('search narrows by item and by warehouse name', (tester) async {

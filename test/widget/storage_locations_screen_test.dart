@@ -23,6 +23,7 @@ class _LocationsApi extends ApiClient {
   bool noWarehouses;
   final locationQueries = <Map<String, dynamic>?>[];
   final creations = <Map<String, dynamic>>[];
+  final deletions = <String>[];
 
   @override
   Future<List<Map<String, dynamic>>> getList(
@@ -102,7 +103,10 @@ class _LocationsApi extends ApiClient {
   }
 
   @override
-  Future<Map<String, dynamic>> delete(String path) async => const {};
+  Future<Map<String, dynamic>> delete(String path) async {
+    deletions.add(path);
+    return const {};
+  }
 }
 
 void main() {
@@ -272,6 +276,30 @@ void main() {
         findsOneWidget);
     // Nothing has been sent yet.
     expect(find.text('A-01'), findsOneWidget);
+  });
+
+  testWidgets('confirming delete targets the chosen location and reloads that warehouse', (tester) async {
+    final api = _LocationsApi();
+    await pump(tester, api);
+    final before = api.locationQueries.length;
+    await tester.tap(find.byTooltip('Delete').first);
+    await tester.pumpAndSettle();
+    expect(api.deletions, isEmpty);
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(api.deletions, ['/inventory/locations/loc-1']);
+    expect(api.locationQueries.length, greaterThan(before));
+    expect(api.locationQueries.last?['warehouseId'], 'wh-1');
+  });
+
+  testWidgets('cancelling delete sends no mutation', (tester) async {
+    final api = _LocationsApi();
+    await pump(tester, api);
+    await tester.tap(find.byTooltip('Delete').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(api.deletions, isEmpty);
   });
 
   testWidgets('a failed location list shows the error view with a retry', (

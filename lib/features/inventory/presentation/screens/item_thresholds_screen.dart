@@ -76,7 +76,7 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
       body: AsyncStateView<List<Json>>(
         value: async,
         onRetry: () => ref.read(itemThresholdsProvider.notifier).reload(),
-        isEmpty: (rows) => _visible(rows).isEmpty,
+        isEmpty: (rows) => rows.isEmpty,
         emptyMessage: _arabic
             ? 'لم تُضبط حدود بعد.'
             : 'No thresholds have been set yet.',
@@ -98,7 +98,11 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
               ),
             ),
             Expanded(
-              child: RecordsTable(
+              child: _visible(rows).isEmpty
+                  ? Center(child: Text(_arabic
+                      ? 'لا توجد أصناف تطابق البحث أو التصفية. غيّر البحث أو ألغِ تصفية الحد الأدنى.'
+                      : 'No items match the search or filter. Change the search or turn off the minimum filter.'))
+                  : RecordsTable(
                 rows: _visible(rows),
                 columns: [
                   ColumnSpec(
