@@ -58,6 +58,13 @@ const bridgeManifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manife
 const dbUrl = (name) => { const x = new URL(adminUrl); x.pathname = `/${name}`; x.searchParams.set('schema', 'public'); return x.toString(); };
 const admin = new pg.Client({ connectionString: adminUrl });
 await admin.connect();
+// Recorded in the report: how this database orders strings. The defect fixed in
+// lowestCashBalanceFrom depended on it.
+const dbInfo = (await admin.query(`SELECT version() AS version,
+  (SELECT datcollate FROM pg_database WHERE datname = 'template1') AS collate,
+  (SELECT datctype FROM pg_database WHERE datname = 'template1') AS ctype,
+  ('~~~~~~~~~~' < 'JV-999999') AS old_sentinel_sorts_before_real_numbers`)).rows[0];
+console.log('DATABASE ' + JSON.stringify(dbInfo));
 await admin.query('DROP DATABASE IF EXISTS kayan_noskip_template WITH (FORCE)');
 await admin.query('CREATE DATABASE kayan_noskip_template');
 {
@@ -126,6 +133,7 @@ const report = {
   manifestedBridgePending: results.filter((r) => r.verdict === 'PASS_BRIDGE_MANIFESTED_PENDING').map((r) => ({ file: r.file, pending: r.pending })),
   unresolvedPending: results.filter((r) => r.verdict === 'FAIL' && r.pendingIdentities?.length).map((r) => ({ file: r.file, pendingIdentities: r.pendingIdentities })),
   passedCases: sum('passed'), pendingCases: sum('pending'), failedFiles: results.filter((r) => r.verdict === 'FAIL').map((r) => ({ file: r.file, reason: r.reason })),
+  database: dbInfo,
   results,
 };
 writeFileSync(join(out, 'noskip-report.json'), JSON.stringify(report, null, 2));
