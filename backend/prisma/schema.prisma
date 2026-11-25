@@ -47,6 +47,10 @@ model Company {
 
   isActive Boolean @default(true)
 
+  /// LEGACY keeps the older free-form codes; EIGHT_DIGIT enforces the 2/4/6/8
+  /// hierarchy with posting only on 8-digit accounts (see account-code-scheme.ts).
+  accountCodeScheme AccountCodeScheme @default(LEGACY)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?
@@ -341,6 +345,11 @@ enum AccountType {
   EQUITY
   REVENUE
   EXPENSE
+}
+
+enum AccountCodeScheme {
+  LEGACY
+  EIGHT_DIGIT
 }
 
 model Account {

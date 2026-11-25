@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InvoiceDocumentType, InvoiceStatus, Prisma } from '@prisma/client';
 
+import { roleCodeSql } from '../accounting/account-map.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 const MONEY_SCALE = 4;
@@ -159,7 +160,7 @@ export class AgingService {
              ${sumBucket('d90_plus')} AS d90_plus
         FROM (${bucketed}) b`);
 
-    const controlCode = side === 'customer' ? '1103' : '2101';
+    const controlCode = roleCodeSql(side === 'customer' ? 'accountsReceivable' : 'accountsPayable', companyId);
     const ledgerRows = await tx.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
       SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
         FROM journal_lines l
@@ -368,7 +369,7 @@ export class AgingService {
 
     // The control account, read from the ledger, so the document view and the
     // accounting view can be compared instead of assumed equal.
-    const controlCode = side === 'customer' ? '1103' : '2101';
+    const controlCode = roleCodeSql(side === 'customer' ? 'accountsReceivable' : 'accountsPayable', companyId);
     const ledgerRows = await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
       SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
         FROM journal_lines l

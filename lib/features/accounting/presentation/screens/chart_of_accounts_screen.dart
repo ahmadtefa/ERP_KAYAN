@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -304,6 +305,8 @@ Future<void> _editAccount(
   DraftExitRelay exitRelay,
 ) async {
   final all = ref.read(chartOfAccountsProvider).value ?? const <Account>[];
+  // Every account of a company carries the same scheme.
+  final eightDigit = all.any((a) => a.isEightDigitScheme);
 
   // Parents: every account of the same type, except the account being edited
   // and anything under it — the server refuses those anyway, so they are not
@@ -328,6 +331,8 @@ Future<void> _editAccount(
       .where(
         (a) =>
             !excluded.contains(a.id) &&
+            // An 8-digit account is the last level of an eight digit chart.
+            !(eightDigit && a.code.length >= 8) &&
             (existing == null || a.type == existing.type),
       )
       .toList(growable: false);
@@ -335,6 +340,10 @@ Future<void> _editAccount(
   String? selectedParent = existing?.parentId;
   var selectedType = existing?.type ?? AccountType.asset;
   var isPostable = existing?.isPostable ?? true;
+  // Eight digit chart: only an 8-digit account takes entries, so the flag is
+  // derived from the code and not chosen.
+  bool postableForCode(String code) => code.trim().length == 8;
+  if (eightDigit) isPostable = postableForCode(existing?.code ?? '');
   var isActive = existing?.isActive ?? true;
   var selectedCashFlow = existing?.cashFlowClass;
 
@@ -352,6 +361,7 @@ Future<void> _editAccount(
         .read(chartOfAccountsRepositoryProvider)
         .suggestCode(parentId: selectedParent);
     codeController.text = suggestion.valueOrNull ?? '';
+    if (eightDigit) isPostable = postableForCode(codeController.text);
     if (!context.mounted) {
       codeController.dispose();
       nameArController.dispose();
@@ -452,13 +462,28 @@ Future<void> _editAccount(
                   ],
                   TextField(
                     controller: codeController,
+                    keyboardType: eightDigit ? TextInputType.number : null,
+                    inputFormatters: eightDigit
+                        ? [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(8),
+                          ]
+                        : null,
                     onChanged: (_) {
-                      if (fieldErrors.remove('code') != null) setDialogState(() {});
+                      fieldErrors.remove('code');
+                      setDialogState(() {
+                        if (eightDigit) isPostable = postableForCode(codeController.text);
+                      });
                     },
                     decoration: InputDecoration(
                       errorText: fieldErrors['code'],
                       labelText: dialogL10n.accountCode,
-                      helperText: dialogL10n.accountCodeHelper,
+                      helperMaxLines: 3,
+                      helperText: eightDigit
+                          ? (arabic
+                              ? 'الكود 2 أو 4 أو 6 أو 8 أرقام، وكل مستوى يضيف رقمين لكود الأب. الحساب ذو الـ8 أرقام فقط يقبل القيود.'
+                              : 'Code of 2, 4, 6 or 8 digits; each level adds two digits to its parent code. Only an 8-digit account takes entries.')
+                          : dialogL10n.accountCodeHelper,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -563,7 +588,10 @@ Future<void> _editAccount(
                         if (dialogContext.mounted && selectedParent == value &&
                             codeController.text.trim().isEmpty && suggestion.valueOrNull != null) {
                           setDialogState(
-                            () => codeController.text = suggestion.valueOrNull!,
+                            () {
+                              codeController.text = suggestion.valueOrNull!;
+                              if (eightDigit) isPostable = postableForCode(codeController.text);
+                            },
                           );
                         }
                       }
@@ -625,10 +653,15 @@ Future<void> _editAccount(
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(dialogL10n.postable),
-                    subtitle: Text(dialogL10n.postableHelper),
+                    subtitle: Text(eightDigit
+                        ? (arabic
+                            ? 'يتحدد تلقائياً من الكود: الحساب ذو الـ8 أرقام يقبل القيود وغيره تجميعي'
+                            : 'Set by the code: an 8-digit account takes entries, shorter codes are totals')
+                        : dialogL10n.postableHelper),
                     value: isPostable,
-                    onChanged: (value) =>
-                        setDialogState(() => isPostable = value),
+                    onChanged: eightDigit
+                        ? null
+                        : (value) => setDialogState(() => isPostable = value),
                   ),
                   if (existing != null)
                     SwitchListTile(

@@ -10,6 +10,8 @@ import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { normalizeLogo } from './company.service';
 import { PERMISSIONS } from '../../../prisma/permissions';
+import { loadAccountCodeScheme } from '../accounting/account-code-scheme';
+import { EIGHT_DIGIT_STARTER_ACCOUNTS } from '../../../prisma/starter-chart';
 import { InitialSetupDto } from './dto/company.dto';
 
 /**
@@ -169,12 +171,22 @@ export class SetupService {
         logoData: logo?.data ?? null,
         logoMime: logo?.mime ?? null,
       };
+      // A brand-new company, or a retired one with no accounts left, gets the
+      // eight digit chart. A retired company that still holds a chart keeps its
+      // own scheme, so the starter accounts never mix two numbering systems.
+      const retiredAccounts = retiredCompany
+        ? await tx.account.count({ where: { companyId: retiredCompany.id, deletedAt: null } })
+        : 0;
       const company = retiredCompany
         ? await tx.company.update({
             where: { id: retiredCompany.id },
-            data: { ...profile, deletedAt: null },
+            data: {
+              ...profile,
+              deletedAt: null,
+              ...(retiredAccounts === 0 ? { accountCodeScheme: 'EIGHT_DIGIT' as const } : {}),
+            },
           })
-        : await tx.company.create({ data: profile });
+        : await tx.company.create({ data: { ...profile, accountCodeScheme: 'EIGHT_DIGIT' } });
 
       const isBranch = dto.facilityKind === 'BRANCH';
       const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;
@@ -416,7 +428,9 @@ export class SetupService {
     tx: Prisma.TransactionClient,
     companyId: string,
   ): Promise<void> {
-    const sorted = [...STARTER_ACCOUNTS].sort(
+    const scheme = await loadAccountCodeScheme(tx as never, companyId);
+    const starter = scheme === 'EIGHT_DIGIT' ? EIGHT_DIGIT_STARTER_ACCOUNTS : STARTER_ACCOUNTS;
+    const sorted = [...starter].sort(
       (a, b) => a.code.length - b.code.length,
     );
     const idByCode = new Map<string, string>();

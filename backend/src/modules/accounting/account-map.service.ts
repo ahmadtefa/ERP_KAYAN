@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { loadAccountCodeScheme, type AccountCodeScheme } from './account-code-scheme';
+
 /**
  * The accounts that automatic postings use.
  *
@@ -32,6 +34,40 @@ export const ACCOUNT_CODES = {
 
 export type AccountKey = keyof typeof ACCOUNT_CODES;
 
+/**
+ * The same roles in the eight digit chart (2/4/6/8 digits, posting on 8).
+ * The role keys are the stable identity; only the code differs by scheme.
+ */
+export const EIGHT_DIGIT_ACCOUNT_CODES: Record<AccountKey, string> = {
+  accountsReceivable: '01010201',
+  accountsPayable: '02010101',
+  inventory: '01010301',
+  vatReceivable: '01010401',
+  vatPayable: '02010301',
+  salesRevenue: '04010101',
+  salesReturns: '04010102',
+  costOfGoodsSold: '05010101',
+  inventoryDifference: '05010102',
+  retainedEarnings: '03010201',
+  openingBalanceEquity: '03010301',
+  assetDisposalGain: '04020101',
+  assetDisposalLoss: '04020101',
+};
+
+export function accountCodesFor(scheme: AccountCodeScheme): Record<AccountKey, string> {
+  return scheme === 'EIGHT_DIGIT' ? EIGHT_DIGIT_ACCOUNT_CODES : ACCOUNT_CODES;
+}
+
+/** Both schemes' codes for a role, for reads that must work on any company. */
+export function anySchemeCodes(key: AccountKey): string[] {
+  return [...new Set([ACCOUNT_CODES[key], EIGHT_DIGIT_ACCOUNT_CODES[key]])];
+}
+
+export const CONTROL_ACCOUNT_CODES: string[] = [
+  ...anySchemeCodes('accountsReceivable'),
+  ...anySchemeCodes('accountsPayable'),
+];
+
 @Injectable()
 export class AccountMapService {
   /**
@@ -43,7 +79,8 @@ export class AccountMapService {
     companyId: string,
     keys: AccountKey[],
   ): Promise<Record<AccountKey, string>> {
-    const codes = keys.map((k) => ACCOUNT_CODES[k]);
+    const map = accountCodesFor(await loadAccountCodeScheme(tx as never, companyId));
+    const codes = keys.map((k) => map[k]);
     const accounts = await tx.account.findMany({
       where: { companyId, code: { in: codes }, deletedAt: null },
       select: { id: true, code: true, isPostable: true, isActive: true },
@@ -51,7 +88,7 @@ export class AccountMapService {
 
     const result = {} as Record<AccountKey, string>;
     for (const key of keys) {
-      const code = ACCOUNT_CODES[key];
+      const code = map[key];
       const account = accounts.find((a) => a.code === code);
       if (!account) {
         throw new BadRequestException(
@@ -68,4 +105,26 @@ export class AccountMapService {
     }
     return result;
   }
+}
+
+/**
+ * The code of one role for this company, by its scheme. Reports use this
+ * instead of a literal so an eight digit company is read correctly.
+ */
+export async function roleCodeFor(
+  client: { $queryRaw: (...args: never[]) => unknown },
+  companyId: string,
+  key: AccountKey,
+): Promise<string> {
+  return accountCodesFor(await loadAccountCodeScheme(client, companyId))[key];
+}
+
+/**
+ * SQL fragment for "the code of this role in this company", so a report query
+ * stays one statement: the company's own scheme picks the code.
+ */
+export function roleCodeSql(key: AccountKey, companyId: string): Prisma.Sql {
+  return Prisma.sql`(SELECT CASE WHEN c."accountCodeScheme" = 'EIGHT_DIGIT'
+      THEN ${EIGHT_DIGIT_ACCOUNT_CODES[key]} ELSE ${ACCOUNT_CODES[key]} END
+    FROM companies c WHERE c.id = ${companyId}::uuid)`;
 }

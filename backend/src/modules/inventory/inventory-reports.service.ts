@@ -7,6 +7,7 @@ import {
 import { Prisma, StockDocumentKind } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
+import { roleCodeSql } from '../accounting/account-map.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { parseFactor } from '../../common/units/unit-math';
@@ -611,7 +612,7 @@ export class InventoryReportsService {
         JOIN accounts a ON a.id = l."accountId"
        WHERE e."companyId" = ${companyId}::uuid
          AND e.status IN ('POSTED', 'REVERSED')
-         AND a.code = '1104'
+         AND a.code = ${roleCodeSql('inventory', companyId)}
          AND (${filters.branchId ?? null}::uuid IS NULL OR e."branchId" = ${filters.branchId ?? null}::uuid)
     `);
     const ledgerValue = new Prisma.Decimal(ledgerRows[0]?.net ?? 0);

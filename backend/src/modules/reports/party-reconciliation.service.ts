@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceDocumentType, InvoiceStatus, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { ACCOUNT_CODES } from '../accounting/account-map.service';
+import { roleCodeFor } from '../accounting/account-map.service';
 
 const MONEY_SCALE = 4;
 const money = (value: Prisma.Decimal) => value.toFixed(MONEY_SCALE);
@@ -55,9 +55,9 @@ export class PartyReconciliationService {
       ? new Date(`${asOfInput.slice(0, 10)}T00:00:00.000Z`)
       : new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
 
-    const controlCode = isReceivable
-      ? ACCOUNT_CODES.accountsReceivable
-      : ACCOUNT_CODES.accountsPayable;
+    const controlCode = await roleCodeFor(
+      this.prisma, companyId, isReceivable ? 'accountsReceivable' : 'accountsPayable',
+    );
     const control = await this.prisma.account.findFirst({
       where: { companyId, code: controlCode, deletedAt: null },
       select: { id: true, code: true, nameEn: true, nameAr: true },

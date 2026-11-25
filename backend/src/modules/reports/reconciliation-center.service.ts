@@ -2,7 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { ACCOUNT_CODES } from '../accounting/account-map.service';
+import { roleCodeFor } from '../accounting/account-map.service';
 import { FixedAssetsService } from '../fixed-assets/fixed-assets.service';
 import { PartyReconciliationService } from './party-reconciliation.service';
 
@@ -127,8 +127,9 @@ export class ReconciliationCenterService {
     branchId?: string,
   ): Promise<Section> {
     try {
+      const inventoryCode = await roleCodeFor(this.prisma, companyId, 'inventory');
       const account = await this.prisma.account.findFirst({
-        where: { companyId, code: ACCOUNT_CODES.inventory, deletedAt: null },
+        where: { companyId, code: inventoryCode, deletedAt: null },
         select: { id: true, code: true },
       });
       if (!account) {
@@ -137,7 +138,7 @@ export class ReconciliationCenterService {
             'inventory',
             new Error('missing'),
           ),
-          reason: `Inventory account ${ACCOUNT_CODES.inventory} does not exist in this company's chart`,
+          reason: `Inventory account ${inventoryCode} does not exist in this company's chart`,
         };
       }
       const asOfDate = new Date(`${asOf}T23:59:59.999Z`);

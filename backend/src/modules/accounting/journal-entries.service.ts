@@ -13,7 +13,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JOURNAL_PENDING_APPROVAL, dedupeKey } from '../notifications/notification-kinds';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
-import { ACCOUNT_CODES } from './account-map.service';
+import { CONTROL_ACCOUNT_CODES } from './account-map.service';
 import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
@@ -171,9 +171,7 @@ export class JournalEntriesService {
     // It is refused here, at the door; the party documents (invoices,
     // notes, vouchers, opening balances) are how these accounts move.
     const control = accounts.filter((a) =>
-      [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(
-        a.code as never,
-      ),
+      CONTROL_ACCOUNT_CODES.includes(a.code),
     );
     if (control.length > 0) {
       throw new BadRequestException(
@@ -266,7 +264,7 @@ export class JournalEntriesService {
       const lineAccounts = await this.prisma.account.findMany({
         where: {
           companyId,
-          code: { in: [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable] },
+          code: { in: CONTROL_ACCOUNT_CODES },
           id: { in: entry.lines.map((l) => l.accountId) },
         },
         select: { code: true },
@@ -532,7 +530,7 @@ export class JournalEntriesService {
     if (accounts.length !== ids.length || accounts.some(account => !account.isActive || !account.isPostable)) {
       throw new BadRequestException('One or more journal accounts are unavailable or cannot receive postings');
     }
-    if (accounts.some(account => [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(account.code as never))) {
+    if (accounts.some(account => CONTROL_ACCOUNT_CODES.includes(account.code))) {
       throw new BadRequestException('Manual entries cannot post directly to a control account');
     }
     // A manual entry can name a box or a bank directly, and taking more out

@@ -70,7 +70,7 @@ export class ImportController {
     // Either the read grant or the manage grant may fetch the blank sheet.
     this.allowed(user, [TEMPLATE_PERMISSION[slug], PERMISSION[slug]]);
 
-    const body = await this.service.template(slug);
+    const body = await this.service.template(slug, user.companyId);
     response.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

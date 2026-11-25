@@ -24,6 +24,7 @@ class Account implements AccountNames {
     this.currency,
     this.description,
     this.cashFlowClass,
+    this.codeScheme = 'legacy',
   });
 
   final String id;
@@ -55,6 +56,13 @@ class Account implements AccountNames {
   /// movement as unclassified instead of guessing.
   final String? cashFlowClass;
 
+  /// The company's account code scheme as the server reports it: 'legacy'
+  /// (free-form codes) or 'eight_digit' (2/4/6/8 digit levels, entries only
+  /// on 8-digit accounts).
+  final String codeScheme;
+
+  bool get isEightDigitScheme => codeScheme == 'eight_digit';
+
   bool get isLeaf => isPostable;
 
   Account copyWith({
@@ -78,6 +86,8 @@ class Account implements AccountNames {
     isActive: isActive ?? this.isActive,
     currency: currency,
     description: description,
+    cashFlowClass: cashFlowClass,
+    codeScheme: codeScheme,
   );
 
   @override

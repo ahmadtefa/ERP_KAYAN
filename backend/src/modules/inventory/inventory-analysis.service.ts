@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { roleCodeSql } from '../accounting/account-map.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseScope } from '../../common/warehouse/warehouse.service';
 
@@ -723,7 +724,7 @@ export class InventoryAnalysisService {
         JOIN "accounts" a ON a."id" = jl."accountId"
        WHERE je."companyId" = ${companyId}::uuid
          AND je."status" <> 'DRAFT'
-         AND a."code" = '1104'
+         AND a."code" = ${roleCodeSql('inventory', companyId)}
        GROUP BY je."branchId"
     `);
     const byBranch = new Map(ledger.map((row) => [row.branchId, new Prisma.Decimal(row.balance)]));

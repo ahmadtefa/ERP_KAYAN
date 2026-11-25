@@ -8,6 +8,8 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OpeningBalancesService } from '../accounting/opening-balances.service';
 import { lockChart } from '../accounting/chart-lock';
+import { roleCodeFor } from '../accounting/account-map.service';
+import { eightDigitViolation, loadAccountCodeScheme } from '../accounting/account-code-scheme';
 import {
   ImportFormatError,
   isXlsx,
@@ -349,8 +351,17 @@ export class ImportService {
   }
 
   /// The spreadsheet a user downloads, fills in and uploads back.
-  async template(kind: ImportKind): Promise<Buffer> {
-    const fields = this.fields(kind);
+  async template(kind: ImportKind, companyId?: string): Promise<Buffer> {
+    const eight = companyId
+      ? (await loadAccountCodeScheme(this.prisma as never, companyId)) === 'EIGHT_DIGIT'
+      : false;
+    const fields = this.fields(kind).map((field) => {
+      if (!eight || kind !== 'chart-of-accounts') return field;
+      // An eight digit company's example row must itself be importable.
+      if (field.key === 'code') return { ...field, example: '05020106' };
+      if (field.key === 'parentcode') return { ...field, example: '050201' };
+      return field;
+    });
     const workbook = new Workbook();
     workbook.creator = 'KAYAN ERP';
 
@@ -373,11 +384,11 @@ export class ImportService {
     if (kind === 'opening-balances') {
       const examples: Array<Record<string, string>> = [
         {
-          asofdate: '2026-01-01', accountcode: '1101', debit: '1000.00',
+          asofdate: '2026-01-01', accountcode: eight ? '01010101' : '1101', debit: '1000.00',
           credit: '0', description: 'Opening cash',
         },
         {
-          asofdate: '2026-01-01', accountcode: '3101', debit: '0',
+          asofdate: '2026-01-01', accountcode: eight ? '03010101' : '3101', debit: '0',
           credit: '1000.00', description: 'Opening capital',
         },
       ];
@@ -413,7 +424,7 @@ export class ImportService {
       ]);
     }
     notes.addRow([]);
-    const { en, ar } = this.instructions(kind);
+    const { en, ar } = this.instructions(kind, eight);
     for (const line of en) notes.addRow([line]);
     notes.addRow([]);
     for (const line of ar) notes.addRow([line]);
@@ -426,7 +437,7 @@ export class ImportService {
     return Buffer.from(buffer);
   }
 
-  private instructions(kind: ImportKind): { en: string[]; ar: string[] } {
+  private instructions(kind: ImportKind, eight = false): { en: string[]; ar: string[] } {
     if (kind === 'opening-balances') {
       return {
         en: [
@@ -452,12 +463,14 @@ export class ImportService {
           'Account types: ASSET, LIABILITY, EQUITY, REVENUE or EXPENSE. A parent account must have the same type.',
           'Import parents and children in any order. Leave Parent code empty for a top-level account.',
           'Accounts with children become grouping accounts and cannot receive postings.',
+          ...(eight ? ['This company uses the eight digit chart: codes have 2, 4, 6 or 8 digits, each level adds two digits to its parent code, and only 8-digit accounts can receive postings.'] : []),
         ],
         ar: [
           'استخدم صفاً واحداً لكل حساب. يجب أن يكون الكود فريداً في الشركة؛ الأكواد الموجودة لن تتغير.',
           'أنواع الحسابات: ASSET أو LIABILITY أو EQUITY أو REVENUE أو EXPENSE. يجب أن يطابق نوع الحساب الأب.',
           'يمكن استيراد الآباء والأبناء بأي ترتيب. اترك كود الأب فارغاً للحساب الرئيسي.',
           'الحساب الذي له حسابات فرعية يصبح تجميعياً ولا يستقبل قيوداً.',
+          ...(eight ? ['هذه الشركة تستخدم دليل الحسابات بثمانية أرقام: الأكواد من 2 أو 4 أو 6 أو 8 أرقام، وكل مستوى يضيف رقمين إلى كود الأب، والحسابات ذات الـ8 أرقام فقط تقبل القيود.'] : []),
         ],
       };
     }
@@ -907,6 +920,7 @@ export class ImportService {
       description: string | null;
     };
     const accountRows = new Map<string, AccountImportRow>();
+    const eightDigit = (await loadAccountCodeScheme(this.prisma as never, companyId)) === 'EIGHT_DIGIT';
     const seen = new Set<string>();
 
     for (const row of parsed.rows) {
@@ -993,6 +1007,22 @@ export class ImportService {
       }
     }
 
+    // An eight digit company only accepts codes that follow the 2/4/6/8 rule,
+    // with entries on the 8-digit level alone.
+    if (eightDigit) {
+      for (const row of newRows.values()) {
+        const parentCode = row.parentCode;
+        const problem = eightDigitViolation({
+          code: row.code,
+          parentCode,
+          isPostable: row.isPostable ?? row.code.length === 8,
+        });
+        if (problem) {
+          errors.push({ row: row.rowNumber, column: 'Code', message: problem });
+        }
+      }
+    }
+
     // Follow parent links among new rows to catch self references and cycles
     // before any account is written.
     for (const row of newRows.values()) {
@@ -1056,7 +1086,7 @@ export class ImportService {
                 nameAr: row.nameAr,
                 type: row.type,
                 parentId: parentId ?? null,
-                isPostable: row.isPostable ?? Boolean(parentId),
+                isPostable: row.isPostable ?? (eightDigit ? row.code.length === 8 : Boolean(parentId)),
                 isActive: row.isActive,
                 currency: row.currency,
                 description: row.description,
@@ -1244,7 +1274,7 @@ export class ImportService {
         : Promise.resolve([]),
       itemCodes.length
         ? this.prisma.account.findFirst({
-            where: { companyId, code: '1104', deletedAt: null },
+            where: { companyId, code: await roleCodeFor(this.prisma, companyId, 'inventory'), deletedAt: null },
             select: { id: true },
           })
         : Promise.resolve(null),

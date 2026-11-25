@@ -8,6 +8,13 @@ import { AccountType, Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  eightDigitViolation,
+  loadAccountCodeScheme,
+  nextEightDigitChildCode,
+  normalizeAccountCode,
+  type AccountCodeScheme,
+} from './account-code-scheme';
 import { lockChart } from './chart-lock';
 import {
   CreateAccountDto,
@@ -30,6 +37,8 @@ export interface AccountResponse {
   currency: string | null;
   description: string | null;
   cashFlowClass: string | null;
+  /** The company's code scheme, so a client can show the right input rules. */
+  codeScheme: 'legacy' | 'eight_digit';
 }
 
 /**
@@ -82,11 +91,37 @@ export class ChartOfAccountsService {
       orderBy: { code: 'asc' },
     });
 
-    return { items: accounts.map((a) => toResponse(a)) };
+    const scheme = await this.schemeOf(companyId);
+    return { items: accounts.map((a) => toResponse(a, scheme)) };
+  }
+
+  /** The company's account code scheme (LEGACY when the row is unknown). */
+  async schemeOf(
+    companyId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<AccountCodeScheme> {
+    return loadAccountCodeScheme(client as never, companyId);
+  }
+
+  /**
+   * Eight digit rule for one account as it would be after the write. Throws
+   * a readable 400 before the database trigger has to.
+   */
+  private assertEightDigitRule(input: {
+    code: string;
+    parentCode: string | null;
+    isPostable: boolean;
+    parentIsEightDigit?: boolean;
+  }): void {
+    if (input.parentIsEightDigit) {
+      throw new BadRequestException('An 8-digit account is the last level and cannot have sub-accounts');
+    }
+    const problem = eightDigitViolation(input);
+    if (problem) throw new BadRequestException(problem);
   }
 
   async findOne(companyId: string, id: string): Promise<AccountResponse> {
-    return toResponse(await this.findAccount(companyId, id));
+    return toResponse(await this.findAccount(companyId, id), await this.schemeOf(companyId));
   }
 
   /**
@@ -105,6 +140,24 @@ export class ChartOfAccountsService {
     if (parentId) {
       const parent = await this.findAccount(companyId, parentId, client);
       prefix = parent.code;
+    }
+    if ((await this.schemeOf(companyId, client)) === 'EIGHT_DIGIT') {
+      const used = await client.account.findMany({
+        where: { companyId, code: { startsWith: prefix } },
+        select: { code: true },
+      });
+      const next = nextEightDigitChildCode(
+        parentId ? prefix : null,
+        new Set(used.map((u) => u.code)),
+      );
+      if (!next) {
+        throw new BadRequestException(
+          prefix.length >= 8
+            ? 'An 8-digit account is the last level and cannot have sub-accounts'
+            : 'No free two-digit code left under this parent',
+        );
+      }
+      return { code: next };
     }
     const siblings = await client.account.findMany({
       where: { companyId, parentId, deletedAt: null },
@@ -141,9 +194,23 @@ export class ChartOfAccountsService {
     const created = await this.prisma.$transaction(async (tx) => {
       await lockChart(tx, companyId);
       if (parentId) await this.assertParentUsable(companyId, parentId, type, undefined, tx);
-      const code = dto.code?.trim() || (await this.suggestCode(companyId, parentId, tx)).code;
+      const scheme = await this.schemeOf(companyId, tx);
+      const code = dto.code?.trim()
+        ? (scheme === 'EIGHT_DIGIT' ? normalizeAccountCode(dto.code) : dto.code.trim())
+        : (await this.suggestCode(companyId, parentId, tx)).code;
       await this.assertCodeFree(companyId, code, undefined, tx);
-      const isPostable = dto.isPostable ?? (parentId ? true : false);
+      const isPostable = scheme === 'EIGHT_DIGIT'
+        ? (dto.isPostable ?? code.length === 8)
+        : (dto.isPostable ?? (parentId ? true : false));
+      if (scheme === 'EIGHT_DIGIT') {
+        const parent = parentId
+          ? await tx.account.findFirst({ where: { id: parentId, companyId, deletedAt: null }, select: { code: true } })
+          : null;
+        this.assertEightDigitRule({
+          code, parentCode: parent?.code ?? null, isPostable,
+          parentIsEightDigit: parent?.code.length === 8,
+        });
+      }
       const row = await tx.account.create({
         data: {
           companyId, code, nameEn: nameEn || nameAr, nameAr: nameAr || nameEn, type, parentId,
@@ -159,7 +226,7 @@ export class ChartOfAccountsService {
       }, tx);
       return row;
     });
-    return toResponse(created);
+    return toResponse(created, await this.schemeOf(companyId));
   }
 
   async update(
@@ -197,6 +264,25 @@ export class ChartOfAccountsService {
         const activeChildren = await tx.account.count({where:{parentId:id,companyId,deletedAt:null,isActive:true}});
         if (activeChildren > 0) throw new BadRequestException('Deactivate active subaccounts before deactivating their parent');
       }
+      const scheme = await this.schemeOf(companyId, tx);
+      if (scheme === 'EIGHT_DIGIT' && dto.code !== undefined) dto.code = normalizeAccountCode(dto.code);
+      if (scheme === 'EIGHT_DIGIT') {
+        const nextCode = dto.code ?? account.code;
+        const nextParentId = dto.parentId === undefined ? account.parentId : dto.parentId;
+        const nextParent = nextParentId
+          ? await tx.account.findFirst({ where: { id: nextParentId, companyId, deletedAt: null }, select: { code: true } })
+          : null;
+        const children = await tx.account.count({ where: { parentId: id, companyId, deletedAt: null } });
+        if (nextCode !== account.code && children > 0) {
+          throw new BadRequestException('This account has sub-accounts whose codes start with its code. Its code cannot be changed.');
+        }
+        this.assertEightDigitRule({
+          code: nextCode,
+          parentCode: nextParent?.code ?? null,
+          isPostable: dto.isPostable ?? account.isPostable,
+          parentIsEightDigit: parentChanged ? nextParent?.code.length === 8 : false,
+        });
+      }
       if (dto.code !== undefined && dto.code !== account.code) {
         // Block a concurrent FK insert before checking whether the code is
         // already part of journal history.
@@ -220,17 +306,20 @@ export class ChartOfAccountsService {
           throw new BadRequestException('An account or its subaccounts have journal movements; moving them would change historical reports.');
         }
       }
-      const row = await tx.account.update({
-        where:{id}, data:{code:dto.code,nameEn:dto.nameEn,nameAr:dto.nameAr,parentId:dto.parentId,
+      // Only the fields the request names: an undefined field must leave the
+      // column alone (a driver that turns undefined into NULL would orphan the
+      // account from its parent and break the code hierarchy).
+      const data = Object.fromEntries(Object.entries({code:dto.code,nameEn:dto.nameEn,nameAr:dto.nameAr,parentId:dto.parentId,
           isPostable:dto.isPostable,isActive:dto.isActive,currency:dto.currency,cashFlowClass:dto.cashFlowClass,
-          description:dto.description === undefined ? undefined : dto.description?.trim() || null,updatedBy:userId},
-      });
+          description:dto.description === undefined ? undefined : dto.description?.trim() || null,updatedBy:userId})
+          .filter(([, value]) => value !== undefined)) as Prisma.AccountUncheckedUpdateInput;
+      const row = await tx.account.update({ where:{id}, data });
       if (parentChanged && dto.parentId) await this.demoteParentToGrouping(tx, companyId, dto.parentId);
       await this.audit.recordRequired({companyId,userId,action:'UPDATE',entity:'accounts',entityId:id,
-        before:toResponse(account),after:toResponse(row)}, tx);
+        before:toResponse(account, scheme),after:toResponse(row, scheme)}, tx);
       return row;
     });
-    return toResponse(updated);
+    return toResponse(updated, await this.schemeOf(companyId));
   }
 
   /**
@@ -256,7 +345,7 @@ export class ChartOfAccountsService {
       if (movements > 0) throw new BadRequestException('This account has journal movements and cannot be deleted. Deactivate it instead so the past stays readable.');
       if (children > 0) throw new BadRequestException('This account has sub-accounts. Move or delete them first, or deactivate this account.');
       await tx.account.update({where:{id},data:{deletedAt:new Date(),updatedBy:userId}});
-      await this.audit.recordRequired({companyId,userId,action:'DELETE',entity:'accounts',entityId:id,before:toResponse(account)},tx);
+      await this.audit.recordRequired({companyId,userId,action:'DELETE',entity:'accounts',entityId:id,before:toResponse(account, await this.schemeOf(companyId, tx))},tx);
     });
   }
 
@@ -414,7 +503,7 @@ function toResponse(a: {
   currency: string | null;
   description: string | null;
   cashFlowClass: string | null;
-}): AccountResponse {
+}, scheme: AccountCodeScheme = 'LEGACY'): AccountResponse {
   return {
     id: a.id,
     companyId: a.companyId,
@@ -431,5 +520,6 @@ function toResponse(a: {
     currency: a.currency,
     description: a.description,
     cashFlowClass: a.cashFlowClass ? a.cashFlowClass.toLowerCase() : null,
+    codeScheme: scheme === 'EIGHT_DIGIT' ? 'eight_digit' : 'legacy',
   };
 }

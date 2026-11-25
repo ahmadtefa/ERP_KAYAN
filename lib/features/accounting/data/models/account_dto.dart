@@ -42,6 +42,9 @@ class AccountDto {
       currency: json['currency']?.toString(),
       description: json['description']?.toString(),
       cashFlowClass: json['cashFlowClass']?.toString().toUpperCase(),
+      codeScheme: json['codeScheme']?.toString().toLowerCase() == 'eight_digit'
+          ? 'eight_digit'
+          : 'legacy',
     );
   }
 

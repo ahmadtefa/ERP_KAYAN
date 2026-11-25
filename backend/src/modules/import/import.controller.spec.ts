@@ -54,7 +54,7 @@ describe('spreadsheet import authorization', () => {
         'opening-balances',
         res as any,
       );
-      expect(template).toHaveBeenCalledWith('opening-balances');
+      expect(template).toHaveBeenCalledWith('opening-balances', user.companyId);
       expect(res.setHeader).toHaveBeenCalledWith(
         'Content-Disposition',
         'attachment; filename="kayan-import-opening-balances.xlsx"',
@@ -108,7 +108,7 @@ describe('spreadsheet import authorization', () => {
     };
 
     await controller.template(reader, 'opening-balances', response);
-    expect(template).toHaveBeenCalledWith('opening-balances');
+    expect(template).toHaveBeenCalledWith('opening-balances', user.companyId);
     expect(response.end).toHaveBeenCalledWith(Buffer.from('xlsx-bytes'));
 
     await expect(controller.upload(reader, 'opening-balances', file, {})).rejects.toBeInstanceOf(ForbiddenException);
