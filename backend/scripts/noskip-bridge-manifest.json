@@ -1,0 +1,20 @@
+{
+  "src/modules/inventory/batches.operations.integration.spec.ts": [
+    "batch operations over a real engine real Flutter receipt over HTTP persists location and shows its stock balance"
+  ],
+  "src/modules/inventory/stock-documents.locations.integration.spec.ts": [
+    "stock document transfer with source and target shelves over a real engine actual Flutter old draft read correction save post uses production SQL without duplication"
+  ],
+  "src/modules/inventory/stock-takes.locations.integration.spec.ts": [
+    "stock count per location over a real engine actual Flutter count add record finish uses service SQL and preserves frozen physical variance"
+  ],
+  "src/modules/inventory/storage-locations.lifecycle.integration.spec.ts": [
+    "storage location lifecycle over a real engine lot transfer between warehouses actual Flutter transfer submits physical shelves to production service and SQL"
+  ],
+  "src/modules/purchases/purchase-location-ui.integration.spec.ts": [
+    "purchase location actual Flutter bridge changes persisted receipt destination through the real form, then posts onto it"
+  ],
+  "src/modules/sales/sales-locations.integration.spec.ts": [
+    "sales posting with storage locations real Flutter draft read allocation edit save then SQL post and reverse"
+  ]
+}
