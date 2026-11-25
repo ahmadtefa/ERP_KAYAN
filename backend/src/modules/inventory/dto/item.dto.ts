@@ -51,6 +51,8 @@ export class CreateItemDto {
   @IsOptional() @IsString() openingQuantity?: string;
   @IsOptional() @IsString() openingUnitCost?: string;
   @IsOptional() @IsString() openingStorageLocationId?: string;
+  /// The warehouse the form named as the target; the save refuses if it is no longer the target.
+  @IsOptional() @IsString() openingWarehouseId?: string;
 
   /// The packing table: one row per unit, each carrying its own factor back
   /// to the base unit, barcode and prices. Left `undefined` the catalogue is

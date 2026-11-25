@@ -27,48 +27,36 @@ class _ItemTaxApi extends ApiClient {
   Map<String, dynamic>? submitted;
   bool failFirst = false;
   int posts = 0;
+  Map<String, dynamic> target = {
+    'state': 'ready',
+    'branch': {'nameEn': 'Cairo branch', 'nameAr': 'فرع القاهرة'},
+    'warehouse': {
+      'id': 'w',
+      'code': 'MAIN',
+      'nameEn': 'Main warehouse',
+      'nameAr': 'المخزن الرئيسي',
+    },
+  };
+  bool targetFails = false;
+  int targetCalls = 0;
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (path == '/inventory/items/opening-target') {
+      targetCalls++;
+      if (targetFails) throw StateError('boom');
+      return target;
+    }
+    return {};
+  }
+
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path == '/inventory/warehouses') {
-      return [
-        {
-          'id': 'w',
-          'branchId': 'br',
-          'code': 'MAIN',
-          'nameEn': 'Main warehouse',
-          'nameAr': 'المخزن الرئيسي',
-          'branchNameEn': 'Cairo branch',
-          'branchNameAr': 'فرع القاهرة',
-          'isDefault': true,
-        },
-        // Lower code but not the default: must not be the displayed target.
-        {
-          'id': 'annex',
-          'branchId': 'br',
-          'code': 'A0',
-          'nameEn': 'Annex warehouse',
-          'nameAr': 'مخزن الملحق',
-          'branchNameEn': 'Cairo branch',
-          'branchNameAr': 'فرع القاهرة',
-          'isDefault': false,
-        },
-        // Inactive default of the branch: must be ignored like the server does.
-        {
-          'id': 'dead',
-          'branchId': 'br',
-          'code': '0DEAD',
-          'nameEn': 'Dead warehouse',
-          'nameAr': 'مخزن معطل',
-          'branchNameEn': 'Cairo branch',
-          'branchNameAr': 'فرع القاهرة',
-          'isDefault': true,
-          'isActive': false,
-        },
-      ];
-    }
     if (path == '/inventory/locations') {
       return [
         {
@@ -261,10 +249,118 @@ void main() {
           api.submitted,
           containsPair('openingStorageLocationId', 'shelf'),
         );
+        // The save names the warehouse the form displayed, so a stale form is refused by the server.
+        expect(api.submitted, containsPair('openingWarehouseId', 'w'));
         expect(api.submitted, containsPair('openingQuantity', '5'));
         expect(api.submitted, containsPair('openingUnitCost', '2'));
         expect(tester.takeException(), isNull);
       },
     );
   }
+
+  Future<_ItemTaxApi> openForm(
+    WidgetTester tester,
+    void Function(_ItemTaxApi api) setup,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ItemTaxApi(existing: false);
+    setup(api);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          currentUserProvider.overrideWithValue(
+            const AppUser(
+              id: 'u',
+              username: 'u',
+              fullName: 'Manager',
+              companyId: 'c',
+              branchId: 'br',
+              permissions: ['inventory.items.create', 'inventory.cost.manage'],
+            ),
+          ),
+          appConfigProvider.overrideWithValue(
+            AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+          ),
+          exportCapabilitiesProvider.overrideWith(
+            (ref) async => ExportCapabilities.unknown,
+          ),
+        ],
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const Scaffold(body: ItemsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    return api;
+  }
+
+  testWidgets(
+    'restricted login: the server-resolved permitted warehouse is shown, nothing else',
+    (tester) async {
+      final api = await openForm(tester, (a) {
+        a.target = {
+          'state': 'ready',
+          'branch': {'nameEn': 'Cairo branch', 'nameAr': 'فرع'},
+          'warehouse': {
+            'id': 'w',
+            'code': 'C2',
+            'nameEn': 'Permitted store',
+            'nameAr': 'مخزن مسموح',
+          },
+        };
+      });
+      expect(api.targetCalls, 1);
+      expect(find.textContaining('Warehouse: Permitted store'), findsOneWidget);
+      expect(find.textContaining('Main warehouse'), findsNothing);
+    },
+  );
+
+  for (final entry in {
+    'forbidden': 'You are not allowed to receive stock',
+    'inactive': 'All warehouses of your branch are inactive',
+    'create': 'Your branch has no warehouse yet',
+  }.entries) {
+    testWidgets('state ${entry.key} is stated, with no invented warehouse', (
+      tester,
+    ) async {
+      final api = await openForm(tester, (a) {
+        a.target = {
+          'state': entry.key,
+          'branch': {'nameEn': 'Cairo branch', 'nameAr': 'فرع'},
+        };
+      });
+      expect(find.textContaining(entry.value), findsOneWidget);
+      expect(find.textContaining('Warehouse:'), findsNothing);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Name (English)'),
+        'X',
+      );
+      await tester.enterText(find.widgetWithText(TextFormField, 'Code'), 'X-1');
+      await tester.tap(find.text('Save').last);
+      await tester.pumpAndSettle();
+      // No opening quantity was typed, so no target is claimed in the payload.
+      expect(
+        api.submitted?.containsKey('openingWarehouseId') ?? false,
+        isFalse,
+      );
+    });
+  }
+
+  testWidgets('target cannot be determined: the form is not opened', (
+    tester,
+  ) async {
+    final api = await openForm(tester, (a) => a.targetFails = true);
+    expect(api.targetCalls, 1);
+    expect(find.text('Opening quantity'), findsNothing);
+    expect(find.textContaining('could not be determined'), findsOneWidget);
+  });
 }

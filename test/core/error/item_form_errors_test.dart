@@ -1,5 +1,6 @@
 import 'package:erp_kayan/core/error/app_error_text.dart';
 import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/features/inventory/domain/item_create_refusal.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The server refusals of the new-item form. None of them may fall back to the
@@ -55,5 +56,48 @@ void main() {
       409,
     );
     expect(text, isNot(contains('script')));
+  });
+
+  group('opening warehouse refusals', () {
+    const forbidden =
+        'You may not receive stock into any active warehouse of your branch, so opening stock cannot be saved.';
+    const inactive =
+        'All warehouses of this branch are inactive, so opening stock cannot be saved. Activate a branch warehouse or save the item without opening stock.';
+    const changed =
+        'The opening stock warehouse changed since the form was opened. Reopen the form to see the current warehouse.';
+    test('each has a specific Arabic message and is a definite refusal', () {
+      for (final raw in [forbidden, inactive, changed]) {
+        expect(
+          ar(raw, raw == forbidden ? 403 : 400),
+          contains('لم يُنشأ الصنف'),
+        );
+      }
+      expect(
+        isKnownItemCreateRefusal(ApiFailure(forbidden, statusCode: 403)),
+        isTrue,
+      );
+      expect(
+        isKnownItemCreateRefusal(ApiFailure(inactive, statusCode: 400)),
+        isTrue,
+      );
+      expect(
+        isKnownItemCreateRefusal(ApiFailure(changed, statusCode: 409)),
+        isTrue,
+      );
+    });
+    test('the same sentences on a 500/503 keep the duplicate-save lock', () {
+      for (final status in [500, 503]) {
+        expect(
+          isKnownItemCreateRefusal(ApiFailure(forbidden, statusCode: status)),
+          isFalse,
+        );
+      }
+      expect(
+        isKnownItemCreateRefusal(
+          ApiFailure('Forbidden resource', statusCode: 403),
+        ),
+        isFalse,
+      );
+    });
   });
 }

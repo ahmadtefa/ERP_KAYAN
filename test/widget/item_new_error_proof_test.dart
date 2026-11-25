@@ -29,6 +29,31 @@ class _ItemTaxApi extends ApiClient {
   bool failFirst = false;
   Object? failWith;
   int posts = 0;
+  Map<String, dynamic> target = {
+    'state': 'ready',
+    'branch': {'nameEn': 'Cairo branch', 'nameAr': 'فرع القاهرة'},
+    'warehouse': {
+      'id': 'w',
+      'code': 'MAIN',
+      'nameEn': 'Main warehouse',
+      'nameAr': 'المخزن الرئيسي',
+    },
+  };
+  bool targetFails = false;
+  int targetCalls = 0;
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (path == '/inventory/items/opening-target') {
+      targetCalls++;
+      if (targetFails) throw StateError('boom');
+      return target;
+    }
+    return {};
+  }
+
   @override
   Future<List<Map<String, dynamic>>> getList(
     String path, {

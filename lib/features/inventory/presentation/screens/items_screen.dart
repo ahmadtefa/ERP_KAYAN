@@ -114,42 +114,40 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     String openingWhere = openingArabic
         ? 'حسابك غير مرتبط بفرع، فلا يمكن حفظ كمية افتتاحية.'
         : 'Your login has no branch, so opening stock cannot be saved.';
+    String? openingWarehouseId;
     if (!isEdit && canManageInventoryCost && user?.branchId != null) {
       try {
         final client = ref.read(apiClientProvider);
-        final warehouses = (await client.getList(
-          '/inventory/warehouses',
-          query: {'branchId': user!.branchId, 'includeInactive': 'true'},
-        )).where((row) => text(row, 'branchId') == user.branchId).toList();
-        final allBranchWarehouses = warehouses.length;
-        // Same eligibility as the server: active (and not deleted) warehouses only.
-        warehouses.removeWhere(
-          (row) => row['isActive'] == false || row['deletedAt'] != null,
-        );
-        warehouses.sort((a, b) {
-          final byDefault =
-              (b['isDefault'] == true ? 1 : 0) -
-              (a['isDefault'] == true ? 1 : 0);
-          return byDefault != 0
-              ? byDefault
-              : text(a, 'code').compareTo(text(b, 'code'));
-        });
-        if (warehouses.isEmpty && allBranchWarehouses > 0) {
-          openingWhere = openingArabic
-              ? 'كل مخازن فرعك غير مفعّلة، فلن يُحفظ رصيد افتتاحي حتى تفعّل مخزنًا.'
-              : 'All warehouses of your branch are inactive, so opening stock will be refused until one is activated.';
-        } else if (warehouses.isEmpty) {
-          openingWhere = openingArabic
-              ? 'لا يوجد مخزن لفرعك حاليًا؛ سيُنشأ مخزن للفرع تلقائيًا عند الحفظ ويُسجَّل الرصيد عليه.'
-              : 'Your branch has no warehouse yet; one is created for the branch on save and the stock is recorded on it.';
-        }
-        if (warehouses.isNotEmpty) {
-          final first = warehouses.first;
-          String pick(String ar, String en) => openingArabic
-              ? text(first, ar, fallback: text(first, en))
-              : text(first, en, fallback: text(first, ar));
-          final branchName = pick('branchNameAr', 'branchNameEn');
-          final warehouseName = pick('nameAr', 'nameEn');
+        // The server answers with the warehouse it WILL write to for this
+        // login (active, within the user's warehouse grants), through the same
+        // resolver the save uses. The form never guesses it from a filtered list.
+        final target = await client.get('/inventory/items/opening-target');
+        final state = text(target, 'state');
+        final branchRow = target['branch'];
+        final branchName = branchRow is Map
+            ? (openingArabic
+                  ? text(
+                      Map<String, dynamic>.from(branchRow),
+                      'nameAr',
+                      fallback: text(
+                        Map<String, dynamic>.from(branchRow),
+                        'nameEn',
+                      ),
+                    )
+                  : text(
+                      Map<String, dynamic>.from(branchRow),
+                      'nameEn',
+                      fallback: text(
+                        Map<String, dynamic>.from(branchRow),
+                        'nameAr',
+                      ),
+                    ))
+            : '';
+        if (state == 'ready' && target['warehouse'] is Map) {
+          final first = Map<String, dynamic>.from(target['warehouse'] as Map);
+          final warehouseName = openingArabic
+              ? text(first, 'nameAr', fallback: text(first, 'nameEn'))
+              : text(first, 'nameEn', fallback: text(first, 'nameAr'));
           final shownWarehouse = warehouseName.isEmpty
               ? text(first, 'code')
               : warehouseName;
@@ -157,6 +155,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ? 'الرصيد يُضاف على - الفرع: ${branchName.isEmpty ? 'فرعك' : branchName}، المخزن: $shownWarehouse.'
               : 'Opening stock goes to - Branch: ${branchName.isEmpty ? 'your branch' : branchName}, Warehouse: $shownWarehouse.';
           final warehouseId = text(first, 'id');
+          openingWarehouseId = warehouseId;
           final rows = await client.getList(
             '/inventory/locations',
             query: {'warehouseId': warehouseId},
@@ -174,12 +173,36 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ),
             );
           }
+        } else if (state == 'create') {
+          openingWhere = openingArabic
+              ? 'لا يوجد مخزن لفرعك حاليًا؛ سيُنشأ مخزن للفرع تلقائيًا عند الحفظ ويُسجَّل الرصيد عليه.'
+              : 'Your branch has no warehouse yet; one is created for the branch on save and the stock is recorded on it.';
+        } else if (state == 'inactive') {
+          openingWhere = openingArabic
+              ? 'كل مخازن فرعك غير مفعّلة، فلن يُحفظ رصيد افتتاحي حتى تفعّل مخزنًا.'
+              : 'All warehouses of your branch are inactive, so opening stock will be refused until one is activated.';
+        } else if (state == 'forbidden') {
+          openingWhere = openingArabic
+              ? 'لا تملك صلاحية استلام مخزون في مخازن فرعك، فلن يُحفظ رصيد افتتاحي. احفظ الصنف بدون كمية افتتاحية أو اطلب الصلاحية.'
+              : 'You are not allowed to receive stock into your branch warehouses, so opening stock will be refused. Save without opening stock or ask for access.';
+        } else {
+          openingWhere = openingArabic
+              ? 'تعذّر تحديد المخزن المستهدف للرصيد الافتتاحي.'
+              : 'The opening stock warehouse could not be determined.';
         }
       } on Object {
-        openingWhere = openingArabic
-            ? 'تعذّر عرض المخزن المستهدف. الرصيد يُسجَّل على أول مخزن مفعّل في فرعك (الافتراضي أولًا) ويمكنك ترك الرف فارغًا.'
-            : 'The target warehouse could not be loaded. Opening stock goes to the first active warehouse of your branch (default first); you can leave the shelf empty.';
-        // Opening stock can remain explicitly unlocated if the catalogue is unavailable.
+        // Never open a form that could write stock to a warehouse it could not
+        // name: the user retries once the target can be determined.
+        if (mounted) {
+          showMessage(
+            context,
+            openingArabic
+                ? 'تعذّر تحديد المخزن المستهدف للرصيد الافتتاحي الآن، فلم يُفتح النموذج. حاول مرة أخرى.'
+                : 'The opening stock warehouse could not be determined now, so the form was not opened. Try again.',
+            error: true,
+          );
+        }
+        return;
       }
     }
     if (!mounted) return;
@@ -259,6 +282,14 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         final payload = Map<String, dynamic>.from(draft);
         // Empty optional prices mean “no price supplied”, not a zero price and
         // not “clear the saved value”. Clearing remains an explicit workflow.
+        // The warehouse the form named. The server refuses (nothing written) if it
+        // is no longer the target; without it a stale form could write elsewhere.
+        if (!isEdit &&
+            openingWarehouseId != null &&
+            (payload['openingQuantity']?.toString().trim().isNotEmpty ??
+                false)) {
+          payload['openingWarehouseId'] = openingWarehouseId;
+        }
         for (final key in ['salePrice', 'purchasePrice', 'openingUnitCost']) {
           final value = payload[key];
           if (value == null || value.toString().trim().isEmpty) {

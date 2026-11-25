@@ -12,6 +12,7 @@ import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { parseUnitRows, planUnitChanges, ParsedUnitRow } from './unit-input';
 import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { grantsOf, may, WarehouseAccessUser } from '../../common/warehouse/warehouse-access';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
 import { isValidEan13, randomInternalBarcode } from './barcode';
@@ -281,6 +282,52 @@ export class ItemsService {
     };
   }
 
+  /// Where an item's opening stock would be written for this caller, or why it
+  /// cannot be. The first ACTIVE warehouse of the caller's branch that the caller
+  /// may receive into (default first, then lowest code). Used by the form to name
+  /// the target and by `create` to write it. Returns only the permitted target's
+  /// own names, never other warehouses.
+  async resolveOpeningTarget(
+    client: Prisma.TransactionClient | PrismaService,
+    companyId: string,
+    branchId: string,
+    access: WarehouseAccessUser | null,
+  ): Promise<
+    | { state: 'ready'; warehouse: { id: string; code: string; nameEn: string; nameAr: string } }
+    | { state: 'create' | 'inactive' | 'forbidden' }
+  > {
+    const c = client as Prisma.TransactionClient;
+    const active = await c.warehouse.findMany({
+      where: { companyId, branchId, deletedAt: null, isActive: true },
+      orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
+      select: { id: true, code: true, nameEn: true, nameAr: true },
+    });
+    const permitted = active.find((w) => may(access, w.id, 'receive'));
+    if (permitted) return { state: 'ready', warehouse: permitted };
+    if (active.length > 0) return { state: 'forbidden' };
+    const anyWarehouse = await c.warehouse.findFirst({
+      where: { companyId, branchId, deletedAt: null },
+      select: { id: true },
+    });
+    if (anyWarehouse) return { state: 'inactive' };
+    // No warehouse at all: the first save creates the branch main warehouse,
+    // which a warehouse-restricted user may not do.
+    return grantsOf(access) !== null ? { state: 'forbidden' } : { state: 'create' };
+  }
+
+  async openingTarget(companyId: string, branchId: string | null, access: WarehouseAccessUser | null) {
+    if (!branchId) return { state: 'no_branch' as const };
+    const target = await this.resolveOpeningTarget(this.prisma as never, companyId, branchId, access);
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, companyId, deletedAt: null },
+      select: { nameEn: true, nameAr: true },
+    });
+    return {
+      ...target,
+      branch: branch ? { nameEn: branch.nameEn, nameAr: branch.nameAr } : null,
+    };
+  }
+
   async create(
     companyId: string,
     userId: string,
@@ -288,6 +335,7 @@ export class ItemsService {
     branchId: string | null = null,
     mayReadCost = true,
     mayManageBarcodes = true,
+    access: WarehouseAccessUser | null = null,
   ) {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
@@ -446,32 +494,43 @@ export class ItemsService {
           'inventory',
           'openingBalanceEquity',
         ]);
-        // The target is the branch's first ACTIVE warehouse, default first then
-        // lowest code. The item form shows exactly this one. A branch whose
-        // warehouses are all inactive is refused (never silently stocked into an
-        // inactive warehouse); a branch with none gets one created by resolve().
-        const activeWarehouse = await tx.warehouse.findFirst({
-          where: { companyId, branchId: branchId!, deletedAt: null, isActive: true },
-          orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
-          select: { id: true },
-        });
-        let warehouseId: string | null;
-        if (activeWarehouse) {
-          warehouseId = activeWarehouse.id;
-        } else {
-          const anyWarehouse = await tx.warehouse.findFirst({
-            where: { companyId, branchId: branchId!, deletedAt: null },
-            select: { id: true },
+        // One resolver serves the form (GET opening-target) and this save, so the
+        // warehouse the form names is the warehouse that is written, within the
+        // caller's warehouse grants.
+        const target = await this.resolveOpeningTarget(tx, companyId, branchId!, access);
+        if (target.state === 'forbidden') {
+          throw new ForbiddenException({
+            code: 'ITEM_OPENING_WAREHOUSE_FORBIDDEN',
+            message:
+              'You may not receive stock into any active warehouse of your branch, so opening stock cannot be saved.',
           });
-          if (anyWarehouse) {
-            throw new BadRequestException({
-              code: 'ITEM_OPENING_WAREHOUSE_INACTIVE',
+        }
+        if (target.state === 'inactive') {
+          throw new BadRequestException({
+            code: 'ITEM_OPENING_WAREHOUSE_INACTIVE',
+            message:
+              'All warehouses of this branch are inactive, so opening stock cannot be saved. Activate a branch warehouse or save the item without opening stock.',
+          });
+        }
+        const shownWarehouseId =
+          typeof dto.openingWarehouseId === 'string' && dto.openingWarehouseId ? dto.openingWarehouseId : null;
+        const targetId = target.state === 'ready' ? target.warehouse.id : null;
+        if (shownWarehouseId !== null || targetId !== null) {
+          // The form names the target it was shown; if that is no longer the
+          // target (warehouse changed, deactivated, grants changed since the
+          // form opened) nothing is written and the user reopens the form.
+          if (shownWarehouseId !== targetId && shownWarehouseId !== null) {
+            throw new ConflictException({
+              code: 'ITEM_OPENING_TARGET_CHANGED',
               message:
-                'كل مخازن الفرع غير مفعّلة، فلا يمكن حفظ كمية افتتاحية. فعّل مخزنًا للفرع أو احفظ الصنف بدون كمية افتتاحية؛ بيانات الصنف المُدخلة محفوظة. / All warehouses of this branch are inactive, so opening stock cannot be saved. Activate a branch warehouse or save the item without opening stock; the item data you entered is kept.',
+                'The opening stock warehouse changed since the form was opened. Reopen the form to see the current warehouse.',
             });
           }
-          warehouseId = await this.warehouses.resolve(tx, companyId, branchId!);
         }
+        const warehouseId: string | null =
+          target.state === 'ready'
+            ? target.warehouse.id
+            : await this.warehouses.resolve(tx, companyId, branchId!);
         const asOf = new Date(new Date().toISOString().slice(0, 10));
         const openingShelfId =
           typeof dto.openingStorageLocationId === 'string' && dto.openingStorageLocationId

@@ -27,6 +27,14 @@ export class ItemsController {
     return this.service.findByBarcode(user.companyId, code, this.mayReadCost(user)).then((result) => this.redactPrices(user, result));
   }
 
+  /// The warehouse a new item's opening stock would be written to for this
+  /// caller (same resolver as the save). Declared before `:id`.
+  @Get('opening-target')
+  @RequirePermissions('inventory.items.create')
+  openingTarget(@CurrentUser() user: AuthUser) {
+    return this.service.openingTarget(user.companyId, user.branchId ?? null, user);
+  }
+
   @Get(':id')
   @RequirePermissions('inventory.items.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -44,6 +52,7 @@ export class ItemsController {
       user.branchId,
       canReadPurchasePrice(user),
       this.mayManageBarcodes(user),
+      user,
     ).then((result) => this.redactPrices(user, result));
   }
 

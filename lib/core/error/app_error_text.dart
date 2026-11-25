@@ -946,6 +946,27 @@ class AppErrorMessageResolver {
       (m) =>
           'للفرع مستند رصيد افتتاحي بالفعل${_safeToken(m.group(1))}. أضف الصنف في هذا المستند بدل إدخال رصيد افتتاحي هنا، أو امسح الكمية والتكلفة الافتتاحية. لم يُنشأ الصنف.',
     ),
+    _BusinessRule(
+      _ci(
+        r'^You may not receive stock into any active warehouse of your branch, so opening stock cannot be saved\.$',
+      ),
+      (_) =>
+          'لا تملك صلاحية استلام مخزون في أي مخزن مفعّل بفرعك، فلا يمكن حفظ رصيد افتتاحي. احفظ الصنف بدون كمية افتتاحية أو اطلب الصلاحية من المدير. لم يُنشأ الصنف.',
+    ),
+    _BusinessRule(
+      _ci(
+        r'^All warehouses of this branch are inactive, so opening stock cannot be saved\. Activate a branch warehouse or save the item without opening stock\.$',
+      ),
+      (_) =>
+          'كل مخازن الفرع غير مفعّلة، فلا يمكن حفظ رصيد افتتاحي. فعّل مخزنًا للفرع أو احفظ الصنف بدون كمية افتتاحية. لم يُنشأ الصنف.',
+    ),
+    _BusinessRule(
+      _ci(
+        r'^The opening stock warehouse changed since the form was opened\. Reopen the form to see the current warehouse\.$',
+      ),
+      (_) =>
+          'مخزن الرصيد الافتتاحي تغيّر منذ فتح النموذج. أغلق النموذج وافتحه من جديد لترى المخزن الحالي. لم يُنشأ الصنف.',
+    ),
     _BusinessRule(_ci(r'^(.+) code (\S+) does not exist$'), (m) {
       final noun = _nounOrNull(m.group(1));
       return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير موجود.';

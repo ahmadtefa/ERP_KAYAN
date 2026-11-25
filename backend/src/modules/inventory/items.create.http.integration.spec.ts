@@ -114,7 +114,8 @@ const vmLacksDynamicImport = !(
         username: 'tester',
         companyId: COMPANY,
         branchId: branch === 'none' ? null : (branch ?? BRANCH),
-        isSuperAdmin: true,
+        isSuperAdmin: req.headers['x-test-grants'] ? false : true,
+        warehouseAccess: req.headers['x-test-grants'] ? JSON.parse(String(req.headers['x-test-grants'])) : undefined,
         permissions: ['inventory.items.create', 'inventory.cost.manage', 'inventory.cost.read', 'inventory.items.purchaseprice.manage'],
         roles: [],
       };
@@ -131,10 +132,10 @@ const vmLacksDynamicImport = !(
     await db?.close();
   });
 
-  const post = async (body: unknown, branch?: string) => {
+  const post = async (body: unknown, branch?: string, grants?: unknown) => {
     const res = await fetch(`${base}/api/v1/inventory/items`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(branch ? { 'x-test-branch': branch } : {}) },
+      headers: { 'content-type': 'application/json', ...(branch ? { 'x-test-branch': branch } : {}), ...(grants ? { 'x-test-grants': JSON.stringify(grants) } : {}) },
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -229,6 +230,75 @@ const vmLacksDynamicImport = !(
     const wh = await movementWarehouse('OK-NOWH');
     expect(wh.length).toBe(1);
     expect(await count(db, `SELECT count(*) AS n FROM warehouses WHERE id='${wh[0]}' AND "branchId"='${B}' AND "isDefault"=true AND "isActive"=true`)).toBe(1);
+  });
+
+  const grant = (warehouseId: string, canReceive: boolean) => ({ warehouseId, canView: true, canReceive, canIssue: false, canTransfer: false, canCount: false, canApprove: false, canSeeCost: true });
+  const getTarget = async (branch: string, grants?: unknown) => {
+    const res = await fetch(`${base}/api/v1/inventory/items/opening-target`, {
+      headers: { 'x-test-branch': branch, ...(grants ? { 'x-test-grants': JSON.stringify(grants) } : {}) },
+    });
+    return { status: res.status, json: await res.json() as any };
+  };
+
+  it('2g. restricted user: display and save use the same PERMITTED warehouse (default is hidden from them), no hidden warehouse leaks', async () => {
+    const B = '99999999-9999-4999-8999-999999999994';
+    await addBranch(B, 'B7', [
+      ['99999999-9999-4999-8999-9999999999c1', 'C1', true, true],
+      ['99999999-9999-4999-8999-9999999999c2', 'C2', false, true],
+    ]);
+    const grants = [grant('99999999-9999-4999-8999-9999999999c2', true)];
+    const t = await getTarget(B, grants);
+    expect(t.status).toBe(200);
+    expect(t.json.state).toBe('ready');
+    expect(t.json.warehouse.id).toBe('99999999-9999-4999-8999-9999999999c2');
+    expect(JSON.stringify(t.json)).not.toContain('C1');
+    const r = await post(payload('OK-GRANT', { openingWarehouseId: t.json.warehouse.id }), B, grants);
+    expect(r.status).toBe(201);
+    expect(await movementWarehouse('OK-GRANT')).toEqual(['99999999-9999-4999-8999-9999999999c2']);
+  });
+
+  it('2h. view-only grant (cannot receive): target is forbidden, save refused with 403 and nothing is written', async () => {
+    const B = '99999999-9999-4999-8999-999999999995';
+    await addBranch(B, 'B8', [['99999999-9999-4999-8999-9999999999d1', 'E1', true, true]]);
+    const grants = [grant('99999999-9999-4999-8999-9999999999d1', false)];
+    expect((await getTarget(B, grants)).json.state).toBe('forbidden');
+    const journalsBefore = await journalRows();
+    const r = await post(payload('NO-RECV'), B, grants);
+    expect(r.status).toBe(403);
+    expect(r.json.code).toBe('ITEM_OPENING_WAREHOUSE_FORBIDDEN');
+    expect(await itemRows('NO-RECV')).toBe(0);
+    expect(await journalRows()).toBe(journalsBefore);
+  });
+
+  it('2i. restricted user in a branch with no warehouse: forbidden (no warehouse is created for them); unrestricted user is told it will be created', async () => {
+    const B = '99999999-9999-4999-8999-999999999996';
+    await addBranch(B, 'B9', []);
+    expect((await getTarget(B, [grant(WAREHOUSE, true)])).json.state).toBe('forbidden');
+    const r = await post(payload('NO-CREATE'), B, [grant(WAREHOUSE, true)]);
+    expect(r.status).toBe(403);
+    expect(await count(db, `SELECT count(*) AS n FROM warehouses WHERE "branchId"='${B}'`)).toBe(0);
+    expect((await getTarget(B)).json.state).toBe('create');
+  });
+
+  it('2j. stale form: the warehouse the form named is no longer the target (deactivated meanwhile): 409, nothing written', async () => {
+    const B = '99999999-9999-4999-8999-999999999997';
+    await addBranch(B, 'BA', [
+      ['99999999-9999-4999-8999-9999999999e1', 'F1', true, true],
+      ['99999999-9999-4999-8999-9999999999e2', 'F2', false, true],
+    ]);
+    const shown = (await getTarget(B)).json.warehouse.id;
+    expect(shown).toBe('99999999-9999-4999-8999-9999999999e1');
+    await db.exec(`UPDATE warehouses SET "isActive"=false WHERE id='${shown}'`);
+    const journalsBefore = await journalRows();
+    const r = await post(payload('STALE-1', { openingWarehouseId: shown }), B);
+    expect(r.status).toBe(409);
+    expect(r.json.code).toBe('ITEM_OPENING_TARGET_CHANGED');
+    expect(await itemRows('STALE-1')).toBe(0);
+    expect(await journalRows()).toBe(journalsBefore);
+    // Reopened form shows the new target and saves there.
+    const now = (await getTarget(B)).json.warehouse.id;
+    expect(now).toBe('99999999-9999-4999-8999-9999999999e2');
+    expect((await post(payload('STALE-2', { openingWarehouseId: now }), B)).status).toBe(201);
   });
 
   it('3b. a location of another branch is refused with the existing Arabic message and nothing is kept', async () => {
