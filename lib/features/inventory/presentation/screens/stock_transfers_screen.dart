@@ -748,6 +748,15 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
   }
 }
 
+class _UncertainTransferOperation {
+  _UncertainTransferOperation(this.action, this.key, this.lines);
+  final String action, key;
+  final List<Json> lines;
+}
+
+final _uncertainTransferOperations =
+    Provider<Map<String, _UncertainTransferOperation>>((ref) => {});
+
 class _TransferDialog extends ConsumerStatefulWidget {
   const _TransferDialog({required this.id, required this.ar});
   final String id;
@@ -777,10 +786,28 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
   }
 
   Json? approvalPath;
+  String? reconciliation;
   Future<void> _load() async {
     try {
       final api = ref.read(apiClientProvider);
       final x = await api.getObject('/inventory/stock-transfers/${widget.id}');
+      final pending = ref.read(_uncertainTransferOperations)[widget.id];
+      if (pending != null) {
+        final actions = listOf(x['actions']);
+        final confirmed = actions.any(
+          (a) =>
+              a['requestKey'] ==
+                  '${pending.action.toUpperCase()}:${pending.key}' &&
+              a['stockDocumentId'] != null,
+        );
+        if (confirmed) {
+          ref.read(_uncertainTransferOperations).remove(widget.id);
+          reconciliation = t(
+            'تم تأكيد العملية السابقة من سجل التحويل. راجع الكميات المحدثة.',
+            'The earlier operation is confirmed in the transfer record. Review the updated quantities.',
+          );
+        }
+      }
       Json? p;
       try {
         p = await api.getObject(
@@ -827,6 +854,14 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (reconciliation != null) Text(reconciliation!),
+                  if (ref.read(_uncertainTransferOperations)[widget.id] != null)
+                    Text(
+                      t(
+                        'توجد عملية غير مؤكدة محفوظة. افتح نفس الإجراء لمراجعة بياناته. الإرسال محظور حتى يؤكد سجل التحويل النتيجة. حدّث أو راجع المدير.',
+                        'An uncertain operation is saved. Open the same action to review its entries. Submission is blocked until the transfer record confirms the result. Refresh or ask the administrator to review.',
+                      ),
+                    ),
                   Text('${text(row!, 'reason')} · $status'),
                   const SizedBox(height: 10),
                   _approvalPath(),
@@ -984,6 +1019,10 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
           can('inventory.transfer.cancel'))
         _action('cancel', t('إلغاء/عكس', 'Cancel/reverse')),
       TextButton(
+        onPressed: busy ? null : _load,
+        child: Text(t('تحديث التحويل', 'Refresh transfer')),
+      ),
+      TextButton(
         onPressed: busy ? null : () => Navigator.pop(context, true),
         child: Text(t('تم', 'Done')),
       ),
@@ -1048,27 +1087,75 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
         .whereType<Map>()
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
+    final existingPending = ref.read(_uncertainTransferOperations)[widget.id];
+    if (existingPending != null && existingPending.action != action) {
+      await showAppError(
+        context,
+        const ValidationFailure(
+          'Review the saved uncertain operation before another stock action.',
+        ),
+      );
+      return;
+    }
     Object? body;
     final key = '$action-${DateTime.now().microsecondsSinceEpoch}';
     if (action == 'dispatch' || action == 'receive' || action == 'settle') {
-      Future<void> send(List<Json> selected) => api.post(
-        '/inventory/stock-transfers/${widget.id}/$action',
-        body: {'lines': selected},
-        idempotencyKey: '$action-${DateTime.now().microsecondsSinceEpoch}',
-      );
+      final savedOperations = ref.read(_uncertainTransferOperations);
+      final pending = savedOperations[widget.id];
+      if (pending != null && pending.action != action) {
+        await showAppError(
+          context,
+          const ValidationFailure(
+            'Review the saved uncertain operation before another stock action.',
+          ),
+        );
+        return;
+      }
+      Future<void> send(List<Json> selected) async {
+        final requestKey = '$action-${DateTime.now().microsecondsSinceEpoch}';
+        try {
+          await api.post(
+            '/inventory/stock-transfers/${widget.id}/$action',
+            body: {'lines': selected},
+            idempotencyKey: requestKey,
+          );
+          savedOperations.remove(widget.id);
+        } catch (error) {
+          if (!(error is ApiFailure &&
+              error.statusCode != null &&
+              error.statusCode! >= 400 &&
+              error.statusCode! < 500)) {
+            savedOperations[widget.id] = _UncertainTransferOperation(
+              action,
+              requestKey,
+              selected.map((e) => Map<String, dynamic>.from(e)).toList(),
+            );
+          }
+          rethrow;
+        }
+      }
+
       final saved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => action == 'settle'
-            ? _SettlementDialog(ar: ar, lines: lines, onSubmit: send)
+            ? _SettlementDialog(
+                ar: ar,
+                lines: lines,
+                onSubmit: send,
+                pending: pending?.lines,
+              )
             : _QuantityDialog(
                 ar: ar,
                 lines: lines,
                 receive: action == 'receive',
                 onSubmit: send,
+                pending: pending?.lines,
               ),
       );
-      if (saved == true && mounted) await _load();
+      if (mounted && (saved == true || savedOperations[widget.id] != null)) {
+        await _load();
+      }
       return;
     }
     if (action == 'reject' || action == 'return') {
@@ -1171,10 +1258,12 @@ class _QuantityDialog extends StatefulWidget {
     required this.lines,
     required this.receive,
     required this.onSubmit,
+    this.pending,
   });
 
   final bool ar;
   final bool receive;
+  final List<Json>? pending;
   final Future<void> Function(List<Json>) onSubmit;
   final List<Json> lines;
 
@@ -1189,6 +1278,8 @@ class _QuantityDialogState extends State<_QuantityDialog>
   @override
   void initState() {
     super.initState();
+    uncertain = widget.pending != null;
+    if (uncertain) submissionMessage = "The operation may have completed. Saved entries remain blocked. Refresh the transfer or ask the administrator to verify the original operation.";
     controllers = widget.lines.map((line) {
       final dispatched = double.tryParse('${line['dispatchedQuantity']}') ?? 0;
       final received = double.tryParse('${line['receivedQuantity']}') ?? 0;
@@ -1199,7 +1290,12 @@ class _QuantityDialogState extends State<_QuantityDialog>
           ? dispatched - received - returned - writtenOff
           : requested - dispatched;
       return TextEditingController(
-        text: remaining.clamp(0, double.infinity).toString(),
+        text:
+            widget.pending
+                ?.where((p) => p['lineId'] == line['id'])
+                .firstOrNull?['quantity']
+                ?.toString() ??
+            remaining.clamp(0, double.infinity).toString(),
       );
     }).toList();
   }
@@ -1289,10 +1385,12 @@ class _SettlementDialog extends StatefulWidget {
     required this.ar,
     required this.lines,
     required this.onSubmit,
+    this.pending,
   });
   final bool ar;
   final List<Json> lines;
   final Future<void> Function(List<Json>) onSubmit;
+  final List<Json>? pending;
 
   @override
   State<_SettlementDialog> createState() => _SettlementDialogState();
@@ -1326,6 +1424,19 @@ class _SettlementDialogState extends State<_SettlementDialog>
       widget.lines.length,
       (_) => TextEditingController(),
     );
+    uncertain = widget.pending != null;
+    if (uncertain) submissionMessage = 'The operation may have completed. Saved entries remain blocked. Refresh the transfer or ask the administrator to verify the original operation.';
+    for (var i = 0; i < widget.lines.length; i++) {
+      final draft = widget.pending
+          ?.where((p) => p['lineId'] == widget.lines[i]['id'])
+          .firstOrNull;
+      if (draft != null) {
+        returns[i].text = '${draft['returnedQuantity']}';
+        shortages[i].text = '${draft['shortage']}';
+        damages[i].text = '${draft['damage']}';
+        reasons[i].text = '${draft['reason']}';
+      }
+    }
   }
 
   @override

@@ -30,6 +30,7 @@ class _Api extends ApiClient {
   int reads = 0;
   bool refuse = false;
   bool definite = false;
+  bool confirmed = false;
   Map<String, dynamic> get row => {
     'id': 't',
     'documentNumber': 'TR-OPS',
@@ -63,7 +64,7 @@ class _Api extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     reads++;
-    return path.endsWith('/approvals') ? {} : row;
+    return path.endsWith('/approvals') ? {} : {...row,'actions': confirmed && keys.isNotEmpty ? [{'requestKey':'DISPATCH:${keys.last}','stockDocumentId':'confirmed-doc'}] : []};
   }
 
   @override
@@ -357,4 +358,14 @@ void main() {
       image.dispose();
     });
   });
+  testWidgets('uncertain dispatch survives close refresh reopen until original key confirmed', (tester) async {
+    final api=_Api('APPROVED')..refuse=true;await pump(tester,api);
+    await tester.tap(find.text('Dispatch'));await tester.pumpAndSettle();await tester.enterText(find.widgetWithText(TextField,'Qty'),'1.25');await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();await tester.tap(find.text('OK'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();await tester.tap(find.text('Refresh transfer'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));await tester.pumpAndSettle();await tester.tap(find.byTooltip('Details'));await tester.pumpAndSettle();await tester.tap(find.text('Dispatch'));await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.widgetWithText(TextField,'Qty')).controller!.text,'1.25');expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNull);expect(api.posts,hasLength(1));
+    await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();api.confirmed=true;api.refuse=false;await tester.tap(find.text('Refresh transfer'));await tester.pumpAndSettle();await tester.tap(find.text('Dispatch'));await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNotNull);expect(api.posts,hasLength(1));
+  });
+
 }
