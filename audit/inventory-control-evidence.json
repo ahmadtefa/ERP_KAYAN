@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 118,
-    "OPEN_UNMAPPED": 73
+    "MAPPED_WIDGET": 126,
+    "OPEN_UNMAPPED": 65
   },
   "controls": [
     {
@@ -1100,15 +1100,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 54,
       "source": "SizedBox(width:190,child:TextField(decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:t('بحث','Search'),isDense:true),onChanged:(v)=>setState(()=>_query=v.trim().toLowerCase()))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 55,
       "source": "IconButton(tooltip:t('تحديث','Refresh'),onPressed:()=>ref.read(stockTransfersProvider.notifier).reload(),icon:const Icon(Icons.refresh)),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1193,36 +1205,66 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 165,
       "source": "SizedBox(width:115,child:TextField(controller:line.quantity,onChanged:(_)=>_clear('lines.$index.quantity'),keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity'),errorText:_errors['lines.$index.quantity']))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 166,
       "source": "if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(isExpanded:true,initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit'),errorText:_errors['lines.$index.unitName']),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v){_errors.remove('lines.$index.unitName');setState(()=>line.unitName=v);})),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 167,
       "source": "if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 168,
       "source": "IconButton(tooltip:t('حذف البند','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 171,
       "source": "Align(alignment:AlignmentDirectional.centerStart,child:TextButton.icon(onPressed:()=>setState(()=>_lines.add(_DraftLine())),icon:const Icon(Icons.add),label:Text(t('إضافة صنف','Add item')))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1241,8 +1283,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 173,
       "source": "TextField(controller:_notes,onChanged:(_)=>_clear('notes'),decoration:InputDecoration(labelText:t('ملاحظات','Notes'),errorText:_errors['notes'])),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer draft add remove unit lot notes and cancel keep intended lines",
+          "proofLevel": "widget with synthetic API, 2-case local run 2026-11-25 06:34 passes with no hit-test warnings; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",

@@ -183,3 +183,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 06:26 voucher page controls
 - New page1->next2->previous1->next2->refresh2->search resets1 test preserves branch/voucherOnly scope and sends no stock create. Voucher flow22/22 passes, full analyze clean.
 - Mapped refresh/previous/next original sites, partial register118 mapped/73 open. List row detail navigation remains open, not inferred from direct detail fixtures.
+
+### 06:35 dedicated transfer draft remaining controls
+- New synthetic test refreshes list without mutation, trims case-insensitive search, selects explicit unit+source lot, enters3 boxes, adds/removes second line, sends one intended line with exact unit/lot/quantity/notes and cancels subsequent draft without mutation. Existing error/idempotent retry preserved.2/2 pass, zero hit-test warnings after targeting dropdown parents. Full analyze clean.
+- Mapped8 original sites, register126 mapped/65 open. Dedicated dispatch/receive/settle/report and other unexercised actions remain open, not inferred from draft test.
