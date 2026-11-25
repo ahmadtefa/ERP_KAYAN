@@ -131,14 +131,18 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
 
   afterAll(async () => {
     if (!prisma) return;
-    await prisma.stockMovement.deleteMany({ where: { companyId } });
-    await prisma.warehouseStockBalance.deleteMany({ where: { companyId } });
-    await prisma.stockBalance.deleteMany({ where: { companyId } });
-    await prisma.stockDocument.deleteMany({ where: { companyId } });
-    await prisma.item.deleteMany({ where: { companyId } });
-    await prisma.userWarehouseAccess.deleteMany({ where: { companyId } });
-    await prisma.warehouse.deleteMany({ where: { companyId } });
-    await prisma.branch.deleteMany({ where: { companyId } });
+    // Only the rows this suite created, by exact id. The company may be a
+    // borrowed one that holds real rows, so a company-wide delete is never safe.
+    const branchIds = [branchA, branchB];
+    const warehouseIds = [warehouseA, warehouseA2, warehouseB];
+    await prisma.stockMovement.deleteMany({ where: { companyId, itemId, branchId: { in: branchIds }, warehouseId: { in: warehouseIds } } });
+    await prisma.warehouseStockBalance.deleteMany({ where: { companyId, itemId, warehouseId: { in: warehouseIds } } });
+    await prisma.stockBalance.deleteMany({ where: { companyId, itemId, branchId: { in: branchIds } } });
+    await prisma.stockDocument.deleteMany({ where: { companyId, id: stockDocumentB } });
+    await prisma.item.deleteMany({ where: { companyId, id: itemId } });
+    await prisma.userWarehouseAccess.deleteMany({ where: { companyId, warehouseId: { in: warehouseIds } } });
+    await prisma.warehouse.deleteMany({ where: { companyId, id: { in: warehouseIds } } });
+    await prisma.branch.deleteMany({ where: { companyId, id: { in: branchIds } } });
     if (ownsCompany) await prisma.company.deleteMany({ where: { id: companyId } });
     await prisma.$disconnect();
   });
@@ -146,7 +150,12 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
   // The two account shapes that matter. Both are ordinary users; the only
   // difference is which branch they belong to.
   const accountOfBranchA = { companyId, userId: randomUUID(), branchId: branchA, branchIds: [branchA] };
-  const companyWide = { companyId, userId: randomUUID(), branchId: null, branchIds: [] };
+  // A company-wide account is built the way production builds one: no branch
+  // and a company-wide role (or a super administrator). An account with no
+  // branch and no such role fails closed (see branch-read-scope.ts).
+  const companyWide = { companyId, userId: randomUUID(), branchId: null, branchIds: [], roles: ['GENERAL_MANAGER'] };
+  const superAdmin = { companyId, userId: randomUUID(), branchId: null, branchIds: [], roles: [], isSuperAdmin: true };
+  const ordinaryNoBranch = { companyId, userId: randomUUID(), branchId: null, branchIds: [], roles: ['SALES_CLERK'] };
 
   describe('company boundaries', () => {
     it('answers another company with nothing, not with this company rows', async () => {
@@ -196,6 +205,10 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
       // earlier assertion is isolation and not an empty ledger.
       const everywhere = await stock.itemLedger(companyId, itemId, true, undefined, warehouseScopeOf(companyWide));
       expect(everywhere.movements).toHaveLength(3);
+      // An ordinary account with no branch assignment fails closed: it sees no
+      // ledger rows from either branch (nothing is widened to make it pass).
+      const nothing = await stock.itemLedger(companyId, itemId, true, undefined, warehouseScopeOf(ordinaryNoBranch));
+      expect(nothing.movements).toHaveLength(0);
     });
   });
 
@@ -274,8 +287,11 @@ const run = process.env.KAYAN_WAREHOUSE_ACCESS_PG === '1';
       expect(canReadCost(withCost as never)).toBe(true);
     });
 
-    it('treats a user with no branch assignment as company-wide', () => {
+    it('keeps company-wide roles unrestricted and fails closed for an ordinary account with no branch', () => {
       expect(warehouseScopeOf(companyWide)).toBeNull();
+      expect(warehouseScopeOf(superAdmin)).toBeNull();
+      expect(warehouseScopeOf(ordinaryNoBranch)).toEqual([]);
+      expect(warehouseScopeOf({ ...ordinaryNoBranch, roles: [] })).toEqual([]);
       expect(warehouseScopeOf(accountOfBranchA)).toEqual([branchA]);
     });
   });
