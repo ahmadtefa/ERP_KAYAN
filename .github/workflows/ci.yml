@@ -99,9 +99,19 @@ jobs:
         run: |
           node -e "const j=require('./jest.config.cjs');if(!j||!j.rootDir)process.exit(1)"
           node -e "if(!(process.env.NODE_OPTIONS||'').includes('--experimental-vm-modules')){console.error('NODE_OPTIONS must carry --experimental-vm-modules or the PGlite suites cannot run');process.exit(1)}"
+      # Real-database specs (field-error-http) truncate and rebuild their own
+      # company, and need a migrated schema. Give them a scratch database so
+      # they neither hit an empty one nor disturb the smoke-test database below.
+      - name: Create a migrated scratch database for the real-database specs
+        env:
+          PGPASSWORD: ci
+        run: |
+          psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_kayan_specs'
+          DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/erp_kayan_specs?schema=public' node scripts/apply-migrations.mjs
       - name: Run all backend tests in bounded-memory batches
         env:
           NODE_OPTIONS: --experimental-vm-modules
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_specs?schema=public
         # Each batch runs in its own Node process, preventing Jest's retained
         # worker state from growing until the whole suite exhausts the heap.
         # The runner discovers every *.spec.ts file and stops on the first
@@ -458,6 +468,11 @@ jobs:
       - name: Apply migrations to a freshly created database
         run: node scripts/apply-migrations.mjs
       - name: Seed an isolated company and administrator
+        env:
+          # This scenario looks accounts up by the legacy 4-digit codes
+          # (1101, 1102, 3103). New companies now get the 2/4/6/8 digit chart,
+          # so seed the legacy one here, as kayan-acceptance.yml does.
+          KAYAN_SEED_ACCOUNT_CODE_SCHEME: LEGACY
         run: npx ts-node prisma/seed.ts
       - name: Verify quotation migrations are present in the runtime database
         run: |
