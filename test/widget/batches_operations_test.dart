@@ -487,7 +487,7 @@ void main() {
     testWidgets('transfer sources stay explicit for a split lot and render with actual fonts', (tester) async {
       await tester.runAsync(() async {
         await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
-        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();
+        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();
       });
       final ar = Platform.environment['KAYAN_ARABIC_COMPACT'] == '1';
       final row=_lot(location:null)..['locations']=[{'locationId':'loc-1','quantity':'40.0000'}];
@@ -502,7 +502,7 @@ void main() {
       await pickDropdownItem(tester,ar?'موقع الصرف':'Source location',ar?'A-01 • ممر أ رف ١':'A-01 • Aisle A shelf 1');
       await pickDropdownItem(tester,ar?'موقع الاستلام (اختياري)':'Destination location (optional)',ar?'T-01 • رف الاستلام':'T-01 • Target shelf');
       final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      await tester.runAsync(() async {final image=await boundary.toImage();final data=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/batch-transfer-${ar?'ar':'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());image.dispose();});
+      await tester.runAsync(() async {final image=await boundary.toImage();final data=await image.toByteData(format:ui.ImageByteFormat.png);await screenshotFile('batch-transfer-${ar?'ar':'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());image.dispose();});
       expect(tester.takeException(),isNull);
       await tapText(tester,ar?'تحويل':'Transfer');
       expect(api.posted.single.$2['fromStorageLocationId'],'loc-1');
@@ -621,7 +621,7 @@ void main() {
     testWidgets('split source visual proof with actual fonts', (tester) async {
       await tester.runAsync(() async {
         await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
-        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();
+        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();
       });
       final ar = Platform.environment['KAYAN_ARABIC_COMPACT'] == '1';
       final api = _BatchApi()..secondLocation = true;
@@ -638,7 +638,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/batch-split-${ar ? 'ar' : 'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());
+        await screenshotFile('batch-split-${ar ? 'ar' : 'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());
         image.dispose();
       });
       expect(tester.takeException(), isNull);

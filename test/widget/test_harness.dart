@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/core/storage/token_store.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -81,4 +83,32 @@ Widget wrapWithApp({
     supportedLocales: AppLocalizations.supportedLocales,
     home: child,
   );
+}
+
+/// Resolve the SDK actually running this test, not a developer's SDK location.
+String get materialIconsFontPath {
+  final roots = <String>[
+    if (Platform.environment['FLUTTER_ROOT'] case final String root) root,
+  ];
+  var ancestor = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 8; i++) {
+    roots.add(ancestor.path);
+    ancestor = ancestor.parent;
+  }
+  for (final root in roots) {
+    final font = File(
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    );
+    if (font.existsSync()) return font.path;
+  }
+  throw StateError('Material Icons font missing from the active Flutter SDK');
+}
+
+/// Keep visual evidence in a writable project artifact folder on every host.
+File screenshotFile(String name) {
+  final root = Directory(
+    Platform.environment['KAYAN_VISUAL_OUTPUT'] ?? 'build/visual-evidence',
+  );
+  root.createSync(recursive: true);
+  return File('${root.path}/$name');
 }

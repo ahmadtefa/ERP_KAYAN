@@ -34,9 +34,7 @@ void main() {
       await (FontLoader('MaterialIcons')..addFont(
             Future.value(
               ByteData.sublistView(
-                File(
-                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                ).readAsBytesSync(),
+                File(materialIconsFontPath).readAsBytesSync(),
               ),
             ),
           ))
@@ -117,7 +115,7 @@ void main() {
     await tester.runAsync(() async {
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('/downloads/stock-document-correction.png')
+      await screenshotFile('stock-document-correction.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });

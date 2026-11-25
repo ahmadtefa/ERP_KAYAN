@@ -377,7 +377,7 @@ void main() {
 
   testWidgets('transfer draft selects source and target shelves in their own stores', (tester) async {
     await tester.runAsync(() async {await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();});
-    await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();});
+    await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();});
     final api=_DocumentsApi();await pump(tester,api,user:const AppUser(id:'u2',username:'u2',fullName:'Manager',companyId:'c1',permissions:['inventory.stock.adjust']));
     await tester.tap(find.text('New document'));await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'Kind'));await tester.pumpAndSettle();await tester.tap(find.text('Transfer').last);await tester.pumpAndSettle();
@@ -386,13 +386,13 @@ void main() {
     Future<void> pick(String button,String option) async {await tester.tap(find.text(button));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'Location'));await tester.pumpAndSettle();await tester.tap(find.text(option).last);await tester.pumpAndSettle();await tester.tap(find.text('Apply'));await tester.pumpAndSettle();}
     await pick('Source location: not selected','A-01 • Shelf');await pick('Destination location: unlocated','Z-01 • Shelf');
     await tester.tap(find.text('Lot: not selected'));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'Lot'));await tester.pumpAndSettle();expect(find.textContaining('WRONG'),findsNothing);expect(find.textContaining('WRITTEN'),findsNothing);await tester.tap(find.textContaining('LOT-A').last);await tester.pumpAndSettle();await tester.tap(find.text('Apply'));await tester.pumpAndSettle();
-    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/stock-document-transfer.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
+    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await screenshotFile('stock-document-transfer.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
     await tester.tap(find.text('Create'));await tester.pumpAndSettle();final line=(api.posts.single['lines'] as List).single as Map;expect(line['storageLocationId'],'source-shelf');expect(line['toStorageLocationId'],'target-shelf');expect(line['quantity'],'1');expect(line['unitName'],'carton');expect(line['batchId'],'lot-1');expect(tester.takeException(),isNull);
   });
 
   testWidgets('Arabic transfer lot picker retains selected lot and source', (tester) async {
     await tester.runAsync(() async {await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();});
-    await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();});
+    await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();});
     final api=_DocumentsApi();await pump(tester,api,locale:const Locale('ar'),user:const AppUser(id:'u2',username:'u2',fullName:'Manager',companyId:'c1',permissions:['inventory.stock.adjust']));
     await tester.tap(find.text('مستند جديد'));await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'نوع المستند'));await tester.pumpAndSettle();await tester.tap(find.text('تحويل').last);await tester.pumpAndSettle();
@@ -401,7 +401,7 @@ void main() {
     Future<void> pick(String button,String option) async {await tester.tap(find.text(button));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'الموقع'));await tester.pumpAndSettle();await tester.tap(find.text(option).last);await tester.pumpAndSettle();await tester.tap(find.text('تطبيق'));await tester.pumpAndSettle();}
     await pick('موقع المصدر: غير محدد','A-01 • رف');await pick('موقع الاستلام: بدون موقع','Z-01 • رف');
     await tester.tap(find.text('الدفعة: غير محددة'));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'الدفعة'));await tester.pumpAndSettle();expect(find.textContaining('WRONG'),findsNothing);expect(find.textContaining('WRITTEN'),findsNothing);await tester.tap(find.textContaining('LOT-A').last);await tester.pumpAndSettle();await tester.tap(find.text('تطبيق'));await tester.pumpAndSettle();
-    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/stock-document-transfer-ar.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
+    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await screenshotFile('stock-document-transfer-ar.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
     await tester.tap(find.text('إنشاء'));await tester.pumpAndSettle();final line=(api.posts.single['lines'] as List).single as Map;expect(line['storageLocationId'],'source-shelf');expect(line['toStorageLocationId'],'target-shelf');expect(line['quantity'],'1');expect(line['unitName'],'carton');expect(line['batchId'],'lot-1');expect(tester.takeException(),isNull);
   });
 

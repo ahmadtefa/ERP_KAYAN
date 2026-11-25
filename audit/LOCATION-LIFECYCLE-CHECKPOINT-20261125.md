@@ -283,3 +283,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Current release gates: full Flutter analyze clean;105 focused count/transfer/document/voucher/catalogue/stock-destination widgets pass; backend TypeScript compilation clean; existing public-key product build compatibility pass; workflow trigger/safety audit pass.
 - Preparing independent-branch fast-forward and unreleased Windows build only. No merge, force push, release asset, new signing key, production database or installed runtime proof. New source is not represented by earlier test installers.
 - Existing registered comprehensive non-signing acceptance workflow has a guarded Windows build job after isolated acceptance. Native installed-candidate and security jobs remain false. Last known successful Windows build job took10m34s, after prerequisite checks; this is history, not a delivery guarantee.
+
+### 09:20 portable visual test paths
+- Hosted focused run exposed two actual-font fixture failures: local SDK path and nonexistent screenshot output directory. Added shared active-SDK font discovery and writable build/visual-evidence folder. No screenshot assertion skipped or production code changed.
+-106 batch/count/document/transfer widgets pass with portable paths; full analyze clean. CI rerun required, previous queued candidate not called green or delivered.

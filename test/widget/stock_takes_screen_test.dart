@@ -356,9 +356,7 @@ void main() {
         await (FontLoader('MaterialIcons')..addFont(
               Future.value(
                 ByteData.sublistView(
-                  File(
-                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                  ).readAsBytesSync(),
+                  File(materialIconsFontPath).readAsBytesSync(),
                 ),
               ),
             ))
@@ -400,7 +398,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/stock-take-locations.png')
+        await screenshotFile('stock-take-locations.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
@@ -424,9 +422,7 @@ void main() {
         await (FontLoader('MaterialIcons')..addFont(
               Future.value(
                 ByteData.sublistView(
-                  File(
-                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                  ).readAsBytesSync(),
+                  File(materialIconsFontPath).readAsBytesSync(),
                 ),
               ),
             ))
@@ -464,7 +460,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/count-add-location.png')
+        await screenshotFile('count-add-location.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
@@ -645,9 +641,7 @@ void main() {
       await (FontLoader('MaterialIcons')..addFont(
             Future.value(
               ByteData.sublistView(
-                File(
-                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                ).readAsBytesSync(),
+                File(materialIconsFontPath).readAsBytesSync(),
               ),
             ),
           ))
@@ -774,9 +768,7 @@ void main() {
         await (FontLoader('MaterialIcons')..addFont(
               Future.value(
                 ByteData.sublistView(
-                  File(
-                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                  ).readAsBytesSync(),
+                  File(materialIconsFontPath).readAsBytesSync(),
                 ),
               ),
             ))
@@ -859,7 +851,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/count-create-retained.png')
+        await screenshotFile('count-create-retained.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
@@ -892,9 +884,7 @@ void main() {
         await (FontLoader('MaterialIcons')..addFont(
               Future.value(
                 ByteData.sublistView(
-                  File(
-                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                  ).readAsBytesSync(),
+                  File(materialIconsFontPath).readAsBytesSync(),
                 ),
               ),
             ))
@@ -963,7 +953,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/count-create-retained-ar.png')
+        await screenshotFile('count-create-retained-ar.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });

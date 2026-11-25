@@ -30,9 +30,7 @@ void main() {
       await (FontLoader('MaterialIcons')..addFont(
             Future.value(
               ByteData.sublistView(
-                File(
-                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                ).readAsBytesSync(),
+                File(materialIconsFontPath).readAsBytesSync(),
               ),
             ),
           ))

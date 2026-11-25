@@ -164,9 +164,7 @@ void main() {
       await (FontLoader('MaterialIcons')..addFont(
             Future.value(
               ByteData.sublistView(
-                File(
-                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-                ).readAsBytesSync(),
+                File(materialIconsFontPath).readAsBytesSync(),
               ),
             ),
           ))
@@ -436,7 +434,7 @@ void main() {
     await tester.runAsync(() async {
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('/downloads/transfer-settlement-retained.png')
+      await screenshotFile('transfer-settlement-retained.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });
@@ -548,7 +546,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/transfer-rejection-retained.png')
+        await screenshotFile('transfer-rejection-retained.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
@@ -624,7 +622,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/transfer-rejection-retained-ar.png')
+        await screenshotFile('transfer-rejection-retained-ar.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
@@ -677,7 +675,7 @@ void main() {
         await tester.runAsync(() async {
           final image = await boundary.toImage();
           final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-          await File('/downloads/transfer-accepted-step.png')
+          await screenshotFile('transfer-accepted-step.png')
               .writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();
         });
@@ -739,7 +737,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/downloads/transfer-transit-report-scroll.png')
+        await screenshotFile('transfer-transit-report-scroll.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
