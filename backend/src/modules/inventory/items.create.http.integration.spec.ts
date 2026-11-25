@@ -172,6 +172,22 @@ const vmLacksDynamicImport = !(
     expect(await count(db, `SELECT count(*) AS n FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='OK-2' AND m."storageLocationId"='${SHELF}'`)).toBe(1);
   });
 
+  it('2b. destination proof: stock lands on the branch DEFAULT warehouse (the one the form displays), not on a lower-code non-default one', async () => {
+    await db.exec(`INSERT INTO warehouses (id,"companyId","branchId",code,"nameEn","nameAr","isDefault","isActive","updatedAt") VALUES ('88888888-8888-4888-8888-888888888888','${COMPANY}','${BRANCH}','A0','Annex','ملحق',false,true,now())`);
+    const r = await post(payload('OK-DEST'));
+    expect(r.status).toBe(201);
+    expect(await count(db, `SELECT count(*) AS n FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='OK-DEST' AND m."warehouseId"='${WAREHOUSE}' AND m."storageLocationId" IS NULL`)).toBe(1);
+    expect(await count(db, `SELECT count(*) AS n FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='OK-DEST' AND m."warehouseId"='88888888-8888-4888-8888-888888888888'`)).toBe(0);
+    // The same ordering the form uses: default first, then lowest code, within the user's branch.
+    expect(await count(db, `SELECT count(*) AS n FROM (SELECT id FROM warehouses WHERE "branchId"='${BRANCH}' ORDER BY "isDefault" DESC, code ASC LIMIT 1) w WHERE w.id='${WAREHOUSE}'`)).toBe(1);
+  });
+
+  it('2c. destination proof: a selected shelf puts the stock in that shelf AND in the shelf warehouse', async () => {
+    const r = await post(payload('OK-DEST2', { openingStorageLocationId: SHELF }));
+    expect(r.status).toBe(201);
+    expect(await count(db, `SELECT count(*) AS n FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='OK-DEST2' AND m."warehouseId"='${WAREHOUSE}' AND m."storageLocationId"='${SHELF}'`)).toBe(1);
+  });
+
   it('3b. a location of another branch is refused with the existing Arabic message and nothing is kept', async () => {
     const before = await journalRows();
     const r = await post(payload('BAD-LOC', { openingStorageLocationId: OTHER_SHELF }));

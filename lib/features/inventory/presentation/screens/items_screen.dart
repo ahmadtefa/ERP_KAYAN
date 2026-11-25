@@ -110,6 +110,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final canManageInventoryCost = user?.canManageInventoryCost ?? false;
     final openingLocations = <FieldOption>[];
     final openingArabic = Localizations.localeOf(context).languageCode == 'ar';
+    // Where opening stock lands: the branch default warehouse, shown to the user.
+    String openingWhere = openingArabic
+        ? 'حسابك غير مرتبط بفرع، فلا يمكن حفظ كمية افتتاحية.'
+        : 'Your login has no branch, so opening stock cannot be saved.';
     if (!isEdit && canManageInventoryCost && user?.branchId != null) {
       try {
         final client = ref.read(apiClientProvider);
@@ -125,8 +129,25 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ? byDefault
               : text(a, 'code').compareTo(text(b, 'code'));
         });
+        if (warehouses.isEmpty) {
+          openingWhere = openingArabic
+              ? 'لا يوجد مخزن لفرعك حاليًا؛ سيُنشأ مخزن للفرع تلقائيًا عند الحفظ ويُسجَّل الرصيد عليه.'
+              : 'Your branch has no warehouse yet; one is created for the branch on save and the stock is recorded on it.';
+        }
         if (warehouses.isNotEmpty) {
-          final warehouseId = text(warehouses.first, 'id');
+          final first = warehouses.first;
+          String pick(String ar, String en) => openingArabic
+              ? text(first, ar, fallback: text(first, en))
+              : text(first, en, fallback: text(first, ar));
+          final branchName = pick('branchNameAr', 'branchNameEn');
+          final warehouseName = pick('nameAr', 'nameEn');
+          final shownWarehouse = warehouseName.isEmpty
+              ? text(first, 'code')
+              : warehouseName;
+          openingWhere = openingArabic
+              ? 'الرصيد يُضاف على - الفرع: ${branchName.isEmpty ? 'فرعك' : branchName}، المخزن: $shownWarehouse.'
+              : 'Opening stock goes to - Branch: ${branchName.isEmpty ? 'your branch' : branchName}, Warehouse: $shownWarehouse.';
+          final warehouseId = text(first, 'id');
           final rows = await client.getList(
             '/inventory/locations',
             query: {'warehouseId': warehouseId},
@@ -200,9 +221,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                 : 'Opening stock location (optional)',
             kind: FieldKind.select,
             options: openingLocations,
-            helper: Localizations.localeOf(context).languageCode == 'ar'
-                ? 'اختياري، من المخزن الافتراضي للفرع.'
-                : 'Optional. Branch default warehouse only.',
+            helper: openingArabic
+                ? '$openingWhere اختر رفًا أو ممرًا داخل هذا المخزن إن أردت، وإلا يُسجَّل الرصيد على المخزن نفسه.'
+                : '$openingWhere Optionally pick a shelf or aisle inside that warehouse; otherwise the stock is recorded on the warehouse itself.',
           ),
           if (canManageInventoryCost)
             FieldSpec(

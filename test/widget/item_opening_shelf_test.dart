@@ -34,7 +34,27 @@ class _ItemTaxApi extends ApiClient {
   }) async {
     if (path == '/inventory/warehouses') {
       return [
-        {'id': 'w', 'branchId': 'br', 'code': 'MAIN', 'isDefault': true},
+        {
+          'id': 'w',
+          'branchId': 'br',
+          'code': 'MAIN',
+          'nameEn': 'Main warehouse',
+          'nameAr': 'المخزن الرئيسي',
+          'branchNameEn': 'Cairo branch',
+          'branchNameAr': 'فرع القاهرة',
+          'isDefault': true,
+        },
+        // Lower code but not the default: must not be the displayed target.
+        {
+          'id': 'annex',
+          'branchId': 'br',
+          'code': 'A0',
+          'nameEn': 'Annex warehouse',
+          'nameAr': 'مخزن الملحق',
+          'branchNameEn': 'Cairo branch',
+          'branchNameAr': 'فرع القاهرة',
+          'isDefault': false,
+        },
       ];
     }
     if (path == '/inventory/locations') {
@@ -191,6 +211,21 @@ void main() {
               : 'Opening stock location (optional)',
         );
         await tester.ensureVisible(loc);
+        // The branch and the target warehouse are named on screen, and the shelf
+        // is described as an optional place inside that warehouse.
+        expect(
+          find.textContaining(
+            ar ? 'الفرع: فرع القاهرة' : 'Branch: Cairo branch',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining(
+            ar ? 'المخزن: المخزن الرئيسي' : 'Warehouse: Main warehouse',
+          ),
+          findsOneWidget,
+        );
+        expect(find.textContaining(ar ? 'مخزن الملحق' : 'Annex'), findsNothing);
         await tester.tap(loc);
         await tester.pumpAndSettle();
         expect(find.textContaining('WRONG'), findsNothing);
