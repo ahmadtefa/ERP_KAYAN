@@ -312,4 +312,22 @@ const vmReady =
     const row=await one(db,`SELECT m."batchId", b."warehouseId" FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceId"=$1 AND m."referenceType"='STOCK_TRANSFER_IN'`,[id]);expect(row.warehouseId).toBe(WAREHOUSE_2);
   });
 
+  it('transfer reverse after repricing source retains original arrival cost and conserved lot value',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L1',quantity:7,unitCost:24,storageLocationId:SHELF,expiryDate:'2027-02-01'});
+    await documents.reverse(COMPANY,USER,id);
+    const a=await lot(WAREHOUSE),b=await lot(WAREHOUSE_2);expect(Number(a.r)).toBe(17);expect(Number(a.c)).toBeCloseTo(288/17,3);expect(Number(b.r)).toBe(5);expect(Number(b.c)).toBe(6);expect(await wh(WAREHOUSE)).toEqual({q:'17.0000',v:'288.0000'});expect(await wh(WAREHOUSE_2)).toEqual({q:'5.0000',v:'30.0000'});
+  });
+
+  it('transfer reverse after destination receipt preserves that receipt cost',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE_2,itemId:ITEM,batchNumber:'L1',quantity:2,unitCost:20,storageLocationId:SHELF_W2,expiryDate:'2027-02-01'});await documents.reverse(COMPANY,USER,id);
+    const b=await lot(WAREHOUSE_2);expect(Number(b.r)).toBe(7);expect(Number(b.c)).toBeCloseTo(10,3);expect(await wh(WAREHOUSE_2)).toEqual({q:'7.0000',v:'70.0000'});
+  });
+  it('transfer reverse refuses conflicting original batch identity without writes',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    const other=(await one(db,`SELECT id FROM item_batches WHERE "warehouseId"=$1 AND "batchNumber"='L1'`,[WAREHOUSE_2])).id;await db.query(`UPDATE stock_movements SET "batchId"=$1 WHERE "referenceId"=$2 AND "referenceType"='STOCK_TRANSFER_OUT'`,[other,id]);
+    const before={a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)};expect(await failure(documents.reverse(COMPANY,USER,id))).not.toBeNull();expect({a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');
+  });
+
 });

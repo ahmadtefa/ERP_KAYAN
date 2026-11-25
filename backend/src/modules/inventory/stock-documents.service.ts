@@ -31,6 +31,7 @@ import { CostCentersService } from '../accounting/cost-centers.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
 import { takeOriginalStockMovement } from './original-stock-movement';
+import { addToLotCost, removeFromLotCost } from './lot-primary-location';
 
 const MONEY_SCALE = 4;
 
@@ -1685,6 +1686,29 @@ export class StockDocumentsService {
             }
             transferOriginal = original;
           }
+          // The reversal lands on the shelf the ORIGINAL movement used on that
+          // side: a transfer's source shelf on the way back, its receiving
+          // shelf (or the unlocated pile) when the goods leave the destination.
+          const originalShelf = (original as { storageLocationId?: string | null }).storageLocationId ?? null;
+          if (!wasOut && target.warehouseId) {
+            const [onShelfRow] = await tx.$queryRaw<Array<{ q: Prisma.Decimal }>>(Prisma.sql`
+              SELECT COALESCE(SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END), 0) AS q
+                FROM "stock_movements"
+               WHERE "companyId" = ${companyId}::uuid AND "warehouseId" = ${target.warehouseId}::uuid
+                 AND "itemId" = ${line.itemId}::uuid
+                 AND ${originalShelf ? Prisma.sql`"storageLocationId" = ${originalShelf}::uuid` : Prisma.sql`"storageLocationId" IS NULL`}
+            `);
+            const onShelf = new Prisma.Decimal(onShelfRow?.q ?? 0);
+            if (onShelf.lessThan(line.quantity.abs())) {
+              throw new BadRequestException({
+                code: 'STOCK_DOC_REVERSE_SHELF_SHORT',
+                message:
+                  `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): الموقع الذي استلم البضاعة يحمل ${onShelf.toFixed(MONEY_SCALE)} فقط من ${line.quantity.abs().toFixed(MONEY_SCALE)} المطلوبة (تم نقل الباقي أو صرفه). لم يتغير أي رصيد؛ راجع المحاسب أو المدير للتحقق قبل أي تصحيح. / ` +
+                  `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): the location that received the goods holds only ${onShelf.toFixed(MONEY_SCALE)} of the ${line.quantity.abs().toFixed(MONEY_SCALE)} required (the rest was moved or issued). No balance changed; ask the accountant or administrator to verify before any correction.`,
+                errors: { lineNumber: String(line.lineNumber) },
+              });
+            }
+          }
           await this.move(tx, {
             companyId,
             branchId,
@@ -1706,7 +1730,7 @@ export class StockDocumentsService {
             warehouseId: target.warehouseId,
             costCenterId: original.costCenterId,
             batchId: line.batchId ?? null,
-            storageLocationId: line.storageLocationId ?? null,
+            storageLocationId: originalShelf,
           });
         }
       }
@@ -1715,6 +1739,61 @@ export class StockDocumentsService {
         throw new BadRequestException(
           'The original stock movements do not match the document; it cannot be reversed automatically.',
         );
+      }
+
+      // A transfer that moved a lot is undone lot by lot: the receiving lot gives
+      // the quantity back at the cost it arrived with, the source lot takes it
+      // back at that same cost. A line with no lot that nevertheless produced a
+      // transferred lot cannot be matched without guessing, so it is refused.
+      if (document.kind === StockDocumentKind.TRANSFER) {
+        for (const line of document.lines) {
+          if (line.quantity.isZero()) continue;
+          const quantity = line.quantity.abs();
+          const fail = (code: string, ar: string, en: string) => new BadRequestException({
+            code,
+            message: `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): ${ar} لم يتغير أي رصيد؛ راجع المحاسب أو المدير للتحقق من الدفعة والتكلفة الأصلية قبل أي تصحيح. / Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): ${en} No balance changed; ask the accountant or administrator to verify the original lot and cost before any correction.`,
+            errors: { lineNumber: String(line.lineNumber) },
+          });
+          if (!line.batchId) {
+            const arrived = await tx.itemBatch.count({
+              where: { companyId, warehouseId: reversalToWarehouseId ?? undefined, itemId: line.itemId, sourceNumber: document.documentNumber, sourceType: 'BATCH_TRANSFER' },
+            });
+            if (arrived > 0) {
+              throw fail('STOCK_DOC_REVERSE_LOT_AMBIGUOUS', 'هذا السطر لا يحدد دفعة بينما نتج عنه نقل دفعة.', 'this line names no lot, but the transfer moved a lot.');
+            }
+            continue;
+          }
+          const source = await tx.itemBatch.findFirst({ where: { id: line.batchId, companyId } });
+          const destination = source
+            ? await tx.itemBatch.findFirst({
+                where: { companyId, warehouseId: reversalToWarehouseId ?? undefined, itemId: line.itemId, batchNumber: source.batchNumber, deletedAt: null },
+              })
+            : null;
+          if (!source || !destination) {
+            throw fail('STOCK_DOC_REVERSE_LOT_AMBIGUOUS', 'الدفعة الأصلية أو دفعة الاستلام غير موجودة.', 'the original lot or the receiving lot cannot be found.');
+          }
+          if (destination.remainingQuantity.lessThan(quantity)) {
+            throw fail('STOCK_DOC_REVERSE_LOT_SHORT', `دفعة الاستلام تحمل ${destination.remainingQuantity.toFixed(MONEY_SCALE)} فقط من ${quantity.toFixed(MONEY_SCALE)} المطلوبة.`, `the receiving lot holds only ${destination.remainingQuantity.toFixed(MONEY_SCALE)} of the ${quantity.toFixed(MONEY_SCALE)} required.`);
+          }
+          await removeFromLotCost(tx, destination.id, quantity, source.unitCost);
+          await tx.itemBatch.update({
+            where: { id: destination.id },
+            data: { remainingQuantity: { decrement: quantity }, receivedQuantity: { decrement: quantity }, updatedBy: userId },
+          });
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE "item_batches" SET "status" = 'CLOSED'
+             WHERE "id" = ${destination.id}::uuid AND "remainingQuantity" = 0 AND "status" <> 'WRITTEN_OFF'
+          `);
+          await addToLotCost(tx, source.id, quantity, source.unitCost);
+          await tx.itemBatch.update({
+            where: { id: source.id },
+            data: { remainingQuantity: { increment: quantity }, updatedBy: userId },
+          });
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE "item_batches" SET "status" = 'OPEN'
+             WHERE "id" = ${source.id}::uuid AND "status" = 'CLOSED'
+          `);
+        }
       }
 
       // A reversal of a write-off returns the goods to their lot.
