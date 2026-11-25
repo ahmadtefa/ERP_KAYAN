@@ -73,6 +73,105 @@ class AppErrorText {
 class AppErrorMessageResolver {
   const AppErrorMessageResolver({required this.isArabic});
 
+  /// Reviewed client-side sentences for stock document refusals. The server
+  /// body is never shown for these codes: only the code selects the text, and
+  /// the only server value used is a plain line number. Each sentence says
+  /// what is wrong and how to fix it, and that the data is kept.
+  static const _stockDocReasons = <String, List<String>>{
+    'STOCK_DOC_APPROVED': [
+      'المستند تمت مراجعته أو اعتماده فلا تُعدَّل مواقعه. أعده للمسودة أو أنشئ مستندًا جديدًا. بياناتك محفوظة.',
+      'This document was reviewed or approved, so its locations cannot be changed. Return it to draft or create a new document. Your data is kept.',
+    ],
+    'STOCK_DOC_LINE_UNKNOWN': [
+      'السطر غير موجود في المستند أو مكرر. أعد فتح المستند وحاول مرة أخرى. لم يُحفظ شيء.',
+      'The line is not in this document or is repeated. Reopen the document and try again. Nothing was saved.',
+    ],
+    'STOCK_DOC_LOCATIONS_EMPTY': [
+      'لم تُرسل أي أسطر لتصحيح مواقعها. اختر سطرًا واحدًا على الأقل وحاول مرة أخرى.',
+      'No lines were sent to correct. Choose at least one line and try again.',
+    ],
+    'STOCK_DOC_LOCATION_INACTIVE': [
+      'الموقع المختار غير مفعّل ولا يستقبل بضاعة. فعّل الموقع أو اختر موقعًا مفعّلًا. بياناتك محفوظة ولم يتغير أي رصيد.',
+      'The chosen location is inactive and cannot receive goods. Activate it or choose an active location. Your data is kept and no balance changed.',
+    ],
+    'STOCK_DOC_LOCATION_INVALID': [
+      'الموقع المختار ليس في مخزن المستند. اختر موقعًا من نفس المخزن. بياناتك محفوظة.',
+      'The chosen location is not in the document warehouse. Pick a location of that warehouse. Your data is kept.',
+    ],
+    'STOCK_DOC_LOCATION_REQUIRED': [
+      'الصنف مخزَّن على أكثر من موقع. اختر الموقع الذي يخرج منه الصنف في هذا السطر ثم رحّل مرة أخرى. بياناتك محفوظة ولم يتغير أي رصيد.',
+      'The item is stored on several locations. Choose the location this line takes from, then post again. Your data is kept and no balance changed.',
+    ],
+    'STOCK_DOC_LOT_INVALID': [
+      'الدفعة المختارة لا تصلح لهذا الصنف في المخزن المحوَّل منه (قد تكون مشطوبة أو محذوفة). اختر دفعة أخرى. لم يُحفظ شيء.',
+      'The chosen lot cannot be used for this item in the source warehouse (it may be written off or deleted). Choose another lot. Nothing was saved.',
+    ],
+    'STOCK_DOC_LOT_SHORT': [
+      'الدفعة المختارة تحمل أقل من الكمية المطلوبة. خفّض الكمية أو وزّعها على دفعات أخرى. لم يُحفظ شيء.',
+      'The chosen lot holds less than the quantity needed. Lower the quantity or split it over other lots. Nothing was saved.',
+    ],
+    'STOCK_DOC_LOT_TRANSFER_ONLY': [
+      'اختيار الدفعة وتقسيم الكمية متاحان لمستند التحويل فقط.',
+      'Choosing a lot and splitting the quantity are available on a transfer document only.',
+    ],
+    'STOCK_DOC_NOT_DRAFT': [
+      'لا يمكن تعديل مواقع مستند تم ترحيله. استخدم العكس ثم أنشئ مستندًا جديدًا.',
+      'The locations of a posted document cannot be edited. Reverse it, then create a new document.',
+    ],
+    'STOCK_DOC_REVERSE_LOT_AMBIGUOUS': [
+      'تعذر عكس المستند لأن الدفعة التي نُقلت غير محددة. لم يتغير أي رصيد. راجع المحاسب أو المدير.',
+      'The document cannot be reversed because the lot that was moved cannot be identified. No balance changed. Ask the accountant or a manager.',
+    ],
+    'STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE': [
+      'تعذر عكس المستند لأن تكلفة الدفعة وقت الاستلام غير موثقة بشكل متسق (مستند قديم أو دفعة مختلفة). لم يتغير أي رصيد. راجع المحاسب أو المدير.',
+      'The document cannot be reversed because the lot cost at receipt cannot be proven consistently (older document or a different lot). No balance changed. Ask the accountant or a manager.',
+    ],
+    'STOCK_DOC_REVERSE_LOT_SHELF_SHORT': [
+      'تعذر عكس المستند لأن موقع الاستلام لم يعد يحمل الكمية. لم يتغير أي رصيد. أعد الكمية إلى موقعها أو راجع المحاسب.',
+      'The document cannot be reversed because the receiving location no longer holds the quantity. No balance changed. Move the stock back or ask the accountant.',
+    ],
+    'STOCK_DOC_REVERSE_LOT_SHORT': [
+      'تعذر عكس المستند لأن دفعة الاستلام تحمل أقل من الكمية. لم يتغير أي رصيد. أعد الكمية إلى الدفعة أو راجع المحاسب.',
+      'The document cannot be reversed because the receiving lot holds less than the quantity. No balance changed. Move the stock back or ask the accountant.',
+    ],
+    'STOCK_DOC_REVERSE_SHELF_SHORT': [
+      'تعذر عكس المستند لأن موقع الاستلام لم يعد يحمل الكمية. لم يتغير أي رصيد. أعد الكمية إلى موقعها أو راجع المحاسب.',
+      'The document cannot be reversed because the receiving location no longer holds the quantity. No balance changed. Move the stock back or ask the accountant.',
+    ],
+    'STOCK_DOC_SHELF_SHORT': [
+      'الموقع المختار يحتوي أقل من الكمية المطلوبة. اختر موقعًا آخر أو خفّض الكمية. بياناتك محفوظة ولم يتغير أي رصيد.',
+      'The chosen location holds less than the quantity needed. Choose another location or lower the quantity. Your data is kept and no balance changed.',
+    ],
+    'STOCK_DOC_SPLIT_INVALID': [
+      'التقسيم غير صحيح: أرسل من 2 إلى 20 جزءًا، لكل جزء دفعة وكمية أكبر من صفر. لم يُحفظ شيء.',
+      'The split is not valid: send 2 to 20 parts, each with a lot and a quantity above zero. Nothing was saved.',
+    ],
+    'STOCK_DOC_SPLIT_TOTAL': [
+      'مجموع الأجزاء لا يساوي كمية السطر. عدّل الأجزاء ليصبح مجموعها مساويًا للكمية. لم يُحفظ شيء.',
+      'The parts do not add up to the line quantity. Adjust them so the total equals the line quantity. Nothing was saved.',
+    ],
+    'STOCK_DOC_TARGET_LOCATION_INVALID': [
+      'موقع الاستلام يجب أن يكون في المخزن المحوَّل إليه وفي مستند تحويل فقط. اختر موقعًا صحيحًا. بياناتك محفوظة.',
+      'The receiving location must be in the destination warehouse and only on a transfer document. Choose a valid location. Your data is kept.',
+    ],
+    'STOCK_DOC_TRANSFER_LOT_COVERAGE': [
+      'الكمية تتوزع على أكثر من دفعة أو لا تغطيها دفعة واحدة. اختر دفعة واحدة تغطي الكمية أو قسّم السطر إلى أسطر بدفعة لكل سطر. لم يتغير أي رصيد والمسودة محفوظة.',
+      'The quantity spans several lots or is not fully covered by one lot. Pick one lot that covers it, or split the line into one line per lot. No balance changed and the draft is kept.',
+    ],
+    'STOCK_DOC_VERSION_REQUIRED': [
+      'أعد فتح المستند وحاول مرة أخرى. بياناتك محفوظة.',
+      'Reopen the document and try again. Your data is kept.',
+    ],
+  };
+
+  String _stockDocContext(Map<String, String> fields) {
+    final line = fields['lineNumber'];
+    if (line != null && RegExp(r'^[0-9]{1,4}$').hasMatch(line)) {
+      return '\n${isArabic ? 'السطر' : 'Line'}: $line';
+    }
+    return '';
+  }
+
   static const _salesPostingReasons = <String, List<String>>{
     'SALES_POST_BRANCH_STOCK': ['لم تُرحّل الفاتورة: مخزون الفرع غير كافٍ. راجع كميات الأصناف وسجّل الاستلام الفعلي قبل الترحيل.', 'Invoice not posted: branch stock is insufficient. Review item quantities and record the actual receipt before posting.'],
     'SALES_POST_LOT_STOCK': ['لم تُرحّل الفاتورة: الدفعات المتاحة غير كافية. راجع كميات الدفعات والصلاحية في مخزن الفاتورة.', 'Invoice not posted: available lots are insufficient. Review lot quantities and expiry dates in the invoice warehouse.'],
@@ -93,30 +192,6 @@ class AppErrorMessageResolver {
     'SALES_SAVE_STOCK_SHORT',
     'CASH_BALANCE_NEGATIVE',
     'CASH_SAVE_BALANCE_SHORT',
-    // Stock document refusals: fixed codes, each written by the server in
-    // Arabic and English (see stock-documents.service.ts). Explicit list, so a
-    // new or unknown code is never relayed on the strength of its wording.
-    'STOCK_DOC_APPROVED',
-    'STOCK_DOC_LINE_UNKNOWN',
-    'STOCK_DOC_LOCATIONS_EMPTY',
-    'STOCK_DOC_LOCATION_INACTIVE',
-    'STOCK_DOC_LOCATION_INVALID',
-    'STOCK_DOC_LOCATION_REQUIRED',
-    'STOCK_DOC_LOT_INVALID',
-    'STOCK_DOC_LOT_SHORT',
-    'STOCK_DOC_LOT_TRANSFER_ONLY',
-    'STOCK_DOC_NOT_DRAFT',
-    'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
-    'STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE',
-    'STOCK_DOC_REVERSE_LOT_SHELF_SHORT',
-    'STOCK_DOC_REVERSE_LOT_SHORT',
-    'STOCK_DOC_REVERSE_SHELF_SHORT',
-    'STOCK_DOC_SHELF_SHORT',
-    'STOCK_DOC_SPLIT_INVALID',
-    'STOCK_DOC_SPLIT_TOTAL',
-    'STOCK_DOC_TARGET_LOCATION_INVALID',
-    'STOCK_DOC_TRANSFER_LOT_COVERAGE',
-    'STOCK_DOC_VERSION_REQUIRED',
   };
 
   String _postingContext(Map<String, String> fields) {
@@ -191,6 +266,15 @@ class AppErrorMessageResolver {
         }
       }
       if (error is ApiFailure && error.statusCode == 400) {
+        final stockDoc = _stockDocReasons[error.code];
+        if (stockDoc != null) {
+          return AppErrorText(
+            reason: AppErrorReason.invalidInput,
+            severity: AppErrorSeverity.warning,
+            businessMessage:
+                '${stockDoc[isArabic ? 0 : 1]}${_stockDocContext(error.fieldErrors)}\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
+          );
+        }
         final postingReason = _salesPostingReasons[error.code];
         if (postingReason != null) {
           return AppErrorText(

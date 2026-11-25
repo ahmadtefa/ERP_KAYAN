@@ -66,72 +66,73 @@ void main() {
       expect(server.businessMessage ?? '', isNot(contains(code)));
     });
   }
-  group('stock document refusals are relayed only for listed codes, in the active language', () {
-    const both = ApiFailure(
-      'السطر 2: الموقع ليس في مخزن المستند. اختر موقعًا من نفس المخزن. / '
-      'Line 2: the chosen location is not in the document warehouse. Pick a location of that warehouse.',
-      statusCode: 400,
-      code: 'STOCK_DOC_LOCATION_INVALID',
-    );
-    test('Arabic and English each show their own half, with the support code', () {
-      final ar = const AppErrorMessageResolver(isArabic: true).resolve(both).businessMessage!;
-      final en = const AppErrorMessageResolver(isArabic: false).resolve(both).businessMessage!;
-      expect(ar, contains('الموقع ليس في مخزن المستند'));
-      expect(ar, isNot(contains('Pick a location')));
-      expect(en, contains('Pick a location of that warehouse'));
-      expect(en, isNot(contains('اختر')));
-      expect(ar, contains('STOCK_DOC_LOCATION_INVALID'));
-      expect(en, contains('STOCK_DOC_LOCATION_INVALID'));
-    });
+  group('stock document refusals use reviewed templates keyed by code, never the server body', () {
+    const codes = <String>[
+      'STOCK_DOC_APPROVED', 'STOCK_DOC_LINE_UNKNOWN', 'STOCK_DOC_LOCATIONS_EMPTY',
+      'STOCK_DOC_LOCATION_INACTIVE', 'STOCK_DOC_LOCATION_INVALID', 'STOCK_DOC_LOCATION_REQUIRED',
+      'STOCK_DOC_LOT_INVALID', 'STOCK_DOC_LOT_SHORT', 'STOCK_DOC_LOT_TRANSFER_ONLY',
+      'STOCK_DOC_NOT_DRAFT', 'STOCK_DOC_REVERSE_LOT_AMBIGUOUS', 'STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE',
+      'STOCK_DOC_REVERSE_LOT_SHELF_SHORT', 'STOCK_DOC_REVERSE_LOT_SHORT', 'STOCK_DOC_REVERSE_SHELF_SHORT',
+      'STOCK_DOC_SHELF_SHORT', 'STOCK_DOC_SPLIT_INVALID', 'STOCK_DOC_SPLIT_TOTAL',
+      'STOCK_DOC_TARGET_LOCATION_INVALID', 'STOCK_DOC_TRANSFER_LOT_COVERAGE', 'STOCK_DOC_VERSION_REQUIRED',
+    ];
+    const hostile = <String>[
+      'SELECT * FROM users WHERE password=hunter2 / SELECT * FROM users WHERE password=hunter2',
+      'Error: at Object.<anonymous> (/srv/app/dist/main.js:10:5) / at Object.<anonymous> (/srv/app/dist/main.js:10:5)',
+      'See https://internal.example/admin?token=abc123 / See https://internal.example/admin?token=abc123',
+      'Lot held by Mona Hassan, 12 Tahrir St, balance 48,250 EGP / Lot held by Mona Hassan, 12 Tahrir St, balance 48,250 EGP',
+      'Lot held by ahmed.salem@example.com / Lot held by ahmed.salem@example.com',
+      'Ask 01012345678 about the lot / Ask 01012345678 about the lot',
+      'You do not have permission to see warehouse Cairo-Private / You do not have permission to see warehouse Cairo-Private',
+    ];
     for (final arabic in [false, true]) {
       final r = AppErrorMessageResolver(isArabic: arabic);
-      test('an unlisted code with the same readable wording is not relayed (arabic=$arabic)', () {
-        final out = r.resolve(const ApiFailure(
-          'Line 2: private customer note / Line 2: private customer note',
-          statusCode: 400, code: 'STOCK_DOC_SOMETHING_NEW'));
-        expect(out.businessMessage ?? '', isNot(contains('private customer')));
-      });
-      test('a listed code with a technical or credential-looking body is not relayed (arabic=$arabic)', () {
-        for (final body in [
-          'SELECT * FROM users WHERE password=hunter2 / SELECT * FROM users WHERE password=hunter2',
-          'Error: at Object.<anonymous> (/srv/app/dist/main.js:10:5) / at Object.<anonymous> (/srv/app/dist/main.js:10:5)',
-          'See https://internal.example/admin?token=abc123 / See https://internal.example/admin?token=abc123',
-        ]) {
-          final out = r.resolve(ApiFailure(body, statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
-          final shown = out.businessMessage ?? '';
-          expect(shown, isNot(contains('hunter2')));
-          expect(shown, isNot(contains('main.js')));
-          expect(shown, isNot(contains('abc123')));
+      test('every listed code shows its own reviewed sentence in the active language and a support code (arabic=$arabic)', () {
+        final seen = <String>{};
+        for (final code in codes) {
+          final out = r.resolve(ApiFailure('body', statusCode: 400, code: code)).businessMessage!;
+          expect(out, contains(code));
+          expect(RegExp(r'[\u0600-\u06FF]').hasMatch(out.split('\n').first), arabic, reason: code);
+          expect(seen.add(out), isTrue, reason: '$code has its own text');
         }
       });
-      test('a listed code whose body carries personal data is not relayed (arabic=$arabic)', () {
+      test('no server body text is ever shown for a listed code, whatever it contains (arabic=$arabic)', () {
+        for (final code in codes) {
+          for (final body in hostile) {
+            final shown = r.resolve(ApiFailure(body, statusCode: 400, code: code)).businessMessage ?? '';
+            for (final leak in ['hunter2', 'main.js', 'abc123', 'Mona', 'Tahrir', '48,250', 'example.com', '01012345678', 'Cairo-Private', 'permission to see']) {
+              expect(shown, isNot(contains(leak)), reason: '$code leaked $leak');
+            }
+          }
+        }
+      });
+      test('only a plain line number from the typed fields is added (arabic=$arabic)', () {
+        final ok = r.resolve(const ApiFailure('x', statusCode: 400, code: 'STOCK_DOC_LOT_SHORT', fieldErrors: {'lineNumber': '3'})).businessMessage!;
+        expect(ok, contains('3'));
+        final bad = r.resolve(const ApiFailure('x', statusCode: 400, code: 'STOCK_DOC_LOT_SHORT', fieldErrors: {'lineNumber': '3 Mona Hassan', 'locationCode': 'Cairo-Private'})).businessMessage!;
+        expect(bad, isNot(contains('Mona')));
+        expect(bad, isNot(contains('Cairo-Private')));
+      });
+      test('codes still relayed from the server (cash/sales) refuse bodies carrying e-mail or long ids (arabic=$arabic)', () {
         for (final body in [
-          'Lot held by ahmed.salem@example.com / Lot held by ahmed.salem@example.com',
-          'Ask 01012345678 about the lot / Ask 01012345678 about the lot',
-          'Owner id 29801011234567 has the lot / Owner id 29801011234567 has the lot',
+          'Cash held by ahmed.salem@example.com / Cash held by ahmed.salem@example.com',
+          'Ask 01012345678 about it / Ask 01012345678 about it',
         ]) {
-          final out = r.resolve(ApiFailure(body, statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
-          final shown = out.businessMessage ?? '';
+          final shown = r.resolve(ApiFailure(body, statusCode: 400, code: 'CASH_BALANCE_NEGATIVE')).businessMessage ?? '';
           expect(shown, isNot(contains('example.com')));
           expect(shown, isNot(contains('01012345678')));
-          expect(shown, isNot(contains('29801011234567')));
         }
       });
-      test('a listed code with an ordinary business sentence is still relayed (arabic=$arabic)', () {
-        final out = r.resolve(ApiFailure(
-            'Lot LOT-7 is short by 3 / Lot LOT-7 is short by 3',
-            statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
-        expect(out.businessMessage ?? '', contains('LOT-7'));
+      test('an unlisted code with a readable body is not shown (arabic=$arabic)', () {
+        final out = r.resolve(const ApiFailure('Line 1: something readable / Line 1: something readable', statusCode: 400, code: 'STOCK_DOC_SOMETHING_NEW'));
+        expect(out.businessMessage ?? '', isNot(contains('something readable')));
       });
-      test('a listed code with a 500 or 403 status is not relayed (arabic=$arabic)', () {
+      test('a listed code with a 500 or 403 status uses no template and no body (arabic=$arabic)', () {
         for (final status in [500, 403]) {
           final out = r.resolve(ApiFailure('Private body / Private body', statusCode: status, code: 'STOCK_DOC_LOT_SHORT'));
           expect(out.businessMessage ?? '', isNot(contains('Private body')));
+          expect(out.businessMessage ?? '', isNot(contains('STOCK_DOC_LOT_SHORT')));
         }
-      });
-      test('an oversized body for a listed code is not relayed (arabic=$arabic)', () {
-        final out = r.resolve(ApiFailure('${'x' * 700} / ${'y' * 700}', statusCode: 400, code: 'STOCK_DOC_LOT_SHORT'));
-        expect(out.businessMessage ?? '', isNot(contains('xxxxxxxxxx')));
       });
     }
   });
