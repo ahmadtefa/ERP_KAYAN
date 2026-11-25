@@ -335,4 +335,22 @@ const vmReady =
     const out=await one(db,`SELECT "batchId" FROM stock_movements WHERE "referenceId"=$1 AND "referenceType"='STOCK_DOCUMENT_REVERSAL' AND direction='OUT'`,[id]);expect(out.batchId).toBe(dest);
   });
 
+  it('transfer no-lot line refuses ambiguous shelf lot allocation or binds full exact lot coverage',async()=>{
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L2',quantity:5,unitCost:20,storageLocationId:SHELF,expiryDate:'2027-03-01'});
+    const id=await draft({quantity:8,storageLocationId:SHELF,toStorageLocationId:SHELF_W2});const before={a:await shelf(SHELF),b:await shelf(SHELF_B),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};const err=await failure(documents.post(COMPANY,USER,id));if(err){console.log('NO_LOT_REFUSAL',JSON.stringify(err));expect({a:await shelf(SHELF),b:await shelf(SHELF_B),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);return;}
+    const rows=(await db.query<{batchId:string|null,warehouseId:string,quantity:string}>(`SELECT m."batchId",b."warehouseId",m.quantity::text FROM stock_movements m LEFT JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceId"=$1 AND m."referenceType"='STOCK_TRANSFER_IN'`,[id])).rows;expect(rows.every(r=>r.batchId&&r.warehouseId===WAREHOUSE_2)).toBe(true);expect(rows.reduce((n,r)=>n+Number(r.quantity),0)).toBe(8);
+  });
+
+  it('named-lot transfer preserves separate warehouse-average books and physical lot contribution',async()=>{
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L2',quantity:5,unitCost:24,storageLocationId:SHELF_B,expiryDate:'2027-03-01'});const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);
+    const move=await one(db,`SELECT "unitCost"::text c,"totalCost"::text v FROM stock_movements WHERE "referenceId"=$1 AND "referenceType"='STOCK_TRANSFER_IN'`,[id]);expect(Number(move.c)).toBe(16);expect(Number(move.v)).toBe(48);expect(await wh(WAREHOUSE_2)).toEqual({q:'8.0000',v:'78.0000'});expect(Number((await lot(WAREHOUSE_2)).c)).toBe(8.25);await documents.reverse(COMPANY,USER,id);expect(await wh(WAREHOUSE_2)).toEqual({q:'5.0000',v:'30.0000'});expect(Number((await lot(WAREHOUSE_2)).c)).toBe(6);expect(await wh(WAREHOUSE)).toEqual({q:'15.0000',v:'240.0000'});expect(Number((await lot(WAREHOUSE)).c)).toBe(12);
+  });
+
+  it('legacy null lot cost evidence refuses actionable and preserves all inputs and stock',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);await db.query(`UPDATE stock_movements SET "lotUnitCost"=NULL WHERE "referenceId"=$1`,[id]);const before={a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)};const err=await failure(documents.reverse(COMPANY,USER,id));expect(err?.code).toBe('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE');expect(err?.message).toContain('accountant');expect({a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');
+  });
+  it('legacy conflicting receiving batch refuses instead of guessing a different lot',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});await documents.post(COMPANY,USER,id);await db.query(`UPDATE stock_movements SET "batchId"=$1 WHERE "referenceId"=$2 AND "referenceType"='STOCK_TRANSFER_IN'`,[await batch(),id]);const before={a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)};expect(await failure(documents.reverse(COMPANY,USER,id))).not.toBeNull();expect({a:await shelf(SHELF),c:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2)}).toEqual(before);
+  });
+
 });

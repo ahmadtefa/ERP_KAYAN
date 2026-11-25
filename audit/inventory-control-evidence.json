@@ -1580,8 +1580,13 @@
     "scope": "Nest HTTP production guards/controller/service native PG14; signature decoder fixture only"
   },
   "genericTransferReverse": {
-    "status": "FAIL",
-    "evidence": "stock-documents.locations.integration.spec.ts and isolated-pg-purchase-concurrency.cjs KAYAN_DOC_REVERSE=1",
-    "finding": "loc37 single-lot forward binding fixed; reverse OUT still source lot ID; native destination lot5 versus ledger8; conflicting origin accepted; partial/multi-lot unqualified"
+    "status": "PASS_SCOPED_MORE_COVERAGE_OPEN",
+    "evidence": "loc38 independent SQL scenarios and native KAYAN_DOC_REVERSE=1",
+    "scope": "per-leg batch/shelf identity, exact lot shelf shortage, repriced lot and book inverse, legacy evidence refusal; not whole installed acceptance"
+  },
+  "genericTransferLotCreate": {
+    "status": "PASS_SCOPED",
+    "evidence": "stock_document_lot_create_http_test.dart native bridge",
+    "scope": "barcode create explicit source lot qty3 post reverse; direct picker and draft split correction still need qualification"
   }
 }

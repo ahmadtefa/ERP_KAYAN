@@ -1788,6 +1788,8 @@ model StockMovement {
   /// without guessing from order or size. Null on movements recorded before
   /// it existed.
   sourceLineId String? @db.Uuid
+  /// Cost per unit of the LOT the goods arrived in at a lot-carrying transfer receipt. Evidence for an exact reversal; null when unknown (legacy).
+  lotUnitCost  Decimal? @db.Decimal(18, 4)
 
   referenceType   String  @db.VarChar(32)
   referenceId     String? @db.Uuid

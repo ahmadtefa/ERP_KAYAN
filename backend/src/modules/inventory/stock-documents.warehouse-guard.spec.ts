@@ -131,6 +131,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     // These cases carry no lots: the goods move as plain quantity, which is the
     // path a warehouse without lot control takes.
     itemBatch: {
+      count: jest.fn(async () => 0),
       findMany: jest.fn(async () => []),
       findFirst: jest.fn(async () => null),
       create: jest.fn(async () => ({ id: 'lot-new' })),
@@ -196,7 +197,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
       }
       if (text.includes('FROM stock_movements')) {
         // Template order: companyId, warehouseId, itemId
-        return [{ quantity: warehouseQuantity(String(values[1]), String(values[2])) }];
+        const quantity=warehouseQuantity(String(values[1]), String(values[2]));return [{q:quantity,quantity}];
       }
       if (text.includes('FROM stock_balances')) {
         // Template order: companyId, branchId, itemId

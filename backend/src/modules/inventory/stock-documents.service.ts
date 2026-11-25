@@ -1265,7 +1265,7 @@ export class StockDocumentsService {
               });
             }
           }
-          const destinationLots: Array<{ batchId: string; quantity: Prisma.Decimal }> = [];
+          const destinationLots: Array<{ batchId: string; quantity: Prisma.Decimal; unitCost: Prisma.Decimal }> = [];
           // The lots travel with the goods. Only what the lots actually hold
           // is moved: a partial transfer moves the requested quantity out of
           // the source lot and the remainder stays where it was.
@@ -1282,6 +1282,16 @@ export class StockDocumentsService {
             referenceNumber: document.documentNumber,
             destinationLots,
           });
+          if (destinationLots.length > 0 &&
+              !(destinationLots.length === 1 && destinationLots[0].quantity.equals(line.quantity))) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_TRANSFER_LOT_COVERAGE',
+              message:
+                `المستند ${document.documentNumber} (سطر ${line.lineNumber}): الكمية المطلوبة تتوزع على أكثر من دفعة أو لا تغطيها دفعة واحدة بالكامل، ولا يمكن تتبعها بدقة. اختر دفعة واحدة تغطي الكمية أو قسّم السطر إلى أسطر بدفعة لكل سطر؛ لم يتغير أي رصيد وبياناتك محفوظة في المسودة. / ` +
+                `Document ${document.documentNumber} (line ${line.lineNumber}): the quantity spans several lots or is not fully covered by one lot, so it cannot be tracked exactly. Pick one lot that covers the quantity, or split the line into one line per lot; no balance changed and your draft is kept.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
           await this.move(tx, {
             companyId,
             branchId: document.branchId,
@@ -1313,6 +1323,14 @@ export class StockDocumentsService {
             // is the one the document names for it, or none (arrive unlocated).
             storageLocationId: (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null,
           });
+          if (destinationLots.length === 1 && destinationLots[0].quantity.equals(line.quantity)) {
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "stock_movements" SET "lotUnitCost" = ${destinationLots[0].unitCost}
+               WHERE "companyId" = ${companyId}::uuid AND "referenceId" = ${document.id}::uuid
+                 AND "referenceType" = 'STOCK_TRANSFER_IN' AND "itemId" = ${line.itemId}::uuid
+                 AND "batchId" = ${destinationLots[0].batchId}::uuid
+            `);
+          }
 
           continue;
         }
@@ -1699,6 +1717,35 @@ export class StockDocumentsService {
           // side: a transfer's source shelf on the way back, its receiving
           // shelf (or the unlocated pile) when the goods leave the destination.
           const originalShelf = (original as { storageLocationId?: string | null }).storageLocationId ?? null;
+          const originalBatch = (original as { batchId?: string | null }).batchId ?? null;
+          if (document.kind === StockDocumentKind.TRANSFER && wasOut && line.batchId && originalBatch !== line.batchId) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
+              message:
+                `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): دفعة حركة الصرف الأصلية لا تطابق دفعة السطر. لم يتغير أي رصيد؛ راجع المحاسب أو المدير للتحقق من الدفعة الأصلية قبل أي تصحيح. / ` +
+                `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): the original issue movement's lot does not match the line's lot. No balance changed; ask the accountant or administrator to verify the original lot before any correction.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
+          if (!wasOut && target.warehouseId && originalBatch) {
+            const [onLotShelf] = await tx.$queryRaw<Array<{ q: Prisma.Decimal }>>(Prisma.sql`
+              SELECT COALESCE(SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END), 0) AS q
+                FROM "stock_movements"
+               WHERE "companyId" = ${companyId}::uuid AND "warehouseId" = ${target.warehouseId}::uuid
+                 AND "itemId" = ${line.itemId}::uuid AND "batchId" = ${originalBatch}::uuid
+                 AND ${originalShelf ? Prisma.sql`"storageLocationId" = ${originalShelf}::uuid` : Prisma.sql`"storageLocationId" IS NULL`}
+            `);
+            const lotOnShelf = new Prisma.Decimal(onLotShelf?.q ?? 0);
+            if (lotOnShelf.lessThan(line.quantity.abs())) {
+              throw new BadRequestException({
+                code: 'STOCK_DOC_REVERSE_LOT_SHELF_SHORT',
+                message:
+                  `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): الدفعة المستلمة تحمل ${lotOnShelf.toFixed(MONEY_SCALE)} فقط في موقع الاستلام من ${line.quantity.abs().toFixed(MONEY_SCALE)} المطلوبة (نُقل الباقي أو صُرف). لم يتغير أي رصيد؛ راجع المحاسب أو المدير قبل أي تصحيح. / ` +
+                  `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): the received lot holds only ${lotOnShelf.toFixed(MONEY_SCALE)} at the receiving location of the ${line.quantity.abs().toFixed(MONEY_SCALE)} required (the rest was moved or issued). No balance changed; ask the accountant or administrator before any correction.`,
+                errors: { lineNumber: String(line.lineNumber) },
+              });
+            }
+          }
           if (!wasOut && target.warehouseId) {
             const [onShelfRow] = await tx.$queryRaw<Array<{ q: Prisma.Decimal }>>(Prisma.sql`
               SELECT COALESCE(SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END), 0) AS q
@@ -1738,7 +1785,7 @@ export class StockDocumentsService {
             requireStock: false,
             warehouseId: target.warehouseId,
             costCenterId: original.costCenterId,
-            batchId: line.batchId ?? null,
+            batchId: originalBatch,
             storageLocationId: originalShelf,
           });
         }
@@ -1784,24 +1831,21 @@ export class StockDocumentsService {
           if (destination.remainingQuantity.lessThan(quantity)) {
             throw fail('STOCK_DOC_REVERSE_LOT_SHORT', `دفعة الاستلام تحمل ${destination.remainingQuantity.toFixed(MONEY_SCALE)} فقط من ${quantity.toFixed(MONEY_SCALE)} المطلوبة.`, `the receiving lot holds only ${destination.remainingQuantity.toFixed(MONEY_SCALE)} of the ${quantity.toFixed(MONEY_SCALE)} required.`);
           }
-          // The cost the goods arrived with is not stored per transfer; it is the
-          // source lot's cost at that time. That only holds while neither lot
-          // took a later receipt (a later IN would have re-averaged it). Any
-          // later IN on either lot makes the original cost unprovable: refuse.
-          const [later] = await tx.$queryRaw<Array<{ n: bigint }>>(Prisma.sql`
-            SELECT COUNT(*)::bigint AS n
+          // The cost the goods arrived with was recorded on the receipt movement
+          // (lotUnitCost) when the transfer was posted. Without it (a legacy
+          // document) the original cost cannot be proven and nothing is guessed.
+          const [evidence] = await tx.$queryRaw<Array<{ c: Prisma.Decimal | null; n: bigint }>>(Prisma.sql`
+            SELECT MAX(m."lotUnitCost") AS c, COUNT(*)::bigint AS n
               FROM "stock_movements" m
-             WHERE m."companyId" = ${companyId}::uuid
-               AND m."batchId" IN (${source.id}::uuid, ${destination.id}::uuid)
-               AND m."direction" = 'IN'
-               AND (m."referenceId" IS DISTINCT FROM ${document.id}::uuid)
-               AND m."createdAt" > (SELECT MIN(d."createdAt") FROM "stock_movements" d
-                                     WHERE d."companyId" = ${companyId}::uuid AND d."referenceId" = ${document.id}::uuid)
+             WHERE m."companyId" = ${companyId}::uuid AND m."referenceId" = ${document.id}::uuid
+               AND m."referenceType" = 'STOCK_TRANSFER_IN' AND m."itemId" = ${line.itemId}::uuid
+               AND m."batchId" = ${destination.id}::uuid AND m."lotUnitCost" IS NOT NULL
           `);
-          if (Number(later?.n ?? 0) > 0) {
-            throw fail('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE', 'دخلت كمية جديدة إلى الدفعة المصدر أو دفعة الاستلام بعد هذا المستند فلا يمكن إثبات تكلفة النقل الأصلية.', 'a later receipt entered the source or receiving lot, so the original transfer cost cannot be proven.');
+          if (Number(evidence?.n ?? 0) !== 1 || evidence?.c == null) {
+            throw fail('STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE', 'لا يوجد سجل لتكلفة الدفعة وقت الاستلام (مستند قديم أو دفعة مختلفة).', 'no record of the lot cost at receipt exists (legacy document or a different lot).');
           }
-          await removeFromLotCost(tx, destination.id, quantity, source.unitCost);
+          const arrivalCost = new Prisma.Decimal(evidence.c);
+          await removeFromLotCost(tx, destination.id, quantity, arrivalCost);
           await tx.itemBatch.update({
             where: { id: destination.id },
             data: { remainingQuantity: { decrement: quantity }, receivedQuantity: { decrement: quantity }, updatedBy: userId },
@@ -1810,7 +1854,7 @@ export class StockDocumentsService {
             UPDATE "item_batches" SET "status" = 'CLOSED'
              WHERE "id" = ${destination.id}::uuid AND "remainingQuantity" = 0 AND "status" <> 'WRITTEN_OFF'
           `);
-          await addToLotCost(tx, source.id, quantity, source.unitCost);
+          await addToLotCost(tx, source.id, quantity, arrivalCost);
           await tx.itemBatch.update({
             where: { id: source.id },
             data: { remainingQuantity: { increment: quantity }, updatedBy: userId },
@@ -1899,7 +1943,7 @@ export class StockDocumentsService {
       batchId: string | null;
       date: Date;
       referenceNumber: string;
-      destinationLots?: Array<{ batchId: string; quantity: Prisma.Decimal }>;
+      destinationLots?: Array<{ batchId: string; quantity: Prisma.Decimal; unitCost: Prisma.Decimal }>;
     },
   ): Promise<Prisma.Decimal> {
     if (!input.fromWarehouseId || !input.toWarehouseId) return new Prisma.Decimal(0);
@@ -1974,7 +2018,7 @@ export class StockDocumentsService {
         },
       });
       if (destination) {
-        input.destinationLots?.push({ batchId: destination.id, quantity: allocation.quantity });
+        input.destinationLots?.push({ batchId: destination.id, quantity: allocation.quantity, unitCost: source.unitCost });
         await tx.itemBatch.update({
           where: { id: destination.id },
           data: {
@@ -2013,7 +2057,7 @@ export class StockDocumentsService {
             createdBy: input.userId,
           },
         });
-        input.destinationLots?.push({ batchId: createdLot.id, quantity: allocation.quantity });
+        input.destinationLots?.push({ batchId: createdLot.id, quantity: allocation.quantity, unitCost: source.unitCost });
       }
       moved = moved.plus(allocation.quantity);
     }
