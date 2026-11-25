@@ -72,6 +72,9 @@ void main() {
     await tester.tap(find.text('Request transfer'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Transfer details'), findsOneWidget);
+    expect(find.text('Items and quantities'), findsOneWidget);
+    expect(find.textContaining('A request does not move stock'), findsOneWidget);
     // Empty form: it used to do nothing. Now every missing field says so.
     await tester.tap(find.text('Create request'));
     await tester.pumpAndSettle();

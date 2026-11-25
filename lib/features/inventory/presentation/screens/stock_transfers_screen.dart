@@ -373,6 +373,25 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                t('بيانات التحويل', 'Transfer details'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                t(
+                  'الطلب لا يحرّك المخزون. بعد الاعتماد، تخرج الكميات من المخزن المصدر عند التسليم وتدخل المخزن المستلم عند الاستلام.',
+                  'A request does not move stock. After approval, quantities leave the source warehouse on Dispatch and enter the destination on Receive.',
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               initialValue: _from,
               decoration: InputDecoration(
@@ -417,6 +436,14 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
               },
             ),
             const SizedBox(height: 12),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                t('الأصناف والكميات', 'Items and quantities'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            const SizedBox(height: 8),
             BarcodeScanField(
               controller: _barcode,
               arabic: ar,
@@ -1312,6 +1339,30 @@ class _TransferActionDialogState extends State<_TransferActionDialog>
     }
   }
 
+  /// What confirming does, from the transfer service: these three steps only
+  /// change the request's status. Stock moves later, on Dispatch and Receive.
+  String _effect() {
+    final ar = widget.ar;
+    switch (widget.action) {
+      case 'review':
+        return ar
+            ? 'تُسجَّل المراجعة ويمرّ الطلب إلى الاعتماد. المخزون لا يتحرك.'
+            : 'The review is recorded and the request moves on to approval. Stock does not move.';
+      case 'submit':
+        return ar
+            ? 'يُرسَل الطلب للاعتماد. المخزون لا يتحرك.'
+            : 'The request is sent for approval. Stock does not move.';
+      case 'approve':
+        return ar
+            ? 'يُعتمد الطلب. المخزون لا يتحرك إلا عند التسليم.'
+            : 'The request is approved. Stock does not move until it is dispatched.';
+      default:
+        return ar
+            ? 'راجع التحويل قبل تأكيد الإجراء.'
+            : 'Review the transfer before confirming this action.';
+    }
+  }
+
   @override
   void dispose() {
     reason.dispose();
@@ -1335,11 +1386,7 @@ class _TransferActionDialogState extends State<_TransferActionDialog>
         if (needsReason)
           TextField(controller: reason, enabled: !sending && !uncertain)
         else
-          Text(
-            widget.ar
-                ? 'راجع التحويل قبل تأكيد الإجراء.'
-                : 'Review the transfer before confirming this action.',
-          ),
+          Text(_effect()),
         if (submissionMessage != null) Text(submissionMessage!),
       ],
     ),
@@ -1465,7 +1512,21 @@ class _QuantityDialogState extends State<_QuantityDialog>
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: List.generate(widget.lines.length, (index) {
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                widget.ar
+                    ? (widget.receive
+                          ? 'عند الاستلام تدخل الكميات المخزن المستلم من البضاعة بالطريق.'
+                          : 'عند التسليم تخرج الكميات من المخزن المصدر وتُحفظ كبضاعة بالطريق إلى أن تُستلم.')
+                    : (widget.receive
+                          ? 'On receipt the quantities enter the destination warehouse from goods in transit.'
+                          : 'On dispatch the quantities leave the source warehouse and are held as goods in transit until received.'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            ...List.generate(widget.lines.length, (index) {
             final item = widget.lines[index]['item'] as Map? ?? const {};
             final itemName = widget.ar
                 ? (item['nameAr'] ?? item['nameEn'])
@@ -1489,6 +1550,7 @@ class _QuantityDialogState extends State<_QuantityDialog>
               ],
             );
           }),
+          ],
         ),
       ),
     ),
