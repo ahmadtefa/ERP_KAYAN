@@ -23,7 +23,7 @@
 ## Still unqualified
 
 - Authenticated installed Windows workflow, licence chain, release and installer.
-- Full every-control acceptance. The existing partial source-site register remains 35 mapped and 156 unmapped. New controls were not silently counted as accepted.
+- Full every-control acceptance. At this earlier checkpoint the partial source-site register was 35 mapped and 156 unmapped; see the latest continuation for current counts. New controls were not silently counted as accepted.
 - Count complete authentication/licence chain. Count Flutter HTTP/service/SQL REVIEW bridge passed separately.
 - Accounting opening Flutter HTTP/controller/service/native PG14 draft/read/post passed (qty5, value10, selected shelf persisted). Separate Nest HTTP guard/controller/native SQL tests passed with a signature-decoder fixture, not real login/signing/licence.
 - Generic transfer reversal currently FAILS independent SQL acceptance: warehouse totals restore but exact shelves/lots do not. Backend owner notified; no acceptance claim. Basic writeoff post/reverse exact shelf/lot/warehouse passes.
@@ -276,3 +276,10 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 08:58 stock destinations and read controls
 - Four new synthetic widget cases pass: balance to vouchers and return with balance reload; cost-center report and its refresh read; exact balance item location route/read; ledger Close without balance mutation or reload.
 - Full analyze clean. Register161mapped/30open of191 snapshot callback sites. Export/OS behaviors remain open. No runtime source or visible layout change.
+
+
+### 09:11 delivery candidate freeze
+- Stopped expanding the callback register at161mapped/30open. This is a partial audit, not an installer blocker count or complete product proof.
+- Current release gates: full Flutter analyze clean;105 focused count/transfer/document/voucher/catalogue/stock-destination widgets pass; backend TypeScript compilation clean; existing public-key product build compatibility pass; workflow trigger/safety audit pass.
+- Preparing independent-branch fast-forward and unreleased Windows build only. No merge, force push, release asset, new signing key, production database or installed runtime proof. New source is not represented by earlier test installers.
+- Existing registered comprehensive non-signing acceptance workflow has a guarded Windows build job after isolated acceptance. Native installed-candidate and security jobs remain false. Last known successful Windows build job took10m34s, after prerequisite checks; this is history, not a delivery guarantee.
