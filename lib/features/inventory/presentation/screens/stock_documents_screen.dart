@@ -185,9 +185,16 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           ? 'ستُضاف الكميات إلى الرصيد أو تُخصم منه حسب إشارتها.'
           : 'The quantities will be added to or removed from the balance.',
     };
-    final tail = _arabic
-        ? ' يتغير الرصيد، ويُنشأ قيد محاسبي عند تغيّر القيمة.'
-        : ' Stock balances change, and a journal entry is made when the value changes.';
+    // A transfer moves the same stock at the cost it already carries, so the
+    // posting code makes no journal entry for it. Counts and adjustments make
+    // one only when the value changes.
+    final tail = kind == 'TRANSFER'
+        ? (_arabic
+            ? ' يتغير رصيد المخزنين، ولا يُنشأ قيد محاسبي لأن القيمة لا تتغير.'
+            : ' The balances of both stores change; no journal entry is made because the value does not change.')
+        : (_arabic
+            ? ' يتغير الرصيد، ويُنشأ قيد محاسبي عند تغيّر القيمة.'
+            : ' Stock balances change, and a journal entry is made when the value changes.');
     return _arabic
         ? 'ترحيل المستند $number: $what$tail'
         : 'Post $number: $what$tail';
