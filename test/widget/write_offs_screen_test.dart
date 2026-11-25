@@ -286,6 +286,19 @@ void main() {
     );
   });
 
+  testWidgets('refresh reloads writeoffs without a stock change', (tester) async {
+    final api=_WriteOffsApi();await pump(tester,api);final before=api.queries.length;
+    await tester.tap(find.byTooltip('Refresh'));await tester.pumpAndSettle();
+    expect(api.queries.length,greaterThan(before));expect(api.posts,isEmpty);
+  });
+
+  testWidgets('confirmed posting targets the signed writeoff and refreshes', (tester) async {
+    final api=_WriteOffsApi();await pump(tester,api);final before=api.queries.length;
+    await tester.tap(find.byTooltip('Post'));await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Post'));await tester.pumpAndSettle();
+    expect(api.posts,['/inventory/stock-documents/wo-2/write-off/post']);expect(api.queries.length,greaterThan(before));
+  });
+
   testWidgets('posting warns that stock and the journal both move', (
     tester,
   ) async {

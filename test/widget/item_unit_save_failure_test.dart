@@ -55,7 +55,9 @@ void main() {
         child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
           supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemsScreen()))));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Units & barcodes')); await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Units & barcodes'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Units & barcodes')); await tester.pumpAndSettle();
       if (editing) {
         await tester.tap(find.byTooltip('Edit unit'));
       } else {
@@ -89,6 +91,8 @@ void main() {
           exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
           child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
             supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemsScreen()))));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byTooltip('Units & barcodes'));
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Units & barcodes')); await tester.pumpAndSettle();
         if (editing) {

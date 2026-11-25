@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 105,
-    "OPEN_UNMAPPED": 86
+    "MAPPED_WIDGET": 115,
+    "OPEN_UNMAPPED": 76
   },
   "controls": [
     {
@@ -383,8 +383,14 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 368,
       "source": "onPressed: () =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "item unit edit retains draft and blocks uncertain retry",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
@@ -418,8 +424,14 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 422,
       "source": "onPressed: () => Navigator.of(dialogContext).pop('add'),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "item unit create retains draft and blocks uncertain retry",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
@@ -460,15 +472,27 @@
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 850,
       "source": "onPressed: _busy ? null : () => _manageUnits(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_unit_save_failure_test.dart",
+          "test": "item unit create/edit retains draft and blocks uncertain retry",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
       "line": 862,
       "source": "onPressed: _busy ? null : () => _toggleActive(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_status_refresh_test.dart",
+          "test": "item activation/deactivation refreshes after uncertain response",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
@@ -621,8 +645,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 101,
       "source": "onPressed: () => ref.read(stockListProvider.notifier).reload(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_cost_visibility_test.dart",
+          "test": "stock refresh reads the source again and retains the search",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -655,8 +685,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 140,
       "source": "onTap: _openLedger,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_cost_visibility_test.dart",
+          "test": "without cost permission neither stock values nor cost columns are shown",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -1949,29 +1985,53 @@
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
       "line": 107,
       "source": "onPressed: async.isLoading ? null : () => ref.read(writeOffsProvider.notifier).reload(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/write_offs_screen_test.dart",
+          "test": "refresh reloads writeoffs without a stock change",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
       "line": 184,
       "source": "onPressed: null,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/write_offs_screen_test.dart",
+          "test": "the person who raised a write-off cannot approve it",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
       "line": 193,
       "source": "onPressed: () => _approve(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/write_offs_screen_test.dart",
+          "test": "approving a write-off posts to the write-off route",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
       "line": 204,
       "source": "onPressed: () => _post(row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/write_offs_screen_test.dart",
+          "test": "confirmed posting targets the signed writeoff and refreshes",
+          "proofLevel": "widget with synthetic API, 37-case local run 2026-11-25 06:24 passes; named callback branch only, no SQL proof implied"
+        }
+      ]
     }
   ],
   "separateEvidence": {
