@@ -478,7 +478,9 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                   .toList();
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Wrap(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
@@ -582,6 +584,7 @@ class _CreateTransferDialogState extends State<_CreateTransferDialog> {
                       icon: const Icon(Icons.remove_circle_outline),
                     ),
                   ],
+                  ),
                 ),
               );
             }),
