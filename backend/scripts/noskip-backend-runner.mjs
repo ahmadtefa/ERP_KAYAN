@@ -12,6 +12,7 @@
 //
 // Usage: DATABASE_ADMIN_URL=postgresql://u:p@host:port/postgres \
 //        node scripts/noskip-backend-runner.mjs <out-dir> [substring-filter]
+import { classify } from './noskip-classify.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdtempSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -106,17 +107,9 @@ for (const f of runnable) {
     const j = JSON.parse(readFileSync(jsonPath, 'utf8'));
     const registered = ident(regPath);
     const cases = (j.testResults ?? []).flatMap((x) => x.assertionResults ?? []);
-    const executed = cases.map((c) => c.fullName).sort();
-    const pendingIds = cases.filter((c) => c.status === 'pending').map((c) => c.fullName).sort();
-    const allowed = new Set(bridgeManifest[f] ?? []);
-    const unmanifested = pendingIds.filter((n) => !allowed.has(n));
-    const bad = cases.filter((c) => !['passed', 'pending'].includes(c.status));
-    if (r.status !== 0 || j.numFailedTests || j.numFailedTestSuites || j.numRuntimeErrorTestSuites || bad.length) reason = 'failed cases or suites';
-    else if (!registered.length || JSON.stringify(registered) !== JSON.stringify(executed)) reason = `registered ${registered.length} vs executed ${executed.length} case identities differ`;
-    else if (!j.numPassedTests && !pendingIds.length) reason = 'no case ran';
-    else if (j.numTodoTests) reason = 'todo cases';
-    else if (unmanifested.length) reason = `${unmanifested.length} pending/skipped case identities are not in the bridge manifest`;
-    else { verdict = pendingIds.length ? 'PASS_BRIDGE_MANIFESTED_PENDING' : 'PASS'; reason = ''; }
+    const c = classify({ exitStatus: r.status, report: j, registered, cases, allowedIdentities: bridgeManifest[f] });
+    const { executed, pendingIds } = c;
+    verdict = c.verdict; reason = c.reason;
     results.push({ file: f, verdict, reason, db, passed: j.numPassedTests, pending: j.numPendingTests, failed: j.numFailedTests,
       registeredCount: registered.length, executedCount: executed.length, pendingIdentities: pendingIds,
       identities: cases.map((c) => `${c.status}\t${c.fullName}`) });

@@ -471,8 +471,14 @@ export class PostingService {
     candidateNumber?: string,
     excludeEntryId?: string,
   ): Promise<Prisma.Decimal> {
-    // A number no real entry can sort past, for callers without a number.
-    const number = candidateNumber ?? '~~~~~~~~~~';
+    // Callers without a number (a draft that has not been numbered yet) sit
+    // after every entry of their own date. That is stated as a flag, never as
+    // a sentinel string: how a string such as '~~~' sorts depends on the
+    // database collation, and under a locale that ignores punctuation it
+    // sorts BEFORE real numbers, which would make same-day receipts unable
+    // to fund a same-day payment.
+    const hasNumber = candidateNumber !== undefined;
+    const number = candidateNumber ?? '';
     // Two plain templates rather than a conditional fragment: the position
     // rule must stay exactly the one the statement prints.
     const rows = excludeEntryId
@@ -485,7 +491,7 @@ export class PostingService {
               SELECT (l.debit - l.credit) AS net,
                      (e."entryDate" < ${fromDate}::date
                       OR (e."entryDate" = ${fromDate}::date
-                          AND e."entryNumber" < ${number})) AS is_before,
+                          AND (NOT ${hasNumber}::boolean OR e."entryNumber" < ${number}))) AS is_before,
                      SUM(l.debit - l.credit) OVER (
                        ORDER BY e."entryDate", e."entryNumber", l."lineNumber"
                      ) AS running
@@ -506,7 +512,7 @@ export class PostingService {
               SELECT (l.debit - l.credit) AS net,
                      (e."entryDate" < ${fromDate}::date
                       OR (e."entryDate" = ${fromDate}::date
-                          AND e."entryNumber" < ${number})) AS is_before,
+                          AND (NOT ${hasNumber}::boolean OR e."entryNumber" < ${number}))) AS is_before,
                      SUM(l.debit - l.credit) OVER (
                        ORDER BY e."entryDate", e."entryNumber", l."lineNumber"
                      ) AS running

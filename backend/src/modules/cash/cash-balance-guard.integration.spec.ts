@@ -492,12 +492,15 @@ const vmReady =
     // A fresh payment takes a number inside the pad width (JV-0000xx), which
     // sorts BEFORE 'JV-999999' on the same date - exactly where the
     // statement shows it. There the box is empty, so the payment is refused
-    // at save even though the book's total would cover it: the statement is
-    // the truth the guard protects, and nothing is created.
-    const failure = await payment(14, '100', '2026-01-06').catch((error) => error);
+    // even though the book's total would cover it: the statement is the
+    // truth the guard protects.
+    const pay = await payment(14, '100', '2026-01-06');
+    const failure = await vouchers
+      .post(COMPANY, USER, pay.id, { discloseBalance: true })
+      .catch((error) => error);
     expect(failure).toBeInstanceOf(BadRequestException);
-    expect(failure.response).toMatchObject({ code: 'CASH_SAVE_BALANCE_SHORT' });
-    expect((await balance(14)).toFixed(4)).toBe('100.0000');
+    expect(failure.response).toMatchObject({ code: 'CASH_BALANCE_NEGATIVE' });
+    expect((await voucherState(pay.id))[0].status).toBe('DRAFT');
 
     // Inflows stay possible, and the total is untouched by the refusal.
     const rc = await receipt(14, '50', '2026-01-07');
