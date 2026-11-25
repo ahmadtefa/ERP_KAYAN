@@ -156,7 +156,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [backend, warehouses-orders, warehouse-cycle, accounting, accounting-reconciliation, system-backup]
+        suite: [backend, warehouses-orders, warehouse-cycle, accounting, accounting-reconciliation, system-backup, eight-digit-chart]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -307,7 +307,12 @@ jobs:
           node - "$RUNNER_TEMP/quotation-background.json" <<'NODE'
           const fs = require('node:fs');
           const r = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (r.numPassedTests !== 1 || r.numPendingTests !== 0 || r.numFailedTests !== 0) throw new Error('Quotation background HTTP regression must run, not skip.');
+          const want = [
+            'retains background design through reopen and uses same composed PDF for print and download',
+            'accepts a picture background, previews it, refuses bad files, and asks for the page of a multi-page PDF',
+          ];
+          const got = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status === 'passed').map((a) => a.title)).sort();
+          if (r.numPendingTests !== 0 || r.numFailedTests !== 0 || JSON.stringify(got) !== JSON.stringify([...want].sort())) throw new Error('Quotation background HTTP regression must run exactly the two synthetic cases, no skips.');
           NODE
       - name: Prove bounded maintenance leases and write-handler fault shutdown
         if: matrix.suite == 'backend'
@@ -416,6 +421,10 @@ jobs:
           [ "$status" -eq 0 ]
       - name: Seed isolated database
         if: matrix.suite != 'backend'
+        env:
+          # Existing companies keep their legacy chart, so the older scenarios seed it.
+          # The eight-digit suite seeds the default (new company) chart.
+          KAYAN_SEED_ACCOUNT_CODE_SCHEME: ${{ matrix.suite == 'eight-digit-chart' && 'EIGHT_DIGIT' || 'LEGACY' }}
         run: npx ts-node prisma/seed.ts
       - name: Assign the isolated accounting operator a business-manager role
         if: matrix.suite == 'accounting' || matrix.suite == 'accounting-reconciliation'

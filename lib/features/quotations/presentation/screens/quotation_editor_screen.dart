@@ -500,8 +500,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   void _clearFieldError(String field) {
-    if (_serverErrors.containsKey(field))
+    if (_serverErrors.containsKey(field)) {
       setState(() => _serverErrors.remove(field));
+    }
   }
 
   String _currency = 'EGP';
@@ -909,8 +910,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     _inputErrors.clear();
     _sentTableLines.clear();
     for (final table in _tables) {
-      if (table.title.text.trim().isEmpty)
+      if (table.title.text.trim().isEmpty) {
         _inputErrors[table.title] = l10n.tableTitle;
+      }
       final active = table.lines
           .where(
             (l) => l.description.text.trim().isNotEmpty || l.itemId != null,
@@ -919,8 +921,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       if (active.isEmpty) _inputErrors[table.title] = l10n.quotationNeedsTable;
       for (final line in active) {
         final qty = Decimal.tryParse(line.quantity.text.trim());
-        if (qty == null || qty <= Decimal.zero)
+        if (qty == null || qty <= Decimal.zero) {
           _inputErrors[line.quantity] = l10n.mustBePositive;
+        }
         final rawPrice = line.unitPrice.text.trim();
         final price = rawPrice.isEmpty
             ? Decimal.zero
@@ -964,8 +967,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       for (final line in table.lines) {
         final quantity = line.quantity.text.trim();
         final parsed = Decimal.tryParse(quantity);
-        if (line.description.text.trim().isEmpty && line.itemId == null)
+        if (line.description.text.trim().isEmpty && line.itemId == null) {
           continue;
+        }
         if (parsed == null || parsed <= Decimal.zero) {
           showMessage(context, l10n.mustBePositive, error: true);
           return;
@@ -1921,12 +1925,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       Navigator.of(dialogContext).pop();
                                     }
                                   } on Failure catch (error) {
-                                    if (dialogContext.mounted)
+                                    if (dialogContext.mounted) {
                                       showMessage(
                                         dialogContext,
                                         error,
                                         error: true,
                                       );
+                                    }
                                   }
                                 },
                               ),
@@ -2039,8 +2044,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
           final current = _design.toJson()[selected];
-          if (current is Map && family.text.isEmpty && size.text == '1.0')
+          if (current is Map && family.text.isEmpty && size.text == '1.0') {
             load();
+          }
           return AlertDialog(
             title: const Text('تخصيص عنصر العرض'),
             content: SizedBox(

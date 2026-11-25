@@ -636,13 +636,15 @@ async function main() {
     `paid ${purchaseAfterPayment.data?.paidAmount}, payable movement ${await delta('2101')}`,
   );
 
-  const transfer = await must('transfer 200 from the bank to the cash box', '/cash/transfers', {
+  // The bank holds 684 - 500 = 184 here. Cash and bank may never go negative,
+  // so the scenario moves 150 (an earlier fixture asked for 200 from 184).
+  const transfer = await must('transfer 150 from the bank to the cash box', '/cash/transfers', {
     method: 'POST',
     json: {
       transferDate: today,
       fromCashAccountId: bankAccount.id,
       toCashAccountId: cashAccount.id,
-      amount: '200',
+      amount: '150',
       description: `Cash for the till ${stamp}`,
     },
   });
@@ -655,14 +657,14 @@ async function main() {
   const bankRow = balanceRows.find((row) => row.code === bankAccount.code);
   check(
     'each box and bank reports its own balance after the transfer',
-    near(cashRow?.balance, 200) && near(bankRow?.balance, 684 - 500 - 200),
+    near(cashRow?.balance, 150) && near(bankRow?.balance, 684 - 500 - 150),
     `cash box ${cashRow?.balance}, bank ${bankRow?.balance}`,
   );
   const statement = await api(`/cash/accounts/${cashAccount.id}/statement`);
   check(
     'the cash box has a statement of everything that moved through it',
     (statement.data?.movements?.length ?? 0) >= 1 &&
-      near(statement.data?.closing ?? statement.data?.balance, 200),
+      near(statement.data?.closing ?? statement.data?.balance, 150),
     `${statement.data?.movements?.length} movements, closing ${statement.data?.closing ?? statement.data?.balance}`,
   );
 
@@ -1080,7 +1082,9 @@ async function main() {
   );
 
   // ──────────────────────────────────────────── 12. what must be refused
-  const oversell = await must('write a sales invoice for goods that are not in stock', '/sales/invoices', {
+  // Selling more than is on hand is refused when the invoice is saved (the
+  // stock-short rule). If a build ever accepts the draft, posting must refuse.
+  const oversellResponse = await api('/sales/invoices', {
     method: 'POST',
     json: {
       invoiceDate: today,
@@ -1088,16 +1092,16 @@ async function main() {
       lines: [{ itemId: itemB.id, quantity: '5', unitPrice: '30', taxRate: TAX }],
     },
   });
-  if (oversell) {
-    await mustRefuse('posting a sale of goods that are not in stock is refused', `/sales/invoices/${oversell.id}/post`, {
+  check(
+    'a sales invoice for goods that are not in stock is refused when saved',
+    oversellResponse.status === 400 &&
+      String(JSON.stringify(oversellResponse.data)).includes('الكمية أكبر من رصيد المخزون'),
+    `status ${oversellResponse.status}`,
+  );
+  if (oversellResponse.status >= 200 && oversellResponse.status < 300) {
+    await mustRefuse('posting a sale of goods that are not in stock is refused', `/sales/invoices/${oversellResponse.data.id}/post`, {
       method: 'POST',
     });
-    const stillDraft = await api(`/sales/invoices/${oversell.id}`);
-    check(
-      'the refused invoice is left as a draft with nothing posted',
-      String(stillDraft.data?.status).toUpperCase() === 'DRAFT',
-      `status ${stillDraft.data?.status}`,
-    );
   }
 
   const draft = await must('create a draft invoice to race against itself', '/sales/invoices', {

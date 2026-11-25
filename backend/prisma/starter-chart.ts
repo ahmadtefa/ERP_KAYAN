@@ -93,3 +93,47 @@ export const EIGHT_DIGIT_STARTER_ACCOUNTS: StarterAccount[] = [
   p('05020104', 'Depreciation expense', 'مصروف الإهلاك', X),
   p('05020105', 'Professional fees', 'أتعاب مهنية', X),
 ];
+
+/**
+ * The previous four digit starter chart. Used only when a test or fixture asks
+ * for it with KAYAN_SEED_ACCOUNT_CODE_SCHEME=LEGACY, so the legacy API paths
+ * (an existing company keeps its chart) stay covered by the scenario scripts.
+ */
+export const LEGACY_STARTER_ACCOUNTS: StarterAccount[] = [
+  { code: '1', nameEn: 'Assets', nameAr: 'الأصول', type: A, postable: false },
+  { code: '11', nameEn: 'Current assets', nameAr: 'الأصول المتداولة', type: A, parent: '1', postable: false },
+  { code: '1101', nameEn: 'Cash on hand', nameAr: 'النقدية بالصندوق', type: A, parent: '11', postable: true },
+  { code: '1102', nameEn: 'Bank — current account', nameAr: 'البنك - الحساب الجاري', type: A, parent: '11', postable: true },
+  { code: '1103', nameEn: 'Accounts receivable', nameAr: 'العملاء (المدينون)', type: A, parent: '11', postable: true },
+  { code: '1104', nameEn: 'Inventory', nameAr: 'المخزون', type: A, parent: '11', postable: true },
+  { code: '1105', nameEn: 'VAT receivable', nameAr: 'ضريبة القيمة المضافة - مدخلات', type: A, parent: '11', postable: true },
+  { code: '12', nameEn: 'Non-current assets', nameAr: 'الأصول غير المتداولة', type: A, parent: '1', postable: false },
+  { code: '1201', nameEn: 'Furniture and fixtures', nameAr: 'الأثاث والتجهيزات', type: A, parent: '12', postable: true },
+  { code: '1202', nameEn: 'Vehicles', nameAr: 'السيارات', type: A, parent: '12', postable: true },
+  { code: '1203', nameEn: 'Accumulated depreciation', nameAr: 'مجمع الإهلاك', type: A, parent: '12', postable: true },
+
+  { code: '2', nameEn: 'Liabilities', nameAr: 'الالتزامات', type: L, postable: false },
+  { code: '2101', nameEn: 'Accounts payable', nameAr: 'الموردون (الدائنون)', type: L, parent: '2', postable: true },
+  { code: '2102', nameEn: 'Accrued expenses', nameAr: 'مصروفات مستحقة', type: L, parent: '2', postable: true },
+  { code: '2103', nameEn: 'VAT payable', nameAr: 'ضريبة القيمة المضافة - مخرجات', type: L, parent: '2', postable: true },
+  { code: '2104', nameEn: 'Salaries payable', nameAr: 'رواتب مستحقة', type: L, parent: '2', postable: true },
+
+  { code: '3', nameEn: 'Equity', nameAr: 'حقوق الملكية', type: E, postable: false },
+  { code: '3101', nameEn: 'Capital', nameAr: 'رأس المال', type: E, parent: '3', postable: true },
+  { code: '3102', nameEn: 'Retained earnings', nameAr: 'الأرباح المحتجزة', type: E, parent: '3', postable: true },
+  { code: '3103', nameEn: 'Opening balance equity', nameAr: 'أرصدة افتتاحية', type: E, parent: '3', postable: true },
+
+  { code: '4', nameEn: 'Revenue', nameAr: 'الإيرادات', type: R, postable: false },
+  { code: '4101', nameEn: 'Sales revenue', nameAr: 'إيرادات المبيعات', type: R, parent: '4', postable: true },
+  { code: '4102', nameEn: 'Sales returns', nameAr: 'مردودات المبيعات', type: R, parent: '4', postable: true },
+  { code: '4103', nameEn: 'Other income', nameAr: 'إيرادات أخرى', type: R, parent: '4', postable: true },
+
+  { code: '5', nameEn: 'Expenses', nameAr: 'المصروفات', type: X, postable: false },
+  { code: '5101', nameEn: 'Cost of goods sold', nameAr: 'تكلفة المبيعات', type: X, parent: '5', postable: true },
+  { code: '5102', nameEn: 'Salaries and wages', nameAr: 'الرواتب والأجور', type: X, parent: '5', postable: true },
+  { code: '5103', nameEn: 'Rent', nameAr: 'الإيجار', type: X, parent: '5', postable: true },
+  { code: '5104', nameEn: 'Utilities', nameAr: 'المرافق والخدمات', type: X, parent: '5', postable: true },
+  { code: '5105', nameEn: 'Depreciation expense', nameAr: 'مصروف الإهلاك', type: X, parent: '5', postable: true },
+  { code: '5106', nameEn: 'Professional fees', nameAr: 'أتعاب مهنية', type: X, parent: '5', postable: true },
+  { code: '5107', nameEn: 'Inventory differences', nameAr: 'فروق المخزون', type: X, parent: '5', postable: true },
+];

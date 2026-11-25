@@ -17,7 +17,9 @@ import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { PERMISSIONS } from './permissions';
-import { EIGHT_DIGIT_STARTER_ACCOUNTS } from './starter-chart';
+import { EIGHT_DIGIT_STARTER_ACCOUNTS, LEGACY_STARTER_ACCOUNTS } from './starter-chart';
+
+const SEED_LEGACY_CHART = process.env.KAYAN_SEED_ACCOUNT_CODE_SCHEME === 'LEGACY';
 import { seededRoles } from './role-catalogue';
 
 // The client runs on the plain `pg` driver (engine-less Prisma runtime), so
@@ -58,7 +60,7 @@ async function main(): Promise<void> {
     where: { code: companyCode },
     update: {},
     create: {
-      accountCodeScheme: 'EIGHT_DIGIT',
+      accountCodeScheme: SEED_LEGACY_CHART ? 'LEGACY' : 'EIGHT_DIGIT',
       code: companyCode,
       nameEn: process.env.KAYAN_COMPANY_NAME_EN?.trim() || 'Kayan Company',
       nameAr: process.env.KAYAN_COMPANY_NAME_AR?.trim() || 'شركة كيان',
@@ -292,7 +294,7 @@ async function main(): Promise<void> {
   }
 
   // Chart of accounts: parents first so foreign keys resolve.
-  const sorted = [...EIGHT_DIGIT_STARTER_ACCOUNTS].sort((a, b) => a.code.length - b.code.length);
+  const sorted = [...(SEED_LEGACY_CHART ? LEGACY_STARTER_ACCOUNTS : EIGHT_DIGIT_STARTER_ACCOUNTS)].sort((a, b) => a.code.length - b.code.length);
   const idByCode = new Map<string, string>();
   for (const a of sorted) {
     const account = await prisma.account.upsert({

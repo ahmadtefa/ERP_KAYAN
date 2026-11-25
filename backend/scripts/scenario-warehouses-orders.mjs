@@ -358,6 +358,43 @@ async function main() {
     json: { kind: 'CUSTOMER', partyId: customer.id },
   });
 
+  // An invoice for more than the stock on hand is refused (stock-short rule), so
+  // receive 20 more into warehouse B first: the ten-unit price-break case below
+  // must be a real, covered sale, not an over-stock one.
+  const restock = await must('more goods are received so a ten-unit sale is covered', '/purchases/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      supplierId: supplier.id,
+      warehouseId: warehouseA.id,
+      lines: [{ itemId: item.id, quantity: '20.0000', unitPrice: '100.0000' }],
+    },
+  });
+  if (!restock) { process.exitCode = 1; return; }
+  await must('the restocking purchase is posted', `/purchases/invoices/${restock.id}/post`, { method: 'POST' });
+  const stockBeforeOverstock = await must('stock before the over-stock attempt', `/inventory/stock?itemId=${item.id}`);
+  const rowBefore = (Array.isArray(stockBeforeOverstock) ? stockBeforeOverstock : stockBeforeOverstock?.items ?? []).find(
+    (row) => row.itemId === item.id || row.code === item.code || row.id === item.id,
+  ) ?? (Array.isArray(stockBeforeOverstock) ? stockBeforeOverstock : stockBeforeOverstock?.items ?? [])[0];
+  const overstock = await mustRefuse('an invoice for more than the stock on hand is refused', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '100000.0000', unitPrice: '120.0000' }],
+    },
+  });
+  check(
+    'the refusal says the quantity exceeds the stock',
+    overstock.status === 400 && String(JSON.stringify(overstock.data)).includes('الكمية أكبر من رصيد المخزون'),
+    `status ${overstock.status}`,
+  );
+  const stockAfterOverstock = await must('stock after the over-stock attempt', `/inventory/stock?itemId=${item.id}`);
+  check(
+    'the refused invoice moved no stock',
+    JSON.stringify(stockAfterOverstock) === JSON.stringify(stockBeforeOverstock) && rowBefore !== undefined,
+  );
+
   const priced1 = await must('an invoice line with no price is accepted', '/sales/invoices', {
     method: 'POST',
     json: {
@@ -438,7 +475,7 @@ async function main() {
   );
   check(
     'an order moves no stock: it is a promise, not a receipt',
-    near(qtyBeforeOrder?.quantity ?? qtyBeforeOrder?.onHand ?? 0, 9),
+    near(qtyBeforeOrder?.quantity ?? qtyBeforeOrder?.onHand ?? 0, 29),
     `on hand ${qtyBeforeOrder?.quantity ?? qtyBeforeOrder?.onHand ?? 'not reported'}`,
   );
 
