@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof.",
   "counts": {
-    "MAPPED_WIDGET": 28,
-    "OPEN_UNMAPPED": 163
+    "MAPPED_WIDGET": 35,
+    "OPEN_UNMAPPED": 156
   },
   "controls": [
     {
@@ -31,29 +31,53 @@
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
       "line": 189,
       "source": "onPressed: () => _operate(BatchOperation.receive),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/batches_operations_test.dart",
+          "test": "receive collects cost, dates and the shelf",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
       "line": 219,
       "source": "onPressed: () => _operate(operation, batch: row),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/batches_operations_test.dart",
+          "test": "atomic issue split must sum exactly and sends one multi-source call",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
       "line": 255,
       "source": "onPressed: _reload,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/expiry_alerts_screen_test.dart",
+          "test": "the refresh button goes back to the server",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
       "line": 260,
       "source": "onPressed: _scanning ? null : _scan,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/expiry_alerts_screen_test.dart",
+          "test": "scan now asks the server to scan, then reloads",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
@@ -66,8 +90,14 @@
       "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
       "line": 323,
       "source": "onSelected: (_) => setState(() => _group = group),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/expiry_alerts_screen_test.dart",
+          "test": "the expired tab lists only the expired lot",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
@@ -504,8 +534,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 125,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_cost_visibility_test.dart",
+          "test": "stock refresh reads the source again and retains the search",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -1480,8 +1516,14 @@
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
       "line": 102,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/write_offs_screen_test.dart",
+          "test": "search narrows by number, reason and warehouse",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
