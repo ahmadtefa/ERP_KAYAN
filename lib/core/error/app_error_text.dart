@@ -123,6 +123,16 @@ class AppErrorMessageResolver {
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
       }
 
+      if (error is ApiFailure && error.statusCode == 400 &&
+          error.code == 'STOCK_DOC_TRANSFER_LOT_REQUIRED') {
+        return AppErrorText(
+          reason: AppErrorReason.invalidInput,
+          severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+              ? 'لم يُرحّل التحويل لأن دفعة المصدر غير محددة. افتح تصحيح مواقع المسودة واختر دفعة متاحة بعد اختيار موقع المصدر، أو قسّم الكمية على الدفعات ثم احفظ ورحّل. لم تتغير الأرصدة والمسودة محفوظة.'
+              : 'Transfer not posted because the source lot is not selected. Open Correct draft locations and choose an available lot after selecting the source location, or split the quantity over lots, then save and post. Balances did not change and the draft is kept.',
+        );
+      }
       if (error is ApiFailure && error.statusCode == 400) {
         final postingReason = _salesPostingReasons[error.code];
         if (postingReason != null) {

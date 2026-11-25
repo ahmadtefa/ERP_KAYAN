@@ -9,6 +9,17 @@ import 'package:flutter_test/flutter_test.dart';
 /// of the DTOs, the business rules the server enforces, and a few shapes a
 /// stray exception can take.
 void main() {
+  test('missing transfer lot has fixed bilingual corrective guidance, never raw diagnostics', () {
+    for (final arabic in [false, true]) {
+      final text = AppErrorMessageResolver(isArabic: arabic).resolve(const ApiFailure(
+        'private SQL diagnostic SELECT', statusCode: 400, code: 'STOCK_DOC_TRANSFER_LOT_REQUIRED',
+      ));
+      expect(text.businessMessage, contains(arabic ? 'اختر دفعة' : 'choose an available lot'));
+      expect(text.businessMessage, isNot(contains('SELECT')));
+      expect(text.businessMessage, contains(arabic ? 'المسودة محفوظة' : 'draft is kept'));
+    }
+  });
+
   test('typed rolled-back transaction has safe Arabic guidance, other 503 does not', () {
     const resolver=AppErrorMessageResolver(isArabic:true);
     final typed=resolver.resolve(const ApiFailure('synthetic raw',statusCode:503,code:'TRANSACTION_ROLLED_BACK'));

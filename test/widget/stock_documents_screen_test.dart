@@ -474,6 +474,42 @@ void main() {
     ]);
   });
 
+  for(final arabic in [false,true]) {
+  testWidgets('no lot posting refusal keeps the original draft and requires acknowledgement Arabic=$arabic', (tester) async {
+    await tester.runAsync(() async {
+      await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
+      await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();
+    });
+    final api = _DocumentsApi()..refusePost = const ApiFailure(
+      'Choose the lot to move on line 1 or split the quantity over lots, then post again; no balance changed and your data is kept.',
+      statusCode: 400, code: 'STOCK_DOC_TRANSFER_LOT_REQUIRED',
+    );
+    await pump(tester, api, locale:Locale(arabic?'ar':'en'), user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    await tester.tap(find.byTooltip(arabic?'ترحيل':'Post'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, arabic?'ترحيل':'Post'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.textContaining(arabic?'اختر دفعة':'source lot is not selected'), findsOneWidget);
+    final boundary = visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
+      await screenshotFile(arabic?'stockdoc-no-lot-guidance-ar.png':'stockdoc-no-lot-guidance.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();
+    });
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-2/post');
+    expect(find.text('Document updated.'), findsNothing);
+    await tester.tap(find.text(arabic?'حسنًا':'OK'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip(arabic?'ترحيل':'Post'), findsOneWidget);
+    expect(find.text('TRF-001'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  }
+
   testWidgets('posts a draft and reloads the stock documents', (tester) async {
     final api = _DocumentsApi();
     await pump(tester, api, user: const AppUser(
