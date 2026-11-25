@@ -306,32 +306,42 @@ jobs:
           # The accounting scenarios below look accounts up by the legacy 4-digit
           # codes (1101, 1103, 2101 ...). This job's main database is seeded with
           # the modern 2/4/6/8 digit chart, which the item, import and backup
-          # checks above rely on, so those scenarios get their own migrated and
-          # LEGACY-seeded database behind a second API on port 3001. Nothing about
-          # them is weakened; the modern database is not touched by them.
-          echo "Preparing an isolated LEGACY-chart database and API for the legacy-coded accounting scenarios..."
-          PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_legacy' -c 'CREATE DATABASE erp_kayan_legacy'
-          LEGACY_DB='postgresql://ci:ci@127.0.0.1:5432/erp_kayan_legacy?schema=public'
-          DATABASE_URL="$LEGACY_DB" node scripts/apply-migrations.mjs
-          DATABASE_URL="$LEGACY_DB" KAYAN_SEED_ACCOUNT_CODE_SCHEME=LEGACY npx ts-node prisma/seed.ts
-          DATABASE_URL="$LEGACY_DB" PORT=3001 npm run start:prod > /tmp/kayan-api-legacy.log 2>&1 &
-          LEGACY_PID=$!
-          trap 'kill "$API_PID" "$LEGACY_PID" 2>/dev/null || true' EXIT
-          legacy_ok=false
-          for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3001/api/v1/health > /tmp/kayan-health-legacy.json 2>/dev/null &&
-               node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health-legacy.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
-              legacy_ok=true
-              break
-            fi
-            sleep 2
-          done
-          if [ "$legacy_ok" != "true" ]; then
-            echo "::error::The legacy-chart API never reported a working database within 60 seconds."
-            tail -c 8000 /tmp/kayan-api-legacy.log
-            exit 1
-          fi
+          # checks above rely on, so these scenarios run against LEGACY-seeded
+          # databases behind a second API on port 3001. Each one gets a fresh
+          # copy of one migrated, LEGACY-seeded template, because accounting and
+          # api-check reset the company and a company set up again after a reset
+          # gets the modern chart. Nothing about the scenarios is weakened and
+          # the modern database is not touched by them.
+          echo "Preparing the migrated LEGACY-chart template database for the legacy-coded scenarios..."
+          export PGPASSWORD=ci
+          psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_legacy_template' -c 'CREATE DATABASE erp_kayan_legacy_template'
+          TEMPLATE_DB='postgresql://ci:ci@127.0.0.1:5432/erp_kayan_legacy_template?schema=public'
+          DATABASE_URL="$TEMPLATE_DB" node scripts/apply-migrations.mjs
+          DATABASE_URL="$TEMPLATE_DB" KAYAN_SEED_ACCOUNT_CODE_SCHEME=LEGACY npx ts-node prisma/seed.ts
           LEGACY_API=http://127.0.0.1:3001/api/v1
+          LEGACY_PID=""
+          trap 'kill "$API_PID" $LEGACY_PID 2>/dev/null || true' EXIT
+          fresh_legacy() {
+            if [ -n "$LEGACY_PID" ]; then kill "$LEGACY_PID" 2>/dev/null || true; wait "$LEGACY_PID" 2>/dev/null || true; fi
+            psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_legacy WITH (FORCE)' -c 'CREATE DATABASE erp_kayan_legacy TEMPLATE erp_kayan_legacy_template'
+            DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/erp_kayan_legacy?schema=public' PORT=3001 npm run start:prod > /tmp/kayan-api-legacy.log 2>&1 &
+            LEGACY_PID=$!
+            local ok=false
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:3001/api/v1/health > /tmp/kayan-health-legacy.json 2>/dev/null &&
+                 node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health-legacy.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                ok=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" != "true" ]; then
+              echo "::error::The legacy-chart API never reported a working database within 60 seconds."
+              tail -c 8000 /tmp/kayan-api-legacy.log
+              return 1
+            fi
+          }
+          fresh_legacy
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
           if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs "$LEGACY_API"; then
             echo "::group::API logs after accounting scenario failure"
@@ -340,13 +350,15 @@ jobs:
             exit 1
           fi
 
+          fresh_legacy
           echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs "$LEGACY_API"; then
             echo "::group::API logs after api-check failure"
-            cat /tmp/kayan-api.log
+            cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"
             exit 1
           fi
+          fresh_legacy
           echo "Running the full accounting lifecycle scenario (hand-computed 2024: assets, depreciation, trading, reconciliations, close)..."
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting-reconciliation.mjs "$LEGACY_API"; then
             echo "::group::API logs after lifecycle scenario failure"
@@ -354,6 +366,7 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          fresh_legacy
           echo "Running customer collections and supplier payments end to end: invoices, allocations, reversals, refusals, permissions, balances and the journal behind each one..."
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-collections-payments.mjs "$LEGACY_API"; then
             echo "::group::API logs after collections and payments scenario failure"
@@ -402,6 +415,7 @@ jobs:
           # can have: a receipt that reaches its partner only through the
           # invoices it settled. That data is inconsistent by construction, so
           # it must not be in place while the ageing/reconciliation checks run.
+          fresh_legacy
           echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs "$LEGACY_API"; then
             echo "::group::API logs after statement scenario failure"
