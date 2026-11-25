@@ -691,6 +691,17 @@ jobs:
       - name: Diagnose the design screenshots
         if: failure()
         run: python scripts/ci-diagnose.py flutter test test/screenshots/design_screenshots_test.dart --update-goldens --reporter expanded
+      - name: Render stock documents pilot pictures
+        env:
+          KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/stockdoc-pictures
+        run: python scripts/ci-diagnose.py flutter test test/widget/stock_documents_screen_test.dart --reporter expanded
+      - name: Upload stock documents pilot pictures
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockdoc-pictures-${{ github.sha }}
+          path: build/stockdoc-pictures/*.png
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload design screenshots
         uses: actions/upload-artifact@v4
         with:

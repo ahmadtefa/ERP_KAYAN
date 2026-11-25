@@ -575,4 +575,39 @@ void main() {
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
   });
+
+  // Pictures for the usability pilot review. They are written to the folder
+  // named by KAYAN_VISUAL_OUTPUT (the CI step uploads it) and assert nothing
+  // new about behaviour, so the same test runs before and after a change.
+  for (final arabic in [false, true]) {
+    testWidgets('pilot pictures: new count document and post confirmation (${arabic ? 'ar' : 'en'})', (tester) async {
+      await tester.runAsync(() async {await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();});
+      await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();});
+      final api = _DocumentsApi();
+      await pump(tester, api, locale: Locale(arabic ? 'ar' : 'en'), user: const AppUser(id: 'u2', username: 'u2', fullName: 'Manager', companyId: 'c1', permissions: ['inventory.stock.adjust']));
+      Future<void> shoot(String name) async {
+        final boundary = visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await screenshotFile('$name-${arabic ? 'ar' : 'en'}.png').writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await tester.tap(find.text(arabic ? 'مستند جديد' : 'New document'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('stock-document-barcode')), 'CARTON');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      await shoot('pilot-new-document-count');
+      await tester.tap(find.text(arabic ? 'إلغاء' : 'Cancel'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(arabic ? 'تجاهل التغييرات' : 'Discard changes'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(arabic ? 'ترحيل' : 'Post').first);
+      await tester.pumpAndSettle();
+      await shoot('pilot-post-confirmation');
+      expect(tester.takeException(), isNull);
+    });
+  }
 }
