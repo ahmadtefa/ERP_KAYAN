@@ -1,4 +1,8 @@
 import 'dart:async';
+
+import 'package:go_router/go_router.dart';
+import 'package:erp_kayan/app/router/app_router.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -59,7 +63,11 @@ Json _row({
     'nameEn': 'Aisle A shelf 1',
     'nameAr': 'ممر أ رف ١',
   },
-  Json? alert = const {'status': 'OPEN', 'severity': 'WARNING', 'raisedCount': 1},
+  Json? alert = const {
+    'status': 'OPEN',
+    'severity': 'WARNING',
+    'raisedCount': 1,
+  },
 }) => {
   'id': id,
   'batchNumber': batchNumber,
@@ -87,7 +95,10 @@ Json _row({
 
 class _AlertsApi extends ApiClient {
   _AlertsApi({this.rows, this.failure, this.scanFailure})
-    : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore()) {
+    : super(
+        AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
+        FakeTokenStore(),
+      ) {
     // The real client's own error path, reached through a real adapter. A
     // hand-rolled `get` override would hide the failure the screen is being
     // tested against, which is exactly how an error-state test passes without
@@ -124,7 +135,9 @@ class _AlertsApi extends ApiClient {
       'horizonDays': 90,
       'counts': {
         'expired': items.where((row) => row['group'] == 'EXPIRED').length,
-        'expiringSoon': items.where((row) => row['group'] == 'EXPIRING_SOON').length,
+        'expiringSoon': items
+            .where((row) => row['group'] == 'EXPIRING_SOON')
+            .length,
         'valid': items.where((row) => row['group'] == 'VALID').length,
         'total': items.length,
       },
@@ -155,7 +168,11 @@ class _Adapter implements HttpClientAdapter {
     );
     try {
       final body = api.answerFor(query);
-      return ResponseBody.fromString(jsonEncode(body), 200, headers: _jsonHeaders);
+      return ResponseBody.fromString(
+        jsonEncode(body),
+        200,
+        headers: _jsonHeaders,
+      );
     } on Failure catch (error) {
       // What the real server would send for a refusal, so the client's own
       // translator runs and the screen shows a server sentence.
@@ -204,6 +221,77 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  for (final control in ['notification', 'row', 'writeoff']) {
+    testWidgets(
+      'expiry navigation $control reaches actual route without mutation',
+      (tester) async {
+        final api = _AlertsApi(rows: [_row(group: 'EXPIRED', days: -2)]);
+        final router = GoRouter(
+          initialLocation: '/expiry',
+          routes: [
+            GoRoute(
+              path: '/expiry',
+              builder: (_, _) => const Scaffold(body: ExpiryAlertsScreen()),
+            ),
+            GoRoute(
+              path: AppRoutes.batches,
+              builder: (_, _) =>
+                  const Scaffold(body: Text('BATCH_DESTINATION')),
+            ),
+            GoRoute(
+              path: AppRoutes.notifications,
+              builder: (_, _) =>
+                  const Scaffold(body: Text('NOTIFICATION_DESTINATION')),
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        tester.view.physicalSize = const Size(1900, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              apiClientProvider.overrideWithValue(api),
+              currentUserProvider.overrideWithValue(_storeManager),
+            ],
+            child: MaterialApp.router(
+              locale: const Locale('en'),
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              routerConfig: router,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (control == 'notification') {
+          await tester.tap(find.text('Notification centre'));
+        } else {
+          await tester.tap(find.text('Expired'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(control == 'row' ? 'LOT-A' : 'Write off'));
+        }
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            control == 'notification'
+                ? 'NOTIFICATION_DESTINATION'
+                : 'BATCH_DESTINATION',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          control == 'notification'
+              ? AppRoutes.notifications
+              : AppRoutes.batches,
+        );
+        expect(api.scanCalls, 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   group('the feed', () {
     testWidgets('shows the item, batch, dates, quantity, warehouse and shelf', (
       tester,
@@ -266,12 +354,19 @@ void main() {
   });
 
   group('the three tabs', () {
-    testWidgets('starts on expiring soon and counts every group', (tester) async {
+    testWidgets('starts on expiring soon and counts every group', (
+      tester,
+    ) async {
       await pump(
         tester,
         _AlertsApi(
           rows: [
-            _row(id: 'expired', batchNumber: 'LOT-X', group: 'EXPIRED', days: -3),
+            _row(
+              id: 'expired',
+              batchNumber: 'LOT-X',
+              group: 'EXPIRED',
+              days: -3,
+            ),
             _row(id: 'soon', batchNumber: 'LOT-A', group: 'EXPIRING_SOON'),
             _row(id: 'good', batchNumber: 'LOT-G', group: 'VALID', days: 200),
           ],
@@ -291,7 +386,12 @@ void main() {
         tester,
         _AlertsApi(
           rows: [
-            _row(id: 'expired', batchNumber: 'LOT-X', group: 'EXPIRED', days: -3),
+            _row(
+              id: 'expired',
+              batchNumber: 'LOT-X',
+              group: 'EXPIRED',
+              days: -3,
+            ),
             _row(id: 'soon', batchNumber: 'LOT-A', group: 'EXPIRING_SOON'),
           ],
         ),
@@ -325,10 +425,7 @@ void main() {
     testWidgets('an empty tab says so instead of showing a blank table', (
       tester,
     ) async {
-      await pump(
-        tester,
-        _AlertsApi(rows: [_row(group: 'EXPIRING_SOON')]),
-      );
+      await pump(tester, _AlertsApi(rows: [_row(group: 'EXPIRING_SOON')]));
 
       await tester.tap(find.text('Expired'));
       await tester.pumpAndSettle();
@@ -350,7 +447,8 @@ void main() {
       expect(
         api.calls.length,
         greaterThan(before),
-        reason: 'a refresh that reused the cached answer would show stock the '
+        reason:
+            'a refresh that reused the cached answer would show stock the '
             'server no longer holds',
       );
     });
@@ -386,7 +484,10 @@ void main() {
     ) async {
       final api = _AlertsApi(
         rows: [_row()],
-        scanFailure: const ApiFailure('Scanning is not allowed', statusCode: 403),
+        scanFailure: const ApiFailure(
+          'Scanning is not allowed',
+          statusCode: 403,
+        ),
       );
       await pump(tester, api);
 
@@ -461,31 +562,29 @@ void main() {
     testWidgets('nothing to alert on says so plainly', (tester) async {
       await pump(tester, _AlertsApi(rows: const []));
 
-      expect(
-        find.textContaining('Nothing to alert on'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('Nothing to alert on'), findsOneWidget);
       expect(find.byType(DataTable), findsNothing);
     });
 
-    testWidgets('a user without the read grant sees the empty state, not an error', (
-      tester,
-    ) async {
-      final api = _AlertsApi(rows: [_row()]);
-      await pump(
-        tester,
-        api,
-        user: const AppUser(
-          id: 'u3',
-          username: 'nobody',
-          fullName: 'Nobody',
-          companyId: 'company-1',
-        ),
-      );
+    testWidgets(
+      'a user without the read grant sees the empty state, not an error',
+      (tester) async {
+        final api = _AlertsApi(rows: [_row()]);
+        await pump(
+          tester,
+          api,
+          user: const AppUser(
+            id: 'u3',
+            username: 'nobody',
+            fullName: 'Nobody',
+            companyId: 'company-1',
+          ),
+        );
 
-      expect(find.textContaining('Nothing to alert on'), findsOneWidget);
-      // No request was made: the server would have refused it.
-      expect(api.calls, isEmpty);
-    });
+        expect(find.textContaining('Nothing to alert on'), findsOneWidget);
+        // No request was made: the server would have refused it.
+        expect(api.calls, isEmpty);
+      },
+    );
   });
 }

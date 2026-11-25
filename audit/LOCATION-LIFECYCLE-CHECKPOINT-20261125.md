@@ -241,3 +241,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Qualified report open/close with45 synthetic rows, vertical scroll to last row and no write requests. Added missing vertical report scroll; prior only horizontal frame could overflow tall tables. Replaced raw report/details-open exception Snackbar with safe acknowledged error dialog.
 - Actual-font report pixels inspected at end of scroll: rows27-44 readable, Close visible. Synthetic report values only, not backend totals verification.
 -25 dedicated widgets and analyze pass. Partial source-site register now140 mapped/51 open after report trigger and Close mapping; unchanged191 denominator and no full-product coverage claim. Optional worker53 simulated tests skipped as less decisive than own existing trigger tests, no source required.
+
+### 07:50 expiry navigation routes
+- Three new synthetic feed + GoRouter tests tap Notification centre, lot row and expired Write off route. Exact destination paths checked, no scan requested. These qualify navigation only, not destination screens or write-off execution.
+- Partial register143mapped/48open of original191 sites. No production UI change or visual claim in this navigation-only batch. Full expiry suite and analyze checked locally, no CI/install claim.
