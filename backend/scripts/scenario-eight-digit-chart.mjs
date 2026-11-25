@@ -177,6 +177,12 @@ async function main() {
     check('an opening balance between eight digit accounts is created as a draft',
       opening.status === 201 && String(opening.data?.status).toLowerCase() === 'draft',
       opening.data?.detail ?? `status ${opening.status}`);
+    if (opening.status === 201) {
+      const openingPost = await api(`/accounting/opening-balances/${opening.data.id}/post`, { method: 'POST' });
+      check('the eight digit opening balance posts and has a journal entry',
+        openingPost.status === 201 && Boolean(openingPost.data?.journalEntryId),
+        openingPost.data?.detail ?? `status ${openingPost.status}`);
+    }
     const unbalanced = await api('/accounting/opening-balances', {
       method: 'POST',
       json: { asOfDate: '2026-01-01', description: `eight digit unbalanced ${stamp}`,
@@ -215,10 +221,33 @@ async function main() {
         transfer.data?.detail ?? `status ${transfer.status}`);
       if (transfer.status === 201) {
         const posted = await api(`/cash/transfers/${transfer.data.id}/post`, { method: 'POST' });
-        // Posting needs money in the cash box; a business refusal (4xx) is acceptable here,
-        // a server error is not. The balance rule (cash never negative) is expected to refuse.
-        check('posting the transfer answers with a business result, not a server error',
-          posted.status < 500, `status ${posted.status}`);
+        check('the transfer posts (cash box funded by the posted opening balance)',
+          posted.status === 201 && Boolean(posted.data?.journalEntryId),
+          posted.data?.detail ?? `status ${posted.status}`);
+        const balances = await api('/cash/accounts/balances');
+        const rows = balances.data?.rows ?? [];
+        const bankRow = rows.find((r) => r.code === `E8BK${stamp}`);
+        const cashRow = rows.find((r) => r.code === `E8CS${stamp}`);
+        check('the bank balance is 25.0000 and the cash box balance is 75.0000 after the transfer',
+          bankRow?.balance === '25.0000' && cashRow?.balance === '75.0000',
+          `bank ${bankRow?.balance} cash ${cashRow?.balance}`);
+        if (posted.data?.journalEntryId) {
+          const je = (await api(`/accounting/journal-entries/${posted.data.journalEntryId}`)).data;
+          const lines = je?.lines ?? [];
+          const sum = (k) => lines.reduce((t, l) => t + Number(l[k] ?? 0), 0);
+          const codes = new Set(lines.map((l) => l.account?.code ?? l.accountCode ?? l.code));
+          check('the transfer journal entry is balanced and sits on the eight digit bank and cash accounts',
+            lines.length >= 2 && Math.abs(sum('debit') - sum('credit')) < 0.00005 && sum('debit') === 25
+              && codes.has(roleCodes.bank) && codes.has(roleCodes.cash),
+            `debit ${sum('debit')} credit ${sum('credit')} accounts ${[...codes].join(',')}`);
+        }
+        const overdraw = await api('/cash/transfers', { method: 'POST',
+          json: { fromCashAccountId: cash.data.id, toCashAccountId: bank.data.id, transferDate: '2026-01-03',
+            amount: '1000.0000', description: `eight digit overdraw ${stamp}` } });
+        const overdrawPost = overdraw.status === 201
+          ? await api(`/cash/transfers/${overdraw.data.id}/post`, { method: 'POST' }) : overdraw;
+        check('a transfer larger than the cash box balance is refused with a client error (cash never negative)',
+          overdrawPost.status >= 400 && overdrawPost.status < 500, `status ${overdrawPost.status}`);
       }
     }
   }
