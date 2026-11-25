@@ -390,8 +390,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     Json document,
     Json line,
   ) async {
-    var amount1 = '';
-    var amount2 = '';
+    final previous = listOf(line['splits']);
+    var amount1 = previous.length == 2 ? text(previous[0], 'quantity') : '';
+    var amount2 = previous.length == 2 ? text(previous[1], 'quantity') : '';
     final parts = <Json>[
       for (var i = 0; i < 2; i++)
         {
@@ -399,6 +400,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           'toStorageLocationId': line['toStorageLocationId'],
           'sourceLabel': line['storageLocationCode'],
           'targetLabel': line['toStorageLocationCode'],
+          if (previous.length == 2) ...previous[i],
         },
     ];
     String? error;

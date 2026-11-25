@@ -146,6 +146,19 @@ void main() {
     await settle();
     expect(find.textContaining('Synthetic refusal'), findsOneWidget);
     expect(find.textContaining('2 × LOT-UI + 1 × LOT-UI'), findsOneWidget);
+    await tester.tap(find.text(tr('Split line quantity', 'تقسيم كمية السطر')));
+    await settle();
+    final first = tester.widget<TextFormField>(
+      find.widgetWithText(TextFormField, tr('Part 1 quantity', 'كمية الجزء 1')),
+    );
+    expect(first.initialValue, '2');
+    expect(
+      find.text(arabic ? 'دفعة الجزء 1: LOT-UI' : 'Part 1 lot: LOT-UI'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text(tr('Apply split', 'تطبيق التقسيم')));
+    await settle();
+
     await tester.tap(find.text(tr('Save locations', 'حفظ المواقع')));
     await settle();
     expect(

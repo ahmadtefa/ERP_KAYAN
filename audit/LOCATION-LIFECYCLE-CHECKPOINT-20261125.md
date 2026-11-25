@@ -95,3 +95,9 @@ Production service hunk integrated. Worker test hunk overlapped independent prob
 ## Generic non-transfer reversal gap, 05:23
 
 Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and generic COUNT10->8 post/reverse tests fail: ledger and warehouse restore but itemBatch remains12 or8 rather than10. reverse lot loop only restores WRITE_OFF and negative ADJUSTMENT. Backend owner notified; positive COUNT probe added awaiting run. Do not present generic stock-document reversals as fully accepted. Evidence patch42-generic-reverse.out.
+
+## 05:26 retained correction follow-through
+
+- Changed UI broad regression65/65 pass; current generic stockdoc22/22 pass. Explicit source lot null clearing is sent, written-off lots excluded. Destination change clears stale split preview.
+- After synthetic save refusal, reopening split now retains typed part2/1 and chosen lot in editable fields, then reapply/retry/post/reverse passes actual Flutter/native bridge. Evidence patch42-retained-edit.out. Analyze clean.
+- Generic COUNT positive12 also confirmed lot12 after reverse instead10; correction remains with backend owner. Transfer qualification is not generic reversal acceptance.
