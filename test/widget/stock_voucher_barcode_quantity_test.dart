@@ -352,7 +352,7 @@ void main() {
       // passing voucher test drives it. Tapping the byType widget lands on its
       // centre and does not reliably hit the clickable area.
       await tester.ensureVisible(find.text('Unit (base by default)'));
-      await tester.tap(find.text('Unit (base by default)'));
+      await tester.tap(find.ancestor(of: find.text('Unit (base by default)'), matching: find.byType(DropdownButtonFormField<String>)).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('piece').last);
       await tester.pumpAndSettle();

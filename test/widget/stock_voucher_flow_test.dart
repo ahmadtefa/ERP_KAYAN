@@ -639,7 +639,7 @@ void main() {
         await tester.tap(find.text('IT • Item').last);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Unit (base by default)'));
-        await tester.tap(find.text('Unit (base by default)'));
+        await tester.tap(find.ancestor(of: find.text('Unit (base by default)'), matching: find.byType(DropdownButtonFormField<String>)).first);
         await tester.pumpAndSettle();
         await tester.tap(find.text('box').last);
         await tester.pumpAndSettle();

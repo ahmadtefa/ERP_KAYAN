@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 76,
-    "OPEN_UNMAPPED": 115
+    "MAPPED_WIDGET": 105,
+    "OPEN_UNMAPPED": 86
   },
   "controls": [
     {
@@ -1085,15 +1085,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 57,
       "source": "if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('طلب تحويل','Request transfer'))),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 58,
       "source": "]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_scroll_test.dart",
+          "test": "transfer details scroll vertically and horizontally in en/ar",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1106,22 +1118,40 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 150,
       "source": "DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse'),errorText:_errors['sourceWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('sourceWarehouseId');setState(()=>_from=v);}),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 152,
       "source": "DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse'),errorText:_errors['destinationWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('destinationWarehouseId');setState(()=>_to=v);}),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 164,
       "source": "SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item'),errorText:_errors['lines.$index.itemId']),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v){_errors.remove('lines.$index.itemId');setState(() {line.itemId=v;line.batchId=null;line.unitName=null;});})),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1162,8 +1192,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 172,
       "source": "TextField(controller:_reason,onChanged:(_)=>_clear('reason'),decoration:InputDecoration(labelText:t('سبب التحويل','Transfer reason'),errorText:_errors['reason'])),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1176,8 +1212,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 175,
       "source": "actions:[TextButton(onPressed:_sending?null:()=>Navigator.pop(context,false),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:_sending?null:_save,child:Text(t('إنشاء الطلب','Create request')))],",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_create_errors_test.dart",
+          "test": "transfer request: missing fields are named, server refusals stay in the dialog, retry reuses the key",
+          "proofLevel": "widget with synthetic API, 3-case local two-file run 2026-11-25 06:10 passes; line175 submit only, cancel not claimed; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1288,15 +1330,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 210,
       "source": "child: TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher search queries the server for the user branch",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 226,
       "source": "onPressed: _submitSearch,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher search queries the server for the user branch",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1323,36 +1377,66 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 518,
       "source": "onPressed: _busy || _confirming",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE saved draft keeps the same edit retry after an uncertain response",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 530,
       "source": "onPressed: _busy || _confirming",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher workflow refreshes after review approval posting and reversal",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 541,
       "source": "onPressed: _busy || _confirming",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher workflow refreshes after review approval posting and reversal",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 552,
       "source": "onPressed: _busy || _confirming",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher workflow refreshes after review approval posting and reversal",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 561,
       "source": "onPressed: _busy || _confirming",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher workflow refreshes after review approval posting and reversal",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1372,8 +1456,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1401,
       "source": "onPressed: _busy ? null : () => _send(_pending!),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1386,8 +1476,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1443,
       "source": "onChanged: (v) {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher detail and selectors use English LTR/Arabic RTL names",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1407,36 +1503,66 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1476,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1478,
       "source": "onChanged: (_) => _edited('counterpartyName'),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1492,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1494,
       "source": "onChanged: (_) => _edited('reason'),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1539,
       "source": "onChanged: (v) {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher detail and selectors use English LTR/Arabic RTL names",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1463,50 +1589,92 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1622,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "scanning a unit barcode selects that item and unit",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1662,
       "source": "onChanged: (v) {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "voucher detail and selectors use English LTR/Arabic RTL names",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1706,
       "source": "onChanged: (v) {",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1724,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1726,
       "source": "onChanged: (_) =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1771,
       "source": "TextFormField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1773,
       "source": "onChanged: (_) =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
@@ -1547,8 +1715,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
       "line": 1846,
       "source": "onPressed: disabled ? null : _save,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_voucher_flow_test.dart",
+          "test": "RECEIPT/ISSUE voucher retains exact request across an uncertain create",
+          "proofLevel": "widget with synthetic API, 28-case three-file local run 2026-11-25 06:11 passes; names with kind/locale alternatives refer to separate tests; named branch only, no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",

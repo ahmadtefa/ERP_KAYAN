@@ -163,3 +163,8 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 06:10 original-movement read ordering proof boundary
 - Injected reversed original-movement read order only in test adapter; same valid equal-quantity/equal-book-cost distinct-lot adjustment and transfer now both refuse atomically with STOCK_DOC_REVERSE_LOT_AMBIGUOUS. Two probes pass unchanged shelves/lots/books/status.
 - Normal tested order exact inverse; arbitrary order not guaranteed usable because no movement-to-line key. This is a known safe-refusal usability limitation, not silent stock corruption. No production change or worker repair requested. TypeScript noEmit clean.
+
+### 06:12 dedicated transfer/voucher evidence and reliable unit selector taps
+- Dedicated transfer create/error retry and EN/AR details-scroll widgets3/3 pass. Mapped7 original sites, submit branch only where shared with Cancel.
+- Voucher flow/field-error/barcode quantity28/28 pass. Replaced label-only unit taps with enclosing dropdown tap in two test files; same assertions pass with zero hit-test warnings. No UI implementation change.
+- Mapped22 voucher sites to specific synthetic workflow/search/edit/retry/selector/quantity/cost/create tests. Partial original191-site register105 mapped/86 open. Unmapped pagination/report/history/add-remove/notes/date/remaining detail controls not inferred from neighboring cases. Mapped callback proof still not all branches or SQL/install proof.
