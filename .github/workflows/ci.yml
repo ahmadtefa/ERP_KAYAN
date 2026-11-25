@@ -694,7 +694,7 @@ jobs:
       - name: Render stock documents pilot pictures
         env:
           KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/stockdoc-pictures
-        run: python scripts/ci-diagnose.py flutter test test/widget/stock_documents_screen_test.dart --reporter expanded
+        run: python scripts/ci-diagnose.py flutter test test/widget/stock_documents_screen_test.dart test/widget/stock_transfer_create_errors_test.dart --reporter expanded
       - name: Upload stock documents pilot pictures
         uses: actions/upload-artifact@v4
         with:

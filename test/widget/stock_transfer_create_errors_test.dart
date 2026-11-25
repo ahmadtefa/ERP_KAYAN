@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
@@ -133,4 +137,47 @@ void main() {
     await tester.tap(find.text('Request transfer'));await tester.pumpAndSettle();await tester.enterText(find.widgetWithText(TextField,'Notes'),'discard');await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();expect(api.posts,hasLength(1));expect(find.text('Create request'),findsNothing);
   });
 
+
+  // Pictures only: the request dialog as it renders, for the visual review.
+  // They assert nothing about behaviour; CI uploads them from KAYAN_VISUAL_OUTPUT.
+  for (final arabic in [false, true]) {
+    testWidgets('picture: transfer request dialog (${arabic ? 'ar' : 'en'})', (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
+        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();
+      });
+      tester.view.physicalSize = const Size(1800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final key = GlobalKey();
+      final api = _Api();
+      final router = GoRouter(initialLocation: '/transfers', routes: [
+        GoRoute(path: '/transfers', builder: (_, _) => const StockTransfersScreen()),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api), currentUserProvider.overrideWithValue(const AppUser(id: 'u', username: 'u', fullName: 'U', companyId: 'c', branchId: 'b', isSuperAdmin: true))],
+        child: MaterialApp.router(
+          theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
+          locale: Locale(arabic ? 'ar' : 'en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          routerConfig: router,
+          builder: (context, child) => RepaintBoundary(key: key, child: child),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(arabic ? 'طلب تحويل' : 'Request transfer'));
+      await tester.pumpAndSettle();
+      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await screenshotFile('stage1-transfer-request-${arabic ? 'ar' : 'en'}.png').writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      expect(tester.takeException(), isNull);
+    });
+  }
 }
