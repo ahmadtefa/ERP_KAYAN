@@ -1346,6 +1346,43 @@ describe('notifications', () => {
     expect(state.notifications.filter((one) => one.type === 'ADMIN_ALERT')).toHaveLength(0);
   });
 
+  it('closes access-change alerts raised before this change, keeps the audit rows, and drops them from the unread count', async () => {
+    const old = (id: string, audit: string) =>
+      notification({
+        id,
+        type: 'ADMIN_ALERT',
+        severity: 'WARNING',
+        severityRank: 2,
+        permission: 'admin.audit.read',
+        dedupeKey: `ADMIN_ALERT:${audit}`,
+        entityType: 'AuditLog',
+        entityId: audit,
+        warehouseId: null,
+        branchId: null,
+      });
+    const { service, state } = makeHarness({
+      notifications: [old('n-role', 'audit-role'), old('n-pass', 'audit-pass'), old('n-restore', 'audit-restore')],
+    });
+    const who = { username: 'admin', fullNameEn: 'System Administrator', fullNameAr: 'مدير النظام' };
+    const base = { companyId: COMPANY, entity: 'x', entityId: 'x', createdAt: days(0), user: who };
+    state.auditLogs = [
+      { ...base, id: 'audit-role', action: 'role.permissions_set' },
+      { ...base, id: 'audit-pass', action: 'user.password' },
+      { ...base, id: 'audit-restore', action: 'admin.backup.restore' },
+    ];
+    const auditor = user({ permissions: ['admin.audit.read'], branchIds: [] });
+    expect((await service.unreadCount(auditor as never)).unread).toBe(3);
+
+    await service.scanBusiness(COMPANY, TODAY);
+
+    const byId = (id: string) => state.notifications.find((one) => one.id === id);
+    expect(byId('n-role')?.status).toBe('CLOSED');
+    expect(byId('n-pass')?.status).toBe('CLOSED');
+    expect(byId('n-restore')?.status).toBe('OPEN');
+    expect((await service.unreadCount(auditor as never)).unread).toBe(1);
+    expect(state.auditLogs).toHaveLength(3);
+  });
+
   it('still tells an auditor about a restore or reset of the company, keyed by the audit row', async () => {
     const { service, state } = makeHarness();
     state.auditLogs = [
