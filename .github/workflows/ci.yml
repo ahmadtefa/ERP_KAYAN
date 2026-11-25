@@ -234,6 +234,12 @@ jobs:
       - name: Prove the quotation PDF verifier reads a real sheet
         run: node --test scripts/verify-quotation-pdf.test.mjs scripts/verify-quotation-pdf.file.test.mjs
 
+      # The demo backup check derives its books from trial-balance rows because
+      # the report's totals are withheld from non-finance roles. Pin that the
+      # exact-decimal comparison fails on unbalanced, dropped, duplicated and
+      # changed rows, so the derived check cannot pass by accident.
+      - name: Prove the row-derived books comparison fails on bad ledgers
+        run: node --test scripts/trial-balance-books.test.mjs
       - name: Pin the database-state classifier (empty/incomplete/ready/unknown)
         run: python ../scripts/ci-diagnose.py node scripts/check-database-state.mjs
       - name: Seed an isolated test company and administrator

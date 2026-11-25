@@ -35,6 +35,7 @@
  * Nothing here touches the database the program normally runs on: two
  * databases are created and dropped, and both names are chosen here.
  */
+import { booksOf } from './trial-balance-books.mjs';
 import { spawn } from 'node:child_process';
 import {
   mkdirSync,
@@ -60,21 +61,6 @@ const BARE_URL = process.env.KAYAN_BARE_URL ?? `${DEMO_URL}_bare`;
 const OUT_DIR = process.env.OUT_DIR ?? join(backendDir, 'dist-demo');
 
 const results = [];
-
-/// Totals computed from the visible rows. The trial balance's own `totals`
-/// block is withheld from logins that are not General or Finance Manager
-/// (company-aggregate-visibility), and the demo administrator is neither, so
-/// the check sums the rows it is allowed to read: debits, credits and the
-/// closing balances, which must net to zero when the books balance.
-function booksOf(report) {
-  const rows = Array.isArray(report?.rows) ? report.rows : [];
-  const sum = (key) => rows.reduce((total, row) => total + Number(row?.[key] ?? 0), 0);
-  return {
-    debit: sum('debit').toFixed(4),
-    credit: sum('credit').toFixed(4),
-    difference: sum('closing').toFixed(4),
-  };
-}
 
 function check(name, ok, detail) {
   results.push({ name, ok });
