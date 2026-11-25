@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 138,
-    "OPEN_UNMAPPED": 53
+    "MAPPED_WIDGET": 140,
+    "OPEN_UNMAPPED": 51
   },
   "controls": [
     {
@@ -1126,8 +1126,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 56,
       "source": "if(user?.can('inventory.transfer.report')??false) IconButton(tooltip:t('تقرير التحويلات والطريق','Transfer/transit report'),onPressed:_report,icon:const Icon(Icons.assessment_outlined)),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "transit report opens scrolls45 rows closes and safe failure acknowledges",
+          "proofLevel": "synthetic API widget, actual-font pixels inspected 2026-11-25 07:42; no SQL/report-total proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
@@ -1159,8 +1165,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
       "line": 106,
       "source": "onPressed: () => Navigator.pop(context),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_transfer_operations_test.dart",
+          "test": "transit report opens scrolls45 rows closes and safe failure acknowledges",
+          "proofLevel": "synthetic API widget, actual-font pixels inspected 2026-11-25 07:42; no SQL/report-total proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",

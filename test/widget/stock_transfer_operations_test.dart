@@ -36,6 +36,7 @@ class _Api extends ApiClient {
   String proofState = 'COMPLETED';
   String proofAction = 'DISPATCH';
   bool wrongProofKey = false;
+  bool failReport = false;
   Map<String, dynamic> get row => {
     'id': 't',
     'documentNumber': 'TR-OPS',
@@ -69,6 +70,22 @@ class _Api extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     reads++;
+    if (path.endsWith('/report')) {
+      if (failReport) throw StateError('PRIVATE_REPORT_DIAGNOSTIC');
+      return {
+        'rows': List.generate(
+          45,
+          (i) => {
+            'documentNumber': 'REPORT-$i',
+            'status': 'PARTIALLY_RECEIVED',
+            'dispatched': '10',
+            'received': '3',
+            'inTransit': '7',
+            'differences': '0',
+          },
+        ),
+      };
+    }
     if (path.endsWith('/actions')) {
       return {
         'transferId': 't',
@@ -132,6 +149,7 @@ void main() {
     WidgetTester tester,
     _Api api, {
     bool arabic = false,
+    bool openDetails = true,
   }) async {
     await tester.runAsync(() async {
       await (FontLoader('IBMPlexSansArabic')..addFont(
@@ -195,6 +213,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (!openDetails) return;
     await tester.tap(find.byTooltip(arabic ? 'التفاصيل' : 'Details'));
     await tester.pumpAndSettle();
   }
@@ -700,6 +719,42 @@ void main() {
         findsOneWidget,
       );
       expect(api.posts, hasLength(1));
+    },
+  );
+  testWidgets(
+    'transit report opens scrolls45 rows closes and safe failure acknowledges',
+    (tester) async {
+      final api = _Api('DRAFT');
+      await pump(tester, api, openDetails: false);
+      await tester.tap(find.byTooltip('Transfer/transit report'));
+      await tester.pumpAndSettle();
+      expect(find.text('Transfers & transit report'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.drag(find.byType(AlertDialog), const Offset(0, -2400));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/transfer-transit-report-scroll.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.text('Transfers & transit report'), findsNothing);
+      expect(api.posts, isEmpty);
+      api.failReport = true;
+      await tester.tap(find.byTooltip('Transfer/transit report'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRIVATE_REPORT_DIAGNOSTIC'), findsNothing);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
     },
   );
 }

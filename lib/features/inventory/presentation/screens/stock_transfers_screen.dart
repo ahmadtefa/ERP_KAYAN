@@ -237,7 +237,7 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
       setState(() => _busy = true);
       await ref.read(stockTransfersProvider.notifier).reload();
     } catch (e) {
-      if (mounted) _msg(e.toString());
+      if (mounted) await showAppError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -270,30 +270,32 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
           ),
           content: SizedBox(
             width: 760,
-            child: HorizontalScrollFrame(
-              child: DataTable(
-                columns: [
-                  DataColumn(label: Text(t('رقم', 'Number'))),
-                  DataColumn(label: Text(t('الحالة', 'Status'))),
-                  DataColumn(label: Text(t('مرسل', 'Dispatched'))),
-                  DataColumn(label: Text(t('مستلم', 'Received'))),
-                  DataColumn(label: Text(t('بالطريق', 'In transit'))),
-                  DataColumn(label: Text(t('فروق', 'Differences'))),
-                ],
-                rows: rows
-                    .map(
-                      (row) => DataRow(
-                        cells: [
-                          DataCell(Text('${row['documentNumber']}')),
-                          DataCell(Text(_status('${row['status']}'))),
-                          DataCell(Text('${row['dispatched']}')),
-                          DataCell(Text('${row['received']}')),
-                          DataCell(Text('${row['inTransit']}')),
-                          DataCell(Text('${row['differences']}')),
-                        ],
-                      ),
-                    )
-                    .toList(),
+            child: SingleChildScrollView(
+              child: HorizontalScrollFrame(
+                child: DataTable(
+                  columns: [
+                    DataColumn(label: Text(t('رقم', 'Number'))),
+                    DataColumn(label: Text(t('الحالة', 'Status'))),
+                    DataColumn(label: Text(t('مرسل', 'Dispatched'))),
+                    DataColumn(label: Text(t('مستلم', 'Received'))),
+                    DataColumn(label: Text(t('بالطريق', 'In transit'))),
+                    DataColumn(label: Text(t('فروق', 'Differences'))),
+                  ],
+                  rows: rows
+                      .map(
+                        (row) => DataRow(
+                          cells: [
+                            DataCell(Text('${row['documentNumber']}')),
+                            DataCell(Text(_status('${row['status']}'))),
+                            DataCell(Text('${row['dispatched']}')),
+                            DataCell(Text('${row['received']}')),
+                            DataCell(Text('${row['inTransit']}')),
+                            DataCell(Text('${row['differences']}')),
+                          ],
+                        ),
+                      )
+                      .toList(),
+                ),
               ),
             ),
           ),
@@ -306,13 +308,9 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) _msg(e.toString());
+      if (mounted) await showAppError(context, e);
     }
   }
-
-  void _msg(String s) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(s), behavior: SnackBarBehavior.floating),
-  );
 }
 
 class _DraftLine {
