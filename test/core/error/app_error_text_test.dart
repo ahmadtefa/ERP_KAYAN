@@ -66,6 +66,33 @@ void main() {
       expect(server.businessMessage ?? '', isNot(contains(code)));
     });
   }
+  group('SALES_SAVE_STOCK_SHORT keeps the server sentence in the active language', () {
+    const both = ApiFailure(
+      'لم تُحفظ الفاتورة: الكمية أكبر من رصيد المخزون. ITEM-1 (سطر 1): المطلوب 41.0000 والمتاح 40.0000. / '
+      'The invoice was not saved: the quantity is more than the stock on hand. ITEM-1 (line 1): requested 41.0000, available 40.0000.',
+      statusCode: 400,
+      code: 'SALES_SAVE_STOCK_SHORT',
+    );
+    test('Arabic shows the Arabic half, English the English half, both with the code', () {
+      final ar = const AppErrorMessageResolver(isArabic: true).resolve(both).businessMessage!;
+      final en = const AppErrorMessageResolver(isArabic: false).resolve(both).businessMessage!;
+      expect(ar, contains('المطلوب 41.0000'));
+      expect(ar, isNot(contains('The invoice')));
+      expect(en, contains('requested 41.0000, available 40.0000'));
+      expect(en, isNot(contains('لم تُحفظ')));
+      expect(ar, contains('SALES_SAVE_STOCK_SHORT'));
+      expect(en, contains('SALES_SAVE_STOCK_SHORT'));
+    });
+    test('a server error with the same code is never relayed', () {
+      final r = const AppErrorMessageResolver(isArabic: false).resolve(
+        const ApiFailure('private SQL password=do-not-show', statusCode: 500, code: 'SALES_SAVE_STOCK_SHORT'));
+      expect(r.businessMessage ?? '', isNot(contains('private')));
+    });
+    test('an oversized or technical body is not echoed', () {
+      final big = ApiFailure('x' * 700, statusCode: 400, code: 'SALES_SAVE_STOCK_SHORT');
+      expect(const AppErrorMessageResolver(isArabic: false).resolve(big).businessMessage ?? '', isNot(contains('xxxxxxxxxx')));
+    });
+  });
   const arabic = AppErrorMessageResolver(isArabic: true);
   const english = AppErrorMessageResolver(isArabic: false);
 

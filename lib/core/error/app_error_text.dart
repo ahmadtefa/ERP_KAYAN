@@ -133,6 +133,30 @@ class AppErrorMessageResolver {
               : 'Transfer not posted because the source lot is not selected. Open Correct draft locations and choose an available lot after selecting the source location, or split the quantity over lots, then save and post. Balances did not change and the draft is kept.',
         );
       }
+      // Saving or converting a sales document above the stock on hand. The
+      // server writes one bounded sentence per language, joined by " / ", and
+      // names the item, the line and the amounts. It is not a diagnostic, so a
+      // user who typed the lines needs to read it as written; the generic
+      // fallback would hide which line to change.
+      if (error is ApiFailure &&
+          error.statusCode == 400 &&
+          error.code == 'SALES_SAVE_STOCK_SHORT') {
+        final halves = error.message.split(' / ');
+        final chosen = halves.length >= 2
+            ? (isArabic ? halves.first : halves.sublist(1).join(' / '))
+            : error.message;
+        final sentence = chosen.trim();
+        if (sentence.isNotEmpty &&
+            sentence.length <= 600 &&
+            !_looksTechnical(sentence)) {
+          return AppErrorText(
+            reason: AppErrorReason.invalidInput,
+            severity: AppErrorSeverity.warning,
+            businessMessage:
+                '$sentence\n${isArabic ? 'رمز المساعدة' : 'Support code'}: ${error.code}',
+          );
+        }
+      }
       if (error is ApiFailure && error.statusCode == 400) {
         final postingReason = _salesPostingReasons[error.code];
         if (postingReason != null) {
