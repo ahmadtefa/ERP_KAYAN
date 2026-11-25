@@ -281,6 +281,46 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  let ambiguous;try{await ob.reverse(C,U,ID,IB);ambiguous='unexpected';}catch(e){ambiguous=e.response?.code??String(e);}assert.equal((await p.openingBalance.findUnique({where:{id:ID}})).status,'POSTED');assert.equal(Number((await p.stockBalance.findFirst({where:{itemId:II}})).quantity),5);console.log('OB_AMBIGUOUS',JSON.stringify({result:ambiguous,quantity:5,status:'POSTED'}));
  const invalidReversals=await p.journalEntry.count({where:{sourceId:ID,reversalOfId:{not:null}}});assert.equal(invalidReversals,0);
  const journalBalance=await sql.query('SELECT COALESCE(SUM(debit-credit),0)::text AS difference FROM journal_lines');assert.equal(Number(journalBalance.rows[0].difference),0);reports.push({mode:'all synthetic journals balanced',difference:0});
+
+ if(process.env.KAYAN_OB_LOCATION_UI==='1'){
+  const {createServer}=require('node:http'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
+  const ub=randomUUID(),uw=randomUUID(),ui=randomUUID(),ul=randomUUID();await p.branch.create({data:{id:ub,companyId:C,code:'UIB',nameEn:'Opening UI branch',nameAr:'Opening UI branch'}});await p.warehouse.create({data:{id:uw,companyId:C,branchId:ub,code:'UIW',nameEn:'Opening UI warehouse',nameAr:'Opening UI warehouse',isDefault:true}});await p.item.create({data:{id:ui,companyId:C,code:'UII',nameEn:'Opening UI item',nameAr:'Opening UI item',unit:'piece',isStockTracked:true,requiresBatch:false}});await p.storageLocation.create({data:{id:ul,companyId:C,branchId:ub,warehouseId:uw,kind:'SHELF',code:'A-UI',nameEn:'Opening UI shelf',nameAr:'Opening UI shelf'}});
+  const {OpeningBalancesController}=require('../dist/src/modules/accounting/opening-balances.controller.js');const ctl=new OpeningBalancesController(ob),user={companyId:C,userId:U,branchId:ub,isSuperAdmin:true,permissions:[]};const calls=[];
+  const server=createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost'),path=url.pathname;let data;
+   if(path.endsWith('/company/profile'))data={currency:'EGP'};
+   else if(path.endsWith('/company/branches'))data={items:[await p.branch.findUnique({where:{id:ub}})]};
+   else if(path.endsWith('/chart-of-accounts'))data={items:await p.account.findMany({where:{id:{in:[inventory.id,equity.id]}}})};
+   else if(path.endsWith('/inventory/items'))data={items:[await p.item.findUnique({where:{id:ui}})]};
+   else if(path.endsWith('/inventory/warehouses'))data={items:[await p.warehouse.findUnique({where:{id:uw}})]};
+   else if(path.endsWith('/inventory/locations'))data={items:[await p.storageLocation.findUnique({where:{id:ul}})]};
+   else if(path.includes('/cash/accounts')||path.includes('/parties/'))data={items:[]};
+   else if(req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):{};calls.push(path);data=path.endsWith('/post')?await ctl.post(user,path.split('/').at(-2)):await ctl.create(user,body);}
+   else if(path.endsWith('/opening-balances')){data=await ctl.findAll(user);const only=await p.openingBalance.findFirst({where:{branchId:ub}});data.items=data.items.filter(x=>x.id===only?.id);}
+   else data=await ctl.findOne(user,path.split('/').at(-1));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
+  }catch(e){console.log('OB_UI_ERROR',e);res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});await new Promise(r=>server.listen(3225,'127.0.0.1',r));
+  try{const out=await promisify(execFile)('/tmp/flutter/bin/flutter',['test','test/widget/opening_locations_http_test.dart'],{cwd:path.join(__dirname,'../..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(out.stdout);assert.equal(calls.length,2);const doc=await p.openingBalance.findFirst({where:{branchId:ub}});assert.equal(doc.status,'POSTED');const balance=await p.warehouseStockBalance.findFirst({where:{itemId:ui}});assert.equal(Number(balance.quantity),5);assert.equal(Number(balance.value),10);const m=await p.stockMovement.findFirst({where:{referenceId:doc.id}});assert.equal(m.storageLocationId,ul);reports.push({mode:'actual Flutter opening draft read post controller service SQL',quantity:5,value:10});}
+  finally{await new Promise(r=>server.close(r));}
+ }
+
+ if(process.env.KAYAN_OB_AUTH==='1'){
+  require('reflect-metadata');const {Module}=require('@nestjs/common'),{NestFactory,APP_GUARD,Reflector}=require('@nestjs/core');
+  const {JwtAuthGuard}=require('../dist/src/common/guards/jwt-auth.guard.js'),{PermissionsGuard}=require('../dist/src/common/guards/permissions.guard.js'),{BranchWriteGuard}=require('../dist/src/common/guards/branch-write.guard.js');const {OpeningBalancesController}=require('../dist/src/modules/accounting/opening-balances.controller.js'),{OpeningBalancesService}=require('../dist/src/modules/accounting/opening-balances.service.js');
+  await p.userBranch.create({data:{userId:U,branchId:B}});const hash='b'.repeat(64);await p.refreshToken.create({data:{userId:U,tokenHash:hash,expiresAt:new Date(Date.now()+3600000)}});
+  const perms={};for(const code of ['accounting.openingbalances.read','accounting.openingbalances.manage','inventory.cost.read']){perms[code]=await p.permission.upsert({where:{code},create:{code,nameEn:code,nameAr:code,module:'synthetic'},update:{}});await p.userPermission.create({data:{userId:U,permissionId:perms[code].id}});}
+  // Signature decoder fixture only. No production token or signing material is created/read.
+  const verifier={verifyAsync:async token=>{if(token!=='synthetic-fixture')throw Error('invalid fixture');return{sub:U,companyId:C,branchId:B,tokenVersion:0,sessionHash:hash};}};
+  class Probe{};Module({controllers:[OpeningBalancesController],providers:[{provide:OpeningBalancesService,useValue:ob},{provide:APP_GUARD,useValue:new JwtAuthGuard(new Reflector(),verifier,p)},{provide:APP_GUARD,useValue:new PermissionsGuard(new Reflector())},{provide:APP_GUARD,useValue:new BranchWriteGuard(p)}]})(Probe);
+  const app=await NestFactory.create(Probe,{logger:false});app.setGlobalPrefix('api/v1');await app.listen(3226,'127.0.0.1');
+  const call=async(method,route,body,token='synthetic-fixture')=>{const r=await fetch('http://127.0.0.1:3226/api/v1/accounting/opening-balances'+route,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});return{status:r.status,body:await r.json()};};
+  try{
+   assert.equal((await call('GET','',null,'')).status,401);assert.equal((await call('GET','',null,'bad')).status,401);assert.equal((await call('GET','')).status,200);
+   const denied=perms['accounting.openingbalances.manage'];await p.userPermission.update({where:{userId_permissionId:{userId:U,permissionId:denied.id}},data:{isDenied:true}});const count=await p.openingBalance.count();assert.equal((await call('POST','',{})).status,403);assert.equal(await p.openingBalance.count(),count);await p.userPermission.update({where:{userId_permissionId:{userId:U,permissionId:denied.id}},data:{isDenied:false}});
+   const other=await p.branch.findFirst({where:{companyId:C,id:{not:B}}});assert.equal((await call('POST','',{branchId:other.id})).status,403);
+   await p.userPermission.update({where:{userId_permissionId:{userId:U,permissionId:perms['inventory.cost.read'].id}},data:{isDenied:true}});assert.equal((await call('POST','',{branchId:B,lines:[{itemId:randomUUID()}]})).status,403);
+   const detail=await call('GET','/'+ID);assert.equal(detail.status,200);assert.equal(detail.body.totalDebit,null);assert.ok(detail.body.lines.every(l=>l.unitCost===null&&l.debit===null&&l.credit===null));
+   await p.refreshToken.update({where:{tokenHash:hash},data:{revokedAt:new Date()}});assert.equal((await call('GET','')).status,401);reports.push({mode:'Nest HTTP production JWT session guard permissions controller SQL; signature decoder fixture',checks:['missing/invalid credential401','live permission deny403 no write','other branch403','no cost stock create403','detail money redacted','revoked session401']});
+  }finally{await app.close();}
+ }
  console.log(JSON.stringify({postgres:identity.version,database,reports},null,2));
  await Promise.all(clients.map(x=>x.$disconnect()));await sql.end();
 })().catch(e=>{console.error(e);process.exit(1)});

@@ -285,4 +285,16 @@ const vmReady =
     const actual=await wh(WAREHOUSE);const branch=await one(db,`SELECT quantity::text q,value::text v FROM stock_balances WHERE "itemId"=$1`,[ITEM]);const warehouseSum=await one(db,`SELECT SUM(quantity)::text q,SUM(value)::text v FROM warehouse_stock_balances WHERE "itemId"=$1`,[ITEM]);const movements=await one(db,`SELECT SUM(CASE WHEN direction='IN' THEN "totalCost" ELSE -"totalCost" END)::text v FROM stock_movements WHERE "itemId"=$1 AND "warehouseId"=$2`,[ITEM,WAREHOUSE]);console.log('FULL_WRITE_OFF_VALUE',{actual,branch,warehouseSum,movements});expect(actual.q).toBe('0.0000');expect(actual.v).toBe('0.0000');expect(branch.v).toBe(warehouseSum.v);
   });
 
+  it('transfer post reverse restores exact source target lot and branch values',async()=>{
+    const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});
+    const before={a:await shelf(SHELF),b:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)};
+    await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);
+    expect({a:await shelf(SHELF),b:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)}).toEqual(before);
+  });
+  it('writeoff post reverse restores exact shelf lot warehouse branch values',async()=>{
+    const id=await writeOff({batchId:await batch(),storageLocationId:SHELF});const before={a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)};
+    await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);
+    expect({a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)}).toEqual(before);
+  });
+
 });
