@@ -125,7 +125,11 @@ class _InventoryReportsScreenState
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
       trailing: IconButton(
         tooltip: _arabic ? 'تحديث' : 'Refresh',
-        onPressed: () => ref.invalidate(_catalogueProvider),
+        onPressed: () {
+          ref.invalidate(_catalogueProvider);
+          ref.invalidate(_reportProvider);
+          ref.invalidate(_warehouseOptionsProvider);
+        },
         icon: const Icon(Icons.refresh),
       ),
       body: AsyncStateView<List<Json>>(

@@ -22,6 +22,16 @@ class _ReportsApi extends ApiClient {
   bool failCatalogue;
   bool failReport;
   final reportCalls = <String>[];
+  final reportQueries = <Map<String, dynamic>?>[];
+  @override
+  Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async {
+    if (path == '/inventory/warehouses') return [
+      {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'Main'},
+      {'id': 'wh-2', 'code': 'BR2', 'nameEn': 'Second store', 'nameAr': 'Second'},
+    ];
+    return [];
+  }
+
 
   @override
   Future<Map<String, dynamic>> get(
@@ -48,6 +58,7 @@ class _ReportsApi extends ApiClient {
       };
     }
     reportCalls.add(path);
+    reportQueries.add(query);
     if (failReport) throw StateError('REPORT_FAILED');
     if (path.endsWith('/expiring')) {
       return {
@@ -198,6 +209,39 @@ void main() {
     expect(find.text('Balance by warehouse'), findsWidgets);
     expect(find.text('Retry'), findsWidgets);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('refresh reloads the selected report, not only its catalogue', (tester) async {
+    final api = _ReportsApi();
+    await pump(tester, api);
+    await tester.tap(find.text('Expiring soon').first);
+    await tester.pumpAndSettle();
+    final before = api.reportCalls.where((p) => p.endsWith('/expiring')).length;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    expect(api.reportCalls.where((p) => p.endsWith('/expiring')).length, greaterThan(before));
+  });
+
+  testWidgets('warehouse scope apply, cancel and all-assigned send only intended filters', (tester) async {
+    final api = _ReportsApi();
+    await pump(tester, api);
+    await tester.tap(find.text('All assigned warehouses'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'BR2 · Second store'));
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+    expect(api.reportQueries.last, {'warehouseIds': 'wh-1'});
+    await tester.tap(find.text('Warehouses: 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'BR2 · Second store'));
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(api.reportQueries.last, {'warehouseIds': 'wh-1'});
+    await tester.tap(find.text('Warehouses: 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All assigned'));
+    await tester.pumpAndSettle();
+    expect(api.reportQueries.last, isNull);
   });
 
   testWidgets('Arabic reads the Arabic titles and mirrors', (tester) async {
