@@ -2,30 +2,48 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 42,
-    "OPEN_UNMAPPED": 149
+    "MAPPED_WIDGET": 45,
+    "OPEN_UNMAPPED": 146
   },
   "controls": [
     {
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
       "line": 173,
       "source": "onSelectionChanged: (value) =>",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/batches_operations_test.dart",
+          "test": "expiry segments filter rows and All restores them",
+          "proofLevel": "widget with synthetic API, 32-case local run 2026-11-25 05:53 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
       "line": 178,
       "source": "onChanged: (value) => setState(() => _query = value.trim()),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/batches_operations_test.dart",
+          "test": "search trims text and clearing restores all lots",
+          "proofLevel": "widget with synthetic API, 32-case local run 2026-11-25 05:53 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
       "line": 182,
       "source": "onPressed: () => ref.read(batchesListProvider.notifier).reload(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/batches_operations_test.dart",
+          "test": "refresh reloads lots without submitting a stock operation",
+          "proofLevel": "widget with synthetic API, 32-case local run 2026-11-25 05:53 passes; no SQL proof implied"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",

@@ -272,6 +272,70 @@ void main() {
     );
   }
 
+  group('list controls', () {
+    testWidgets('expiry segments filter rows and All restores them', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        _BatchApi(
+          lots: [
+            _lot(id: 'expired', batchNumber: 'OLD', days: -2),
+            _lot(id: 'soon', batchNumber: 'SOON', days: 5),
+            _lot(id: 'later', batchNumber: 'LATER', days: 120),
+          ],
+        ),
+      );
+      await tester.tap(find.text('Expired'));
+      await tester.pumpAndSettle();
+      expect(find.text('OLD'), findsOneWidget);
+      expect(find.text('SOON'), findsNothing);
+      expect(find.text('LATER'), findsNothing);
+      await tester.tap(find.text('Expiring'));
+      await tester.pumpAndSettle();
+      expect(find.text('SOON'), findsOneWidget);
+      expect(find.text('OLD'), findsNothing);
+      expect(find.text('LATER'), findsNothing);
+      await tester.tap(find.text('All'));
+      await tester.pumpAndSettle();
+      expect(find.text('OLD'), findsOneWidget);
+      expect(find.text('SOON'), findsOneWidget);
+      expect(find.text('LATER'), findsOneWidget);
+    });
+    testWidgets('search trims text and clearing restores all lots', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        _BatchApi(
+          lots: [
+            _lot(batchNumber: 'FINDME'),
+            _lot(id: 'other', batchNumber: 'OTHER'),
+          ],
+        ),
+      );
+      final search = find.byType(TextField).first;
+      await tester.enterText(search, '  findme  ');
+      await tester.pumpAndSettle();
+      expect(find.text('FINDME'), findsOneWidget);
+      expect(find.text('OTHER'), findsNothing);
+      await tester.enterText(search, '');
+      await tester.pumpAndSettle();
+      expect(find.text('OTHER'), findsOneWidget);
+    });
+    testWidgets('refresh reloads lots without submitting a stock operation', (
+      tester,
+    ) async {
+      final api = _BatchApi();
+      await pump(tester, api);
+      final before = api.listCalls;
+      await tester.tap(find.byTooltip('Refresh'));
+      await tester.pumpAndSettle();
+      expect(api.listCalls, greaterThan(before));
+      expect(api.posted, isEmpty);
+    });
+  });
+
   group('the lot row', () {
     testWidgets('shows production date, expiry and the storage location', (
       tester,
