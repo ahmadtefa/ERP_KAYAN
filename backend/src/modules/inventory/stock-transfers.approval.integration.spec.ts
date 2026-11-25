@@ -512,16 +512,23 @@ const vmReady =
       expect(returned?.entityId).toBe(transfer.id);
     });
 
-    it('does not let a second decision reuse the same idempotency key silently', async () => {
+    it('treats a key as one request: another person reusing it is refused with no effect, their own key advances', async () => {
       await withChain();
       const transfer = await openTransfer();
       await service.submit(COMPANY, REQUESTER, transfer.id, 'submit-001');
       await service.approve(COMPANY, MANAGER, transfer.id, 'same-key', manager());
-      // Level 2 with a different person; the same key must not be mistaken for
-      // the level-1 action it already recorded.
-      const after = await service.approve(COMPANY, CHIEF, transfer.id, 'same-key', chief());
+      // Level 2 by a different person under the level-1 key: that key already
+      // names the manager's request, so it is refused and changes nothing.
+      await expect(service.approve(COMPANY, CHIEF, transfer.id, 'same-key', chief())).rejects.toThrow(/reused/);
+      const unchanged = await service.findOne(COMPANY, transfer.id);
+      expect(unchanged.status).toBe('PENDING_APPROVAL');
+      let history = await approvals.history(COMPANY, 'StockTransfer', transfer.id);
+      expect(history.items.filter((item) => item.decision === 'APPROVE')).toHaveLength(1);
+      // The same person's own request, with its own key, is the legitimate successive step.
+      const after = await service.approve(COMPANY, CHIEF, transfer.id, 'chief-key', chief());
       expect(after.status).toBe('APPROVED');
-      const history = await approvals.history(COMPANY, 'StockTransfer', transfer.id);
+      expect(after.approvedBy).toBe(CHIEF);
+      history = await approvals.history(COMPANY, 'StockTransfer', transfer.id);
       expect(history.items.filter((item) => item.decision === 'APPROVE')).toHaveLength(2);
     });
   },
