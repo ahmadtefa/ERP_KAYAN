@@ -153,6 +153,76 @@ async function main() {
     }
   }
 
+  // Opening balance, bank account and cash box on the eight digit chart.
+  // Accounts are resolved by their role (cash on hand, current bank account,
+  // opening balance equity), not by the legacy 4-digit codes, so these business
+  // paths are proven on the modern chart and not through a legacy fixture.
+  const roleCodes = { cash: '01010101', bank: '01010102', openingEquity: '03010301' };
+  const cashLedger = byCode.get(roleCodes.cash);
+  const bankLedger = byCode.get(roleCodes.bank);
+  const equityLedger = byCode.get(roleCodes.openingEquity);
+  const totalLedger = items.find((a) => a.code === '010101');
+  check('the cash, bank and opening-equity role accounts exist and post',
+    [cashLedger, bankLedger, equityLedger].every((a) => a && a.isPostable),
+    Object.entries(roleCodes).map(([k, c]) => `${k}=${byCode.has(c)}`).join(' '));
+  if (cashLedger && bankLedger && equityLedger && totalLedger) {
+    const countDrafts = async () =>
+      ((await api('/accounting/opening-balances')).data?.items ?? []).length;
+    const before = await countDrafts();
+    const opening = await api('/accounting/opening-balances', {
+      method: 'POST',
+      json: { asOfDate: '2026-01-01', description: `eight digit opening ${stamp}`,
+        lines: [{ accountId: cashLedger.id, debit: '100.0000' }, { accountId: equityLedger.id, credit: '100.0000' }] },
+    });
+    check('an opening balance between eight digit accounts is created as a draft',
+      opening.status === 201 && String(opening.data?.status).toLowerCase() === 'draft',
+      opening.data?.detail ?? `status ${opening.status}`);
+    const unbalanced = await api('/accounting/opening-balances', {
+      method: 'POST',
+      json: { asOfDate: '2026-01-01', description: `eight digit unbalanced ${stamp}`,
+        lines: [{ accountId: cashLedger.id, debit: '10.0000' }, { accountId: equityLedger.id, credit: '9.0000' }] },
+    });
+    const after = await countDrafts();
+    check('an unbalanced opening balance is refused and leaves no extra draft',
+      unbalanced.status === 400 && after === before + (opening.status === 201 ? 1 : 0),
+      `status ${unbalanced.status}, drafts ${before} -> ${after}`);
+    const onTotal = await api('/accounting/opening-balances', {
+      method: 'POST',
+      json: { asOfDate: '2026-01-01', description: `eight digit total ${stamp}`,
+        lines: [{ accountId: totalLedger.id, debit: '5.0000' }, { accountId: equityLedger.id, credit: '5.0000' }] },
+    });
+    check('an opening balance line on a total (non-posting) account is refused',
+      onTotal.status >= 400 && onTotal.status < 500, `status ${onTotal.status}`);
+
+    const bank = await api('/cash/accounts', { method: 'POST',
+      json: { code: `E8BK${stamp}`, nameEn: 'Eight digit bank', nameAr: 'بنك', kind: 'BANK', accountId: bankLedger.id } });
+    check('a bank account is created on the eight digit bank account and reported as a bank',
+      bank.status === 201 && String(bank.data?.kind).toLowerCase() === 'bank', bank.data?.detail ?? `status ${bank.status}`);
+    const cash = await api('/cash/accounts', { method: 'POST',
+      json: { code: `E8CS${stamp}`, nameEn: 'Eight digit cash box', nameAr: 'صندوق', kind: 'CASH', accountId: cashLedger.id } });
+    check('a cash box is created on the eight digit cash account',
+      cash.status === 201, cash.data?.detail ?? `status ${cash.status}`);
+    const onTotalCash = await api('/cash/accounts', { method: 'POST',
+      json: { code: `E8TT${stamp}`, nameEn: 'Bad cash box', nameAr: 'صندوق خطأ', kind: 'CASH', accountId: totalLedger.id } });
+    check('a cash box on a total (non-posting) account is refused',
+      onTotalCash.status >= 400 && onTotalCash.status < 500, `status ${onTotalCash.status}`);
+    if (bank.status === 201 && cash.status === 201) {
+      const transfer = await api('/cash/transfers', { method: 'POST',
+        json: { fromCashAccountId: cash.data.id, toCashAccountId: bank.data.id, transferDate: '2026-01-02',
+          amount: '25.0000', description: `eight digit transfer ${stamp}` } });
+      check('a transfer between the eight digit cash box and bank is created as a draft',
+        transfer.status === 201 && String(transfer.data?.status).toLowerCase() === 'draft',
+        transfer.data?.detail ?? `status ${transfer.status}`);
+      if (transfer.status === 201) {
+        const posted = await api(`/cash/transfers/${transfer.data.id}/post`, { method: 'POST' });
+        // Posting needs money in the cash box; a business refusal (4xx) is acceptable here,
+        // a server error is not. The balance rule (cash never negative) is expected to refuse.
+        check('posting the transfer answers with a business result, not a server error',
+          posted.status < 500, `status ${posted.status}`);
+      }
+    }
+  }
+
   const failures = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failures.length}/${results.length} checks passed`);
   if (failures.length > 0) {
