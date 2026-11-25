@@ -429,4 +429,18 @@ void main() {
       expect(api.posts, hasLength(1));
     },
   );
+  testWidgets('uncertain reject retains reason after recreation and blocks duplicate', (tester) async {
+    final api=_Api('REVIEWED')..refuse=true;await pump(tester,api);
+    await tester.tap(find.text('Reject'));await tester.pumpAndSettle();await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'verify source lot');await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();
+    expect(find.textContaining('PRIVATE_TRANSFER_DIAGNOSTIC'),findsNothing);await tester.tap(find.text('OK'));await tester.pumpAndSettle();expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNull);
+    await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();await tester.pumpWidget(const SizedBox.shrink());await tester.pumpAndSettle();await pump(tester,api);await tester.tap(find.text('Reject'));await tester.pumpAndSettle();
+    final reason=find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField));expect(tester.widget<TextField>(reason).controller!.text,'verify source lot');expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Confirm')).onPressed,isNull);expect(api.posts,hasLength(1));
+    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/transfer-rejection-retained.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
+  });
+  testWidgets('review requires confirmation and cancel sends nothing', (tester) async {
+    final api=_Api('DRAFT');await pump(tester,api);await tester.tap(find.text('Review'));await tester.pumpAndSettle();expect(api.posts,isEmpty);await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();expect(api.posts,isEmpty);
+    await tester.tap(find.text('Review'));await tester.pumpAndSettle();await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();expect(api.posts.single.$1,'/inventory/stock-transfers/t/review');
+  });
+
 }

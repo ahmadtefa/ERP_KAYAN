@@ -864,8 +864,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
+        await showAppError(context, e);
       }
     } finally {
       if (mounted) setState(() => loading = false);
@@ -1141,131 +1140,162 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
       );
       return;
     }
-    Object? body;
-    final key = '$action-${DateTime.now().microsecondsSinceEpoch}';
-    if (action == 'dispatch' || action == 'receive' || action == 'settle') {
-      final savedOperations = ref.read(_uncertainTransferOperations);
-      final pending = savedOperations[recoveryScope];
-      if (pending != null && pending.action != action) {
-        await showAppError(
-          context,
-          const ValidationFailure(
-            'Review the saved uncertain operation before another stock action.',
-          ),
+    final savedOperations = ref.read(_uncertainTransferOperations);
+    final pending = savedOperations[recoveryScope];
+    Future<void> send(List<Json> selected) async {
+      final requestKey = '$action-${DateTime.now().microsecondsSinceEpoch}';
+      final operation = _UncertainTransferOperation(
+        action,
+        requestKey,
+        selected.map((e) => Map<String, dynamic>.from(e)).toList(),
+      );
+      await persistOperation(operation);
+      savedOperations[recoveryScope] = operation;
+      try {
+        await api.post(
+          '/inventory/stock-transfers/${widget.id}/$action',
+          body: const ['dispatch', 'receive', 'settle'].contains(action)
+              ? {'lines': selected}
+              : const ['reject', 'return'].contains(action)
+              ? selected.first
+              : null,
+          idempotencyKey: requestKey,
         );
-        return;
-      }
-      Future<void> send(List<Json> selected) async {
-        final requestKey = '$action-${DateTime.now().microsecondsSinceEpoch}';
-        final operation = _UncertainTransferOperation(
-          action,
-          requestKey,
-          selected.map((e) => Map<String, dynamic>.from(e)).toList(),
-        );
-        await persistOperation(operation);
-        savedOperations[recoveryScope] = operation;
-        try {
-          await api.post(
-            '/inventory/stock-transfers/${widget.id}/$action',
-            body: {'lines': selected},
-            idempotencyKey: requestKey,
-          );
+        await persistOperation(null);
+        savedOperations.remove(recoveryScope);
+      } catch (error) {
+        if (error is ApiFailure &&
+            error.statusCode != null &&
+            error.statusCode! >= 400 &&
+            error.statusCode! < 500) {
           await persistOperation(null);
           savedOperations.remove(recoveryScope);
-        } catch (error) {
-          if (!(error is ApiFailure &&
-              error.statusCode != null &&
-              error.statusCode! >= 400 &&
-              error.statusCode! < 500)) {
-            savedOperations[recoveryScope] = _UncertainTransferOperation(
-              action,
-              requestKey,
-              selected.map((e) => Map<String, dynamic>.from(e)).toList(),
-            );
-          } else {
-            await persistOperation(null);
-            savedOperations.remove(recoveryScope);
-          }
-          rethrow;
         }
+        rethrow;
       }
+    }
 
-      final saved = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => action == 'settle'
-            ? _SettlementDialog(
-                ar: ar,
-                lines: lines,
-                onSubmit: send,
-                pending: pending?.lines,
-              )
-            : _QuantityDialog(
-                ar: ar,
-                lines: lines,
-                receive: action == 'receive',
-                onSubmit: send,
-                pending: pending?.lines,
-              ),
-      );
-      if (mounted &&
-          (saved == true || savedOperations[recoveryScope] != null)) {
-        await _load();
-      }
-      return;
-    }
-    if (action == 'reject' || action == 'return') {
-      final reason = await _ask(
-        action == 'reject'
-            ? t('سبب الرفض', 'Rejection reason')
-            : t('سبب الإرجاع للتعديل', 'Reason for returning it'),
-      );
-      if (reason == null || !mounted) return;
-      body = {'reason': reason};
-    }
-    if (!mounted) return;
-    setState(() => busy = true);
-    try {
-      await api.post(
-        '/inventory/stock-transfers/${widget.id}/$action',
-        body: body,
-        idempotencyKey: key,
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<String?> _ask(String title) async {
-    final controller = TextEditingController();
-    final route = DialogRoute<String>(
+    final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(controller: controller),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(t('إلغاء', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: Text(t('تأكيد', 'Confirm')),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (_) {
+        if (action == 'settle') {
+          return _SettlementDialog(
+            ar: ar,
+            lines: lines,
+            onSubmit: send,
+            pending: pending?.lines,
+          );
+        }
+        if (action == 'dispatch' || action == 'receive') {
+          return _QuantityDialog(
+            ar: ar,
+            lines: lines,
+            receive: action == 'receive',
+            onSubmit: send,
+            pending: pending?.lines,
+          );
+        }
+        return _TransferActionDialog(
+          ar: ar,
+          action: action,
+          onSubmit: send,
+          pending: pending?.lines,
+        );
+      },
     );
-    final value = await Navigator.of(context, rootNavigator: true).push(route);
-    await route.completed;
-    controller.dispose();
-    return value;
+    if (mounted && (saved == true || savedOperations[recoveryScope] != null)) {
+      await _load();
+    }
   }
+}
+
+class _TransferActionDialog extends StatefulWidget {
+  const _TransferActionDialog({
+    required this.ar,
+    required this.action,
+    required this.onSubmit,
+    this.pending,
+  });
+  final bool ar;
+  final String action;
+  final Future<void> Function(List<Json>) onSubmit;
+  final List<Json>? pending;
+  @override
+  State<_TransferActionDialog> createState() => _TransferActionDialogState();
+}
+
+class _TransferActionDialogState extends State<_TransferActionDialog>
+    with _RetainedTransferSubmission<_TransferActionDialog> {
+  late final TextEditingController reason;
+  bool get needsReason =>
+      widget.action == 'reject' || widget.action == 'return';
+  @override
+  void initState() {
+    super.initState();
+    reason = TextEditingController(
+      text: widget.pending?.firstOrNull?['reason']?.toString() ?? '',
+    );
+    uncertain = widget.pending != null;
+    if (uncertain) {
+      submissionMessage = widget.ar
+          ? 'العملية السابقة غير مؤكدة. بياناتك محفوظة والإرسال محظور. حدّث التحويل أو راجع المدير للتحقق.'
+          : 'The earlier operation is uncertain. Your entries are saved and submission is blocked. Refresh the transfer or ask the administrator to verify it.';
+    }
+  }
+
+  @override
+  void dispose() {
+    reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      needsReason
+          ? (widget.action == 'reject'
+                ? (widget.ar ? 'سبب الرفض' : 'Rejection reason')
+                : (widget.ar
+                      ? 'سبب الإرجاع للتعديل'
+                      : 'Reason for returning it'))
+          : (widget.ar ? 'تأكيد إجراء التحويل' : 'Confirm transfer action'),
+    ),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (needsReason)
+          TextField(controller: reason, enabled: !sending && !uncertain)
+        else
+          Text(
+            widget.ar
+                ? 'راجع التحويل قبل تأكيد الإجراء.'
+                : 'Review the transfer before confirming this action.',
+          ),
+        if (submissionMessage != null) Text(submissionMessage!),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: sending ? null : () => Navigator.pop(context),
+        child: Text(widget.ar ? 'إلغاء' : 'Cancel'),
+      ),
+      FilledButton(
+        onPressed: sending || uncertain
+            ? null
+            : () => submitLines(
+                needsReason
+                    ? [
+                        {'reason': reason.text},
+                      ]
+                    : [],
+                widget.onSubmit,
+                widget.ar,
+              ),
+        child: Text(widget.ar ? 'تأكيد' : 'Confirm'),
+      ),
+    ],
+  );
 }
 
 mixin _RetainedTransferSubmission<T extends StatefulWidget> on State<T> {
