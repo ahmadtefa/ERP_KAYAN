@@ -638,7 +638,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                             update(
                                               () => line.addAll({
                                                 'batchId': picked['id'],
-                                                'batchLabel': picked['label'],
+                                                'batchLabel':
+                                                    picked['label'] ??
+                                                    (_arabic
+                                                        ? 'بدون دفعة (رصيد قديم)'
+                                                        : 'No lot (legacy stock)'),
                                                 'batchChanged': true,
                                                 'splits': null,
                                               }),
@@ -713,7 +717,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                             line['storageLocationCode'] =
                                                 picked['code'];
                                             line['batchId'] = null;
-                                            line['batchLabel'] = null;
+                                            line['batchChanged'] = true;
+                                            line['batchLabel'] = _arabic
+                                                ? 'بدون دفعة (اختر مجددًا)'
+                                                : 'No lot (choose again)';
                                             line['splits'] = null;
                                             failure = null;
                                           });
@@ -911,6 +918,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
       final choices = rows
           .where(
             (r) =>
+                text(r, 'status').toUpperCase() != 'WRITTEN_OFF' &&
                 available(r) > Decimal.zero &&
                 (Decimal.tryParse(text(r, 'remainingQuantity')) ??
                         Decimal.zero) >
