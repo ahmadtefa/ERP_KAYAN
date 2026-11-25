@@ -89,8 +89,13 @@ async function freshDatabase(): Promise<PGlite> {
 }
 
 
-function servicesWith(db: PGlite) {
+function servicesWith(db: PGlite, reverseOriginalOrder = false) {
   const prisma = pglitePrisma(db);
+  if (reverseOriginalOrder) {
+    const model = (prisma as any).stockMovement;
+    const read = model.findMany.bind(model);
+    model.findMany = async (args: any) => (await read(args)).reverse();
+  }
   const audit = { record: async () => undefined, recordRequired: async () => undefined };
   const numbers = new DocumentNumberService();
   const posting = new PostingService(
@@ -422,4 +427,7 @@ const vmReady =
     const first=await batch();const second=await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'EQUAL',quantity:4,unitCost:12,storageLocationId:SHELF_B,expiryDate:'2027-03-01'});const allLots=async()=>(await db.query(`SELECT id,"remainingQuantity"::text r,"receivedQuantity"::text n,"unitCost"::text c,status FROM item_batches ORDER BY id`)).rows;const snapshot=async()=>({a:await shelf(SHELF),b:await shelf(SHELF_B),t:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),lots:await allLots()});const initial=await snapshot();const doc=await documents.create(COMPANY,BRANCH,USER,{kind,documentDate:'2026-11-25',fromBranchId:BRANCH,fromWarehouseId:WAREHOUSE,toWarehouseId:kind==='transfer'?WAREHOUSE_2:WAREHOUSE,lines:[{batchId:first,storageLocationId:SHELF},{batchId:second.batchId,storageLocationId:SHELF_B}].map(x=>({itemId:ITEM,quantity:2,unitCost:12,...x,...(kind==='transfer'?{toStorageLocationId:SHELF_W2}:{})}))} as never) as unknown as {id:string};await documents.post(COMPANY,USER,doc.id);const before=await snapshot();const err=await failure(documents.reverse(COMPANY,USER,doc.id));console.log('EQUAL_LOT_INVERSE',JSON.stringify({kind,outcome:err??'exact'}));if(err){expect(await snapshot()).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[doc.id])).status).toBe('POSTED');return;}const end=await snapshot();expect({...end,lots:end.lots.filter((x:any)=>initial.lots.some((y:any)=>y.id===x.id))}).toEqual(initial);const added=end.lots.filter((x:any)=>!initial.lots.some((y:any)=>y.id===x.id));expect(added.every((x:any)=>Number(x.r)===0&&Number(x.n)===0)).toBe(true);
   });
 
+  it.each(['adjustment','transfer'])('reordered original equal quantity and cost distinct-lot %s inverse is safe',async kind=>{
+    const first=await batch();const second=await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'EQUAL',quantity:4,unitCost:12,storageLocationId:SHELF_B,expiryDate:'2027-03-01'});const allLots=async()=>(await db.query(`SELECT id,"remainingQuantity"::text r,"receivedQuantity"::text n,"unitCost"::text c,status FROM item_batches ORDER BY id`)).rows;const snapshot=async()=>({a:await shelf(SHELF),b:await shelf(SHELF_B),t:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),lots:await allLots()});const initial=await snapshot();const doc=await documents.create(COMPANY,BRANCH,USER,{kind,documentDate:'2026-11-25',fromBranchId:BRANCH,fromWarehouseId:WAREHOUSE,toWarehouseId:kind==='transfer'?WAREHOUSE_2:WAREHOUSE,lines:[{batchId:first,storageLocationId:SHELF},{batchId:second.batchId,storageLocationId:SHELF_B}].map(x=>({itemId:ITEM,quantity:2,unitCost:12,...x,...(kind==='transfer'?{toStorageLocationId:SHELF_W2}:{})}))} as never) as unknown as {id:string};await documents.post(COMPANY,USER,doc.id);const before=await snapshot();const reversed=servicesWith(db,true).documents;jest.spyOn(reversed,'findOne').mockImplementation((async (_c:string,id:string)=>({id})) as never);const err=await failure(reversed.reverse(COMPANY,USER,doc.id));console.log('REORDERED_EQUAL_LOT_INVERSE',JSON.stringify({kind,outcome:err??'exact'}));if(err){expect(await snapshot()).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[doc.id])).status).toBe('POSTED');return;}const end=await snapshot();expect({...end,lots:end.lots.filter((x:any)=>initial.lots.some((y:any)=>y.id===x.id))}).toEqual(initial);const added=end.lots.filter((x:any)=>!initial.lots.some((y:any)=>y.id===x.id));expect(added.every((x:any)=>Number(x.r)===0&&Number(x.n)===0)).toBe(true);
+  });
 });
