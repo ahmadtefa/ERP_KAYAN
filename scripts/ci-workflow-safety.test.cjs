@@ -119,6 +119,14 @@ assert.deepEqual(setup.permissions, { contents: 'read' });
 assert.deepEqual(Object.keys(setup.jobs), ['windows-evaluation']);
 const guardedSteps = optionalWindows.steps.map(({env, ...step}) => step);
 assert.deepEqual(guardedSteps, setup.jobs['windows-evaluation'].steps, 'Reuse the separately reviewed non-signing build, adding only runtime signing guard');
+// Registered path hosts the exact standalone trial job on this repair branch.
+const trial = read('windows-packaging-probe.yml');
+assert.deepEqual(trial.on, {workflow_dispatch: null});
+assert.deepEqual(trial.permissions, {contents: 'read'});
+assert.deepEqual(Object.keys(trial.jobs), ['windows-evaluation']);
+assert.deepEqual(trial.jobs['windows-evaluation'].steps, optionalWindows.steps);
+assert.equal(trial.jobs['windows-evaluation'].environment, undefined);
+assert.equal(trial.jobs['windows-evaluation'].needs, undefined);
 const installer = read('windows-installer.yml');
 assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
 assert.deepEqual(installer.permissions, { contents: 'read', deployments: 'read' }, 'Installer may read deployment review state but must not publish');

@@ -287,3 +287,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 09:20 portable visual test paths
 - Hosted focused run exposed two actual-font fixture failures: local SDK path and nonexistent screenshot output directory. Added shared active-SDK font discovery and writable build/visual-evidence folder. No screenshot assertion skipped or production code changed.
 -106 batch/count/document/transfer widgets pass with portable paths; full analyze clean. CI rerun required, previous queued candidate not called green or delivered.
+
+### 09:31 independent trial packaging route
+- Full831fef87 hosted Flutter run:1100 reported tests,0failed,9opt-in bridge fixtures NOT TESTED. No-skips gate remains failed. PG17 restore and5 business scenario jobs passed. Focused inventory CI passed. Full backend suite still in progress.
+- Separately requested test-only package uses registered windows-packaging-probe path on this repair branch, replaced with the already-reviewed standalone evaluation build job plus no-signing runtime guard. Pinned safety test asserts exact job-step equality with existing guarded comprehensive Windows build. No comprehensive gate changed, no install/signing/key generation/release/deployment.
