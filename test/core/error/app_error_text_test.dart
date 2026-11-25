@@ -123,6 +123,58 @@ void main() {
           expect(shown, isNot(contains('01012345678')));
         }
       });
+      test('location, lot and opening-stock refusals use reviewed templates and never the body (arabic=$arabic)', () {
+        const locationCodes = <String>[
+          'ISSUE_ALLOCATION_DUPLICATE',
+          'ISSUE_ALLOCATION_INVALID',
+          'ISSUE_ALLOCATION_SUM',
+          'ISSUE_LOCATION_AMBIGUOUS',
+          'ISSUE_LOCATION_REQUIRED',
+          'ITEM_OPENING_LOCATION_INACTIVE',
+          'ITEM_OPENING_LOCATION_NOT_FOUND',
+          'ITEM_OPENING_LOCATION_WRONG_WAREHOUSE',
+          'ITEM_OPENING_TARGET_CHANGED',
+          'ITEM_OPENING_WAREHOUSE_INACTIVE',
+          'OPENING_LOCATION_INACTIVE',
+          'OPENING_LOCATION_NOT_FOUND',
+          'OPENING_LOCATION_WITHOUT_ITEM',
+          'OPENING_LOCATION_WRONG_WAREHOUSE',
+          'OPENING_LOT_CONTROLLED_ITEM',
+          'OPENING_REVERSE_ORIGIN_AMBIGUOUS',
+          'OPENING_REVERSE_ORIGIN_UNKNOWN',
+          'OPENING_REVERSE_SHELF_SHORT',
+          'PURCHASE_LOCATION_INACTIVE',
+          'PURCHASE_LOCATION_NOT_FOUND',
+          'PURCHASE_LOCATION_WRONG_WAREHOUSE',
+          'PURCHASE_LOT_DETAILS_REQUIRED',
+          'PURCHASE_LOT_NEEDS_WAREHOUSE',
+          'PURCHASE_RETURN_LOT_SHORT',
+          'PURCHASE_RETURN_SHELF_SHORT',
+          'PURCHASE_REVERSE_LOT_USED',
+          'PURCHASE_REVERSE_SHELF_SHORT',
+          'RETURN_REVERSE_COST_MISMATCH',
+          'RETURN_REVERSE_LOT_SHORT',
+          'RETURN_REVERSE_SHELF_SHORT',
+          'SALES_POST_LOCATION_REQUIRED',
+          'TRANSFER_LOCATION_REQUIRED',
+          'TRANSFER_LOCATION_SHORT',
+          'TRANSFER_TARGET_LOCATION_INVALID',
+          'WRITEOFF_LOCATION_REQUIRED',
+          'WRITEOFF_LOCATION_SHORT',
+        ];
+        for (final code in locationCodes) {
+          for (final body in hostile) {
+            final shown = r.resolve(ApiFailure(body, statusCode: 400, code: code)).businessMessage ?? '';
+            expect(shown, contains(code), reason: code);
+            for (final leak in ['hunter2', 'main.js', 'abc123', 'Mona', 'Tahrir', '48,250', 'example.com', '01012345678', 'Cairo-Private', 'permission to see']) {
+              expect(shown, isNot(contains(leak)), reason: '$code leaked $leak');
+            }
+            expect(RegExp(r'[\u0600-\u06FF]').hasMatch(shown.split('\n').first), arabic, reason: code);
+          }
+        }
+        final row = r.resolve(const ApiFailure('x', statusCode: 400, code: 'ISSUE_ALLOCATION_SUM', fieldErrors: {'row': '2 Mona'})).businessMessage!;
+        expect(row, isNot(contains('Mona')));
+      });
       test('an unlisted code with a readable body is not shown (arabic=$arabic)', () {
         final out = r.resolve(const ApiFailure('Line 1: something readable / Line 1: something readable', statusCode: 400, code: 'STOCK_DOC_SOMETHING_NEW'));
         expect(out.businessMessage ?? '', isNot(contains('something readable')));

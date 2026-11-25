@@ -164,10 +164,164 @@ class AppErrorMessageResolver {
     ],
   };
 
+  /// Reviewed sentences for location, lot and opening-stock refusals outside
+  /// stock documents. Same rule: the code picks the text, the server body is
+  /// never shown, only a plain line or row number is added.
+  static const _locationRefusalReasons = <String, List<String>>{
+    'ISSUE_ALLOCATION_DUPLICATE': [
+      'هذا الموقع مذكور مرتين. ادمج الكميتين في صف واحد. بياناتك محفوظة.',
+      'This location appears twice. Merge the two quantities into one row. Your data is kept.',
+    ],
+    'ISSUE_ALLOCATION_INVALID': [
+      'اختر موقعًا وكمية أكبر من صفر في كل صف. بياناتك محفوظة.',
+      'Choose a location and a quantity above zero in every row. Your data is kept.',
+    ],
+    'ISSUE_ALLOCATION_SUM': [
+      'مجموع الكميات الموزعة لا يساوي كمية الصرف. عدّل الصفوف حتى تتطابق. بياناتك محفوظة.',
+      'The split does not add up to the issued quantity. Adjust the rows so they match. Your data is kept.',
+    ],
+    'ISSUE_LOCATION_AMBIGUOUS': [
+      'أرسل موقعًا واحدًا أو توزيعًا على مواقع، وليس الاثنين.',
+      'Send either one location or a split over locations, not both.',
+    ],
+    'ISSUE_LOCATION_REQUIRED': [
+      'الصنف مخزَّن على أكثر من موقع. اختر الموقع أو عدة مواقع بالكميات ثم اصرف مرة أخرى. بياناتك محفوظة.',
+      'The item is stored on several locations. Choose the location, or several locations with quantities, then issue again. Your data is kept.',
+    ],
+    'ITEM_OPENING_LOCATION_INACTIVE': [
+      'موقع التخزين للرصيد الافتتاحي غير مفعّل. فعّله أو اختر موقعًا مفعّلًا أو احذف الموقع. بياناتك محفوظة.',
+      'The opening stock location is inactive. Activate it, choose an active location, or leave it empty. Your data is kept.',
+    ],
+    'ITEM_OPENING_LOCATION_NOT_FOUND': [
+      'موقع التخزين للرصيد الافتتاحي غير موجود. اختر موقعًا آخر أو احذف الموقع. بياناتك محفوظة.',
+      'The opening stock location does not exist. Choose another location or leave it empty. Your data is kept.',
+    ],
+    'ITEM_OPENING_LOCATION_WRONG_WAREHOUSE': [
+      'موقع الرصيد الافتتاحي يتبع مخزنًا آخر غير مخزن الفرع. اختر موقعًا من مخزن الفرع. بياناتك محفوظة.',
+      'The opening stock location belongs to a different warehouse than the branch warehouse. Choose a location of the branch warehouse. Your data is kept.',
+    ],
+    'ITEM_OPENING_TARGET_CHANGED': [
+      'تغيّر مخزن الرصيد الافتتاحي منذ فتح النموذج. أعد فتح النموذج لرؤية المخزن الحالي.',
+      'The opening stock warehouse changed since the form was opened. Reopen the form to see the current warehouse.',
+    ],
+    'ITEM_OPENING_WAREHOUSE_INACTIVE': [
+      'كل مخازن هذا الفرع غير مفعّلة فلا يمكن حفظ رصيد افتتاحي. فعّل مخزنًا للفرع أو احفظ الصنف بدون رصيد افتتاحي.',
+      'All warehouses of this branch are inactive, so opening stock cannot be saved. Activate a branch warehouse or save the item without opening stock.',
+    ],
+    'OPENING_LOCATION_INACTIVE': [
+      'موقع التخزين غير مفعّل أو محذوف. فعّله أو اختر موقعًا آخر. باقي بياناتك محفوظة.',
+      'The storage location is inactive or deleted. Activate it or choose another one. The rest of your data is kept.',
+    ],
+    'OPENING_LOCATION_NOT_FOUND': [
+      'موقع التخزين غير موجود. اختر موقعًا آخر أو احذف الموقع. باقي بياناتك محفوظة.',
+      'The storage location does not exist. Choose another location or leave it empty. The rest of your data is kept.',
+    ],
+    'OPENING_LOCATION_WITHOUT_ITEM': [
+      'موقع التخزين يخص سطر صنف فقط. احذف الموقع من هذا السطر. باقي بياناتك محفوظة.',
+      'A storage location belongs only on a stock item line. Remove it from this line. The rest of your data is kept.',
+    ],
+    'OPENING_LOCATION_WRONG_WAREHOUSE': [
+      'الموقع يتبع مخزنًا آخر غير مخزن الرصيد الافتتاحي. اختر موقعًا من نفس المخزن. باقي بياناتك محفوظة.',
+      'The location belongs to a different warehouse than the opening balance warehouse. Choose a location of that warehouse. The rest of your data is kept.',
+    ],
+    'OPENING_LOT_CONTROLLED_ITEM': [
+      'هذا الصنف يتطلب رقم دفعة أو تواريخ، والرصيد الافتتاحي لا يحمل بيانات دفعة فلا يمكن صرفه لاحقًا. احذف هذا السطر (باقي الأسطر محفوظة) واطلب من المحاسب أو المدير طريقة مناسبة لإدخال رصيده.',
+      'This item requires a lot number or dates, and an opening balance carries no lot data, so the stock could not be issued later. Remove this line (the other lines are kept) and ask the accountant or an administrator for a traceable way to enter its stock.',
+    ],
+    'OPENING_REVERSE_ORIGIN_AMBIGUOUS': [
+      'تعذر عكس الرصيد الافتتاحي لأن حركة المخزون الأصلية لا تطابق السطر بيقين. لم يتغير شيء. اطلب من المحاسب أو المدير مراجعة المخزن والموقع والتكلفة الأصلية.',
+      'The opening balance cannot be reversed because the original stock movement does not match the line with certainty. Nothing was changed. Ask the accountant or an administrator to verify the original warehouse, location and cost.',
+    ],
+    'OPENING_REVERSE_ORIGIN_UNKNOWN': [
+      'تعذر عكس الرصيد الافتتاحي لأنه لا توجد حركة مخزون أصلية مسجلة لهذا الصنف. لم يتغير شيء. اطلب من المحاسب أو المدير المراجعة.',
+      'The opening balance cannot be reversed because no original stock movement is recorded for this item. Nothing was changed. Ask the accountant or an administrator to verify.',
+    ],
+    'OPENING_REVERSE_SHELF_SHORT': [
+      'تعذر عكس الرصيد الافتتاحي لأن الموقع لا يحمل الكمية المطلوبة. أعد الكمية المنقولة إلى هذا الموقع ثم اعكس مرة أخرى. لم يتغير أي رصيد.',
+      'The opening balance cannot be reversed because its location no longer holds the required quantity. Transfer the moved quantity back to that location, then reverse again. No balance changed.',
+    ],
+    'PURCHASE_LOCATION_INACTIVE': [
+      'موقع التخزين غير مفعّل. فعّله أو اختر موقعًا آخر. بيانات الفاتورة محفوظة.',
+      'The location is inactive. Activate it or choose another. The invoice data is kept.',
+    ],
+    'PURCHASE_LOCATION_NOT_FOUND': [
+      'موقع التخزين غير موجود. اختر موقعًا آخر أو اتركه فارغًا. بيانات الفاتورة محفوظة.',
+      'The storage location does not exist. Choose another location or leave it empty. The invoice data is kept.',
+    ],
+    'PURCHASE_LOCATION_WRONG_WAREHOUSE': [
+      'الموقع يتبع مخزنًا غير مخزن الفاتورة. اختر موقعًا من مخزن الفاتورة أو غيّر مخزن الفاتورة. بيانات الفاتورة محفوظة.',
+      'The location belongs to a different warehouse than the invoice. Choose a location of the invoice warehouse, or change the invoice warehouse. The invoice data is kept.',
+    ],
+    'PURCHASE_LOT_DETAILS_REQUIRED': [
+      'بيانات الدفعة أو التواريخ المطلوبة لهذا الصنف ناقصة. أدخلها في السطر ثم رحّل من جديد. بيانات الفاتورة محفوظة.',
+      'The lot or date details this item needs are missing. Enter them on the line, then post again. The invoice data is kept.',
+    ],
+    'PURCHASE_LOT_NEEDS_WAREHOUSE': [
+      'الصنف يُستلم في دفعة لكن الفرع بلا مخزن. أضف مخزنًا للفرع أو للفاتورة ثم رحّل من جديد. بيانات الفاتورة محفوظة.',
+      'The item is received into a lot but the branch has no warehouse. Add a warehouse to the branch or the invoice, then post again. The invoice data is kept.',
+    ],
+    'PURCHASE_RETURN_LOT_SHORT': [
+      'الدفعة لم يبق منها الكمية المطلوبة للمرتجع لأن جزءًا منها بيع أو نُقل. خفّض كمية المرتجع إلى المتبقي. بيانات المرتجع محفوظة.',
+      'The lot has less left to return than the quantity entered, because part of it was sold or moved. Reduce the returned quantity to what is left. The return data is kept.',
+    ],
+    'PURCHASE_RETURN_SHELF_SHORT': [
+      'موقع الاستلام لا يحمل الكمية المطلوبة لأن البضاعة نُقلت منه. أعدها إلى هذا الموقع ثم رحّل مرة أخرى. بيانات المرتجع محفوظة.',
+      'The receiving location no longer holds the quantity because the goods were moved off it. Move them back to that location, then post again. The return data is kept.',
+    ],
+    'PURCHASE_REVERSE_LOT_USED': [
+      'تعذر عكس السطر لأن جزءًا من الدفعة بيع أو نُقل. تراجع عن تلك العمليات أولًا أو استخدم مرتجع مشتريات للكمية المتبقية.',
+      'The line cannot be reversed because part of its lot was sold or moved. Undo those sales first, or use a purchase return for the remaining quantity.',
+    ],
+    'PURCHASE_REVERSE_SHELF_SHORT': [
+      'تعذر عكس السطر لأن موقعه لا يحمل الكمية بعد نقل البضاعة منه. أعدها إلى هذا الموقع ثم اعكس مرة أخرى.',
+      'The line cannot be reversed because its location no longer holds the quantity, as the goods were moved off it. Move them back to that location, then reverse again.',
+    ],
+    'RETURN_REVERSE_COST_MISMATCH': [
+      'تعذر عكس المرتجع لأن تكلفة حركة المخزون المسجلة لا تطابق تكلفة السطر في القيد المحاسبي، وعكسه سيُخلّ بتوازن المخزون والحسابات. لم يتغير شيء. راجع المحاسب أو المدير.',
+      'The return cannot be reversed because the recorded stock movement cost does not match the line cost in the accounting entry, so reversing it would put stock and accounts out of step. Nothing changed. Ask the accountant or an administrator.',
+    ],
+    'RETURN_REVERSE_LOT_SHORT': [
+      'تعذر عكس المرتجع لأن جزءًا من الدفعة بيع أو نُقل بعد المرتجع. تراجع عن ذلك أولًا ثم اعكس المرتجع مرة أخرى.',
+      'The return cannot be reversed because part of the lot was sold or moved after the return. Undo those first, then reverse the return again.',
+    ],
+    'RETURN_REVERSE_SHELF_SHORT': [
+      'تعذر عكس المرتجع لأن الموقع الذي عادت إليه البضاعة لا يحمل الكمية بعد نقلها. أعدها إلى هذا الموقع ثم اعكس المرتجع مرة أخرى.',
+      'The return cannot be reversed because the location the goods went back to no longer holds the quantity. Move them back to that location, then reverse the return again.',
+    ],
+    'SALES_POST_LOCATION_REQUIRED': [
+      'الصنف مخزَّن على أكثر من موقع. افتح السطر وحدد الموقع والكمية ثم رحّل من جديد. بيانات الفاتورة محفوظة.',
+      'The item is stored on several locations. Open the line, choose the location(s) and quantity to take from, then post again. The invoice data is kept.',
+    ],
+    'TRANSFER_LOCATION_REQUIRED': [
+      'الدفعة مخزَّنة على أكثر من موقع. اختر الموقع الذي تخرج منه البضاعة ثم حوّل مرة أخرى. ما أدخلته محفوظ.',
+      'The lot is stored on several locations. Choose the location the goods leave from, then transfer again. What you entered is kept.',
+    ],
+    'TRANSFER_LOCATION_SHORT': [
+      'الموقع المختار لا يحمل الكمية المطلوبة من هذه الدفعة. اختر موقعًا آخر أو خفّض الكمية. ما أدخلته محفوظ.',
+      'The chosen location does not hold the quantity needed of this lot. Pick another location or lower the quantity. What you entered is kept.',
+    ],
+    'TRANSFER_TARGET_LOCATION_INVALID': [
+      'موقع الوجهة ليس موقعًا مفعّلًا في المخزن المستلم. اختر موقعًا مفعّلًا هناك أو اتركه فارغًا. ما أدخلته محفوظ.',
+      'The destination location is not an active location of the receiving warehouse. Choose an active location there, or leave it empty. What you entered is kept.',
+    ],
+    'WRITEOFF_LOCATION_REQUIRED': [
+      'الدفعة مخزَّنة على أكثر من موقع. اختر الموقع الذي يُشطب منه ثم حاول مرة أخرى. ما أدخلته محفوظ.',
+      'The lot is stored on several locations. Choose the location to write off from, then try again. What you entered is kept.',
+    ],
+    'WRITEOFF_LOCATION_SHORT': [
+      'الموقع المختار لا يحمل الكمية المطلوبة من هذه الدفعة. خفّض الكمية أو اختر موقعًا آخر.',
+      'The chosen location does not hold the quantity needed of this lot. Reduce the quantity or choose another location.',
+    ],
+  };
+
   String _stockDocContext(Map<String, String> fields) {
     final line = fields['lineNumber'];
     if (line != null && RegExp(r'^[0-9]{1,4}$').hasMatch(line)) {
       return '\n${isArabic ? 'السطر' : 'Line'}: $line';
+    }
+    final row = fields['row'];
+    if (row != null && RegExp(r'^[0-9]{1,4}$').hasMatch(row)) {
+      return '\n${isArabic ? 'الصف' : 'Row'}: $row';
     }
     return '';
   }
@@ -266,7 +420,8 @@ class AppErrorMessageResolver {
         }
       }
       if (error is ApiFailure && error.statusCode == 400) {
-        final stockDoc = _stockDocReasons[error.code];
+        final stockDoc = _stockDocReasons[error.code] ??
+            _locationRefusalReasons[error.code];
         if (stockDoc != null) {
           return AppErrorText(
             reason: AppErrorReason.invalidInput,
