@@ -179,3 +179,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Added writeoff refresh-no-mutation and confirmed signed-row post/refresh. New test initially assumed generic post path, corrected to dedicated write-off/post route actually used; no code path changed.
 - Item-unit superadmin uncertain-save tests initially failed because extra cost columns placed Units action beyond1700px viewport. Added ensureVisible before same tap. All6 unit tests pass with retained input/uncertain duplicate block assertions unchanged and zero hit-test warnings. No permission/UI behavior change.
 - Seven-file bounded item/writeoff/stock widget run37/37 passes, full analyze clean. Mapped10 more original source sites (writeoff4, stock2, items4), partial register115 mapped/76 open. Picture-editor isolated tests are not borrowed as proof for ItemsScreen launch button.
+
+### 06:26 voucher page controls
+- New page1->next2->previous1->next2->refresh2->search resets1 test preserves branch/voucherOnly scope and sends no stock create. Voucher flow22/22 passes, full analyze clean.
+- Mapped refresh/previous/next original sites, partial register118 mapped/73 open. List row detail navigation remains open, not inferred from direct detail fixtures.

@@ -38,6 +38,7 @@ class _VoucherApi extends ApiClient {
   final itemPages = <int>[];
   final listQueries = <Map<String, dynamic>>[];
   final barcodeQueries = <String>[];
+  int listTotal = 0;
   String status = 'draft';
   @override
   Future<List<Map<String, dynamic>>> getList(
@@ -128,7 +129,7 @@ class _VoucherApi extends ApiClient {
     }
     if (path == '/inventory/stock-documents') {
       listQueries.add(Map<String, dynamic>.from(query ?? {}));
-      return {'items': <Map<String, dynamic>>[], 'total': 0};
+      return {'items': <Map<String, dynamic>>[], 'total': listTotal};
     }
     return {
       'id': 'document',
@@ -998,6 +999,19 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('voucher pagination refresh and search keep branch scope', (tester) async {
+    final api=_VoucherApi()..listTotal=101;
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user)],child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,home:const StockVouchersScreen())));
+    await tester.pumpAndSettle();expect(api.listQueries.last['page'],1);
+    await tester.tap(find.text('Next'));await tester.pumpAndSettle();expect(api.listQueries.last['page'],2);
+    await tester.tap(find.text('Previous'));await tester.pumpAndSettle();expect(api.listQueries.last['page'],1);
+    await tester.tap(find.text('Next'));await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Refresh'));await tester.pumpAndSettle();expect(api.listQueries.last['page'],2);
+    await tester.enterText(find.byType(TextField),' SA ');await tester.tap(find.byTooltip('Search'));await tester.pumpAndSettle();
+    expect(api.listQueries.last['page'],1);expect(api.listQueries.last['q'],'SA');
+    expect(api.listQueries.every((q)=>q['branchId']=='branch'&&q['voucherOnly']=='true'),isTrue);expect(api.requests,isEmpty);
+  });
 
   testWidgets('voucher search queries the server for the user branch', (
     tester,
