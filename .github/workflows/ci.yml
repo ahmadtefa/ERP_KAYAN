@@ -127,7 +127,7 @@ jobs:
               sys.exit(1)
           text = log.read_text(errors='replace')
           # Jest prints one "PASS <path>" line per suite it actually executed.
-          ran = set(re.findall(r'^PASS\s+(\S+(?:stock-takes\.barcode-count|stock-documents\.barcode-posting|expired-issue-policy\.integration|batches\.operations\.integration|batch-transfer-hold\.integration|multi-receipt\.integration|sales-batches\.integration|sales-invoice-posting\.integration|stock-transfers\.integration)\.spec\.ts)', text, re.M))
+          ran = set(re.findall(r'^PASS\s+(\S+(?:stock-takes\.barcode-count|stock-documents\.barcode-posting|expired-issue-policy\.integration|batches\.operations\.integration|batch-transfer-hold\.integration|multi-receipt\.integration|sales-batches\.integration|sales-invoice-posting\.integration|stock-transfers\.integration|items\.create\.http\.integration)\.spec\.ts)', text, re.M))
           expected = {
               'stock-takes.barcode-count.spec.ts',
               'stock-documents.barcode-posting.spec.ts',
@@ -138,6 +138,7 @@ jobs:
               'sales-batches.integration.spec.ts',
               'sales-invoice-posting.integration.spec.ts',
               'stock-transfers.integration.spec.ts',
+              'items.create.http.integration.spec.ts',
           }
           seen = {p.split('/')[-1] for p in ran}
           missing = sorted(expected - seen)
@@ -145,7 +146,7 @@ jobs:
           if missing:
               print('::error title=PGlite suites did not run::' + ', '.join(missing))
               sys.exit(1)
-          print('All 9 real-database suites executed; none were skipped.')
+          print('All 10 real-database suites executed; none were skipped.')
           PY
       - name: Build API
         run: npm run build

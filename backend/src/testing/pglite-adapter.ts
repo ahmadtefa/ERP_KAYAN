@@ -61,7 +61,7 @@ function revive(row: Row): Row {
     if (
       typeof value === 'string' &&
       /^-?\d+(\.\d+)?$/.test(value) &&
-      /quantity|value|cost|price|amount|factor|tax|discount|total|shortage|damage/i.test(key)
+      /quantity|value|cost|price|amount|factor|tax|discount|total|shortage|damage|reorderlevel/i.test(key)
     ) {
       out[key] = new Prisma.Decimal(value);
     } else if (value instanceof Date) {
@@ -844,6 +844,7 @@ export function pglitePrisma(db: PgliteLike) {
     warehouse: plainModel('warehouse', 'warehouses'),
     branch: plainModel('branch', 'branches'),
     item: plainModel('item', 'items'),
+    openingBalance: plainModel('openingBalance', 'opening_balances'),
     fiscalPeriod: plainModel('fiscalPeriod', 'fiscal_periods'),
     costCenter: plainModel('costCenter', 'cost_centers'),
 

@@ -27,6 +27,7 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/master_data_backup_actions.dart';
 import '../../data/item_image_data_source.dart';
+import '../../domain/item_create_refusal.dart';
 import '../widgets/barcode_labels_dialog.dart';
 import '../widgets/item_picture.dart';
 import 'stock_screen.dart' show stockListProvider;
@@ -241,6 +242,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             await client.post('/inventory/items', body: payload);
           }
         } catch (error) {
+          // A known refusal of a NEW item is rolled back by the server, so
+          // nothing was created: show it and leave the form editable. Edits
+          // and every other failure keep the "may have completed" lock.
+          if (!isEdit && isKnownItemCreateRefusal(error)) rethrow;
           // The server may have committed before a transport error. Reload
           // the source instead of leaving dependent screens confidently stale.
           if (mounted) {

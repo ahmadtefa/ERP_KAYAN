@@ -50,6 +50,7 @@ export class CreateItemDto {
   /// then the item belongs in that document instead.
   @IsOptional() @IsString() openingQuantity?: string;
   @IsOptional() @IsString() openingUnitCost?: string;
+  @IsOptional() @IsString() openingStorageLocationId?: string;
 
   /// The packing table: one row per unit, each carrying its own factor back
   /// to the base unit, barcode and prices. Left `undefined` the catalogue is

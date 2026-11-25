@@ -888,6 +888,64 @@ class AppErrorMessageResolver {
       _ci(r'^Cash account code (\S+) is already used$'),
       (m) => 'كود الحساب النقدي${_codeSuffix(m.group(1))} مستخدم بالفعل.',
     ),
+    // A posting role the chart of accounts does not carry (the opening stock of
+    // an item posts inventory against opening equity).
+    _BusinessRule(
+      _ci(
+        r"^Required account (\S+) \((\w+)\) does not exist in this company's chart of accounts$",
+      ),
+      (m) {
+        const roles = <String, String>{
+          'inventory': 'المخزون',
+          'openingbalanceequity': 'الأرصدة الافتتاحية (حقوق الملكية)',
+          'accountsreceivable': 'العملاء',
+          'accountspayable': 'الموردين',
+          'salesrevenue': 'إيراد المبيعات',
+          'costofgoodssold': 'تكلفة البضاعة المباعة',
+        };
+        final role = roles[(m.group(2) ?? '').toLowerCase()] ?? 'مطلوب للترحيل';
+        return 'دليل الحسابات ينقصه حساب $role${_safeToken(m.group(1))} المطلوب لترحيل هذه العملية، فلم تُحفظ. أضف الحساب أو راجع إعداد دليل الحسابات، ثم أعد المحاولة.';
+      },
+    ),
+    // New-item form refusals. Each names the field to fix; the figures echoed
+    // are limited to short plain tokens (see _safeToken).
+    _BusinessRule(
+      _ci(r'^Provide an Arabic or English item name$'),
+      (_) => 'اكتب اسم الصنف بالعربي أو بالإنجليزي على الأقل.',
+    ),
+    _BusinessRule(
+      _ci(r'^Barcode (\S+) is already assigned to item (\S+)$'),
+      (m) =>
+          'الباركود${_safeToken(m.group(1))} مستخدم بالفعل في الصنف${_safeToken(m.group(2))}. استخدم باركودًا آخر أو اتركه فارغًا.',
+    ),
+    _BusinessRule(
+      _ci(r'^Barcode (\S+) is already assigned to unit (.+) of item (\S+)$'),
+      (m) =>
+          'الباركود${_safeToken(m.group(1))} مستخدم بالفعل في إحدى وحدات الصنف${_safeToken(m.group(3))}. استخدم باركودًا آخر أو اتركه فارغًا.',
+    ),
+    _BusinessRule(
+      _ci(
+        r'^Opening stock cannot be set on an item that is not stock-tracked$',
+      ),
+      (_) =>
+          'لا يمكن إدخال رصيد افتتاحي لصنف غير متتبع في المخزون. فعّل «تتبّع المخزون» أو امسح الكمية والتكلفة الافتتاحية. لم يُنشأ الصنف.',
+    ),
+    _BusinessRule(
+      _ci(r'^openingQuantity and openingUnitCost must be given together$'),
+      (_) =>
+          'اكتب الكمية الافتتاحية وتكلفة الوحدة الافتتاحية معًا، أو اترك الاثنتين فارغتين. لم يُنشأ الصنف.',
+    ),
+    _BusinessRule(
+      _ci(r'^Select a branch before adding opening stock$'),
+      (_) => 'اختر الفرع قبل إضافة رصيد افتتاحي. لم يُنشأ الصنف.',
+    ),
+    _BusinessRule(
+      _ci(
+        r'^This branch already has an opening balance \((\S+)\)\. Add the item there instead of giving it opening stock here\.$',
+      ),
+      (m) =>
+          'للفرع مستند رصيد افتتاحي بالفعل${_safeToken(m.group(1))}. أضف الصنف في هذا المستند بدل إدخال رصيد افتتاحي هنا، أو امسح الكمية والتكلفة الافتتاحية. لم يُنشأ الصنف.',
+    ),
     _BusinessRule(_ci(r'^(.+) code (\S+) does not exist$'), (m) {
       final noun = _nounOrNull(m.group(1));
       return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير موجود.';
@@ -1214,6 +1272,13 @@ class AppErrorMessageResolver {
     return RegExp(r'^\d{1,12}$').hasMatch(code) ? ' $code' : '';
   }
 
+  /// A short plain token (code, barcode, document number) is safe to echo;
+  /// anything else is left out rather than risk repeating private text.
+  static String _safeToken(String? raw) {
+    final token = raw ?? '';
+    return RegExp(r'^[A-Za-z0-9_-]{1,60}$').hasMatch(token) ? ' $token' : '';
+  }
+
   static String _fieldAr(String? raw) {
     final key = (raw ?? '').trim().toLowerCase();
     return _fieldsAr[key] ?? 'الحقل';
@@ -1316,6 +1381,8 @@ class AppErrorMessageResolver {
     'status': 'الحالة',
     'paymenttermdays': 'مدة السداد',
     'openingquantity': 'الكمية الافتتاحية',
+    'openingunitcost': 'تكلفة الوحدة الافتتاحية',
+    'taxrate': 'نسبة الضريبة',
     'transferdate': 'تاريخ التحويل',
     'statementbalance': 'رصيد الكشف',
   };
