@@ -1,0 +1,1513 @@
+{
+  "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
+  "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof.",
+  "counts": {
+    "MAPPED_WIDGET": 27,
+    "OPEN_UNMAPPED": 164
+  },
+  "controls": [
+    {
+      "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
+      "line": 173,
+      "source": "onSelectionChanged: (value) =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
+      "line": 178,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
+      "line": 182,
+      "source": "onPressed: () => ref.read(batchesListProvider.notifier).reload(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
+      "line": 189,
+      "source": "onPressed: () => _operate(BatchOperation.receive),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/batches_screen.dart",
+      "line": 219,
+      "source": "onPressed: () => _operate(operation, batch: row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 255,
+      "source": "onPressed: _reload,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 260,
+      "source": "onPressed: _scanning ? null : _scan,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 274,
+      "source": "onPressed: () => context.go(AppRoutes.notifications),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 323,
+      "source": "onSelected: (_) => setState(() => _group = group),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 376,
+      "source": "onTap: (row) => context.go(AppRoutes.batches),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/expiry_alerts_screen.dart",
+      "line": 386,
+      "source": "onPressed: () => context.go(AppRoutes.batches),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 128,
+      "source": "onPressed: () {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "refresh reloads the selected report, not only its catalogue",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 162,
+      "source": "onTap: () => ref",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "choosing another report asks for that one",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 219,
+      "source": "onPressed: _exporting ? null : () => _export(slug),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 257,
+      "source": "onPressed: () async {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "warehouse scope apply, cancel and all-assigned send only intended filters",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 275,
+      "source": "onChanged: (checked) => setDialogState(() {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "warehouse scope apply, cancel and all-assigned send only intended filters",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 284,
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "warehouse scope apply, cancel and all-assigned send only intended filters",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 285,
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext, <String>{}), child: Text(_arabic ? 'الكل' : 'All assigned')),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "warehouse scope apply, cancel and all-assigned send only intended filters",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/inventory_reports_screen.dart",
+      "line": 286,
+      "source": "FilledButton(onPressed: () => Navigator.pop(dialogContext, draft), child: Text(_arabic ? 'تطبيق' : 'Apply')),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/inventory_reports_screen_test.dart",
+          "test": "warehouse scope apply, cancel and all-assigned send only intended filters",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 149,
+      "source": "onChanged: busy",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 163,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 169,
+      "source": "onChanged: (_) => update(() => error = null),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 195,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 223,
+      "source": "onPressed: busy ? null : () => Navigator.pop(context, false),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 227,
+      "source": "onPressed: busy || uncertain",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 302,
+      "source": "onPressed: _load,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_locations_screen.dart",
+      "line": 428,
+      "source": "onPressed: () => _relocate(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_thresholds_screen.dart",
+      "line": 74,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_thresholds_screen_test.dart",
+          "test": "search narrows by item and by warehouse name",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_thresholds_screen.dart",
+      "line": 95,
+      "source": "onSelected: (value) =>",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_thresholds_screen_test.dart",
+          "test": "an empty below-minimum result keeps the filter available to turn off",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/item_thresholds_screen.dart",
+      "line": 172,
+      "source": "onPressed: () => _edit(row),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/item_thresholds_screen_test.dart",
+          "test": "editing puts the thresholds to the warehouse/item pair",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 361,
+      "source": "onPressed: () =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 368,
+      "source": "onPressed: () =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 379,
+      "source": "onPressed: () =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 392,
+      "source": "onPressed: isBase",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 406,
+      "source": "onPressed: () => Navigator.of(dialogContext).pop(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 412,
+      "source": "onPressed:",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 422,
+      "source": "onPressed: () => Navigator.of(dialogContext).pop('add'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 727,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 730,
+      "source": "onPressed: _busy ? null : () => _save(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 821,
+      "source": "onPressed: () => Navigator.of(context).push(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 840,
+      "source": "onPressed: _busy ? null : () => _openPicture(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 845,
+      "source": "onPressed: _busy ? null : () => _save(existing: row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 850,
+      "source": "onPressed: _busy ? null : () => _manageUnits(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/items_screen.dart",
+      "line": 862,
+      "source": "onPressed: _busy ? null : () => _toggleActive(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 220,
+      "source": "onPressed: _createDocument,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 240,
+      "source": "onChanged: (value) => setState(() => _kind = value),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 245,
+      "source": "onPressed: async.isLoading",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 251,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 273,
+      "source": "onPressed: _changingStatus ? null : () => _changeStatus(row, reverse: reverse),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 662,
+      "source": "onChanged: (value) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 693,
+      "source": "onChanged: (value) => setDialogState(() {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 725,
+      "source": "onChanged: (value) => setDialogState(() {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 732,
+      "source": "onPressed: addLine,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 807,
+      "source": "child: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 809,
+      "source": "onChanged: (_) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 836,
+      "source": "onPressed: () => setDialogState(() {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 850,
+      "source": "TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 863,
+      "source": "onPressed: saving ? null : closeDraft,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_documents_screen.dart",
+      "line": 867,
+      "source": "onPressed: saving ? null : submit,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 101,
+      "source": "onPressed: () => ref.read(stockListProvider.notifier).reload(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 104,
+      "source": "onPressed: _openVouchers,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 113,
+      "source": "onPressed: _openCostCenterReport,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 125,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 140,
+      "source": "onTap: _openLedger,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 149,
+      "source": "onPressed: () => Navigator.of(context).push(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 268,
+      "source": "onPressed: _refresh,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 467,
+      "source": "onPressed: () => runPrint(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 479,
+      "source": "onPressed: () => runDownload(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 491,
+      "source": "onPressed: () => runDownload(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 504,
+      "source": "onPressed: () => runDownload(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
+      "line": 596,
+      "source": "onPressed: () => Navigator.of(context).pop(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 100,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "search narrows by code and by warehouse",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 104,
+      "source": "onPressed: () => ref.read(stockTakesProvider.notifier).reload(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 110,
+      "source": "onPressed: _starting ? null : _start,",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "partial count requires item selection and preserves notes in its request",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 158,
+      "source": "onTap: (row) => _openSession(row),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "saves counted quantities to the session count endpoint",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 220,
+      "source": "onChanged: (value) => setDialogState(() => warehouseId = value ?? warehouseId),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 229,
+      "source": "onSelectionChanged: (values) => setDialogState(() => scope = values.first),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "partial count requires item selection and preserves notes in its request",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 245,
+      "source": "onChanged: (value) => setDialogState(() {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "partial count requires item selection and preserves notes in its request",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 254,
+      "source": "TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 255,
+      "source": "onChanged: (value) => notes = value,",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "partial count requires item selection and preserves notes in its request",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 262,
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "cancelling a new stock take sends nothing",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 264,
+      "source": "onPressed: scope == 'PARTIAL' && selected.isEmpty ? null : () => Navigator.pop(dialogContext, {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "partial count requires item selection and preserves notes in its request",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 306,
+      "source": "onChanged: _refreshAfterAction,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 335,
+      "source": "onPressed: null,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 344,
+      "source": "onPressed: () => _approve(row),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "confirming approve posts to the session, not to a list route",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 355,
+      "source": "onPressed: () => _post(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 679,
+      "source": "onTap: () => Navigator.of(dialogContext).pop(line),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 686,
+      "source": "onPressed: () => Navigator.of(dialogContext).pop(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 800,
+      "source": "content: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 801,
+      "source": "onChanged: (value) => reason = value,",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "cancelling an open count sends its entered reason",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 806,
+      "source": "TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 808,
+      "source": "onPressed: () => Navigator.pop(dialogContext, reason.trim()),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "cancelling an open count sends its entered reason",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 931,
+      "source": "SizedBox(width: 150, child: TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 948,
+      "source": "onChanged: (value) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 978,
+      "source": "if (editable) OutlinedButton(onPressed: _busy ? null : () => _save(finish: false), child: Text(_t('حفظ العد', 'Save count'))),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "finish requires all frozen lines while save allows a partial count",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 979,
+      "source": "if (editable) FilledButton(onPressed: _busy ? null : () => _save(finish: true), child: Text(_t('إنهاء وإرسال للمراجعة', 'Finish & review'))),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "finish requires all frozen lines while save allows a partial count",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 981,
+      "source": "FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('اعتماد', 'Approve'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 983,
+      "source": "FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('ترحيل', 'Post'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 985,
+      "source": "OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('إلغاء الجرد', 'Cancel count'))),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "cancelling an open count sends its entered reason",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
+      "line": 987,
+      "source": "TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 54,
+      "source": "SizedBox(width:190,child:TextField(decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:t('بحث','Search'),isDense:true),onChanged:(v)=>setState(()=>_query=v.trim().toLowerCase()))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 55,
+      "source": "IconButton(tooltip:t('تحديث','Refresh'),onPressed:()=>ref.read(stockTransfersProvider.notifier).reload(),icon:const Icon(Icons.refresh)),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 56,
+      "source": "if(user?.can('inventory.transfer.report')??false) IconButton(tooltip:t('تقرير التحويلات والطريق','Transfer/transit report'),onPressed:_report,icon:const Icon(Icons.assessment_outlined)),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 57,
+      "source": "if(user?.can('inventory.transfer.create')??false) FilledButton.icon(onPressed:_busy?null:_create,icon:const Icon(Icons.add),label:Text(t('طلب تحويل','Request transfer'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 58,
+      "source": "]),body:AsyncStateView<List<Json>>(value:rows,onRetry:()=>ref.read(stockTransfersProvider.notifier).reload(),isEmpty:(x)=>_visible(x).isEmpty,emptyMessage:t('لا توجد تحويلات مخزنية.','No stock transfers yet.'),data:(items)=>ListView.separated(padding:const EdgeInsets.all(12),itemCount:_visible(items).length,separatorBuilder:(_,_)=>const SizedBox(height:8),itemBuilder:(context,i){final row=_visible(items)[i];final from=row['sourceWarehouse'] as Map? ??const{},to=row['destinationWarehouse'] as Map? ??const{};return Card(child:ListTile(isThreeLine:true,title:Wrap(spacing:8,children:[Text(text(row,'documentNumber'),style:const TextStyle(fontWeight:FontWeight.bold)),Chip(label:Text(_status(text(row,'status'))),visualDensity:VisualDensity.compact)]),subtitle:Text('${ar?(from['nameAr']??from['nameEn']):(from['nameEn']??from['nameAr'])}  →  ${ar?(to['nameAr']??to['nameEn']):(to['nameEn']??to['nameAr'])}\\n${text(row,'transferDate').split('T').first} · ${(row['lines'] as List? ??const[]).length} ${t('بنود','lines')}'),trailing:IconButton(tooltip:t('التفاصيل','Details'),icon:const Icon(Icons.open_in_new),onPressed:()=>_details(row))));})));}",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 106,
+      "source": "onPressed: () => Navigator.pop(context),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 150,
+      "source": "DropdownButtonFormField<String>(initialValue:_from,decoration:InputDecoration(labelText:t('من المخزن','Source warehouse'),errorText:_errors['sourceWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('sourceWarehouseId');setState(()=>_from=v);}),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 152,
+      "source": "DropdownButtonFormField<String>(initialValue:_to,decoration:InputDecoration(labelText:t('إلى المخزن','Destination warehouse'),errorText:_errors['destinationWarehouseId']),items:widget.warehouses.map((w)=>DropdownMenuItem(value:text(w,'id'),child:Text('${text(w,'code')} · ${ar?text(w,'nameAr'):text(w,'nameEn')}'))).toList(),onChanged:(v){_errors.remove('destinationWarehouseId');setState(()=>_to=v);}),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 164,
+      "source": "SizedBox(width:270,child:DropdownButtonFormField<String>(initialValue:line.itemId,decoration:InputDecoration(labelText:t('الصنف','Item'),errorText:_errors['lines.$index.itemId']),items:_items.map((x){final barcode=text(x,'barcode');return DropdownMenuItem(value:text(x,'id'),child:Text('${text(x,'code')} · ${ar?text(x,'nameAr'):text(x,'nameEn')}${barcode.isNotEmpty?'  [$barcode]':''}',overflow:TextOverflow.ellipsis));}).toList(),onChanged:(v){_errors.remove('lines.$index.itemId');setState(() {line.itemId=v;line.batchId=null;line.unitName=null;});})),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 165,
+      "source": "SizedBox(width:115,child:TextField(controller:line.quantity,onChanged:(_)=>_clear('lines.$index.quantity'),keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:t('كمية','Quantity'),errorText:_errors['lines.$index.quantity']))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 166,
+      "source": "if(item!=null)SizedBox(width:160,child:DropdownButtonFormField<String>(isExpanded:true,initialValue:line.unitName??text(item,'unit'),decoration:InputDecoration(labelText:t('الوحدة','Unit'),errorText:_errors['lines.$index.unitName']),items:selectedUnits.map((u)=>DropdownMenuItem(value:'${u['unit']??text(item,'unit')}',child:Text('${u['unit']??text(item,'unit')} × ${u['factor']??1}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v){_errors.remove('lines.$index.unitName');setState(()=>line.unitName=v);})),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 167,
+      "source": "if(lots.isNotEmpty)SizedBox(width:180,child:DropdownButtonFormField<String>(initialValue:line.batchId,decoration:InputDecoration(labelText:t('دفعة المصدر','Source lot')),items:lots.map((b)=>DropdownMenuItem(value:text(b,'id'),child:Text('${text(b,'batchNumber')} · ${b['remainingQuantity']}'))).toList(),onChanged:(v)=>setState(()=>line.batchId=v))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 168,
+      "source": "IconButton(tooltip:t('حذف البند','Remove line'),onPressed:_lines.length==1?null:()=>setState(()=>_lines.removeAt(index).dispose()),icon:const Icon(Icons.remove_circle_outline)),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 171,
+      "source": "Align(alignment:AlignmentDirectional.centerStart,child:TextButton.icon(onPressed:()=>setState(()=>_lines.add(_DraftLine())),icon:const Icon(Icons.add),label:Text(t('إضافة صنف','Add item')))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 172,
+      "source": "TextField(controller:_reason,onChanged:(_)=>_clear('reason'),decoration:InputDecoration(labelText:t('سبب التحويل','Transfer reason'),errorText:_errors['reason'])),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 173,
+      "source": "TextField(controller:_notes,onChanged:(_)=>_clear('notes'),decoration:InputDecoration(labelText:t('ملاحظات','Notes'),errorText:_errors['notes'])),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 175,
+      "source": "actions:[TextButton(onPressed:_sending?null:()=>Navigator.pop(context,false),child:Text(t('إلغاء','Cancel'))),FilledButton(onPressed:_sending?null:_save,child:Text(t('إنشاء الطلب','Create request')))],",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 272,
+      "source": "TextButton(onPressed:busy?null:()=>Navigator.pop(context,true),child:Text(t('تم','Done'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 301,
+      "source": "Widget _action(String action,String label)=>TextButton(onPressed:busy?null:()=>_run(action),child:Text(label));",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 362,
+      "source": "content: TextField(controller: controller),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 364,
+      "source": "TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', 'Cancel'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 365,
+      "source": "FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: Text(t('تأكيد', 'Confirm'))),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 438,
+      "source": "child: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 452,
+      "source": "onPressed: () => Navigator.pop(context),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 456,
+      "source": "onPressed: () {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 538,
+      "source": "child: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 553,
+      "source": "onPressed: () => Navigator.pop(context),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 557,
+      "source": "onPressed: () {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_transfers_screen.dart",
+      "line": 582,
+      "source": "child: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 174,
+      "source": "onPressed: () => _create('RECEIPT'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 179,
+      "source": "onPressed: () => _create('ISSUE'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 199,
+      "source": "onPressed: _refresh,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 210,
+      "source": "child: TextField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 226,
+      "source": "onPressed: _submitSearch,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 276,
+      "source": "onTap: () => _detail(text(row, 'id')),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 285,
+      "source": "onPressed: _page > 1",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 295,
+      "source": "onPressed: _page * 50 < total",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 518,
+      "source": "onPressed: _busy || _confirming",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 530,
+      "source": "onPressed: _busy || _confirming",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 541,
+      "source": "onPressed: _busy || _confirming",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 552,
+      "source": "onPressed: _busy || _confirming",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 561,
+      "source": "onPressed: _busy || _confirming",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 610,
+      "source": "onExpansionChanged: (expanded) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1362,
+      "source": "onPressed: _busy ? null : () => _send(_pending!),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1401,
+      "source": "onPressed: _busy ? null : () => _send(_pending!),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1408,
+      "source": "onPressed: _busy",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1443,
+      "source": "onChanged: (v) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1451,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1453,
+      "source": "onChanged: (_) => _edited('documentDate'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1476,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1478,
+      "source": "onChanged: (_) => _edited('counterpartyName'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1492,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1494,
+      "source": "onChanged: (_) => _edited('reason'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1539,
+      "source": "onChanged: (v) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1561,
+      "source": "onPressed: _loadingMore",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1572,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1574,
+      "source": "onChanged: (_) => _edited('notes'),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1622,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1662,
+      "source": "onChanged: (v) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1706,
+      "source": "onChanged: (v) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1724,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1726,
+      "source": "onChanged: (_) =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1771,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1773,
+      "source": "onChanged: (_) =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1786,
+      "source": "TextFormField(",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1788,
+      "source": "onChanged: (value) {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1802,
+      "source": "onPressed: () {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1825,
+      "source": "onPressed: () {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1834,
+      "source": "onPressed: _loadingMore",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/stock_vouchers_screen.dart",
+      "line": 1846,
+      "source": "onPressed: disabled ? null : _save,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
+      "line": 120,
+      "source": "onPressed: () => _openForm(context, ref, null),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/storage_locations_screen_test.dart",
+          "test": "creates a root location without asking the user for a code",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
+      "line": 156,
+      "source": "onChanged: (value) {",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/storage_locations_screen_test.dart",
+          "test": "choosing the other warehouse re-reads that warehouse",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
+      "line": 233,
+      "source": "onPressed: () =>",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/storage_locations_screen.dart",
+      "line": 239,
+      "source": "onPressed: () => _remove(context, ref, row),",
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/storage_locations_screen_test.dart",
+          "test": "confirming delete targets the chosen location and reloads that warehouse",
+          "proofLevel": "widget with synthetic API"
+        }
+      ]
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
+      "line": 88,
+      "source": "onPressed: () => ref.invalidate(_peopleProvider),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
+      "line": 116,
+      "source": "onTap: () => ref",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
+      "line": 263,
+      "source": "onPressed: _dirty && !_saving ? _save : null,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
+      "line": 313,
+      "source": "onChanged: widget.mayManage",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouse_access_screen.dart",
+      "line": 328,
+      "source": "onSelected: widget.mayManage",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 111,
+      "source": "onPressed: () => ref.read(warehousesListProvider.notifier).reload(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 116,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 126,
+      "source": "onPressed: () {",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 140,
+      "source": "onPressed: _busy ? null : () => _save(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 188,
+      "source": "onPressed: () => _openBalances(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 194,
+      "source": "onPressed: _busy ? null : () => _save(existing: row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/warehouses_screen.dart",
+      "line": 206,
+      "source": "onPressed: _busy ? null : () => _toggleActive(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
+      "line": 102,
+      "source": "onChanged: (value) => setState(() => _query = value.trim()),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
+      "line": 107,
+      "source": "onPressed: async.isLoading ? null : () => ref.read(writeOffsProvider.notifier).reload(),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
+      "line": 184,
+      "source": "onPressed: null,",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
+      "line": 193,
+      "source": "onPressed: () => _approve(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    },
+    {
+      "screen": "lib/features/inventory/presentation/screens/write_offs_screen.dart",
+      "line": 204,
+      "source": "onPressed: () => _post(row),",
+      "state": "OPEN_UNMAPPED",
+      "evidence": []
+    }
+  ],
+  "separateEvidence": {
+    "nativePG": "backend/scripts/isolated-pg-location-concurrency.cjs: issue,writeoff,mixed contention; move/assign/reconcile; sales A/B vs B/A. See parent reports for limitations.",
+    "protectedFlow": "No activated installed Windows/auth/licence-chain acceptance claimed."
+  }
+}
