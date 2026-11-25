@@ -1282,6 +1282,21 @@ export class StockDocumentsService {
             referenceNumber: document.documentNumber,
             destinationLots,
           });
+          if (!line.batchId && destinationLots.length > 0) {
+            const held = await tx.itemBatch.findMany({
+              where: { companyId, warehouseId: fromWarehouseId ?? undefined, itemId: line.itemId, deletedAt: null },
+              select: { batchNumber: true, remainingQuantity: true },
+              orderBy: { batchNumber: 'asc' },
+            });
+            const names = held.filter((l) => l.remainingQuantity.greaterThan(0)).map((l) => `${l.batchNumber}: ${l.remainingQuantity.toFixed(MONEY_SCALE)}`);
+            throw new BadRequestException({
+              code: 'STOCK_DOC_TRANSFER_LOT_REQUIRED',
+              message:
+                `المستند ${document.documentNumber} (سطر ${line.lineNumber}): الصنف له دفعات في المخزن المحوَّل منه ولم تُحدَّد الدفعة. اختر الدفعة المنقولة في السطر (${names.join('، ')}) أو قسّم الكمية على دفعات ثم رحّل من جديد؛ لم يتغير أي رصيد وبياناتك محفوظة. / ` +
+                `Document ${document.documentNumber} (line ${line.lineNumber}): the item has lots in the source warehouse but no lot was chosen. Choose the lot to move on the line (${names.join(', ')}) or split the quantity over lots, then post again; no balance changed and your data is kept.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
           if (destinationLots.length > 0 &&
               !(destinationLots.length === 1 && destinationLots[0].quantity.equals(line.quantity))) {
             throw new BadRequestException({
@@ -1486,6 +1501,17 @@ export class StockDocumentsService {
         // destroyed, and a count that found units missing from a lot must
         // take them out of that lot.
         if (line.batchId) {
+          // Evidence for an exact reversal: the lot's per-unit cost at the moment
+          // this line touched it (the lot cost is not changed by these documents).
+          const lotBefore = await tx.itemBatch.findFirst({ where: { id: line.batchId, companyId }, select: { unitCost: true } });
+          if (lotBefore) {
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "stock_movements" SET "lotUnitCost" = ${lotBefore.unitCost}
+               WHERE "companyId" = ${companyId}::uuid AND "referenceId" = ${document.id}::uuid
+                 AND "itemId" = ${line.itemId}::uuid AND "batchId" = ${line.batchId}::uuid
+                 AND "lotUnitCost" IS NULL
+            `);
+          }
           if (direction === StockDirection.OUT) {
             const claimedBatch = await tx.itemBatch.updateMany({
               where: {
@@ -1727,7 +1753,7 @@ export class StockDocumentsService {
               errors: { lineNumber: String(line.lineNumber) },
             });
           }
-          if (document.kind !== StockDocumentKind.TRANSFER && line.batchId && originalBatch !== line.batchId) {
+          if (document.kind !== StockDocumentKind.TRANSFER && originalBatch !== (line.batchId ?? null)) {
             throw new BadRequestException({
               code: 'STOCK_DOC_REVERSE_LOT_AMBIGUOUS',
               message:
@@ -1888,7 +1914,26 @@ export class StockDocumentsService {
         for (const line of document.lines) {
           if (!line.batchId || line.quantity.isZero()) continue;
           const lotQty = line.quantity.abs();
+          const [ev] = await tx.$queryRaw<Array<{ lo: Prisma.Decimal | null; hi: Prisma.Decimal | null; n: bigint; missing: bigint }>>(Prisma.sql`
+            SELECT MIN(m."lotUnitCost") AS lo, MAX(m."lotUnitCost") AS hi, COUNT(*)::bigint AS n,
+                   COUNT(*) FILTER (WHERE m."lotUnitCost" IS NULL)::bigint AS missing
+              FROM "stock_movements" m
+             WHERE m."companyId" = ${companyId}::uuid AND m."referenceId" = ${document.id}::uuid
+               AND m."itemId" = ${line.itemId}::uuid AND m."batchId" = ${line.batchId}::uuid
+               AND m."id" = ANY(${originals.map((o) => o.id)}::uuid[])
+          `);
+          if (Number(ev?.n ?? 0) < 1 || Number(ev?.missing ?? 0) > 0 || ev?.lo == null || ev?.hi == null || !new Prisma.Decimal(ev.lo).equals(ev.hi)) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_REVERSE_LOT_COST_UNPROVABLE',
+              message:
+                `لا يمكن عكس المستند ${document.documentNumber} (سطر ${line.lineNumber}): لا يوجد سجل لتكلفة الدفعة وقت الترحيل (مستند قديم). لم يتغير أي رصيد؛ راجع المحاسب أو المدير للتحقق من الدفعة والتكلفة الأصلية قبل أي تصحيح. / ` +
+                `Cannot reverse document ${document.documentNumber} (line ${line.lineNumber}): no record of the lot cost at posting exists (legacy document). No balance changed; ask the accountant or administrator to verify the original lot and cost before any correction.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
+          const originalLotCost = new Prisma.Decimal(ev.lo);
           if (line.quantity.lessThan(0) || (document.kind === StockDocumentKind.WRITE_OFF)) {
+            await addToLotCost(tx, line.batchId, lotQty, originalLotCost);
             await tx.itemBatch.updateMany({
               where: { id: line.batchId, companyId },
               data: { remainingQuantity: { increment: lotQty } },
@@ -1898,6 +1943,8 @@ export class StockDocumentsService {
                WHERE "id" = ${line.batchId}::uuid AND "status" = 'CLOSED'
             `);
           } else {
+            const holds = await tx.itemBatch.findFirst({ where: { id: line.batchId, companyId, remainingQuantity: { gte: lotQty }, receivedQuantity: { gte: lotQty } }, select: { id: true } });
+            if (holds) await removeFromLotCost(tx, line.batchId, lotQty, originalLotCost);
             const claimed = await tx.itemBatch.updateMany({
               where: { id: line.batchId, companyId, remainingQuantity: { gte: lotQty }, receivedQuantity: { gte: lotQty } },
               data: { remainingQuantity: { decrement: lotQty }, receivedQuantity: { decrement: lotQty } },

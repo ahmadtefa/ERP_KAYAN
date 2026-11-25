@@ -63,6 +63,7 @@ describe('a documentary write-off', () => {
       },
       stockDocumentLine: { update: jest.fn(async () => ({})) },
       itemBatch: {
+        findFirst: jest.fn(async () => ({ unitCost: new Prisma.Decimal(12) })),
         updateMany: jest.fn(async () => ({ count: 1 })),
         update: jest.fn(async () => ({})),
         create: jest.fn(async () => ({ id: 'lot-new' })),
@@ -315,7 +316,11 @@ describe('a documentary write-off', () => {
     const claim = (tx.itemBatch.updateMany.mock.calls[0] as any[])[0];
     expect(claim.data.remainingQuantity.increment.toFixed(4)).toBe('2.0000');
     expect(claim.data.receivedQuantity.increment.toFixed(4)).toBe('2.0000');
-    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const evidence = (tx.$executeRaw.mock.calls as any[][])[0][0];
+    expect(evidence.strings.join('')).toContain('UPDATE "stock_movements" SET "lotUnitCost"');
+    expect(evidence.strings.join('')).toContain('"lotUnitCost" IS NULL');
+    expect(evidence.values.map(String)).toEqual(['12', COMPANY, 'doc-wo', ITEM, 'lot-1']);
   });
 
   it('writes the lot and the shelf onto the movement the loss produced', async () => {

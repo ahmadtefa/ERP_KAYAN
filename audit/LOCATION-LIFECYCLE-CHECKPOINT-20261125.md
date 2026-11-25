@@ -121,3 +121,11 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Writeoff2 then actual receipt2@24 then inverse: physical lot12@14.4 vs expected14. Same original physical contribution loss as negative adjustment, not a warehouse valuation-policy change.
 - Synthetic legacy mismatch: post generic adjustment+2 with named lot then clear only the posted line's batchId. Reverse succeeds, ledger/books restore10 but lot stays12. Must bind proven original identity or refuse atomically. This is intentionally a corrupted/legacy fixture, not evidence that UI can clear a posted line.
 - Both probes allow exact inverse or unchanged atomic refusal. Both currently fail. Reported to parent for backend owner. `/tmp/patch43-extra-inverse.out`.
+
+### 05:40 patch44 independent qualification, legacy transfer still open
+- Applied service hunks only. Worker tests excluded. New omitted-lot tracked transfer refuses with explicit lot/split correction and data retained. Physical lot cost evidence uses nullable migration38 column, reads only original movement IDs. Generic line/original lot mismatch now refuses including null line.
+- Own PGlite8 probes pass: positive/negative adjustment and writeoff after actual receipt exact cost, new omitted-lot refusal, cleared generic line refusal and basic adjustment/count± inverses. Additional3 pass: count± after actual receipt, generic null-cost legacy refusal with truthful accountant review guidance.
+- Native PG14 expanded actual-receipt inverses adjustment±/count±/writeoff all restore12@14, received12, OPEN, books168; generic issue/reverse overlap remains consistent. Full harness journals balanced. Server stopped.
+- 9 unit suites80/80 pass. Writeoff unit now asserts precisely one lot-cost evidence UPDATE and exact parameters, not merely absence of CLOSED text. TypeScript noEmit clean.
+- Remaining FAIL: synthetic legacy transfer line.batchId null with proven original lot movements and destination lot merged into preexisting lot. Reverse still succeeds leaving lots unchanged while reversing ledger/books. New-post refusal does not protect old documents. Own test saved and reported.
+- Full37-case PGlite single run exceeded120sec and stopped, no claim of full-suite pass. Smaller scoped groups used.
