@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -228,5 +231,13 @@ const vmReady =
     expect((await one(db,`SELECT quantity::text q,value::text v FROM warehouse_stock_balances WHERE "itemId"=$1`,[ITEM_NO_EXPIRY]))).toEqual({q:'5.0000',v:'10.0000'});
     expect((await one(db,`SELECT count(*)::text n FROM item_batches WHERE "itemId"=$1`,[ITEM_NO_EXPIRY])).n).toBe('0');
   });
+
+  (process.env.KAYAN_COUNT_LOCATION_UI==='1'?it:it.skip)('actual Flutter count add record finish uses service SQL and preserves frozen physical variance',async()=>{
+    const CLOC='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';await db.exec(`INSERT INTO storage_locations(id,"companyId","branchId","warehouseId",kind,code,"nameEn","nameAr","updatedAt") VALUES('${CLOC}','${COMPANY}','${BRANCH}','${WAREHOUSE}','SHELF','C-01','C1','C1',now())`);
+    const st=await takes.start(COMPANY,USER,{warehouseId:WAREHOUSE,scope:'PARTIAL',itemIds:[ITEM]}) as any;const locations=new StorageLocationsService(pglitePrisma(db) as never,{record:async()=>undefined} as never);const calls:string[]=[];
+    const server=createServer(async(req,res)=>{try{const url=new URL(req.url!,'http://localhost');let data:any;if(req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);calls.push(url.pathname);data=url.pathname.endsWith('/locations')?await takes.addLocation(COMPANY,USER,st.id,body):await takes.record(COMPANY,USER,st.id,body);}else if(url.pathname.endsWith('/locations'))data=await locations.list(COMPANY,{warehouseId:WAREHOUSE});else if(url.pathname.endsWith('/stock-takes'))data={items:[await takes.findOne(COMPANY,st.id)]};else data=await takes.findOne(COMPANY,st.id);res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));}catch(e){console.log(e);res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});await new Promise<void>(r=>server.listen(3224,'127.0.0.1',r));
+    try{const out=await promisify(execFile)('/tmp/flutter/bin/flutter',['test','test/widget/stock_take_locations_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(out.stdout);expect(calls.map(x=>x.split('/').pop())).toEqual(['locations','count','count']);const final=await takes.findOne(COMPANY,st.id);expect(final.status).toBe('REVIEW');expect(final.assignedQuantity).toBe(3);expect(final.realVarianceValue).toBe('0.0000');expect(await shelf(null)).toBe(3);expect(await shelf(CLOC)).toBe(0);}
+    finally{await new Promise<void>(r=>server.close(()=>r()));}
+  },150000);
 
 });
