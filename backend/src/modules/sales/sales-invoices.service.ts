@@ -965,6 +965,7 @@ export class SalesInvoicesService {
               itemId: item.id,
               quantity,
               storageLocationId,
+              sourceLineId: line.id,
               referenceType: 'SALES_INVOICE',
               referenceId: invoice.id,
               referenceNumber: invoice.invoiceNumber,

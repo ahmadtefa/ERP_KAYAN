@@ -41,6 +41,8 @@ class _DraftLine {
 
   /// The packing unit counted in. Empty means the item's own base unit.
   String? unitName;
+  String? storageLocationId;
+  String? toStorageLocationId;
 
   void dispose() => quantity.dispose();
 }
@@ -117,7 +119,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   Future<void> _changeStatus(Json row, {required bool reverse}) async {
     if (_changingStatus) return;
     final action = reverse ? 'reverse' : 'post';
-    final label = reverse ? (_arabic ? 'عكس' : 'Reverse') : (_arabic ? 'ترحيل' : 'Post');
+    final label = reverse
+        ? (_arabic ? 'عكس' : 'Reverse')
+        : (_arabic ? 'ترحيل' : 'Post');
     setState(() => _changingStatus = true);
     try {
       final confirmed = await confirmAction(
@@ -131,8 +135,15 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
       );
       if (!confirmed || !mounted) return;
       try {
-        await ref.read(apiClientProvider).post('/inventory/stock-documents/${text(row, 'id')}/$action');
-        if (mounted) showMessage(context, _arabic ? 'تم تحديث المستند.' : 'Document updated.');
+        await ref
+            .read(apiClientProvider)
+            .post('/inventory/stock-documents/${text(row, 'id')}/$action');
+        if (mounted) {
+          showMessage(
+            context,
+            _arabic ? 'تم تحديث المستند.' : 'Document updated.',
+          );
+        }
       } catch (error) {
         if (mounted) await showAppError(context, error);
       } finally {
@@ -232,10 +243,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 child: Text(_arabic ? 'كل الأنواع' : 'All kinds'),
               ),
               for (final kind in _kinds)
-                DropdownMenuItem(
-                  value: kind,
-                  child: Text(_kindLabel(kind)),
-                ),
+                DropdownMenuItem(value: kind, child: Text(_kindLabel(kind))),
             ],
             onChanged: (value) => setState(() => _kind = value),
           ),
@@ -261,19 +269,40 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
             : 'No stock documents.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
-          actions: canAdjust ? (row) {
-            final kind = text(row, 'kind').toUpperCase();
-            final status = text(row, 'status');
-            if (!_creatableKinds.contains(kind) || (status != 'draft' && status != 'posted')) return [];
-            final reverse = status == 'posted';
-            return [
-              IconButton(
-                tooltip: reverse ? (_arabic ? 'عكس' : 'Reverse') : (_arabic ? 'ترحيل' : 'Post'),
-                icon: Icon(reverse ? Icons.undo : Icons.play_arrow_outlined),
-                onPressed: _changingStatus ? null : () => _changeStatus(row, reverse: reverse),
-              ),
-            ];
-          } : null,
+          actions: canAdjust
+              ? (row) {
+                  final kind = text(row, 'kind').toUpperCase();
+                  final status = text(row, 'status');
+                  if (!_creatableKinds.contains(kind) ||
+                      (status != 'draft' && status != 'posted')) {
+                    return [];
+                  }
+                  final reverse = status == 'posted';
+                  return [
+                    if (!reverse)
+                      IconButton(
+                        tooltip: _arabic
+                            ? 'تصحيح مواقع المسودة'
+                            : 'Correct draft locations',
+                        icon: const Icon(Icons.edit_location_alt_outlined),
+                        onPressed: _changingStatus
+                            ? null
+                            : () => _correctDraftLocations(row),
+                      ),
+                    IconButton(
+                      tooltip: reverse
+                          ? (_arabic ? 'عكس' : 'Reverse')
+                          : (_arabic ? 'ترحيل' : 'Post'),
+                      icon: Icon(
+                        reverse ? Icons.undo : Icons.play_arrow_outlined,
+                      ),
+                      onPressed: _changingStatus
+                          ? null
+                          : () => _changeStatus(row, reverse: reverse),
+                    ),
+                  ];
+                }
+              : null,
           columns: [
             ColumnSpec(
               _arabic ? 'الرقم' : 'Number',
@@ -330,7 +359,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
   String? _quantityError(String kind, String raw) {
     final value = double.tryParse(raw.trim());
     if (!RegExp(r'^-?\d+(\.\d+)?$').hasMatch(raw.trim()) ||
-        value == null || !value.isFinite) {
+        value == null ||
+        !value.isFinite) {
       return _arabic ? 'اكتب كمية رقمية.' : 'Enter a numeric quantity.';
     }
     if (kind == 'TRANSFER' && value <= 0) {
@@ -349,6 +379,308 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
           : 'An adjustment of zero changes nothing.';
     }
     return null;
+  }
+
+  Future<void> _correctDraftLocations(Json row) async {
+    Json document;
+    try {
+      document = await ref
+          .read(apiClientProvider)
+          .getObject('/inventory/stock-documents/${text(row, 'id')}');
+    } catch (error) {
+      if (mounted) await showAppError(context, error);
+      return;
+    }
+    if (!mounted) return;
+    final lines = listOf(document['lines'])
+        .map((line) => Map<String, dynamic>.from(line))
+        .toList();
+    var saving = false;
+    String? failure;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: Text(
+            _arabic ? 'تصحيح مواقع المسودة' : 'Correct draft locations',
+          ),
+          content: SizedBox(
+            width: 680,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _arabic
+                        ? 'راجع مواقع المصدر والاستلام صراحة. الكميات والوحدات لا تتغير. الحفظ لا يرحّل المستند.'
+                        : 'Review source and destination explicitly. Quantities and units stay unchanged. Saving does not post the document.',
+                  ),
+                  for (final line in lines)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${text(line, 'lineNumber')} · ${text(line, 'itemCode')} · ${text(line, 'unitQuantity')} ${text(line, 'unit')}',
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              TextButton(
+                                onPressed: saving
+                                    ? null
+                                    : () async {
+                                        final picked =
+                                            await _pickDocumentLocation(
+                                              dialogContext,
+                                              asString(
+                                                document[text(
+                                                          document,
+                                                          'kind',
+                                                        ).toUpperCase() ==
+                                                        'TRANSFER'
+                                                    ? 'fromWarehouseId'
+                                                    : 'toWarehouseId'],
+                                              ),
+                                              asString(
+                                                line['storageLocationId'],
+                                              ),
+                                              source: true,
+                                            );
+                                        if (picked != null &&
+                                            dialogContext.mounted) {
+                                          update(() {
+                                            line['storageLocationId'] =
+                                                picked['id'];
+                                            line['storageLocationCode'] =
+                                                picked['code'];
+                                            failure = null;
+                                          });
+                                        }
+                                      },
+                                child: Text(
+                                  _arabic
+                                      ? 'المصدر: ${line['storageLocationId'] == null ? "بدون موقع" : text(line, 'storageLocationCode', fallback: "محدد")}'
+                                      : 'Source: ${line['storageLocationId'] == null ? "unlocated" : text(line, 'storageLocationCode', fallback: "selected")}',
+                                ),
+                              ),
+                              if (text(document, 'kind').toUpperCase() ==
+                                  'TRANSFER')
+                                TextButton(
+                                  onPressed: saving
+                                      ? null
+                                      : () async {
+                                          final picked =
+                                              await _pickDocumentLocation(
+                                                dialogContext,
+                                                asString(
+                                                  document['toWarehouseId'],
+                                                ),
+                                                asString(
+                                                  line['toStorageLocationId'],
+                                                ),
+                                                source: false,
+                                              );
+                                          if (picked != null &&
+                                              dialogContext.mounted) {
+                                            update(() {
+                                              line['toStorageLocationId'] =
+                                                  picked['id'];
+                                              line['toStorageLocationCode'] =
+                                                  picked['code'];
+                                              failure = null;
+                                            });
+                                          }
+                                        },
+                                  child: Text(
+                                    _arabic
+                                        ? 'الاستلام: ${line['toStorageLocationId'] == null ? "بدون موقع" : text(line, 'toStorageLocationCode', fallback: "محدد")}'
+                                        : 'Destination: ${line['toStorageLocationId'] == null ? "unlocated" : text(line, 'toStorageLocationCode', fallback: "selected")}',
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (failure != null)
+                    Text(
+                      failure!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
+              child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      update(() => saving = true);
+                      try {
+                        await ref
+                            .read(apiClientProvider)
+                            .put(
+                              '/inventory/stock-documents/${text(row, 'id')}/draft-locations',
+                              body: {
+                                'expectedVersion': document['editVersion'],
+                                'lines': [
+                                  for (final line in lines)
+                                    {
+                                      'lineNumber': line['lineNumber'],
+                                      'storageLocationId':
+                                          line['storageLocationId'],
+                                      if (text(
+                                            document,
+                                            'kind',
+                                          ).toUpperCase() ==
+                                          'TRANSFER')
+                                        'toStorageLocationId':
+                                            line['toStorageLocationId'],
+                                    },
+                                ],
+                              },
+                            );
+                        if (dialogContext.mounted) Navigator.pop(dialogContext);
+                        ref.read(stockDocumentsProvider.notifier).reload();
+                      } catch (error) {
+                        if (dialogContext.mounted) {
+                          update(() {
+                            saving = false;
+                            failure = error is ApiFailure
+                                ? error.message
+                                : error.toString();
+                          });
+                        }
+                      }
+                    },
+              child: Text(_arabic ? 'حفظ المواقع' : 'Save locations'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<Json?> _pickDocumentLocation(
+    BuildContext dialogContext,
+    String? warehouseId,
+    String? selected, {
+    required bool source,
+  }) async {
+    if (warehouseId == null) return null;
+    try {
+      final rows =
+          (await ref
+                  .read(apiClientProvider)
+                  .getList(
+                    '/inventory/locations',
+                    query: {'warehouseId': warehouseId},
+                  ))
+              .where(
+                (row) =>
+                    text(row, 'warehouseId') == warehouseId &&
+                    (source || row['isActive'] != false),
+              )
+              .toList();
+      if (!dialogContext.mounted) return null;
+      var current = selected;
+      return await showDialog<Json>(
+        context: dialogContext,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: Text(
+              source
+                  ? (_arabic ? 'موقع المصدر' : 'Source location')
+                  : (_arabic ? 'موقع الاستلام' : 'Destination location'),
+            ),
+            content: SizedBox(
+              width: 480,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _arabic
+                        ? 'اختر الموقع الفعلي في المخزن المحدد. تحويل من موقع واحد لكل سطر.'
+                        : 'Choose the physical location in the selected store. One source per line.',
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: rows.any((row) => text(row, 'id') == current)
+                        ? current
+                        : null,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: _arabic ? 'الموقع' : 'Location',
+                    ),
+                    items: [
+                      for (final row in rows)
+                        DropdownMenuItem(
+                          value: text(row, 'id'),
+                          child: Text(
+                            '${text(row, 'code')} • ${localizedRecordName(row, arabic: _arabic)}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) => update(() => current = value),
+                  ),
+                  if (selected != null &&
+                      !rows.any((row) => text(row, 'id') == selected))
+                    Text(
+                      _arabic
+                          ? 'الموقع المحفوظ غير متاح. اختر موقعًا نشطًا أو امسحه صراحة.'
+                          : 'Saved location unavailable. Select an active location or clear it explicitly.',
+                    ),
+                  if (rows.isEmpty)
+                    Text(
+                      _arabic
+                          ? 'لا توجد مواقع نشطة. أنشئ موقعًا ثم افتح الاختيار مجددًا.'
+                          : 'No active locations. Create a location, then reopen this picker.',
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, <String, dynamic>{'id': null}),
+                child: Text(_arabic ? 'بدون موقع' : 'Clear location'),
+              ),
+              FilledButton(
+                onPressed: rows.any((row) => text(row, 'id') == current)
+                    ? () => Navigator.pop(context, <String, dynamic>{
+                        'id': current,
+                        'code': text(
+                          rows.firstWhere((r) => text(r, 'id') == current),
+                          'code',
+                        ),
+                      })
+                    : null,
+                child: Text(_arabic ? 'تطبيق' : 'Apply'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (error) {
+      if (dialogContext.mounted) await showAppError(dialogContext, error);
+      return null;
+    }
   }
 
   Future<void> _createDocument() async {
@@ -406,8 +738,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     late final DialogRoute<void> route;
     Future<bool> closeDraft() async {
       if (saving || confirmingExit) return false;
-      final changed = lines.isNotEmpty || notes.text.trim().isNotEmpty ||
-          kind != 'COUNT' || fromWarehouseId != initialWarehouseId ||
+      final changed =
+          lines.isNotEmpty ||
+          notes.text.trim().isNotEmpty ||
+          kind != 'COUNT' ||
+          fromWarehouseId != initialWarehouseId ||
           toWarehouseId != initialWarehouseId;
       if (changed) {
         confirmingExit = true;
@@ -457,9 +792,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               scanning = true;
               try {
                 final scanner = BarcodeScanner(
-                  lookup: (value) => ref.read(apiClientProvider).getObject(
-                    '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
-                  ),
+                  lookup: (value) => ref
+                      .read(apiClientProvider)
+                      .getObject(
+                        '/inventory/items/by-barcode/${Uri.encodeComponent(value)}',
+                      ),
                 );
                 await scanner.scan(
                   code,
@@ -472,33 +809,47 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   onMatch: (match) async {
                     if (!dialogContext.mounted || saving) return;
                     if (!flag(match.item, 'isStockTracked', fallback: true)) {
-                      await showAppPlainError(dialogContext, _arabic
-                          ? 'هذا الصنف غير متابع مخزنيًا.'
-                          : 'This item is not stock-tracked.');
+                      await showAppPlainError(
+                        dialogContext,
+                        _arabic
+                            ? 'هذا الصنف غير متابع مخزنيًا.'
+                            : 'This item is not stock-tracked.',
+                      );
                       return;
                     }
                     final baseUnit = text(match.item, 'unit');
-                    final unit = match.matched == 'unit' ? match.unit : baseUnit;
-                    final index = lines.indexWhere((line) =>
-                      line.itemId == match.itemId &&
-                      (line.unitName ?? line.baseUnit) == unit,
+                    final unit = match.matched == 'unit'
+                        ? match.unit
+                        : baseUnit;
+                    final index = lines.indexWhere(
+                      (line) =>
+                          line.itemId == match.itemId &&
+                          (line.unitName ?? line.baseUnit) == unit,
                     );
                     if (index >= 0) {
                       final line = lines[index];
-                      final quantity = Decimal.tryParse(line.quantity.text.trim());
+                      final quantity = Decimal.tryParse(
+                        line.quantity.text.trim(),
+                      );
                       if (quantity == null || quantity < Decimal.zero) {
-                        await showAppPlainError(dialogContext, _arabic
-                            ? 'صحّح كمية الصنف قبل المسح مرة أخرى.'
-                            : 'Correct the item quantity before scanning again.');
+                        await showAppPlainError(
+                          dialogContext,
+                          _arabic ? 'صحّح كمية الصنف قبل المسح مرة أخرى.' : 'Correct the item quantity before scanning again.',
+                        );
                         return;
                       }
                       line.quantity.text = (quantity + Decimal.one).toString();
                     } else {
-                      setDialogState(() => lines.add(_DraftLine(
-                        itemId: match.itemId,
-                        itemLabel: '${match.itemCode} — ${localizedRecordName(match.item, arabic: _arabic)}',
-                        baseUnit: baseUnit,
-                      )..unitName = unit));
+                      setDialogState(
+                        () => lines.add(
+                          _DraftLine(
+                            itemId: match.itemId,
+                            itemLabel:
+                                '${match.itemCode} — ${localizedRecordName(match.item, arabic: _arabic)}',
+                            baseUnit: baseUnit,
+                          )..unitName = unit,
+                        ),
+                      );
                     }
                     barcode.clear();
                   },
@@ -517,12 +868,14 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               }
               if (kind == 'TRANSFER') {
                 if (fromWarehouseId == null) {
-                  found['fromWarehouse'] =
-                      _arabic ? 'اختر المخزن المحوِّل.' : 'Choose the source store.';
+                  found['fromWarehouse'] = _arabic
+                      ? 'اختر المخزن المحوِّل.'
+                      : 'Choose the source store.';
                 }
                 if (toWarehouseId == null) {
-                  found['toWarehouse'] =
-                      _arabic ? 'اختر المخزن المستلم.' : 'Choose the destination store.';
+                  found['toWarehouse'] = _arabic
+                      ? 'اختر المخزن المستلم.'
+                      : 'Choose the destination store.';
                 } else if (fromWarehouseId == toWarehouseId) {
                   found['toWarehouse'] = _arabic
                       ? 'المخزن المستلم يجب أن يختلف عن المحوِّل.'
@@ -564,6 +917,12 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                       {
                         'itemId': line.itemId,
                         'quantity': line.quantity.text.trim(),
+                        if (kind == 'TRANSFER' &&
+                            line.storageLocationId != null)
+                          'storageLocationId': line.storageLocationId,
+                        if (kind == 'TRANSFER' &&
+                            line.toStorageLocationId != null)
+                          'toStorageLocationId': line.toStorageLocationId,
                         if ((line.unitName ?? '').isNotEmpty)
                           'unitName': line.unitName,
                         if (kind == 'COUNT')
@@ -579,9 +938,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 navigator.pop();
                 showMessage(
                   context,
-                  _arabic
-                      ? 'تم إنشاء المستند. رحّله ليؤثر في الأرصدة.'
-                      : 'The document was created. Post it to affect the balances.',
+                  _arabic ? 'تم إنشاء المستند. رحّله ليؤثر في الأرصدة.' : 'The document was created. Post it to affect the balances.',
                 );
                 await ref.read(stockDocumentsProvider.notifier).reload();
               } catch (failure) {
@@ -627,7 +984,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 if (!didPop) closeDraft();
               },
               child: AlertDialog(
-                title: Text(_arabic ? 'مستند مخزني جديد' : 'New stock document'),
+                title: Text(
+                  _arabic ? 'مستند مخزني جديد' : 'New stock document',
+                ),
                 content: SizedBox(
                   // The dialog is as wide as the window allows, up to 840, and
                   // never taller than the window. Asking for a fixed height made
@@ -663,6 +1022,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                 if (value != null) {
                                   setDialogState(() {
                                     kind = value;
+                                    for (final line in lines) {
+                                      line.storageLocationId = null;
+                                      line.toStorageLocationId = null;
+                                    }
                                     errors.clear();
                                   });
                                 }
@@ -679,14 +1042,20 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     : (_arabic ? 'المخزن' : 'Store'),
                                 border: const OutlineInputBorder(),
                                 isDense: true,
-                                errorText: errors[kind == 'TRANSFER' ? 'fromWarehouse' : 'toWarehouse'],
+                                errorText:
+                                    errors[kind == 'TRANSFER'
+                                        ? 'fromWarehouse'
+                                        : 'toWarehouse'],
                               ),
                               items: [
                                 for (final warehouse in warehouses)
                                   DropdownMenuItem(
                                     value: text(warehouse, 'id'),
                                     child: Text(
-                                      localizedRecordName(warehouse, arabic: _arabic),
+                                      localizedRecordName(
+                                        warehouse,
+                                        arabic: _arabic,
+                                      ),
                                     ),
                                   ),
                               ],
@@ -695,8 +1064,14 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                 errors.remove('toWarehouse');
                                 if (kind == 'TRANSFER') {
                                   fromWarehouseId = value;
+                                  for (final line in lines) {
+                                    line.storageLocationId = null;
+                                  }
                                 } else {
                                   toWarehouseId = value;
+                                  for (final line in lines) {
+                                    line.toStorageLocationId = null;
+                                  }
                                   fromWarehouseId = value;
                                 }
                               }),
@@ -718,13 +1093,19 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                     DropdownMenuItem(
                                       value: text(warehouse, 'id'),
                                       child: Text(
-                                        localizedRecordName(warehouse, arabic: _arabic),
+                                        localizedRecordName(
+                                          warehouse,
+                                          arabic: _arabic,
+                                        ),
                                       ),
                                     ),
                                 ],
                                 onChanged: (value) => setDialogState(() {
                                   errors.remove('toWarehouse');
                                   toWarehouseId = value;
+                                  for (final line in lines) {
+                                    line.toStorageLocationId = null;
+                                  }
                                 }),
                               ),
                             ),
@@ -765,7 +1146,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   style: errors['lines'] == null
                                       ? null
                                       : TextStyle(
-                                          color: Theme.of(context).colorScheme.error,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .error,
                                         ),
                                 ),
                               )
@@ -783,64 +1166,150 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                       vertical: 6,
                                     ),
                                     child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(line.itemLabel),
-                                          Text(
-                                            _arabic
-                                                ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
-                                                : 'Unit: ${line.unitName ?? line.baseUnit}',
-                                            style: Theme.of(context).textTheme.bodySmall,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        SizedBox(
-                                          width: 110,
-                                          child: TextField(
-                                            controller: line.quantity,
-                                            onChanged: (_) {
-                                              if (errors.remove('line.$index') != null) {
-                                                setDialogState(() {});
-                                              }
-                                            },
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(line.itemLabel),
+                                              if (kind == 'TRANSFER')
+                                                Wrap(
+                                                  spacing: 8,
+                                                  children: [
+                                                    TextButton.icon(
+                                                      icon: const Icon(
+                                                        Icons.output,
+                                                      ),
+                                                      label: Text(
+                                                        _arabic
+                                                            ? 'موقع المصدر: ${line.storageLocationId == null ? "غير محدد" : "محدد"}'
+                                                            : 'Source location: ${line.storageLocationId == null ? "not selected" : "selected"}',
+                                                      ),
+                                                      onPressed: saving
+                                                          ? null
+                                                          : () async {
+                                                              final picked =
+                                                                  await _pickDocumentLocation(
+                                                                    dialogContext,
+                                                                    fromWarehouseId,
+                                                                    line.storageLocationId,
+                                                                    source:
+                                                                        true,
+                                                                  );
+                                                              if (picked !=
+                                                                      null &&
+                                                                  dialogContext
+                                                                      .mounted) {
+                                                                setDialogState(
+                                                                  () => line.storageLocationId =
+                                                                      picked['id']
+                                                                          as String?,
+                                                                );
+                                                              }
+                                                            },
+                                                    ),
+                                                    TextButton.icon(
+                                                      icon: const Icon(
+                                                        Icons.input,
+                                                      ),
+                                                      label: Text(
+                                                        _arabic
+                                                            ? 'موقع الاستلام: ${line.toStorageLocationId == null ? "بدون موقع" : "محدد"}'
+                                                            : 'Destination location: ${line.toStorageLocationId == null ? "unlocated" : "selected"}',
+                                                      ),
+                                                      onPressed: saving
+                                                          ? null
+                                                          : () async {
+                                                              final picked =
+                                                                  await _pickDocumentLocation(
+                                                                    dialogContext,
+                                                                    toWarehouseId,
+                                                                    line.toStorageLocationId,
+                                                                    source:
+                                                                        false,
+                                                                  );
+                                                              if (picked !=
+                                                                      null &&
+                                                                  dialogContext
+                                                                      .mounted) {
+                                                                setDialogState(
+                                                                  () => line.toStorageLocationId =
+                                                                      picked['id']
+                                                                          as String?,
+                                                                );
+                                                              }
+                                                            },
+                                                    ),
+                                                  ],
                                                 ),
-                                            decoration: InputDecoration(
-                                              labelText: _arabic
-                                                  ? 'الكمية'
-                                                  : 'Quantity',
-                                              isDense: true,
-                                              border: const OutlineInputBorder(),
-                                              errorText: errors['line.$index'],
-                                              errorMaxLines: 3,
-                                            ),
+                                              Text(
+                                                _arabic
+                                                    ? 'الوحدة: ${line.unitName ?? line.baseUnit}'
+                                                    : 'Unit: ${line.unitName ?? line.baseUnit}',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall,
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        IconButton(
-                                          tooltip:
-                                              _arabic ? 'حذف' : 'Remove line',
-                                          icon: const Icon(
-                                            Icons.delete_outline,
-                                            size: 20,
-                                          ),
-                                          onPressed: () => setDialogState(() {
-                                            errors.removeWhere((k, _) => k.startsWith('line.'));
-                                            lines.removeAt(index).dispose();
-                                          }),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              width: 110,
+                                              child: TextField(
+                                                controller: line.quantity,
+                                                onChanged: (_) {
+                                                  if (errors.remove(
+                                                        'line.$index',
+                                                      ) !=
+                                                      null) {
+                                                    setDialogState(() {});
+                                                  }
+                                                },
+                                                keyboardType:
+                                                    const TextInputType.numberWithOptions(
+                                                      decimal: true,
+                                                    ),
+                                                decoration: InputDecoration(
+                                                  labelText: _arabic
+                                                      ? 'الكمية'
+                                                      : 'Quantity',
+                                                  isDense: true,
+                                                  border:
+                                                      const OutlineInputBorder(),
+                                                  errorText:
+                                                      errors['line.$index'],
+                                                  errorMaxLines: 3,
+                                                ),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: _arabic
+                                                  ? 'حذف'
+                                                  : 'Remove line',
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                                size: 20,
+                                              ),
+                                              onPressed: () =>
+                                                  setDialogState(() {
+                                                    errors.removeWhere(
+                                                      (k, _) =>
+                                                          k.startsWith('line.'),
+                                                    );
+                                                    lines
+                                                        .removeAt(index)
+                                                        .dispose();
+                                                  }),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ),
-                                    ],
                                     ),
                                   );
                                 },

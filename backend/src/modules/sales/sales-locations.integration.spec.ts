@@ -19,6 +19,7 @@ import { StockLedgerService } from '../../common/warehouse/stock-ledger.service'
 import { pglitePrisma } from '../../testing/pglite-adapter';
 
 import { SalesInvoicesService } from './sales-invoices.service';
+import { ReturnsService } from '../returns/returns.service';
 import { StorageLocationsService } from '../inventory/storage-locations.service';
 
 /// A whole sales invoice, posted and reversed, on a real PostgreSQL engine.
@@ -475,5 +476,246 @@ const placedNow = async (db: PGlite) => {
       await service.reverse(COMPANY,USER,id);expect(await placedNow(db)).toEqual({'A-01':20,'B-01':20});expect(await shelf(db)).toBe(40);
     }finally{await new Promise<void>(r=>server.close(()=>r()));}
   },150000);
+
+
+  it('sales return restores original issue cost into a lot repriced by a later receipt', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',4);await seedShelf(db,10,40);await seedPlaced(db,lot,10,0);
+    await seedDraftInvoice(db,2);await allocate(db,[{storageLocationId:LOC_A,quantity:'2'}]);
+    const {service,prisma}=serviceWith(db);await service.post(COMPANY,USER,INVOICE);
+    const numbers=new DocumentNumberService();const audit=new AuditService(prisma as never);const posting=new PostingService(numbers,new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never));
+    const batches=new BatchesService(prisma as never,{} as never,posting,new AccountMapService(),numbers,audit as never,new StockLedgerService());
+    await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L1',expiryDate:'2027-01-01',quantity:8,unitCost:6,storageLocationId:LOC_A});
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const returns=new ReturnsService(prisma as never,numbers,posting,new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:INVOICE,returnDate:'2026-11-08',lines:[{originalLineId:LINE,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    const batch=(await db.query<{q:string,c:string}>(`SELECT "remainingQuantity"::text q,"unitCost"::text c FROM item_batches WHERE id=$1`,[lot])).rows[0];
+    const balance=(await db.query<{q:string,v:string}>(`SELECT quantity::text q,value::text v FROM stock_balances WHERE "itemId"=$1`,[ITEM])).rows[0];
+    expect(batch.q).toBe('18.0000');expect(balance).toEqual({q:'18.0000',v:'88.0000'});expect(Number(batch.c)).toBeCloseTo(88/18,4);
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'5107','Inventory loss','Inventory loss','EXPENSE',true,true,now())`,[COMPANY]);
+    await batches.writeOff(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchId:lot,quantity:1,storageLocationId:LOC_A,reason:'damaged synthetic'});
+    const loss=(await db.query<{c:string}>(`SELECT "totalCost"::text c FROM stock_movements WHERE "referenceType"='STOCK_WRITE_OFF'`)).rows[0];expect(Number(loss.c)).toBeCloseTo(88/18,4);
+
+  });
+
+  it('returning only the second same-item sales line restores that lines physical source', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    expect(await placedNow(db)).toEqual({'A-01':3,'B-01':4});expect(await remaining(db,lot)).toBe(7);
+  });
+
+  it('reversing a sales return removes its restored lot and physical shelf', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    await returns.reverse(COMPANY,USER,'sales',ret.id);expect(await placedNow(db)).toEqual({'A-01':3,'B-01':2});expect(await remaining(db,lot)).toBe(5);
+    const again=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-09',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,again.id);expect(await placedNow(db)).toEqual({'A-01':3,'B-01':4});expect(await remaining(db,lot)).toBe(7);
+
+  });
+
+  it('return reversal refuses quantity-complete but cost-incomplete movement evidence', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    await db.query(`UPDATE stock_movements SET "unitCost"=1,"totalCost"=quantity WHERE "referenceType"='SALES_RETURN'`);
+    await expect(returns.reverse(COMPANY,USER,'sales',ret.id)).rejects.toBeDefined();expect(await placedNow(db)).toEqual({'A-01':3,'B-01':4});expect(await remaining(db,lot)).toBe(7);
+  });
+
+  it('sales return reversal refuses exact-source shortage and rolls back invoice and lot', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    const numbers=new DocumentNumberService();const batches=new BatchesService(prisma as never,{} as never,new PostingService(numbers,new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),numbers,audit as never,new StockLedgerService());
+    await batches.issue(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,quantity:3,storageLocationId:LOC_B});
+    const before=await placedNow(db);const beforeLot=await remaining(db,lot);
+    await expect(returns.reverse(COMPANY,USER,'sales',ret.id)).rejects.toBeDefined();expect(await placedNow(db)).toEqual(before);expect(await remaining(db,lot)).toBe(beforeLot);
+    expect((await db.query<{s:string}>(`SELECT status::text s FROM sales_invoices WHERE id=$1`,[ret.id])).rows[0].s).toBe('POSTED');
+  });
+
+  it('legacy unbound sales return reversal refuses without corrupting lot or shelf', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postSalesReturn(COMPANY,USER,ret.id);
+    await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "referenceType"='SALES_RETURN'`);
+    await expect(returns.reverse(COMPANY,USER,'sales',ret.id)).rejects.toBeDefined();expect(await placedNow(db)).toEqual({'A-01':3,'B-01':4});expect(await remaining(db,lot)).toBe(7);
+  });
+
+  it('legacy unbound returning only the second same-item sales line restores that lines physical source', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL`);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await expect(returns.postSalesReturn(COMPANY,USER,ret.id)).rejects.toMatchObject({response:{code:'SALES_RETURN_LEGACY_AMBIGUOUS'}});
+    expect(await placedNow(db)).toEqual({'A-01':3,'B-01':2});expect(await remaining(db,lot)).toBe(5);
+  });
+
+  it('mixed bound/unbound returning only the second same-item sales line restores that lines physical source', async () => {
+    const lot=await seedLot(db,'L1',10,'2027-01-01',5);await seedShelf(db,10,50);await seedPlaced(db,lot,6,4);
+    const {service,prisma}=serviceWith(db);
+    const invoice=await service.create(COMPANY,BRANCH,USER,{customerId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[
+      {itemId:ITEM,quantity:'3',unitPrice:'10',taxRate:'0',locationAllocations:[{storageLocationId:LOC_A,quantity:'3'}]},
+      {itemId:ITEM,quantity:'2',unitPrice:'11',taxRate:'0',locationAllocations:[{storageLocationId:LOC_B,quantity:'2'}]},
+    ]} as never) as unknown as {id:string};await service.post(COMPANY,USER,invoice.id);
+    const audit=new AuditService(prisma as never);const returns=new ReturnsService(prisma as never,new DocumentNumberService(),new PostingService(new DocumentNumberService(),new FiscalPeriodsService(prisma as never,audit as never),new CostCentersService(prisma as never,audit as never)),new AccountMapService(),audit as never,new WarehouseService(prisma as never,audit as never));
+    await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'4102','Sales returns','Sales returns','REVENUE',true,true,now())`,[COMPANY]);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "sourceLineId" IN (SELECT id FROM sales_invoice_lines WHERE "lineNumber"=2)`);
+    const line=(await db.query<{id:string}>(`SELECT id FROM sales_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[invoice.id])).rows[0];
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:invoice.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await expect(returns.postSalesReturn(COMPANY,USER,ret.id)).rejects.toMatchObject({response:{code:'SALES_RETURN_LEGACY_AMBIGUOUS'}});
+    expect(await placedNow(db)).toEqual({'A-01':3,'B-01':2});expect(await remaining(db,lot)).toBe(5);
+  });
+
+  it('a sales return goes back to the shelves the sale took from, in the order they left', async () => {
+    const lot = await seedLot(db, 'L1', 10, '2027-01-01', 5);
+    await seedShelf(db, 10, 50);
+    await seedPlaced(db, lot, 6, 4);
+    await seedDraftInvoice(db, 5);
+    await allocate(db, [{ storageLocationId: LOC_A, quantity: '3.0000' }, { storageLocationId: LOC_B, quantity: '2.0000' }]);
+    const { service, prisma } = serviceWith(db);
+    await service.post(COMPANY, USER, INVOICE);
+    const audit = new AuditService(prisma as never);
+    const returns = new ReturnsService(
+      prisma as never,
+      new DocumentNumberService(),
+      new PostingService(new DocumentNumberService(), new FiscalPeriodsService(prisma as never, audit as never), new CostCentersService(prisma as never, audit as never)),
+      new AccountMapService(),
+      audit as never,
+      new WarehouseService(prisma as never, audit as never),
+    );
+    await db.query(`INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "updatedAt") VALUES (gen_random_uuid(), $1, '4102', 'Sales returns', 'مردودات', 'REVENUE', true, true, now())`, [COMPANY]);
+    const created = await returns.createSalesReturn(COMPANY, BRANCH, USER, {
+      originalInvoiceId: INVOICE, returnDate: '2026-11-08', lines: [{ originalLineId: LINE, quantity: '4' }],
+    }) as unknown as { id: string };
+    await returns.postSalesReturn(COMPANY, USER, created.id);
+    expect(await placedNow(db)).toEqual({ 'A-01': 6, 'B-01': 3 });
+    expect(await remaining(db, lot)).toBe(9);
+    const second=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:INVOICE,returnDate:'2026-11-09',lines:[{originalLineId:LINE,quantity:'1'}]}) as unknown as {id:string};
+    await returns.postSalesReturn(COMPANY,USER,second.id);
+    expect(await placedNow(db)).toEqual({'A-01':6,'B-01':4});
+    expect(await remaining(db,lot)).toBe(10);
+
+  });
+  it('partial-bound sales return reversal refuses incomplete movement coverage', async () => {
+    const lot = await seedLot(db, 'L1', 10, '2027-01-01', 5);
+    await seedShelf(db, 10, 50);
+    await seedPlaced(db, lot, 6, 4);
+    await seedDraftInvoice(db, 5);
+    await allocate(db, [{ storageLocationId: LOC_A, quantity: '3.0000' }, { storageLocationId: LOC_B, quantity: '2.0000' }]);
+    const { service, prisma } = serviceWith(db);
+    await service.post(COMPANY, USER, INVOICE);
+    const audit = new AuditService(prisma as never);
+    const returns = new ReturnsService(
+      prisma as never,
+      new DocumentNumberService(),
+      new PostingService(new DocumentNumberService(), new FiscalPeriodsService(prisma as never, audit as never), new CostCentersService(prisma as never, audit as never)),
+      new AccountMapService(),
+      audit as never,
+      new WarehouseService(prisma as never, audit as never),
+    );
+    await db.query(`INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "updatedAt") VALUES (gen_random_uuid(), $1, '4102', 'Sales returns', 'مردودات', 'REVENUE', true, true, now())`, [COMPANY]);
+    const created = await returns.createSalesReturn(COMPANY, BRANCH, USER, {
+      originalInvoiceId: INVOICE, returnDate: '2026-11-08', lines: [{ originalLineId: LINE, quantity: '4' }],
+    }) as unknown as { id: string };
+    await returns.postSalesReturn(COMPANY, USER, created.id);
+    expect(await placedNow(db)).toEqual({ 'A-01': 6, 'B-01': 3 });
+    expect(await remaining(db, lot)).toBe(9);
+    await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "referenceType"='SALES_RETURN' AND "storageLocationId"=$1`,[LOC_B]);
+    await expect(returns.reverse(COMPANY,USER,'sales',created.id)).rejects.toBeDefined();expect(await placedNow(db)).toEqual({'A-01':6,'B-01':3});expect(await remaining(db,lot)).toBe(9);
+  });
+
+  it('partial original-line allocation refuses missing source slices', async () => {
+    const lot = await seedLot(db, 'L1', 10, '2027-01-01', 5);
+    await seedShelf(db, 10, 50);
+    await seedPlaced(db, lot, 6, 4);
+    await seedDraftInvoice(db, 5);
+    await allocate(db, [{ storageLocationId: LOC_A, quantity: '3.0000' }, { storageLocationId: LOC_B, quantity: '2.0000' }]);
+    const { service, prisma } = serviceWith(db);
+    await service.post(COMPANY, USER, INVOICE);
+    const audit = new AuditService(prisma as never);
+    const returns = new ReturnsService(
+      prisma as never,
+      new DocumentNumberService(),
+      new PostingService(new DocumentNumberService(), new FiscalPeriodsService(prisma as never, audit as never), new CostCentersService(prisma as never, audit as never)),
+      new AccountMapService(),
+      audit as never,
+      new WarehouseService(prisma as never, audit as never),
+    );
+    await db.query(`INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "updatedAt") VALUES (gen_random_uuid(), $1, '4102', 'Sales returns', 'مردودات', 'REVENUE', true, true, now())`, [COMPANY]);
+    await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "referenceType"='SALES_INVOICE' AND "storageLocationId"=$1`,[LOC_B]);
+    const ret=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:INVOICE,returnDate:'2026-11-08',lines:[{originalLineId:LINE,quantity:'4'}]}) as unknown as {id:string};
+    await expect(returns.postSalesReturn(COMPANY,USER,ret.id)).rejects.toBeDefined();expect(await placedNow(db)).toEqual({'A-01':3,'B-01':2});expect(await remaining(db,lot)).toBe(5);
+  });
+
+  it('single-line legacy split sale can still be returned without guessed line identity', async () => {
+    const lot = await seedLot(db, 'L1', 10, '2027-01-01', 5);
+    await seedShelf(db, 10, 50);
+    await seedPlaced(db, lot, 6, 4);
+    await seedDraftInvoice(db, 5);
+    await allocate(db, [{ storageLocationId: LOC_A, quantity: '3.0000' }, { storageLocationId: LOC_B, quantity: '2.0000' }]);
+    const { service, prisma } = serviceWith(db);
+    await service.post(COMPANY, USER, INVOICE);
+    await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL`);
+    const audit = new AuditService(prisma as never);
+    const returns = new ReturnsService(
+      prisma as never,
+      new DocumentNumberService(),
+      new PostingService(new DocumentNumberService(), new FiscalPeriodsService(prisma as never, audit as never), new CostCentersService(prisma as never, audit as never)),
+      new AccountMapService(),
+      audit as never,
+      new WarehouseService(prisma as never, audit as never),
+    );
+    await db.query(`INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "updatedAt") VALUES (gen_random_uuid(), $1, '4102', 'Sales returns', 'مردودات', 'REVENUE', true, true, now())`, [COMPANY]);
+    const created = await returns.createSalesReturn(COMPANY, BRANCH, USER, {
+      originalInvoiceId: INVOICE, returnDate: '2026-11-08', lines: [{ originalLineId: LINE, quantity: '4' }],
+    }) as unknown as { id: string };
+    await returns.postSalesReturn(COMPANY, USER, created.id);
+    expect(await placedNow(db)).toEqual({ 'A-01': 6, 'B-01': 3 });
+    expect(await remaining(db, lot)).toBe(9);
+    const second=await returns.createSalesReturn(COMPANY,BRANCH,USER,{originalInvoiceId:INVOICE,returnDate:'2026-11-09',lines:[{originalLineId:LINE,quantity:'1'}]}) as unknown as {id:string};
+    await returns.postSalesReturn(COMPANY,USER,second.id);
+    expect(await placedNow(db)).toEqual({'A-01':6,'B-01':4});
+    expect(await remaining(db,lot)).toBe(10);
+
+  });
 
 });

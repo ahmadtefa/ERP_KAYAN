@@ -14,6 +14,7 @@ import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { pglitePrisma } from '../../testing/pglite-adapter';
 
+import { ReturnsService } from '../returns/returns.service';
 import { BatchesService } from '../inventory/batches.service';
 import { PurchaseInvoicesService } from './purchase-invoices.service';
 
@@ -151,7 +152,8 @@ function parts(db: PGlite) {
     audit as never,
     batches,
   );
-  return { service, batches };
+  const returns = new ReturnsService(prisma as never, new DocumentNumberService(), posting, new AccountMapService(), audit as never, new WarehouseService(prisma as never, audit as never));
+  return { service, batches, returns };
 }
 const serviceWith = (db: PGlite) => parts(db).service;
 
@@ -228,6 +230,29 @@ const vmReady =
     expect(await inMovements()).toEqual([{ loc: SHELF_B, q: '5.0000' }]);
   });
 
+  it('enforces production-date policy when batch number itself is optional', async () => {
+    await db.query(`UPDATE items SET "requiresBatch"=false,"requiresProductionDate"=true WHERE id=$1`,[ITEM]);
+    const service=serviceWith(db);
+    const created=await service.create(COMPANY,BRANCH,USER,dto(SHELF_A)) as {id:string};
+    const err=await fail(service.post(COMPANY,USER,created.id));
+    expect(err?.code).toBe('PURCHASE_LOT_DETAILS_REQUIRED');
+    expect(await inMovements()).toEqual([]);
+  });
+
+  it('reverses the generated lot identity for a date-only purchase receipt', async () => {
+    const service = serviceWith(db);
+    const created=await service.create(COMPANY,BRANCH,USER,{
+      supplierId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,
+      lines:[{itemId:ITEM,quantity:'5',unitPrice:'4',taxRate:'0',storageLocationId:SHELF_A,batchExpiryDate:'2027-06-01'}],
+    } as never) as {id:string};
+    await service.post(COMPANY,USER,created.id);
+    expect((await db.query(`SELECT "remainingQuantity"::text q FROM item_batches`)).rows).toEqual([{q:'5.0000'}]);
+    await service.reverse(COMPANY,USER,created.id);
+    expect((await db.query(`SELECT "remainingQuantity"::text q FROM item_batches`)).rows).toEqual([{q:'0.0000'}]);
+    const movement=(await db.query<{batchId:string|null}>(`SELECT "batchId" FROM stock_movements WHERE "referenceType"='PURCHASE_INVOICE_REVERSAL'`)).rows[0];
+    expect(movement.batchId).not.toBeNull();
+  });
+
   describe('a lot-controlled item receives into a real lot', () => {
     const lotDto = (extra: Record<string, unknown>) => ({
       supplierId: CUSTOMER, invoiceDate: '2026-11-07', warehouseId: WAREHOUSE,
@@ -293,5 +318,193 @@ const vmReady =
       expect(err?.code).toBe('PURCHASE_REVERSE_LOT_USED');
       expect((await lots()).find((l) => l.n === 'P-3')?.r).toBe('4.0000');
     });
+
+    it('a purchase return leaves from the lot and shelf the receipt used, and refuses past what is left', async () => {
+      const { service, batches, returns } = parts(db);
+      const a = await service.create(COMPANY, BRANCH, USER, lotDto({ batchNumber: 'R-1', batchExpiryDate: '2027-06-01' })) as unknown as { id: string; lines: Array<{ id: string }> };
+      await service.post(COMPANY, USER, a.id);
+      const lineId = (await db.query<{ id: string }>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1`, [a.id])).rows[0].id;
+      const ret = await returns.createPurchaseReturn(COMPANY, BRANCH, USER, { originalInvoiceId: a.id, returnDate: '2026-11-08', lines: [{ originalLineId: lineId, quantity: '2' }] }) as unknown as { id: string };
+      await returns.postPurchaseReturn(COMPANY, USER, ret.id);
+      expect(await lots()).toEqual([{ n: 'R-1', r: '3.0000', s: 'OPEN' }]);
+      const out = (await db.query<{ b: string | null; loc: string | null; q: string }>(`SELECT "batchId" b, "storageLocationId" loc, quantity::text q FROM stock_movements WHERE "referenceType"='PURCHASE_RETURN'`)).rows;
+      expect(out).toHaveLength(1);
+      expect(out[0].b).not.toBeNull();
+      expect(out[0].loc).toBe(SHELF_A);
+      expect(out[0].q).toBe('2.0000');
+      // other stock on hand, so only the lot itself can say no
+      const other = await service.create(COMPANY, BRANCH, USER, lotDto({ batchNumber: 'R-2', batchExpiryDate: '2027-07-01' })) as unknown as { id: string };
+      await service.post(COMPANY, USER, other.id);
+      await batches.issue(COMPANY, USER, { branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM, quantity: 2, storageLocationId: SHELF_A });
+      const ret2 = await returns.createPurchaseReturn(COMPANY, BRANCH, USER, { originalInvoiceId: a.id, returnDate: '2026-11-09', lines: [{ originalLineId: lineId, quantity: '2' }] }) as unknown as { id: string };
+      const err = await fail(returns.postPurchaseReturn(COMPANY, USER, ret2.id));
+      expect(err?.code).toBe('PURCHASE_RETURN_LOT_SHORT');
+      expect((await lots()).find((l) => l.n === 'R-1')?.r).toBe('1.0000');
+    });
+
+    it('reversing a purchase return restores the same lot and physical shelf', async () => {
+      const {service,returns}=parts(db);const a=await service.create(COMPANY,BRANCH,USER,lotDto({batchNumber:'UNDO-RET',batchExpiryDate:'2027-06-01'})) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1`,[a.id])).rows[0];const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postPurchaseReturn(COMPANY,USER,ret.id);
+      await returns.reverse(COMPANY,USER,'purchases',ret.id);expect((await lots()).map(l=>l.r)).toEqual(['5.0000']);
+      const again=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-09',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postPurchaseReturn(COMPANY,USER,again.id);expect((await lots()).map(l=>l.r)).toEqual(['3.0000']);
+      await returns.reverse(COMPANY,USER,'purchases',again.id);
+
+      expect((await db.query<{q:string}>(`SELECT SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END)::text q FROM stock_movements WHERE "storageLocationId"=$1`,[SHELF_A])).rows[0].q).toBe('5.0000');
+    });
+
+    it('legacy unbound purchase return reversal refuses without phantom lot quantity', async () => {
+      const {service,returns}=parts(db);const a=await service.create(COMPANY,BRANCH,USER,lotDto({batchNumber:'UNDO-RET',batchExpiryDate:'2027-06-01'})) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1`,[a.id])).rows[0];const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postPurchaseReturn(COMPANY,USER,ret.id);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "referenceType"='PURCHASE_RETURN'`);
+      await expect(returns.reverse(COMPANY,USER,'purchases',ret.id)).rejects.toBeDefined();expect((await lots()).map(l=>l.r)).toEqual(['3.0000']);
+    });
+
+    it('returns a date-only generated receipt from its real lot', async () => {
+      await db.query(`UPDATE items SET "requiresBatch"=false,"requiresExpiryDate"=false WHERE id=$1`,[ITEM]);
+      const { service, returns }=parts(db);
+      const a=await service.create(COMPANY,BRANCH,USER,lotDto({batchExpiryDate:'2027-06-01'})) as unknown as {id:string};
+      await service.post(COMPANY,USER,a.id);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1`,[a.id])).rows[0];
+      const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};
+      await returns.postPurchaseReturn(COMPANY,USER,ret.id);
+      expect((await lots()).map(l=>l.r)).toEqual(['3.0000']);
+      expect((await db.query<{batchId:string|null}>(`SELECT "batchId" FROM stock_movements WHERE "referenceType"='PURCHASE_RETURN'`)).rows[0].batchId).not.toBeNull();
+    });
+
+    it('reverses two same-item equal-quantity same-shelf receipt lots without reusing the first movement', async () => {
+      const {service}=parts(db);
+      const data=lotDto({batchNumber:'FIRST',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};
+      data.lines.push({...data.lines[0],batchNumber:'SECOND'});
+      const a=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};
+      await service.post(COMPANY,USER,a.id);
+      await service.reverse(COMPANY,USER,a.id);
+      expect((await lots()).map(l=>l.r)).toEqual(['0.0000','0.0000']);
+    });
+
+    it('returns the second same-item same-shelf equal-quantity receipt line from its own distinct lot and cost', async () => {
+      const {service,returns}=parts(db);
+      const data=lotDto({batchNumber:'FIRST',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};
+      data.lines[0].unitPrice='4';data.lines.push({...data.lines[0],batchNumber:'SECOND',unitPrice:'6'});
+      const a=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      // PostgreSQL now() is identical within a transaction. Force the UUID tie-break
+      // to oppose line order, which is legal and must not change receipt identity.
+      await db.query(`UPDATE stock_movements SET "createdAt"='2026-11-25T01:00:00Z',id=CASE WHEN "unitCost"=4 THEN 'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid ELSE '00000000-0000-4000-8000-000000000001'::uuid END WHERE "referenceType"='PURCHASE_INVOICE'`);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[a.id])).rows[0];
+      for(let i=0;i<2;i++){
+        const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'1'}]}) as unknown as {id:string};
+        await returns.postPurchaseReturn(COMPANY,USER,ret.id);
+      }
+      const rows=await lots();expect(rows.find(l=>l.n==='FIRST')?.r).toBe('5.0000');expect(rows.find(l=>l.n==='SECOND')?.r).toBe('3.0000');
+      const movements=(await db.query<{n:string,c:string}>(`SELECT b."batchNumber" n,m."unitCost"::text c FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceType"='PURCHASE_RETURN'`)).rows;
+      expect(movements).toEqual([{n:'SECOND',c:'6.0000'},{n:'SECOND',c:'6.0000'}]);
+    });
+
+    it('legacy unbound returns the second same-item same-shelf equal-quantity receipt line from its own distinct lot and cost', async () => {
+      const {service,returns}=parts(db);
+      const data=lotDto({batchNumber:'FIRST',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};
+      data.lines[0].unitPrice='4';data.lines.push({...data.lines[0],batchNumber:'SECOND',unitPrice:'6'});
+      const a=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      // PostgreSQL now() is identical within a transaction. Force the UUID tie-break
+      // to oppose line order, which is legal and must not change receipt identity.
+      await db.query(`UPDATE stock_movements SET "createdAt"='2026-11-25T01:00:00Z',id=CASE WHEN "unitCost"=4 THEN 'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid ELSE '00000000-0000-4000-8000-000000000001'::uuid END WHERE "referenceType"='PURCHASE_INVOICE'`);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL`);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[a.id])).rows[0];
+      for(let i=0;i<2;i++){
+        const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'1'}]}) as unknown as {id:string};
+        const err=await fail(returns.postPurchaseReturn(COMPANY,USER,ret.id));expect(err?.code).toBe('PURCHASE_RETURN_LEGACY_AMBIGUOUS');
+      }
+      const rows=await lots();expect(rows.find(l=>l.n==='FIRST')?.r).toBe('5.0000');expect(rows.find(l=>l.n==='SECOND')?.r).toBe('5.0000');
+      const movements=(await db.query<{n:string,c:string}>(`SELECT b."batchNumber" n,m."unitCost"::text c FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceType"='PURCHASE_RETURN'`)).rows;
+      expect(movements).toEqual([]);
+    });
+
+    it('legacy same-lot same-shelf distinct-cost lines refuse financial ambiguity', async () => {
+      const {service,returns}=parts(db);
+      const data=lotDto({batchNumber:'FIRST',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};
+      data.lines[0].unitPrice='4';data.lines.push({...data.lines[0],batchNumber:'FIRST',unitPrice:'6'});
+      const a=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      // PostgreSQL now() is identical within a transaction. Force the UUID tie-break
+      // to oppose line order, which is legal and must not change receipt identity.
+      await db.query(`UPDATE stock_movements SET "createdAt"='2026-11-25T01:00:00Z',id=CASE WHEN "unitCost"=4 THEN 'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid ELSE '00000000-0000-4000-8000-000000000001'::uuid END WHERE "referenceType"='PURCHASE_INVOICE'`);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL`);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[a.id])).rows[0];
+      for(let i=0;i<2;i++){
+        const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'1'}]}) as unknown as {id:string};
+        const err=await fail(returns.postPurchaseReturn(COMPANY,USER,ret.id));expect(err?.code).toBe('PURCHASE_RETURN_LEGACY_AMBIGUOUS');
+      }
+      const rows=await lots();expect(rows.find(l=>l.n==='FIRST')?.r).toBe('10.0000');
+      const movements=(await db.query<{n:string,c:string}>(`SELECT b."batchNumber" n,m."unitCost"::text c FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceType"='PURCHASE_RETURN'`)).rows;
+      expect(movements).toEqual([]);
+    });
+
+    it('mixed bound/unbound returns the second same-item same-shelf equal-quantity receipt line from its own distinct lot and cost', async () => {
+      const {service,returns}=parts(db);
+      const data=lotDto({batchNumber:'FIRST',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};
+      data.lines[0].unitPrice='4';data.lines.push({...data.lines[0],batchNumber:'SECOND',unitPrice:'6'});
+      const a=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};await service.post(COMPANY,USER,a.id);
+      // PostgreSQL now() is identical within a transaction. Force the UUID tie-break
+      // to oppose line order, which is legal and must not change receipt identity.
+      await db.query(`UPDATE stock_movements SET "createdAt"='2026-11-25T01:00:00Z',id=CASE WHEN "unitCost"=4 THEN 'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid ELSE '00000000-0000-4000-8000-000000000001'::uuid END WHERE "referenceType"='PURCHASE_INVOICE'`);
+      await db.query(`UPDATE stock_movements SET "sourceLineId"=NULL WHERE "sourceLineId" IN (SELECT id FROM purchase_invoice_lines WHERE "lineNumber"=2)`);
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1 AND "lineNumber"=2`,[a.id])).rows[0];
+      for(let i=0;i<2;i++){
+        const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:a.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'1'}]}) as unknown as {id:string};
+        const err=await fail(returns.postPurchaseReturn(COMPANY,USER,ret.id));expect(err?.code).toBe('PURCHASE_RETURN_LEGACY_AMBIGUOUS');
+      }
+      const rows=await lots();expect(rows.find(l=>l.n==='FIRST')?.r).toBe('5.0000');expect(rows.find(l=>l.n==='SECOND')?.r).toBe('5.0000');
+      const movements=(await db.query<{n:string,c:string}>(`SELECT b."batchNumber" n,m."unitCost"::text c FROM stock_movements m JOIN item_batches b ON b.id=m."batchId" WHERE m."referenceType"='PURCHASE_RETURN'`)).rows;
+      expect(movements).toEqual([]);
+    });
+
+    it('later shared-lot receipt uses remaining stock after reversal and partial purchase return', async () => {
+      const {service,returns}=parts(db);
+      const receive=async(q:string,c:string)=>{const data=lotDto({batchNumber:'WEIGHT',batchExpiryDate:'2027-06-01'}) as unknown as {lines:Array<Record<string,unknown>>};data.lines[0].quantity=q;data.lines[0].unitPrice=c;const doc=await service.create(COMPANY,BRANCH,USER,data as never) as unknown as {id:string};await service.post(COMPANY,USER,doc.id);return doc;};
+      const a=await receive('5','4');await receive('5','6');await service.reverse(COMPANY,USER,a.id);const b=await receive('5','10');
+      const get=async()=> (await db.query<{q:string,c:string}>(`SELECT "remainingQuantity"::text q,"unitCost"::text c FROM item_batches WHERE "batchNumber"='WEIGHT'`)).rows[0];
+      expect(await get()).toEqual({q:'10.0000',c:'8.0000'});
+      const line=(await db.query<{id:string}>(`SELECT id FROM purchase_invoice_lines WHERE "invoiceId"=$1`,[b.id])).rows[0];
+      const ret=await returns.createPurchaseReturn(COMPANY,BRANCH,USER,{originalInvoiceId:b.id,returnDate:'2026-11-08',lines:[{originalLineId:line.id,quantity:'2'}]}) as unknown as {id:string};await returns.postPurchaseReturn(COMPANY,USER,ret.id);
+      expect(await get()).toEqual({q:'8.0000',c:'7.5000'});
+      await receive('2','10');expect(await get()).toEqual({q:'10.0000',c:'8.0000'});
+    });
+
+    it('removes the reversed contribution from the retained shared-lot valuation', async () => {
+      const {service,batches}=parts(db);
+      await db.query(`INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES (gen_random_uuid(),$1,'5107','Inventory loss','Inventory loss','EXPENSE',true,true,now())`,[COMPANY]);
+      const data=(price:string,shelf:string)=>({supplierId:CUSTOMER,invoiceDate:'2026-11-07',warehouseId:WAREHOUSE,lines:[{itemId:ITEM,quantity:'5',unitPrice:price,taxRate:'0',storageLocationId:shelf,batchNumber:'VALUE',batchExpiryDate:'2027-06-01'}]}) as never;
+      const a=await service.create(COMPANY,BRANCH,USER,data('4',SHELF_A)) as unknown as {id:string};
+      const b=await service.create(COMPANY,BRANCH,USER,data('6',SHELF_B)) as unknown as {id:string};
+      await service.post(COMPANY,USER,a.id);await service.post(COMPANY,USER,b.id);
+      await service.reverse(COMPANY,USER,a.id);
+      const batchId=(await db.query<{id:string}>(`SELECT id FROM item_batches WHERE "batchNumber"='VALUE'`)).rows[0].id;
+      await batches.writeOff(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchId,quantity:1,storageLocationId:SHELF_B,reason:'damaged synthetic'});
+      const out=(await db.query<{cost:string}>(`SELECT "totalCost"::text cost FROM stock_movements WHERE "referenceType"='STOCK_WRITE_OFF'`)).rows;
+      expect(out.map(x=>x.cost)).toEqual(['6.0000']);
+    });
+
+    it('two invoices into one lot add up, and reversing one leaves the other contribution and its shelf alone', async () => {
+      const { service } = parts(db);
+      const mk = (shelf: string, cost: string, expiry = '2027-06-01') => ({
+        supplierId: CUSTOMER, invoiceDate: '2026-11-07', warehouseId: WAREHOUSE,
+        lines: [{ itemId: ITEM, quantity: '5', unitPrice: cost, taxRate: '0', storageLocationId: shelf, batchNumber: 'SAME', batchExpiryDate: expiry }],
+      }) as never;
+      const first = await service.create(COMPANY, BRANCH, USER, mk(SHELF_A, '4')) as unknown as { id: string };
+      await service.post(COMPANY, USER, first.id);
+      const second = await service.create(COMPANY, BRANCH, USER, mk(SHELF_B, '6')) as unknown as { id: string };
+      await service.post(COMPANY, USER, second.id);
+      expect(await lots()).toEqual([{ n: 'SAME', r: '10.0000', s: 'OPEN' }]);
+      const at = async (loc: string) => Number((await db.query<{ q: string }>(
+        `SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text q FROM stock_movements WHERE "storageLocationId"=$1`, [loc])).rows[0].q);
+      expect([await at(SHELF_A), await at(SHELF_B)]).toEqual([5, 5]);
+      await service.reverse(COMPANY, USER, first.id);
+      expect(await lots()).toEqual([{ n: 'SAME', r: '5.0000', s: 'OPEN' }]);
+      expect([await at(SHELF_A), await at(SHELF_B)]).toEqual([0, 5]);
+      // the same lot number with a different expiry date is refused, not merged
+      const clash = await service.create(COMPANY, BRANCH, USER, mk(SHELF_A, '4', '2027-09-01')) as unknown as { id: string };
+      const err = await fail(service.post(COMPANY, USER, clash.id));
+      expect(String(err?.message ?? '')).toContain('SAME');
+      expect(await at(SHELF_A)).toBe(0);
+    });
   });
+
 });

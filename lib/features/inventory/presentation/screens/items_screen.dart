@@ -107,6 +107,48 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final canManageSalePrice = user?.canManageSalePrice ?? false;
     final canManagePurchasePrice = user?.canManagePurchasePrice ?? false;
     final canManageInventoryCost = user?.canManageInventoryCost ?? false;
+    final openingLocations = <FieldOption>[];
+    final openingArabic = Localizations.localeOf(context).languageCode == 'ar';
+    if (!isEdit && canManageInventoryCost && user?.branchId != null) {
+      try {
+        final client = ref.read(apiClientProvider);
+        final warehouses = (await client.getList(
+          '/inventory/warehouses',
+          query: {'branchId': user!.branchId},
+        )).where((row) => text(row, 'branchId') == user.branchId).toList();
+        warehouses.sort((a, b) {
+          final byDefault =
+              (b['isDefault'] == true ? 1 : 0) -
+              (a['isDefault'] == true ? 1 : 0);
+          return byDefault != 0
+              ? byDefault
+              : text(a, 'code').compareTo(text(b, 'code'));
+        });
+        if (warehouses.isNotEmpty) {
+          final warehouseId = text(warehouses.first, 'id');
+          final rows = await client.getList(
+            '/inventory/locations',
+            query: {'warehouseId': warehouseId},
+          );
+          for (final row in rows) {
+            if (text(row, 'warehouseId') != warehouseId ||
+                row['isActive'] != true ||
+                row['deletedAt'] != null) {
+              continue;
+            }
+            openingLocations.add(
+              FieldOption(
+                text(row, 'id'),
+                '${text(row, 'code')} - ${openingArabic ? text(row, 'nameAr', fallback: text(row, 'nameEn')) : text(row, 'nameEn', fallback: text(row, 'nameAr'))}',
+              ),
+            );
+          }
+        }
+      } on Object {
+        // Opening stock can remain explicitly unlocated if the catalogue is unavailable.
+      }
+    }
+    if (!mounted) return;
     final values = await showFormSheet(
       context,
       exitRelay: _exitRelay,
@@ -137,14 +179,29 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           'isStockTracked',
           l10n.isStockTracked,
           kind: FieldKind.toggle,
-          helper: l10n.stockTrackingDoesNotAddQuantity,
+          helper: openingArabic
+              ? 'تتبّع المخزون لا يضيف كمية. الرصيد الافتتاحي أدناه يُرحّل عند الحفظ.'
+              : 'Tracking adds no stock. Opening stock below posts when you save.',
         ),
         if (!isEdit && canManageInventoryCost) ...[
           FieldSpec(
             'openingQuantity',
             l10n.openingQuantity,
             kind: FieldKind.decimal,
-            helper: l10n.openingStockHint,
+            helper: openingArabic
+                ? 'الحفظ يضيف الكمية ويُرحّل قيد المخزون وحقوق الملكية فورًا.'
+                : 'Save immediately posts this stock and its inventory/equity entry.',
+          ),
+          FieldSpec(
+            'openingStorageLocationId',
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'موقع الرصيد الافتتاحي (اختياري)'
+                : 'Opening stock location (optional)',
+            kind: FieldKind.select,
+            options: openingLocations,
+            helper: Localizations.localeOf(context).languageCode == 'ar'
+                ? 'اختياري، من المخزن الافتراضي للفرع.'
+                : 'Optional. Branch default warehouse only.',
           ),
           if (canManageInventoryCost)
             FieldSpec(

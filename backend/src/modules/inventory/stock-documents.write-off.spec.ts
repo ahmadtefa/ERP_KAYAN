@@ -101,6 +101,7 @@ describe('a documentary write-off', () => {
     const warehouses = {
       resolve: jest.fn(async () => WAREHOUSE),
       assertWarehouseAvailable: jest.fn(async () => undefined),
+      lockForPosting: jest.fn(async () => undefined),
       availableQuantity: jest.fn(async () => D('10')),
     };
     const numbers = { next: jest.fn(async () => 'WO-2026-0001') };

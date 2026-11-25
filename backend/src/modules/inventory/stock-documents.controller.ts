@@ -172,6 +172,15 @@ export class StockDocumentsController {
     return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, this.mayReadDocumentCost(user, document));
   }
 
+  /// Corrects the shelves of a draft (source, and receiving shelf on a
+  /// transfer). Nothing else on the document changes.
+  @Put(':id/draft-locations')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.adjust')
+  async updateDraftLocations(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    const document = await this.assertDocumentAccess(user, id, 'view');
+    return this.service.updateDraftLocations(user.companyId, user.userId, id, body as never, this.mayReadDocumentCost(user, document));
+  }
+
   @Post(':id/review')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
   async review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {

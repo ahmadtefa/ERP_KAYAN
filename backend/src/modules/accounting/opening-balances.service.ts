@@ -8,6 +8,7 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from './account-map.service';
 import { DocumentNumberService } from './document-number.service';
@@ -22,6 +23,8 @@ export interface OpeningBalanceLineInput {
   customerId?: string;
   supplierId?: string;
   itemId?: string;
+  /// Optional shelf of the opening warehouse that receives this item's opening quantity. Omitted = unlocated.
+  storageLocationId?: string;
   quantity?: string | number;
   unitCost?: string | number;
   description?: string;
@@ -61,7 +64,18 @@ export class OpeningBalancesService {
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
+
+  /// Per-item advisory keys, sorted, taken FIRST in the transaction (before any
+  /// branch, warehouse, balance or journal lock) so stock documents and issues
+  /// of the same item queue instead of deadlocking. Same key as batches/issues.
+  private async lockItems(tx: Prisma.TransactionClient, warehouseId: string | null, itemIds: Array<string | null>) {
+    if (!warehouseId) return;
+    for (const id of [...new Set(itemIds.filter((x): x is string => !!x))].sort()) {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${warehouseId}:${id}`}, 0))`);
+    }
+  }
 
   async findAll(companyId: string, mayReadCost = true) {
     const items = await this.prisma.openingBalance.findMany({
@@ -115,6 +129,7 @@ export class OpeningBalancesService {
         supplierId: line.supplierId,
         supplier: line.supplier,
         itemId: line.itemId,
+        storageLocationId: (line as { storageLocationId?: string | null }).storageLocationId ?? null,
         item: line.item,
         debit: hasRestrictedCosts ? null : line.debit.toFixed(MONEY_SCALE),
         credit: hasRestrictedCosts ? null : line.credit.toFixed(MONEY_SCALE),
@@ -236,6 +251,7 @@ export class OpeningBalancesService {
         targetBranch,
         dto.warehouseId,
       );
+      await this.assertLineShelvesInWarehouse(tx, companyId, warehouseId, lines as Array<{ storageLocationId?: string | null }>);
       const details = {
         branchId: targetBranch,
         warehouseId,
@@ -371,6 +387,11 @@ export class OpeningBalancesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockItems(
+        tx,
+        await this.warehouses.resolve(tx, companyId, document.branchId, document.warehouseId),
+        document.lines.map((line) => line.itemId),
+      );
       // Serialize posts for this branch. The duplicate check outside the
       // transaction is a useful early error, but only this lock closes the
       // race where two drafts are posted at the same time.
@@ -440,10 +461,11 @@ export class OpeningBalancesService {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true, code: true },
+          select: { id: true, isStockTracked: true, code: true, requiresBatch: true, requiresProductionDate: true, requiresExpiryDate: true },
         });
         if (!item) throw new BadRequestException('An opening line references a missing item');
         if (!item.isStockTracked) continue;
+        this.assertNoLotControl(item, line.lineNumber);
         if (!line.quantity || !line.unitCost) {
           throw new BadRequestException(
             `Item line ${line.lineNumber} needs both a quantity and a unit cost`,
@@ -477,12 +499,17 @@ export class OpeningBalancesService {
           );
         }
 
+        const openShelf = (line as { storageLocationId?: string | null }).storageLocationId ?? null;
+        if (openShelf) {
+          await this.assertLineShelvesInWarehouse(tx, companyId, warehouseId, [{ storageLocationId: openShelf, lineNumber: line.lineNumber } as never], true);
+        }
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: document.branchId,
             warehouseId,
             itemId: item.id,
+            ...({ storageLocationId: openShelf } as object),
             movementDate: document.asOfDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
@@ -496,25 +523,14 @@ export class OpeningBalancesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: line.debit,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.debit },
-          },
+        // Branch book and the warehouse book move together, in one ledger call.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: line.debit,
         });
       }
 
@@ -581,6 +597,65 @@ export class OpeningBalancesService {
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
+      // The reversal must take the stock back out of exactly where it went in.
+      // The original movement is the evidence: a historical document may have
+      // been posted branch-only (no warehouse), and a fresh default warehouse
+      // today would be a place the goods never entered.
+      const originals = await tx.stockMovement.findMany({
+        where: { companyId, referenceType: 'OPENING_BALANCE', referenceId: document.id },
+        select: { itemId: true, warehouseId: true, direction: true, quantity: true, totalCost: true, storageLocationId: true },
+      } as never) as unknown as Array<{ itemId: string; warehouseId: string | null; direction: string; quantity: Prisma.Decimal; totalCost: Prisma.Decimal; storageLocationId: string | null }>;
+      // Complete, provable coverage only: exactly one original IN movement per
+      // stock line, with the same quantity, value and shelf as the line. Repeated
+      // items, several origins, a changed quantity or value or a different shelf
+      // are historical ambiguity: refuse, and never pick "the last" one.
+      const originWarehouse = new Map<string, string | null>();
+      const stockLines = document.lines.filter((l) => l.itemId && l.quantity !== null);
+      const ambiguous = (lineNumber: number, why: string) =>
+        new BadRequestException({
+          code: 'OPENING_REVERSE_ORIGIN_AMBIGUOUS',
+          message:
+            `لا يمكن عكس الرصيد الافتتاحي (سطر ${lineNumber}): حركة المخزون الأصلية لا تطابق السطر بشكل قاطع (${why}). لم يُنفَّذ أي شيء ولم يُعدَّل المستند؛ راجع المحاسب أو المدير للتحقق من المخزن والموقع والتكلفة الأصلية قبل أي تصحيح. / ` +
+            `Cannot reverse the opening balance (line ${lineNumber}): the original stock movement does not match the line with certainty (${why}). Nothing was changed and the document is untouched; ask the accountant or administrator to verify the original warehouse, location and cost before any correction.`,
+          errors: { lineNumber: String(lineNumber), reason: why },
+        });
+      for (const line of stockLines) {
+        if (stockLines.filter((l) => l.itemId === line.itemId).length > 1) {
+          throw ambiguous(line.lineNumber, 'item repeated in the document');
+        }
+        const own = originals.filter((m) => m.itemId === line.itemId);
+        if (own.length === 0) {
+          throw new BadRequestException({
+            code: 'OPENING_REVERSE_ORIGIN_UNKNOWN',
+            message:
+              `لا يمكن عكس الرصيد الافتتاحي (سطر ${line.lineNumber}): لا توجد حركة مخزون أصلية مسجلة لهذا الصنف تحدد المخزن الذي دخل إليه. لم يُنفَّذ أي شيء؛ راجع المحاسب أو المدير للتحقق قبل أي تصحيح. / ` +
+              `Cannot reverse the opening balance (line ${line.lineNumber}): no original stock movement is recorded for this item to show which warehouse it entered. Nothing was changed; ask the accountant or administrator to verify before any correction.`,
+            errors: { lineNumber: String(line.lineNumber) },
+          });
+        }
+        if (own.length > 1) throw ambiguous(line.lineNumber, 'several original movements');
+        const m = own[0];
+        const lineShelf = (line as { storageLocationId?: string | null }).storageLocationId ?? null;
+        if (m.direction !== 'IN') throw ambiguous(line.lineNumber, 'original movement is not a receipt');
+        if (!new Prisma.Decimal(m.quantity).equals(line.quantity as Prisma.Decimal)) throw ambiguous(line.lineNumber, 'quantity differs');
+        if (new Prisma.Decimal(m.totalCost).minus(line.debit).abs().greaterThan('0.01')) throw ambiguous(line.lineNumber, 'value differs');
+        if ((m.storageLocationId ?? null) !== lineShelf) throw ambiguous(line.lineNumber, 'location differs');
+        originWarehouse.set(line.itemId as string, m.warehouseId ?? null);
+      }
+      const keys = new Map<string, { warehouseId: string; itemId: string }>();
+      for (const [itemId, wh] of originWarehouse) if (wh) keys.set(`${wh}:${itemId}`, { warehouseId: wh, itemId });
+      for (const key of [...keys.keys()].sort()) {
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+      }
+      // Claim the posted document before touching the journal or stock: a second
+      // reverse (or a concurrent one) finds it already claimed and stops.
+      const claimed = await tx.openingBalance.updateMany({
+        where: { id: document.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
+        data: { status: InvoiceStatus.REVERSED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This opening balance was already reversed or changed. Refresh the document.');
+      }
       const reversal = await this.posting.reverse(
         tx,
         companyId,
@@ -589,14 +664,9 @@ export class OpeningBalancesService {
         `Reversal of opening balance ${document.documentNumber}`,
       );
 
-      const warehouseId = await this.warehouses.resolveForReversal(
-        tx,
-        companyId,
-        document.branchId,
-        document.warehouseId,
-      );
       for (const line of document.lines) {
         if (!line.itemId || line.quantity === null || line.unitCost === null) continue;
+        const warehouseId = originWarehouse.get(line.itemId) ?? null;
         const lockedBalances = await tx.$queryRaw<
           Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
         >(Prisma.sql`
@@ -618,12 +688,31 @@ export class OpeningBalancesService {
           );
         }
 
+        const openShelf = (line as { storageLocationId?: string | null }).storageLocationId ?? null;
+        if (openShelf) {
+          const [row] = await tx.$queryRaw<Array<{ q: Prisma.Decimal }>>(Prisma.sql`
+            SELECT COALESCE(SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END), 0) AS q
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid AND "warehouseId" = ${warehouseId}::uuid
+               AND "itemId" = ${line.itemId}::uuid AND "storageLocationId" = ${openShelf}::uuid
+          `);
+          const onShelf = new Prisma.Decimal(row?.q ?? 0);
+          if (onShelf.lessThan(line.quantity)) {
+            throw new BadRequestException({
+              code: 'OPENING_REVERSE_SHELF_SHORT',
+              message:
+                `لا يمكن عكس الرصيد الافتتاحي (سطر ${line.lineNumber}): الموقع المسجل عليه يحمل ${onShelf.toFixed(MONEY_SCALE)} فقط من ${line.quantity.toFixed(MONEY_SCALE)} المطلوبة. أعد الكمية المنقولة إلى هذا الموقع (تحويل) ثم أعد العكس؛ لم يتغير أي رصيد. / ` +
+                `Cannot reverse the opening balance (line ${line.lineNumber}): its location holds only ${onShelf.toFixed(MONEY_SCALE)} of the ${line.quantity.toFixed(MONEY_SCALE)} required. Transfer the moved quantity back to that location, then reverse again; no balance changed.`,
+            });
+          }
+        }
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: document.branchId,
             warehouseId,
             itemId: line.itemId,
+            ...({ storageLocationId: openShelf } as object),
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
@@ -636,18 +725,13 @@ export class OpeningBalancesService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: line.itemId,
-            },
-          },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: line.debit },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity.neg(),
+          value: line.debit.neg(),
         });
       }
 
@@ -686,6 +770,7 @@ export class OpeningBalancesService {
       customerId: string | null;
       supplierId: string | null;
       itemId: string | null;
+      storageLocationId?: string | null;
       quantity: Prisma.Decimal | null;
       unitCost: Prisma.Decimal | null;
       description: string | null;
@@ -737,13 +822,35 @@ export class OpeningBalancesService {
 
       let quantity: Prisma.Decimal | null = null;
       let unitCost: Prisma.Decimal | null = null;
+      let storageLocationId: string | null = null;
+      if (raw.storageLocationId) {
+        if (!raw.itemId) {
+          throw new BadRequestException({
+            code: 'OPENING_LOCATION_WITHOUT_ITEM',
+            message: `السطر ${index + 1}: موقع التخزين يخص سطر صنف فقط. احذف الموقع من هذا السطر؛ باقي بياناتك محفوظة. / Line ${index + 1}: a storage location belongs only on a stock item line. Remove it from this line; the rest of your data is kept.`,
+          });
+        }
+        const shelf = await tx.storageLocation.findFirst({
+          where: { id: raw.storageLocationId, companyId, deletedAt: null },
+          select: { id: true, code: true, isActive: true },
+        });
+        const fix = 'اختر موقعًا نشطًا من مخزن الرصيد الافتتاحي أو اتركه فارغًا؛ بياناتك محفوظة. / Choose an active location of the opening warehouse or leave it empty; your data is kept.';
+        if (!shelf) {
+          throw new BadRequestException({ code: 'OPENING_LOCATION_NOT_FOUND', message: `السطر ${index + 1}: موقع التخزين غير موجود. ${fix}` });
+        }
+        if (!shelf.isActive) {
+          throw new BadRequestException({ code: 'OPENING_LOCATION_INACTIVE', message: `السطر ${index + 1}: الموقع ${shelf.code} غير مفعّل ولا يستقبل رصيدًا. ${fix}`, errors: { lineNumber: String(index + 1), locationCode: shelf.code.slice(0, 64) } });
+        }
+        storageLocationId = shelf.id;
+      }
       if (raw.itemId) {
         const item = await tx.item.findFirst({
           where: { id: raw.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true },
+          select: { id: true, code: true, isStockTracked: true, requiresBatch: true, requiresProductionDate: true, requiresExpiryDate: true },
         });
         if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
         if (item.isStockTracked) {
+          this.assertNoLotControl(item, index + 1);
           const previousLine = seenStockItems.get(item.id);
           if (previousLine !== undefined) {
             throw new BadRequestException(
@@ -801,6 +908,7 @@ export class OpeningBalancesService {
         customerId: raw.customerId ?? null,
         supplierId: raw.supplierId ?? null,
         itemId: raw.itemId ?? null,
+        ...({ storageLocationId } as object),
         quantity,
         unitCost,
         description: raw.description?.trim() || null,
@@ -808,6 +916,54 @@ export class OpeningBalancesService {
     }
 
     return prepared;
+  }
+
+  /// Opening stock has no lot number or dates. A lot-controlled item (lot, production
+  /// date or expiry date required) would post to the shelf and warehouse and
+  /// still have NO lot, so a later issue would refuse for lack of a lot. Refuse
+  /// before anything is written and invent no lot or date.
+  private assertNoLotControl(
+    item: { code?: string | null; requiresBatch?: boolean | null; requiresProductionDate?: boolean | null; requiresExpiryDate?: boolean | null },
+    lineNumber: number,
+  ) {
+    if (!item.requiresBatch && !item.requiresProductionDate && !item.requiresExpiryDate) return;
+    const code = String(item.code ?? '').slice(0, 64);
+    throw new BadRequestException({
+      code: 'OPENING_LOT_CONTROLLED_ITEM',
+      message:
+        `السطر ${lineNumber}: الصنف ${code} يتطلب رقم دفعة أو تواريخ (إنتاج/صلاحية)، والرصيد الافتتاحي هنا لا يحمل بيانات دفعة، فلن يمكن صرفه لاحقًا. احذف هذا السطر من المستند (باقي السطور محفوظة) وراجع المحاسب أو المدير لاعتماد طريقة إدخال رصيده الافتتاحي بدفعة وتواريخ يمكن تتبعها دون تكرار قيد المخزون. لم يُرحَّل أي شيء. / ` +
+        `Line ${lineNumber}: item ${code} requires a lot number or dates (production/expiry), and an opening balance carries no lot data, so the stock could not be issued later. Remove this line (the other lines are kept) and ask the accountant or administrator to approve a traceable way to enter its opening stock with a lot and dates, without duplicating the stock or the journal entry. Nothing was posted.`,
+      errors: { lineNumber: String(lineNumber), itemCode: code },
+    });
+  }
+
+  /// The shelf must belong to the opening warehouse. At post it is also
+  /// re-read, because a shelf may have been deleted or switched off since the
+  /// draft was saved.
+  private async assertLineShelvesInWarehouse(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    warehouseId: string | null,
+    lines: Array<{ storageLocationId?: string | null; lineNumber?: number }>,
+    atPost = false,
+  ) {
+    for (const [index, line] of lines.entries()) {
+      if (!line.storageLocationId) continue;
+      const shelf = await tx.storageLocation.findFirst({
+        where: { id: line.storageLocationId, companyId, deletedAt: null },
+        select: { code: true, isActive: true, warehouseId: true },
+      });
+      const n = line.lineNumber ?? index + 1;
+      const tail = atPost
+        ? 'صحّح الموقع في المسودة أو اتركه فارغًا ثم رحّل من جديد؛ لم يتغير أي رصيد. / Correct the location on the draft or leave it empty, then post again; no balance changed.'
+        : 'اختر موقعًا من مخزن الرصيد الافتتاحي أو اتركه فارغًا؛ بياناتك محفوظة. / Choose a location of the opening warehouse or leave it empty; your data is kept.';
+      if (!shelf || !shelf.isActive) {
+        throw new BadRequestException({ code: 'OPENING_LOCATION_INACTIVE', message: `السطر ${n}: ${shelf ? `الموقع ${shelf.code} غير مفعّل` : 'الموقع حُذف'}. ${tail}`, errors: { lineNumber: String(n) } });
+      }
+      if (warehouseId && shelf.warehouseId !== warehouseId) {
+        throw new BadRequestException({ code: 'OPENING_LOCATION_WRONG_WAREHOUSE', message: `السطر ${n}: الموقع ${shelf.code} يتبع مخزنًا آخر غير مخزن الرصيد الافتتاحي. ${tail}`, errors: { lineNumber: String(n), locationCode: shelf.code.slice(0, 64) } });
+      }
+    }
   }
 
   private amount(value: unknown, field: string): Prisma.Decimal {

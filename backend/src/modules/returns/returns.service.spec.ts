@@ -87,6 +87,12 @@ function transactionPrisma(tx: Record<string, any>, model: 'salesInvoice' | 'pur
   };
 }
 
+// The return's own bound movements are looked up by sourceLineId; these
+// fixtures predate that binding, so the lookup finds none and the old path runs.
+const withoutBoundMovements = (rows: unknown[]) =>
+  jest.fn(async (query: { sql?: string; strings?: string[] }) =>
+    String(query?.sql ?? query?.strings?.join('?') ?? '').includes('"sourceLineId"') ? [] : rows);
+
 describe('ReturnsService', () => {
   it('refuses a return that does not name its source invoice instead of selecting one', async () => {
     // Prisma reads a missing id as "no filter". A request that leaves the
@@ -353,6 +359,7 @@ describe('ReturnsService', () => {
       itemId: ITEM_ID,
     };
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
       salesInvoice: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
@@ -369,12 +376,14 @@ describe('ReturnsService', () => {
       itemBatch: {
         findFirst: jest.fn().mockResolvedValue({ id: LOT_ID, unitCost: D(5), status: 'CLOSED' }),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn()
         .mockResolvedValueOnce([{ status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE }])
         .mockResolvedValueOnce([sourceLine])
-        .mockResolvedValueOnce([{ quantity: D(5), value: D(1) }]),
+        .mockResolvedValueOnce([{ quantity: D(5), value: D(1) }])
+        .mockResolvedValue([]),
     };
     const prisma = transactionPrisma(tx, 'salesInvoice', [document, document]);
     const posting = { post: jest.fn().mockResolvedValue({ id: 'journal-1', entryNumber: 'JE-0001' }), reverse: jest.fn() };
@@ -449,6 +458,7 @@ describe('ReturnsService', () => {
       itemId: ITEM_ID,
     };
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
       salesInvoice: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
@@ -543,7 +553,7 @@ describe('ReturnsService', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
       },
-      purchaseInvoiceLine: { update: jest.fn().mockResolvedValue({}) },
+      purchaseInvoiceLine: { update: jest.fn().mockResolvedValue({}), findUnique: jest.fn().mockResolvedValue(null) },
       item: { findFirst: jest.fn().mockResolvedValue({ id: ITEM_ID, isStockTracked: true }) },
       stockMovement: {
         create: jest.fn().mockResolvedValue({}),
@@ -552,6 +562,7 @@ describe('ReturnsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn()
         .mockResolvedValueOnce([{ status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE }])
         .mockResolvedValueOnce([sourceLine])
@@ -632,7 +643,8 @@ describe('ReturnsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
-      $queryRaw: jest.fn().mockResolvedValue([{ quantity: D(5), value: D(1) }]),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRaw: withoutBoundMovements([{ quantity: D(5), value: D(1) }]),
     };
     const prisma = transactionPrisma(tx, 'salesInvoice', [document, document]);
     const posting = { post: jest.fn(), reverse: jest.fn().mockResolvedValue(undefined) };
@@ -700,7 +712,8 @@ describe('ReturnsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       stockBalance: { update: jest.fn().mockResolvedValue({}) },
-      $queryRaw: jest.fn().mockResolvedValue([{ quantity: D(1), value: D(0) }]),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRaw: withoutBoundMovements([{ quantity: D(1), value: D(0) }]),
     };
     const prisma = transactionPrisma(tx, 'salesInvoice', [document, document]);
     const posting = { post: jest.fn(), reverse: jest.fn().mockResolvedValue(undefined) };
@@ -763,6 +776,8 @@ describe('ReturnsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRaw: withoutBoundMovements([]),
     };
     const prisma = transactionPrisma(tx, 'purchaseInvoice', [document, document]);
     const posting = { post: jest.fn(), reverse: jest.fn().mockResolvedValue(undefined) };

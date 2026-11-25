@@ -89,6 +89,8 @@ class TransferDto implements TransferInput {
   @IsNumber() quantity!: number;
   @IsOptional() @IsString() reason?: string | null;
   @IsOptional() @IsString() documentDate?: string | null;
+  @IsOptional() @IsString() fromStorageLocationId?: string | null;
+  @IsOptional() @IsString() toStorageLocationId?: string | null;
 }
 
 /**

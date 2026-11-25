@@ -452,6 +452,38 @@ export class ItemsService {
           branchId!,
         );
         const asOf = new Date(new Date().toISOString().slice(0, 10));
+        const openingShelfId =
+          typeof dto.openingStorageLocationId === 'string' && dto.openingStorageLocationId
+            ? dto.openingStorageLocationId
+            : null;
+        if (openingShelfId) {
+          const shelf = await tx.storageLocation.findFirst({
+            where: { id: openingShelfId, companyId, deletedAt: null },
+            select: { code: true, isActive: true, warehouseId: true },
+          });
+          const fix =
+            'اختر موقعًا نشطًا من مخزن الفرع أو اترك الموقع فارغًا؛ بيانات الصنف المُدخلة محفوظة. / Choose an active location of the branch warehouse or leave it empty; the item data you entered is kept.';
+          if (!shelf) {
+            throw new BadRequestException({
+              code: 'ITEM_OPENING_LOCATION_NOT_FOUND',
+              message: `موقع التخزين للرصيد الافتتاحي غير موجود. ${fix}`,
+            });
+          }
+          if (!shelf.isActive) {
+            throw new BadRequestException({
+              code: 'ITEM_OPENING_LOCATION_INACTIVE',
+              message: `الموقع ${shelf.code} غير مفعّل ولا يستقبل رصيدًا افتتاحيًا. ${fix}`,
+              errors: { locationCode: shelf.code.slice(0, 64) },
+            });
+          }
+          if (shelf.warehouseId !== warehouseId) {
+            throw new BadRequestException({
+              code: 'ITEM_OPENING_LOCATION_WRONG_WAREHOUSE',
+              message: `الموقع ${shelf.code} يتبع مخزنًا آخر غير مخزن الفرع المختار للرصيد الافتتاحي. ${fix}`,
+              errors: { locationCode: shelf.code.slice(0, 64) },
+            });
+          }
+        }
 
         await tx.stockMovement.create({
           data: {
@@ -475,6 +507,7 @@ export class ItemsService {
             referenceNumber: item.code,
             notes: 'Opening stock entered with the item',
             createdBy: userId,
+            ...({ storageLocationId: openingShelfId } as object),
           },
         });
         await this.ledger.post(tx, {

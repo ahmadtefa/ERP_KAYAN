@@ -104,8 +104,16 @@ export class StockTakesService {
     });
     if (!session) throw new NotFoundException('Stock-take session not found');
 
+    const shelfIds = [...new Set(session.lines.map((l) => (l as { storageLocationId?: string | null }).storageLocationId).filter((x): x is string => !!x))];
+    const shelves = shelfIds.length
+      ? await this.prisma.storageLocation.findMany({ where: { id: { in: shelfIds }, companyId }, select: { id: true, code: true, nameEn: true, nameAr: true } })
+      : [];
     const lines = session.lines.map((line) => ({
       id: line.id,
+      storageLocationId: (line as { storageLocationId?: string | null }).storageLocationId ?? null,
+      storageLocationCode: shelves.find((x) => x.id === (line as { storageLocationId?: string | null }).storageLocationId)?.code ?? null,
+      storageLocationNameEn: shelves.find((x) => x.id === (line as { storageLocationId?: string | null }).storageLocationId)?.nameEn ?? null,
+      storageLocationNameAr: shelves.find((x) => x.id === (line as { storageLocationId?: string | null }).storageLocationId)?.nameAr ?? null,
       itemId: line.itemId,
       itemCode: line.item.code,
       itemNameEn: line.item.nameEn,
@@ -122,10 +130,58 @@ export class StockTakesService {
       countedAt: line.countedAt,
       notes: line.notes,
     }));
+    // A quantity found on a shelf that the unlocated bucket of the same item
+    // (and lot) is short by is a stock ASSIGNMENT, not a stock difference: the
+    // goods were always there, they only had no shelf. It moves no quantity and
+    // no value in total, so it is shown apart from the real variance.
+    const neutral = new Map<string, number>();
+    const groups = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const key = `${line.itemId}|${line.batchId ?? ''}`;
+      groups.set(key, [...(groups.get(key) ?? []), line]);
+    }
+    for (const rows of groups.values()) {
+      const unlocated = rows.find((r) => r.storageLocationId === null && Number(r.varianceQuantity) < 0);
+      if (!unlocated) continue;
+      // Value-neutral only when the shelf row and the unlocated row carry the
+      // same frozen unit cost. Otherwise moving the quantity would change value,
+      // so the pair stays a real variance and nothing is hidden as neutral.
+      const found = rows.filter((r) =>
+        r.storageLocationId !== null &&
+        Number(r.varianceQuantity) > 0 &&
+        Math.abs(Number(r.unitCost) - Number(unlocated.unitCost)) < 0.00005);
+      const foundTotal = found.reduce((sum, r) => sum + Number(r.varianceQuantity), 0);
+      const moved = Math.min(foundTotal, -Number(unlocated.varianceQuantity));
+      if (moved <= 0) continue;
+      neutral.set(unlocated.id, moved);
+      let left = moved;
+      for (const r of found) {
+        const part = Math.min(left, Number(r.varianceQuantity));
+        if (part > 0) neutral.set(r.id, part);
+        left -= part;
+      }
+    }
+    const classified = lines.map((line) => {
+      const moved = neutral.get(line.id) ?? 0;
+      const variance = Number(line.varianceQuantity);
+      const real = variance === 0 ? 0 : variance > 0 ? variance - moved : variance + moved;
+      return {
+        ...line,
+        assignmentQuantity: moved.toFixed(MONEY_SCALE),
+        realVarianceQuantity: real.toFixed(MONEY_SCALE),
+        varianceKind: variance === 0 ? 'MATCH' : moved === 0 ? 'VARIANCE' : real === 0 ? 'ASSIGNMENT' : 'MIXED',
+      };
+    });
+    const netVarianceValue = classified.reduce(
+      (sum, line) => sum + Number(line.realVarianceQuantity) * Number(line.unitCost),
+      0,
+    );
     const variances = lines.filter((line) => Number(line.varianceQuantity) !== 0);
     return {
       ...this.toSummary(session),
-      lines,
+      lines: classified,
+      assignedQuantity: [...neutral.values()].reduce((a, b) => a + b, 0) / 2,
+      realVarianceValue: netVarianceValue.toFixed(MONEY_SCALE),
       varianceCount: variances.length,
       varianceValue: variances
         .reduce((sum, line) => sum + Number(line.varianceValue), 0)
@@ -221,16 +277,49 @@ export class StockTakesService {
       });
       const lotItems = new Set(lots.map((lot) => lot.itemId));
 
-      for (const lot of lots) {
+      // What each shelf holds, from the movement ledger: one count row per
+      // item (and lot) and shelf, and the part no shelf holds as its own row
+      // with no location, so a count can say where the rest really is.
+      const shelfRows = await tx.$queryRaw<
+        Array<{ itemId: string; batchId: string | null; storageLocationId: string; quantity: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT m."itemId" AS "itemId", m."batchId" AS "batchId", m."storageLocationId" AS "storageLocationId",
+               SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) AS "quantity"
+          FROM "stock_movements" m
+         WHERE m."companyId" = ${companyId}::uuid
+           AND m."warehouseId" = ${warehouse.id}::uuid
+           AND m."storageLocationId" IS NOT NULL
+           ${partial ? Prisma.sql`AND m."itemId" = ANY(${itemIds}::uuid[])` : Prisma.empty}
+         GROUP BY m."itemId", m."batchId", m."storageLocationId"
+        HAVING SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) > 0
+      `);
+      const located = (itemId: string, batchId: string | null) =>
+        shelfRows.filter((r) => r.itemId === itemId && (r.batchId ?? null) === batchId);
+      const sum = (rows: Array<{ quantity: Prisma.Decimal }>) =>
+        rows.reduce((t, r) => t.plus(new Prisma.Decimal(r.quantity)), new Prisma.Decimal(0));
+      const makeLine = async (itemId: string, batchId: string | null, storageLocationId: string | null, systemQuantity: Prisma.Decimal, unitCost: Prisma.Decimal) => {
         await tx.stockTakeLine.create({
           data: {
             sessionId: session.id,
-            itemId: lot.itemId,
-            batchId: lot.id,
-            systemQuantity: lot.remainingQuantity,
-            unitCost: lot.unitCost,
+            itemId,
+            ...(batchId ? { batchId } : {}),
+            systemQuantity,
+            unitCost,
+            // new column: written through a cast so this compiles before and after prisma generate
+            ...({ storageLocationId } as object),
           },
         });
+      };
+
+      for (const lot of lots) {
+        const onShelves = located(lot.itemId, lot.id);
+        for (const row of onShelves) {
+          await makeLine(lot.itemId, lot.id, row.storageLocationId, new Prisma.Decimal(row.quantity), lot.unitCost);
+        }
+        const rest = lot.remainingQuantity.minus(sum(onShelves));
+        if (rest.greaterThan(0) || onShelves.length === 0) {
+          await makeLine(lot.itemId, lot.id, null, Prisma.Decimal.max(rest, new Prisma.Decimal(0)), lot.unitCost);
+        }
       }
 
       const balances = await tx.warehouseStockBalance.findMany({
@@ -246,14 +335,14 @@ export class StockTakesService {
         const unitCost = balance.quantity.isZero()
           ? new Prisma.Decimal(0)
           : balance.value.div(balance.quantity).toDecimalPlaces(MONEY_SCALE);
-        await tx.stockTakeLine.create({
-          data: {
-            sessionId: session.id,
-            itemId: balance.itemId,
-            systemQuantity: balance.quantity,
-            unitCost,
-          },
-        });
+        const onShelves = located(balance.itemId, null);
+        for (const row of onShelves) {
+          await makeLine(balance.itemId, null, row.storageLocationId, new Prisma.Decimal(row.quantity), unitCost);
+        }
+        const rest = balance.quantity.minus(sum(onShelves));
+        if (rest.greaterThan(0) || onShelves.length === 0) {
+          await makeLine(balance.itemId, null, null, Prisma.Decimal.max(rest, new Prisma.Decimal(0)), unitCost);
+        }
       }
 
       // Every stock-tracked item belongs in a FULL count, including items
@@ -308,6 +397,104 @@ export class StockTakesService {
     return this.findOne(companyId, sessionId.id, scope);
   }
 
+  private async lockSession(tx: { $queryRaw: (...a: any[]) => Promise<unknown> }, id: string) {
+    await tx.$queryRaw`SELECT id FROM stock_take_sessions WHERE id = ${id}::uuid FOR UPDATE`;
+  }
+
+  /// Adds a count row for a shelf the freeze did not list: goods found on a
+  /// shelf the system thought empty. The expected quantity is zero, so whatever
+  /// is counted there is a surplus on that shelf. When the same item (and lot)
+  /// has an unlocated row, counting that row lower by the same amount makes the
+  /// pair a neutral assignment (see findOne) instead of a real difference.
+  async addLocation(
+    companyId: string,
+    userId: string,
+    id: string,
+    dto: { itemId: string; batchId?: string | null; storageLocationId: string },
+    scope: WarehouseScope = null,
+  ) {
+    const session = await this.prisma.stockTakeSession.findFirst({
+      where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
+      select: { id: true, warehouseId: true },
+    });
+    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!dto?.itemId || !dto?.storageLocationId) {
+      throw new BadRequestException('اختر الصنف وموقع التخزين. / Choose the item and the storage location.');
+    }
+    const batchId = dto.batchId ?? null;
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockSession(tx as never, session.id);
+      const fresh = await tx.stockTakeSession.findFirst({ where: { id: session.id, companyId }, select: { status: true } });
+      if (!fresh || fresh.status !== 'COUNTING') {
+        throw new BadRequestException({
+          code: 'STOCK_TAKE_NOT_COUNTING',
+          message: `لا يمكن إضافة موقع: الجرد ليس في مرحلة العد (الحالة: ${fresh?.status ?? '-'}). / A location can be added only while the count is open (status: ${fresh?.status ?? '-'}). ما تم إدخاله محفوظ / what was entered is kept.`,
+        });
+      }
+      const siblings = await tx.stockTakeLine.findMany({
+        where: { sessionId: session.id, itemId: dto.itemId },
+        select: { id: true, batchId: true, storageLocationId: true, unitCost: true },
+      } as never) as unknown as Array<{ id: string; batchId: string | null; storageLocationId: string | null; unitCost: Prisma.Decimal }>;
+      if (siblings.length === 0) {
+        throw new BadRequestException({
+          code: 'STOCK_TAKE_ITEM_NOT_IN_SESSION',
+          message: 'هذا الصنف ليس ضمن هذا الجرد. أضفه عند فتح جرد جديد أو اختر صنفًا من الجرد. / This item is not part of this count. Choose an item that is in the count, or include it when opening a new count.',
+        });
+      }
+      const shelf = await tx.storageLocation.findFirst({
+        where: { id: dto.storageLocationId, companyId, deletedAt: null },
+        select: { id: true, code: true, isActive: true, warehouseId: true },
+      });
+      const fix = 'اختر موقعًا نشطًا من مخزن الجرد؛ ما تم عدّه محفوظ. / Choose an active location of the counted warehouse; what you counted is kept.';
+      if (!shelf) throw new BadRequestException({ code: 'STOCK_TAKE_LOCATION_NOT_FOUND', message: `موقع التخزين غير موجود. ${fix}` });
+      if (!shelf.isActive) {
+        throw new BadRequestException({ code: 'STOCK_TAKE_LOCATION_INACTIVE', message: `الموقع ${shelf.code} غير مفعّل. فعّله أو ${fix}`, errors: { locationCode: shelf.code.slice(0, 64) } });
+      }
+      if (session.warehouseId && shelf.warehouseId !== session.warehouseId) {
+        throw new BadRequestException({ code: 'STOCK_TAKE_LOCATION_WRONG_WAREHOUSE', message: `الموقع ${shelf.code} يتبع مخزنًا آخر غير مخزن الجرد. ${fix}`, errors: { locationCode: shelf.code.slice(0, 64) } });
+      }
+      const hasLots = siblings.some((l) => l.batchId !== null);
+      if (hasLots && !batchId) {
+        throw new BadRequestException({ code: 'STOCK_TAKE_LOT_REQUIRED', message: 'هذا الصنف له دفعات: حدّد الدفعة التي وجدتها على الموقع. / This item is lot-tracked: choose the lot you found on the shelf.' });
+      }
+      if (!hasLots && batchId) {
+        throw new BadRequestException({ code: 'STOCK_TAKE_LOT_NOT_IN_SESSION', message: 'هذه الدفعة ليست ضمن هذا الجرد لهذا الصنف. / This lot is not part of this count for the item.' });
+      }
+      const sameLot = siblings.filter((l) => (l.batchId ?? null) === batchId);
+      if (hasLots && sameLot.length === 0) {
+        throw new BadRequestException({ code: 'STOCK_TAKE_LOT_NOT_IN_SESSION', message: 'هذه الدفعة ليست ضمن هذا الجرد لهذا الصنف. / This lot is not part of this count for the item.' });
+      }
+      if (sameLot.some((l) => l.storageLocationId === shelf.id)) {
+        throw new ConflictException({
+          code: 'STOCK_TAKE_LOCATION_ALREADY_COUNTED',
+          message: `الموقع ${shelf.code} موجود بالفعل في هذا الجرد لنفس الصنف؛ سجّل الكمية على سطره. / Location ${shelf.code} is already a row of this count for the item; enter the quantity on that row.`,
+          errors: { locationCode: shelf.code.slice(0, 64) },
+        });
+      }
+      // Copy the cost of the unlocated row first (the bucket this surplus is
+      // most likely taken from), then any positive sibling cost.
+      const unitCost =
+        sameLot.find((l) => l.storageLocationId === null)?.unitCost ??
+        sameLot.map((l) => l.unitCost).find((c) => c.greaterThan(0)) ??
+        new Prisma.Decimal(0);
+      await tx.stockTakeLine.create({
+        data: {
+          sessionId: session.id,
+          itemId: dto.itemId,
+          batchId,
+          systemQuantity: 0,
+          unitCost,
+          ...({ storageLocationId: shelf.id } as object),
+        },
+      });
+    });
+    await this.audit.record({
+      companyId, userId, action: 'COUNT', entity: 'stock_take_sessions', entityId: session.id,
+      after: { addedLocation: dto.storageLocationId, itemId: dto.itemId },
+    });
+    return this.findOne(companyId, session.id, scope);
+  }
+
   /// Records what was actually found. Only the counted figure is accepted; the
   /// variance is computed here, from the frozen system quantity, so a client
   /// cannot post its own idea of the difference.
@@ -345,6 +532,16 @@ export class StockTakesService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      await this.lockSession(tx as never, session.id);
+      // The status was read before this lock. A finish, cancel or approve that
+      // committed in between must stop this write, so read it again under the lock.
+      const locked = await tx.stockTakeSession.findFirst({ where: { id: session.id, companyId }, select: { status: true } });
+      if (!locked || locked.status !== 'COUNTING') {
+        throw new BadRequestException(
+          `هذا الجرد لم يعد مفتوحًا للعد (الحالة: ${locked?.status ?? '-'}). ما أدخلته لم يُحفظ في الجرد؛ أعد إدخاله بعد إعادة فتح العد أو في جرد جديد. / ` +
+            `This count is no longer open for counting (status: ${locked?.status ?? '-'}). Your figures were not saved to it; enter them again once counting is reopened or in a new count.`,
+        );
+      }
       for (const entry of dto.lines) {
         const line = await tx.stockTakeLine.findFirst({
           where: { id: entry.lineId, sessionId: session.id },
@@ -586,6 +783,7 @@ export class StockTakesService {
         quantity: Number(line.varianceQuantity),
         unitCost: Number(line.unitCost),
         batchId: line.batchId ?? undefined,
+        storageLocationId: (line as { storageLocationId?: string | null }).storageLocationId ?? undefined,
         notes: line.notes ?? `Stock-take ${session.code}`,
       }));
       // Reuse the session's own document after an interrupted attempt. The
@@ -602,7 +800,8 @@ export class StockTakesService {
           return saved.itemId === expected.itemId &&
             saved.quantity.equals(expected.quantity) &&
             saved.unitCost.equals(expected.unitCost) &&
-            (saved.batchId ?? null) === (expected.batchId ?? null);
+            (saved.batchId ?? null) === (expected.batchId ?? null) &&
+            ((saved as { storageLocationId?: string | null }).storageLocationId ?? null) === (expected.storageLocationId ?? null);
         });
         if (
           existing.kind !== StockDocumentKind.ADJUSTMENT ||

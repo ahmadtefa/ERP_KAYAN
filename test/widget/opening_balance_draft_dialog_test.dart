@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/opening_balance_draft_dialog.dart';
@@ -25,10 +30,42 @@ class _Api extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async => switch (path) {
+    '/inventory/warehouses' => [
+      {
+        'id': 'wh',
+        'branchId': 'branch',
+        'code': 'MAIN',
+        'nameEn': 'Main warehouse',
+        'isDefault': true,
+      },
+    ],
+    '/inventory/locations' => [
+      {
+        'id': 'shelf',
+        'warehouseId': 'wh',
+        'code': 'A-01',
+        'nameEn': 'Shelf A',
+        'isActive': true,
+      },
+    ],
+    '/inventory/items' => [
+      {
+        'id': 'item',
+        'code': 'IT-1',
+        'nameEn': 'Opening stock item',
+        'isStockTracked': true,
+      },
+    ],
     '/company/branches' => [
       {'id': 'branch', 'code': '01', 'nameEn': 'Main'},
     ],
     '/accounting/chart-of-accounts' => [
+      {
+        'id': 'inventory',
+        'code': '1104',
+        'nameEn': 'Inventory',
+        'isPostable': true,
+      },
       {
         'id': 'ledger',
         'code': '1101',
@@ -73,6 +110,106 @@ class _Api extends ApiClient {
 }
 
 void main() {
+  testWidgets(
+    'opening document draft selects a warehouse shelf without changing quantity or cost',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                      .readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+        await (FontLoader('MaterialIcons')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File(
+                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                  ).readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      final api = _Api();
+      final key = GlobalKey();
+      const user = AppUser(
+        id: 'user',
+        username: 'test',
+        fullName: 'Test',
+        companyId: 'company',
+        isSuperAdmin: true,
+        branchId: 'branch',
+      );
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: key,
+          child: MaterialApp(
+            theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
+            locale: const Locale('en'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => showOpeningBalanceDraft(context, api, user),
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Stock item'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Opening stock item').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Quantity'), '5');
+      await tester.enterText(find.widgetWithText(TextField, 'Unit cost'), '2');
+      await tester.tap(find.text('Opening location: unlocated'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Location'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A-01 - Shelf A').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
+      final boundary =
+          key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/opening-document-shelf.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      await tester.tap(find.text('Save draft for review'));
+      await tester.pumpAndSettle();
+      expect(
+        (api.saved!['lines'] as List).first,
+        containsPair('storageLocationId', 'shelf'),
+      );
+      expect(
+        (api.saved!['lines'] as List).first,
+        containsPair('quantity', '5'),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets(
     'manual opening balances submit two cash and bank lines at four decimals',
     (tester) async {
@@ -139,56 +276,59 @@ void main() {
     },
   );
 
-  testWidgets('every invalid line is marked under its own field and editing clears only that reason', (tester) async {
-    tester.view.physicalSize = const Size(1600, 1800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _Api();
-    const user = AppUser(
-      id: 'user',
-      username: 'test',
-      fullName: 'Test',
-      companyId: 'company',
-      isSuperAdmin: true,
-      branchId: 'branch',
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        locale: const Locale('en'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showOpeningBalanceDraft(context, api, user),
-              child: const Text('Open'),
+  testWidgets(
+    'every invalid line is marked under its own field and editing clears only that reason',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _Api();
+      const user = AppUser(
+        id: 'user',
+        username: 'test',
+        fullName: 'Test',
+        companyId: 'company',
+        isSuperAdmin: true,
+        branchId: 'branch',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showOpeningBalanceDraft(context, api, user),
+                child: const Text('Open'),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.text('Open'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Add line'));
-    await tester.pumpAndSettle();
-    // Two empty lines: no account and no amount on either.
-    await tester.tap(find.text('Save draft for review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Choose an account'), findsNWidgets(2));
-    expect(
-      find.text('Enter an amount in debit or credit, not both or neither'),
-      findsWidgets,
-    );
-    expect(api.saved, isNull);
-    // Fixing one field clears only that field's reason.
-    final debitFields = find.widgetWithText(TextField, 'Debit');
-    await tester.enterText(debitFields.first, '5');
-    await tester.pumpAndSettle();
-    expect(find.text('Choose an account'), findsNWidgets(2));
-    expect(
-      find.text('Enter an amount in debit or credit, not both or neither'),
-      findsNWidgets(2),
-    );
-  });
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add line'));
+      await tester.pumpAndSettle();
+      // Two empty lines: no account and no amount on either.
+      await tester.tap(find.text('Save draft for review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an account'), findsNWidgets(2));
+      expect(
+        find.text('Enter an amount in debit or credit, not both or neither'),
+        findsWidgets,
+      );
+      expect(api.saved, isNull);
+      // Fixing one field clears only that field's reason.
+      final debitFields = find.widgetWithText(TextField, 'Debit');
+      await tester.enterText(debitFields.first, '5');
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an account'), findsNWidgets(2));
+      expect(
+        find.text('Enter an amount in debit or credit, not both or neither'),
+        findsNWidgets(2),
+      );
+    },
+  );
 }

@@ -109,7 +109,7 @@ export class StockTakesController {
       if (value === null || typeof value !== 'object') return value;
       return Object.fromEntries(
         Object.entries(value as Record<string, unknown>)
-          .filter(([key]) => key !== 'unitCost' && key !== 'varianceValue')
+          .filter(([key]) => !['unitCost', 'varianceValue', 'realVarianceValue'].includes(key))
           .map(([key, child]) => [key, hide(child)]),
       );
     };
@@ -135,6 +135,18 @@ export class StockTakesController {
   ) {
     const take = await this.assertTakeAccess(user, id, 'count');
     const result = await this.service.record(user.companyId, user.userId, id, dto, warehouseScopeOf(user));
+    return this.redactCosts(user, take.warehouseId, result);
+  }
+
+  @Post(':id/locations')
+  @RequirePermissions('inventory.stocktake.count')
+  async addLocation(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: { itemId: string; batchId?: string | null; storageLocationId: string },
+  ) {
+    const take = await this.assertTakeAccess(user, id, 'count');
+    const result = await this.service.addLocation(user.companyId, user.userId, id, dto, warehouseScopeOf(user));
     return this.redactCosts(user, take.warehouseId, result);
   }
 

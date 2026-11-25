@@ -1,3 +1,6 @@
+import {createServer} from 'node:http';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -133,6 +136,18 @@ const vmReady =
     shelf: await one(db, `SELECT quantity::text q, value::text v FROM warehouse_stock_balances WHERE "itemId"=$1`, [ITEM]),
   });
 
+  it('nullable source-line migration preserves pre-existing stock movements and balances', async () => {
+    const lot=await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'OLD',quantity:5,unitCost:2,storageLocationId:SHELF});
+    await db.exec(`ALTER TABLE stock_movements DROP COLUMN "sourceLineId"`);
+    const before=(await db.query(`SELECT id,quantity::text,"totalCost"::text,"batchId","storageLocationId" FROM stock_movements`)).rows;
+    const beforeBalances=await balances();
+    await db.exec(readFileSync(join(migrationsDir,'20261125020000_stock_movement_source_line','migration.sql'),'utf8'));
+    expect((await db.query(`SELECT id,quantity::text,"totalCost"::text,"batchId","storageLocationId" FROM stock_movements`)).rows).toEqual(before);
+    expect((await db.query(`SELECT "sourceLineId" FROM stock_movements`)).rows).toEqual([{sourceLineId:null}]);
+    expect(await balances()).toEqual(beforeBalances);
+    expect((await db.query<{q:string}>(`SELECT "remainingQuantity"::text q FROM item_batches WHERE id=$1`,[lot.batchId])).rows[0].q).toBe('5.0000');
+  });
+
   it('shows a located receipt with its location and quantity', async () => {
     await batches.receive(COMPANY, USER, {
       branchId: BRANCH, warehouseId: WAREHOUSE, itemId: ITEM, batchNumber: 'L1',
@@ -221,6 +236,98 @@ const vmReady =
     expect(Object.fromEntries((b?.locations ?? []).map((l) => [l.code, l.quantity]))).toEqual({ 'A-01': '4.0000', 'B-01': '1.0000' });
     expect(b?.total).toBe('5.0000');
     expect((await balances()).shelf.q).toBe('5.0000');
+  });
+
+  describe('lot transfer between warehouses', () => {
+    const SHELF_W2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    beforeEach(async () => {
+      await db.exec(`INSERT INTO storage_locations
+        (id, "companyId", "branchId", "warehouseId", kind, code, "nameEn", "nameAr", "isActive", "updatedAt")
+        VALUES ('${SHELF_W2}', '${COMPANY}', '${BRANCH}', '${WAREHOUSE_2}', 'SHELF', 'Z-01', 'Z1', 'ز١', true, now())`);
+    });
+    const send = (lotId: string, extra: Record<string, unknown>) =>
+      batches.transfer(COMPANY, USER, {
+        branchId: BRANCH, fromWarehouseId: WAREHOUSE, toWarehouseId: WAREHOUSE_2, itemId: ITEM,
+        batchId: lotId, quantity: 3, ...extra,
+      } as never);
+    const shelfOf = async (wh: string) =>
+      (await db.query<{ code: string | null; q: string }>(
+        `SELECT l.code, SUM(CASE WHEN m.direction='IN' THEN m.quantity ELSE -m.quantity END)::text q
+           FROM stock_movements m LEFT JOIN storage_locations l ON l.id=m."storageLocationId"
+          WHERE m."warehouseId"='${wh}' AND m."itemId"='${ITEM}' GROUP BY l.code ORDER BY l.code`)).rows;
+
+    (process.env.KAYAN_TRANSFER_LOCATION_UI==='1'?it:it.skip)('actual Flutter transfer submits physical shelves to production service and SQL', async () => {
+      const lot=await receiveLot(5,SHELF);
+      const setup={batch:{id:lot.batchId,itemId:ITEM,warehouseId:WAREHOUSE,remainingQuantity:'5',batchNumber:'HTTP',locations:[{locationId:SHELF,quantity:'5'}]},warehouses:[{id:WAREHOUSE,code:'W1',nameEn:'Main'},{id:WAREHOUSE_2,code:'W2',nameEn:'Overflow'}]};
+      await db.query(`UPDATE storage_locations SET "nameEn"='Target shelf' WHERE id=$1`,[SHELF_W2]);
+      const calls:Array<unknown>=[];
+      const server=createServer(async(req,res)=>{try{
+        const url=new URL(req.url!,'http://localhost');let data:unknown;
+        if(url.pathname.endsWith('/setup'))data=setup;
+        else if(url.pathname.endsWith('/locations'))data=await locations.list(COMPANY,{warehouseId:url.searchParams.get('warehouseId')??undefined});
+        else if(url.pathname.endsWith('/transfer')){let body='';for await(const chunk of req)body+=chunk;const dto=JSON.parse(body);calls.push(dto);data=await batches.transfer(COMPANY,USER,dto);}
+        else throw new Error('Unknown route '+url.pathname);
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
+      }catch(e){res.statusCode=400;res.end(JSON.stringify({message:String(e)}));}});
+      await new Promise<void>(r=>server.listen(3222,'127.0.0.1',r));
+      try{
+        const out=await promisify(execFile)(process.env.FLUTTER_BIN??'/tmp/flutter/bin/flutter',['test','test/widget/batch_transfer_http_test.dart'],{cwd:join(process.cwd(),'..'),timeout:90000,maxBuffer:4*1024*1024}).catch(e=>{console.log(e.stdout,e.stderr);throw e;});console.log(out.stdout);
+        expect(calls).toHaveLength(1);expect(calls[0]).toMatchObject({fromStorageLocationId:SHELF,toStorageLocationId:SHELF_W2,quantity:3});
+        expect(await shelfOf(WAREHOUSE)).toEqual([{code:'A-01',q:'2.0000'}]);expect(await shelfOf(WAREHOUSE_2)).toEqual([{code:'Z-01',q:'3.0000'}]);
+        expect((await balances()).branch).toEqual({q:'5.0000',v:'10.0000'});
+      }finally{await new Promise<void>(r=>server.close(()=>r()));}
+    },150000);
+
+    it('merging a warehouse transfer into an existing lot preserves destination lot valuation', async () => {
+      const lot=await receiveLot(5,SHELF);
+      await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE_2,itemId:ITEM,batchNumber:'L1',quantity:3,unitCost:6,storageLocationId:SHELF_W2,expiryDate:'2027-01-01'});
+      await send(lot.batchId as string,{fromStorageLocationId:SHELF,toStorageLocationId:SHELF_W2});
+      const got=await one(db,`SELECT "remainingQuantity"::text q,"unitCost"::text c FROM item_batches WHERE "warehouseId"=$1`,[WAREHOUSE_2]);
+      const balance=await one(db,`SELECT quantity::text q,value::text v FROM warehouse_stock_balances WHERE "warehouseId"=$1`,[WAREHOUSE_2]);
+      expect(balance).toEqual({q:'6.0000',v:'24.0000'});expect(got).toEqual({q:'6.0000',c:'4.0000'});
+      const target=(await db.query<{id:string}>(`SELECT id FROM item_batches WHERE "warehouseId"=$1`,[WAREHOUSE_2])).rows[0];
+      await batches.writeOff(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE_2,itemId:ITEM,batchId:target.id,quantity:1,storageLocationId:SHELF_W2,reason:'damaged synthetic'});
+      expect((await db.query<{c:string}>(`SELECT "totalCost"::text c FROM stock_movements WHERE "referenceType"='STOCK_WRITE_OFF'`)).rows).toEqual([{c:'4.0000'}]);
+      expect(await one(db,`SELECT quantity::text q,value::text v FROM warehouse_stock_balances WHERE "warehouseId"=$1`,[WAREHOUSE_2])).toEqual({q:'5.0000',v:'20.0000'});
+
+    });
+
+    it('refuses a located lot without a source shelf, names the shelves, writes nothing', async () => {
+      const lot = await receiveLot(5, SHELF);
+      let err: { response?: { code?: string; message?: string } } = {};
+      try { await send(lot.batchId as string, {}); } catch (e) { err = e as never; }
+      expect(err.response?.code).toBe('TRANSFER_LOCATION_REQUIRED');
+      expect(err.response?.message).toContain('A-01');
+      expect(await shelfOf(WAREHOUSE_2)).toEqual([]);
+      expect(await shelfOf(WAREHOUSE)).toEqual([{ code: 'A-01', q: '5.0000' }]);
+    });
+
+    it('moves from the named shelf to the named destination shelf, books unchanged', async () => {
+      const lot = await receiveLot(5, SHELF);
+      const before = await balances();
+      await send(lot.batchId as string, { fromStorageLocationId: SHELF, toStorageLocationId: SHELF_W2 });
+      expect(await shelfOf(WAREHOUSE)).toEqual([{ code: 'A-01', q: '2.0000' }]);
+      expect(await shelfOf(WAREHOUSE_2)).toEqual([{ code: 'Z-01', q: '3.0000' }]);
+      expect((await balances()).branch).toEqual(before.branch);
+    });
+
+    it('refuses more than the named shelf holds of the lot, and an unlocated lot still moves with no shelf', async () => {
+      const lot = await receiveLot(5, SHELF);
+      let err: { response?: { code?: string } } = {};
+      await locations.move(COMPANY, USER, {
+        fromLocationId: SHELF, toLocationId: SHELF_B, itemId: ITEM, batchId: lot.batchId as string, quantity: 3,
+      }, null);
+      try { await send(lot.batchId as string, { fromStorageLocationId: SHELF, quantity: 4 }); } catch (e) { err = e as never; }
+      expect(err.response?.code).toBe('TRANSFER_LOCATION_SHORT');
+      expect(await shelfOf(WAREHOUSE_2)).toEqual([]);
+      const plain = await receiveLot(4, undefined, ITEM_NO_EXPIRY, 'L2');
+      await batches.transfer(COMPANY, USER, {
+        branchId: BRANCH, fromWarehouseId: WAREHOUSE, toWarehouseId: WAREHOUSE_2, itemId: ITEM_NO_EXPIRY,
+        batchId: plain.batchId as string, quantity: 3,
+      } as never);
+      const got = await one(db, `SELECT "remainingQuantity"::text q FROM item_batches WHERE "warehouseId"='${WAREHOUSE_2}'`);
+      expect(got.q).toBe('3.0000');
+    });
   });
 
   it('refuses to take from a shelf more than it holds even when the lot has more elsewhere', async () => {

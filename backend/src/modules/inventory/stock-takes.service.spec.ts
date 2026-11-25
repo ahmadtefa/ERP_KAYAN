@@ -96,6 +96,8 @@ describe('stock takes', () => {
     };
 
     const tx = {
+      $queryRaw: jest.fn(async () => []),
+      storageLocation: { findMany: jest.fn(async () => []) },
       stockTakeSession: {
         create: jest.fn(async ({ data }: { data: Session }) => {
           const row = {

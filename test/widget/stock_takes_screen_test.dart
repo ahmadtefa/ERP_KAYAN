@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -59,15 +64,38 @@ class _StockTakesApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (failList && path == '/inventory/stock-takes') throw StateError('STOCKTAKE_LIST_FAILED');
+    if (failList && path == '/inventory/stock-takes') {
+      throw StateError('STOCKTAKE_LIST_FAILED');
+    }
+    if (path == '/inventory/locations') {
+      return [
+        {
+          'id': 'shelf-c',
+          'warehouseId': 'wh-1',
+          'code': 'C-01',
+          'nameEn': 'Shelf C',
+          'isActive': true,
+        },
+      ];
+    }
     if (path == '/inventory/warehouses') {
       return [
-        {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'المخزن الرئيسي'},
+        {
+          'id': 'wh-1',
+          'code': 'MAIN',
+          'nameEn': 'Main store',
+          'nameAr': 'المخزن الرئيسي',
+        },
       ];
     }
     if (path == '/inventory/items') {
       return [
-        {'id': 'item-1', 'code': 'ITEM-1', 'nameEn': 'Coffee', 'nameAr': 'قهوة'},
+        {
+          'id': 'item-1',
+          'code': 'ITEM-1',
+          'nameEn': 'Coffee',
+          'nameAr': 'قهوة',
+        },
       ];
     }
     final list = <Map<String, dynamic>>[
@@ -193,7 +221,8 @@ class _StockTakesApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
-    if (path == '/inventory/stock-takes/st-1' || path == '/inventory/stock-takes/st-new') {
+    if (path == '/inventory/stock-takes/st-1' ||
+        path == '/inventory/stock-takes/st-new') {
       return Map<String, dynamic>.from(detail);
     }
     throw StateError('Unexpected GET $path');
@@ -208,6 +237,7 @@ class _StockTakesApi extends ApiClient {
     posts.add(path);
     bodies[path] = body;
     if (path == '/inventory/stock-takes') return {'id': 'st-new'};
+    if (path.endsWith('/locations')) return Map<String, dynamic>.from(detail);
     if (path.endsWith('/count') && failCount != null) throw failCount!;
     if (path.endsWith('/count')) return Map<String, dynamic>.from(detail);
     return const {};
@@ -220,10 +250,10 @@ const _approver = [
   'inventory.stocktake.post',
 ];
 
-Finder tableText(String value) => find.byWidgetPredicate(
-  (widget) => widget is Text && widget.data == value,
-);
+Finder tableText(String value) =>
+    find.byWidgetPredicate((widget) => widget is Text && widget.data == value);
 
+final visualKey = GlobalKey();
 void main() {
   Future<void> pump(
     WidgetTester tester,
@@ -249,16 +279,169 @@ void main() {
             ),
           ),
         ],
-        child: MaterialApp(
-          locale: locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: const Scaffold(body: StockTakesScreen()),
+        child: RepaintBoundary(
+          key: visualKey,
+          child: MaterialApp(
+            theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
+            locale: locale,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: const Scaffold(body: StockTakesScreen()),
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'count distinguishes the same lot on two shelves and unlocated stock',
+    (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                      .readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      await tester.runAsync(() async {
+        await (FontLoader('MaterialIcons')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File(
+                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                  ).readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      final api = _StockTakesApi();
+      final base = Map<String, dynamic>.from(
+        (api.detail['lines'] as List).first as Map,
+      );
+      api.detail['lines'] = [
+        for (final (id, code, qty) in [
+          ('A', 'A-01', '6.0000'),
+          ('B', 'B-01', '4.0000'),
+          ('U', null, '3.0000'),
+        ])
+          {
+            ...base,
+            'id': id,
+            'batchNumber': 'LOT-1',
+            'storageLocationId': code == null ? null : 'shelf-$id',
+            'storageLocationCode': code,
+            'storageLocationNameEn': code == null ? null : 'Shelf $id',
+            'systemQuantity': qty,
+          },
+      ];
+      await pump(
+        tester,
+        api,
+        permissions: ['inventory.stocktake.read', 'inventory.stocktake.count'],
+      );
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      expect(find.text('Location: A-01 - Shelf A'), findsOneWidget);
+      expect(find.text('Location: B-01 - Shelf B'), findsOneWidget);
+      expect(find.text('Location: Unlocated stock'), findsOneWidget);
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/stock-take-locations.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'add count location preserves typed counts and sends exact item lot shelf',
+    (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                      .readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+        await (FontLoader('MaterialIcons')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File(
+                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                  ).readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      final api = _StockTakesApi();
+      await pump(
+        tester,
+        api,
+        permissions: ['inventory.stocktake.read', 'inventory.stocktake.count'],
+      );
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Counted qty'),
+        '8',
+      );
+      await tester.tap(find.text('Add count location'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Item and batch'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ITEM-1 | No lot').last);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<String>, 'Location'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('C-01 - Shelf C').last);
+      await tester.pumpAndSettle();
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/count-add-location.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      await tester.tap(find.text('Add location'));
+      await tester.pumpAndSettle();
+      expect(api.bodies['/inventory/stock-takes/st-1/locations'], {
+        'itemId': 'item-1',
+        'batchId': null,
+        'storageLocationId': 'shelf-c',
+      });
+      expect(
+        tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Counted qty'),
+            )
+            .initialValue,
+        '8',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('lists sessions with warehouse, scope, lines and status', (
     tester,
@@ -316,6 +499,27 @@ void main() {
   testWidgets('approving confirms first, and says that posting moves stock', (
     tester,
   ) async {
+    await tester.runAsync(() async {
+      await (FontLoader('IBMPlexSansArabic')..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                    .readAsBytesSync(),
+              ),
+            ),
+          ))
+          .load();
+      await (FontLoader('MaterialIcons')..addFont(
+            Future.value(
+              ByteData.sublistView(
+                File(
+                  '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                ).readAsBytesSync(),
+              ),
+            ),
+          ))
+          .load();
+    });
     final api = _StockTakesApi();
     await pump(tester, api);
     await tester.tap(find.byTooltip('Approve'));
@@ -359,7 +563,10 @@ void main() {
     await pump(
       tester,
       _StockTakesApi(),
-      permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count'],
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.count',
+      ],
     );
     expect(find.text('ST-001'), findsOneWidget);
     expect(find.byTooltip('Approve'), findsNothing);
@@ -394,7 +601,11 @@ void main() {
     await pump(
       tester,
       api,
-      permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create', 'inventory.stocktake.count'],
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.create',
+        'inventory.stocktake.count',
+      ],
     );
     await tester.tap(find.byKey(const ValueKey('stock-take-new')));
     await tester.pumpAndSettle();
@@ -406,26 +617,61 @@ void main() {
     expect(find.text('ITEM-1 — Coffee'), findsOneWidget);
   });
 
-  testWidgets('partial count requires item selection and preserves notes in its request', (tester) async {
-    final api = _StockTakesApi();
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
-    await tester.tap(find.byKey(const ValueKey('stock-take-new')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Partial')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Open count')).onPressed, isNull);
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.enterText(find.widgetWithText(TextField, 'Notes'), '  physical partial check  ');
-    await tester.tap(find.text('Open count'));
-    await tester.pumpAndSettle();
-    expect(api.bodies['/inventory/stock-takes'], {
-      'warehouseId': 'wh-1', 'scope': 'PARTIAL', 'itemIds': ['item-1'], 'notes': 'physical partial check',
-    });
-  });
+  testWidgets(
+    'partial count requires item selection and preserves notes in its request',
+    (tester) async {
+      final api = _StockTakesApi();
+      await pump(
+        tester,
+        api,
+        permissions: const [
+          'inventory.stocktake.read',
+          'inventory.stocktake.create',
+        ],
+      );
+      await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Partial'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Open count'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Notes'),
+        '  physical partial check  ',
+      );
+      await tester.tap(find.text('Open count'));
+      await tester.pumpAndSettle();
+      expect(api.bodies['/inventory/stock-takes'], {
+        'warehouseId': 'wh-1',
+        'scope': 'PARTIAL',
+        'itemIds': ['item-1'],
+        'notes': 'physical partial check',
+      });
+    },
+  );
 
   testWidgets('cancelling a new stock take sends nothing', (tester) async {
     final api = _StockTakesApi();
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
+    await pump(
+      tester,
+      api,
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.create',
+      ],
+    );
     await tester.tap(find.byKey(const ValueKey('stock-take-new')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
@@ -434,38 +680,80 @@ void main() {
     expect(find.text('Open a new stock take'), findsNothing);
   });
 
-  testWidgets('finish requires all frozen lines while save allows a partial count', (tester) async {
-    final api = _StockTakesApi();
-    (api.detail['lines'] as List).add({
-      'id': 'line-2', 'itemId': 'item-2', 'itemCode': 'ITEM-2', 'itemNameEn': 'Tea',
-      'unit': 'piece', 'systemQuantity': '4', 'countedQuantity': null,
-    });
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
-    await tester.tap(find.text('ST-001'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byWidgetPredicate((widget) => widget is TextFormField && widget.key.toString().contains('count-line-1-')), '0');
-    await tester.tap(find.text('Finish & review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Enter the counted quantity before finishing.'), findsOneWidget);
-    expect(api.posts, isEmpty);
-    await tester.tap(find.text('Save count'));
-    await tester.pumpAndSettle();
-    expect(api.bodies['/inventory/stock-takes/st-1/count'], {
-      'lines': [{'lineId': 'line-1', 'countedQuantity': 0.0}], 'finish': false,
-    });
-  });
+  testWidgets(
+    'finish requires all frozen lines while save allows a partial count',
+    (tester) async {
+      final api = _StockTakesApi();
+      (api.detail['lines'] as List).add({
+        'id': 'line-2',
+        'itemId': 'item-2',
+        'itemCode': 'ITEM-2',
+        'itemNameEn': 'Tea',
+        'unit': 'piece',
+        'systemQuantity': '4',
+        'countedQuantity': null,
+      });
+      await pump(
+        tester,
+        api,
+        permissions: const [
+          'inventory.stocktake.read',
+          'inventory.stocktake.count',
+        ],
+      );
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TextFormField &&
+              widget.key.toString().contains('count-line-1-'),
+        ),
+        '0',
+      );
+      await tester.tap(find.text('Finish & review'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Enter the counted quantity before finishing.'),
+        findsOneWidget,
+      );
+      expect(api.posts, isEmpty);
+      await tester.tap(find.text('Save count'));
+      await tester.pumpAndSettle();
+      expect(api.bodies['/inventory/stock-takes/st-1/count'], {
+        'lines': [
+          {'lineId': 'line-1', 'countedQuantity': 0.0},
+        ],
+        'finish': false,
+      });
+    },
+  );
 
-  testWidgets('cancelling an open count sends its entered reason', (tester) async {
+  testWidgets('cancelling an open count sends its entered reason', (
+    tester,
+  ) async {
     final api = _StockTakesApi();
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.create']);
+    await pump(
+      tester,
+      api,
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.create',
+      ],
+    );
     await tester.tap(find.text('ST-001'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel count'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Cancellation reason'), '  duplicate count  ');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Cancellation reason'),
+      '  duplicate count  ',
+    );
     await tester.tap(find.text('Confirm cancellation'));
     await tester.pumpAndSettle();
-    expect(api.bodies['/inventory/stock-takes/st-1/cancel'], {'reason': 'duplicate count'});
+    expect(api.bodies['/inventory/stock-takes/st-1/cancel'], {
+      'reason': 'duplicate count',
+    });
   });
 
   testWidgets('saves counted quantities to the session count endpoint', (
@@ -475,7 +763,10 @@ void main() {
     await pump(
       tester,
       api,
-      permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count'],
+      permissions: const [
+        'inventory.stocktake.read',
+        'inventory.stocktake.count',
+      ],
     );
     await tester.tap(find.text('ST-001'));
     await tester.pumpAndSettle();
@@ -492,50 +783,100 @@ void main() {
     });
   });
 
-  testWidgets('a refused count names the line, keeps the typed figure, and clears on edit', (tester) async {
-    final api = _StockTakesApi()
-      ..failCount = const ApiFailure('x', statusCode: 400, code: 'VALIDATION_FAILED', fieldErrors: {'lines.0.countedQuantity': 'الكمية أكبر من المسموح'});
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
-    await tester.tap(find.text('ST-001'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).last, '8');
-    await tester.tap(find.text('Save count'));
-    await tester.pumpAndSettle();
-    expect(find.text('الكمية أكبر من المسموح'), findsOneWidget);
-    expect(find.text('8'), findsWidgets);
-    await tester.enterText(find.byType(TextFormField).last, '7');
-    await tester.pump();
-    expect(find.text('الكمية أكبر من المسموح'), findsNothing);
-  });
+  testWidgets(
+    'a refused count names the line, keeps the typed figure, and clears on edit',
+    (tester) async {
+      final api = _StockTakesApi()
+        ..failCount = const ApiFailure(
+          'x',
+          statusCode: 400,
+          code: 'VALIDATION_FAILED',
+          fieldErrors: {'lines.0.countedQuantity': 'الكمية أكبر من المسموح'},
+        );
+      await pump(
+        tester,
+        api,
+        permissions: const [
+          'inventory.stocktake.read',
+          'inventory.stocktake.count',
+        ],
+      );
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).last, '8');
+      await tester.tap(find.text('Save count'));
+      await tester.pumpAndSettle();
+      expect(find.text('الكمية أكبر من المسموح'), findsOneWidget);
+      expect(find.text('8'), findsWidgets);
+      await tester.enterText(find.byType(TextFormField).last, '7');
+      await tester.pump();
+      expect(find.text('الكمية أكبر من المسموح'), findsNothing);
+    },
+  );
 
-  testWidgets('an invalid or missing count is marked on its own line and nothing is sent', (tester) async {
-    final api = _StockTakesApi();
-    await pump(tester, api, permissions: const ['inventory.stocktake.read', 'inventory.stocktake.count']);
-    await tester.tap(find.text('ST-001'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).last, '-3');
-    await tester.tap(find.text('Save count'));
-    await tester.pumpAndSettle();
-    expect(find.text('Enter a number that is zero or more.'), findsOneWidget);
-    expect(api.posts.where((x) => x.endsWith('/count')), isEmpty);
-  });
-
-  testWidgets('does not offer approval while a stock take is still being counted', (
+  testWidgets('late closed-count refusal retains typed figures for recovery', (
     tester,
   ) async {
+    final api = _StockTakesApi()
+      ..failCount = const ApiFailure(
+        'Count is no longer open',
+        statusCode: 400,
+        code: 'STOCK_TAKE_NOT_COUNTING',
+      );
     await pump(
       tester,
-      _StockTakesApi()..countingOnly = true,
-      permissions: const [
-        'inventory.stocktake.read',
-        'inventory.stocktake.approve',
-      ],
+      api,
+      permissions: ['inventory.stocktake.read', 'inventory.stocktake.count'],
     );
-    // Every row in this list is still being counted, so an approver is offered
-    // nothing to approve - only a session that reached REVIEW may be.
-    expect(find.byTooltip('Approve'), findsNothing);
-    expect(find.text('Counting'), findsNWidgets(2));
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).last, '9');
+    await tester.tap(find.text('Save count'));
+    await tester.pumpAndSettle();
+    expect(find.text('9'), findsWidgets);
+    expect(find.text('ST-001 — Stock take details'), findsOneWidget);
+    expect(api.posts.where((x) => x.endsWith('/count')), hasLength(1));
   });
+
+  testWidgets(
+    'an invalid or missing count is marked on its own line and nothing is sent',
+    (tester) async {
+      final api = _StockTakesApi();
+      await pump(
+        tester,
+        api,
+        permissions: const [
+          'inventory.stocktake.read',
+          'inventory.stocktake.count',
+        ],
+      );
+      await tester.tap(find.text('ST-001'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).last, '-3');
+      await tester.tap(find.text('Save count'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter a number that is zero or more.'), findsOneWidget);
+      expect(api.posts.where((x) => x.endsWith('/count')), isEmpty);
+    },
+  );
+
+  testWidgets(
+    'does not offer approval while a stock take is still being counted',
+    (tester) async {
+      await pump(
+        tester,
+        _StockTakesApi()..countingOnly = true,
+        permissions: const [
+          'inventory.stocktake.read',
+          'inventory.stocktake.approve',
+        ],
+      );
+      // Every row in this list is still being counted, so an approver is offered
+      // nothing to approve - only a session that reached REVIEW may be.
+      expect(find.byTooltip('Approve'), findsNothing);
+      expect(find.text('Counting'), findsNWidgets(2));
+    },
+  );
 
   testWidgets('Arabic reads the Arabic warehouse name and mirrors', (
     tester,

@@ -303,6 +303,12 @@ export function pglitePrisma(db: PgliteLike) {
     stockTransfer: {
       lines: { model: 'stockTransferLine', table: 'stock_transfer_lines', foreignKey: 'transferId' },
     },
+    stockDocument: {
+      lines: { model: 'stockDocumentLine', table: 'stock_document_lines', foreignKey: 'documentId' },
+    },
+    stockTakeSession: {
+      lines: { model: 'stockTakeLine', table: 'stock_take_lines', foreignKey: 'sessionId' },
+    },
     approvalPolicy: {
       levels: { model: 'approvalLevel', table: 'approval_levels', foreignKey: 'policyId' },
     },
@@ -348,6 +354,22 @@ export function pglitePrisma(db: PgliteLike) {
     },
     item: {
       units: { model: 'itemUnit', table: 'item_units', foreignKey: 'itemId' },
+    },
+    stockDocument: {
+      lines: { model: 'stockDocumentLine', table: 'stock_document_lines', foreignKey: 'documentId' },
+    },
+    stockTakeSession: {
+      lines: { model: 'stockTakeLine', table: 'stock_take_lines', foreignKey: 'sessionId' },
+      warehouse: { model: 'warehouse', table: 'warehouses', foreignKey: 'id', parentField: 'warehouseId' },
+    },
+    stockTakeLine: {
+      item: { model: 'item', table: 'items', foreignKey: 'id', parentField: 'itemId' },
+      batch: { model: 'itemBatch', table: 'item_batches', foreignKey: 'id', parentField: 'batchId' },
+    },
+    stockDocumentLine: {
+      item: { model: 'item', table: 'items', foreignKey: 'id', parentField: 'itemId' },
+      batch: { model: 'itemBatch', table: 'item_batches', foreignKey: 'id', parentField: 'batchId' },
+      storageLocation: { model: 'storageLocation', table: 'storage_locations', foreignKey: 'id', parentField: 'storageLocationId' },
     },
     stockTransferLine: {
       item: { model: 'item', table: 'items', foreignKey: 'id', parentField: 'itemId' },
@@ -719,7 +741,7 @@ export function pglitePrisma(db: PgliteLike) {
       findMany: async (args: Row = {}) => {
         const params: unknown[] = [];
         const where = whereToSql('stock_movements', args.where as Row, params);
-        return q(`SELECT * FROM "stock_movements"${where}`, params);
+        return q(`SELECT * FROM "stock_movements"${where}${orderToSql('stock_movements', args.orderBy)}`, params);
       },
       count: async (args: Row = {}) => {
         const params: unknown[] = [];
@@ -746,6 +768,22 @@ export function pglitePrisma(db: PgliteLike) {
           );
         }
         return { count: rows.length };
+      },
+      /// Insert, or add to the row that is already there (increment only).
+      upsert: async (args: Row) => {
+        const where = args.where as Record<string, Record<string, unknown>>;
+        const key = where.companyId_branchId_itemId;
+        const create = args.create as Row;
+        const update = args.update as Row;
+        const inc = (v: unknown) => String((v as { increment?: unknown })?.increment ?? 0);
+        await db.query(
+          `INSERT INTO "stock_balances" ("companyId","branchId","itemId","quantity","value","updatedAt")
+           VALUES ($1,$2,$3,$4,$5,now())
+           ON CONFLICT ("companyId","branchId","itemId") DO UPDATE
+             SET "quantity" = "stock_balances"."quantity" + $6, "value" = "stock_balances"."value" + $7, "updatedAt" = now()`,
+          [key.companyId, key.branchId, key.itemId, String(create.quantity ?? 0), String(create.value ?? 0), inc(update.quantity), inc(update.value)],
+        );
+        return {};
       },
       update: async (args: Row) => {
         const where = args.where as Record<string, Record<string, unknown>>;
@@ -781,6 +819,11 @@ export function pglitePrisma(db: PgliteLike) {
     itemUnit: plainModel('itemUnit', 'item_units'),
     stockTransfer: plainModel('stockTransfer', 'stock_transfers'),
     stockTransferLine: plainModel('stockTransferLine', 'stock_transfer_lines'),
+    user: plainModel('user','users'),
+    stockTakeSession: plainModel('stockTakeSession', 'stock_take_sessions'),
+    stockTakeLine: plainModel('stockTakeLine', 'stock_take_lines'),
+    stockDocument: plainModel('stockDocument', 'stock_documents'),
+    stockDocumentLine: plainModel('stockDocumentLine', 'stock_document_lines'),
     stockTransferAction: plainModel('stockTransferAction', 'stock_transfer_actions'),
     approvalPolicy: plainModel('approvalPolicy', 'approval_policies'),
     approvalLevel: plainModel('approvalLevel', 'approval_levels'),
@@ -807,6 +850,11 @@ export function pglitePrisma(db: PgliteLike) {
     },
 
     warehouseStockBalance: {
+      findMany: async (args: Row = {}) => {
+        const params: unknown[] = [];
+        const where = whereToSql('warehouse_stock_balances', args.where as Row, params);
+        return q(`SELECT * FROM "warehouse_stock_balances"${where}`, params);
+      },
       createMany: async (args: Row) => {
         const rows = (args.data as Row[]) ?? [];
         for (const row of rows) {

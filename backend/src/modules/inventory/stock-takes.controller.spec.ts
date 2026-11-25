@@ -85,6 +85,47 @@ describe('stock take warehouse access', () => {
     });
   });
 
+  it('hides every financial field, including the real-variance value, on detail, start, count, add-row, approve and post for a reader without cost access', async () => {
+    const withValues = () => ({
+      id: 'take-cost',
+      warehouseId: 'warehouse-a',
+      varianceValue: '25.0000',
+      realVarianceValue: '14.0000',
+      assignedQuantity: 2,
+      lines: [
+        { id: 'line-1', unitCost: '9.0000', varianceValue: '18.0000', realVarianceValue: '18.0000', assignmentQuantity: '0.0000', realVarianceQuantity: '2.0000', varianceKind: 'VARIANCE' },
+      ],
+    });
+    const expectClean = (result: any) => {
+      const text = JSON.stringify(result);
+      expect(text).not.toMatch(/unitCost|varianceValue|realVarianceValue/);
+      expect(result.lines[0].realVarianceQuantity).toBe('2.0000');
+      expect(result.lines[0].varianceKind).toBe('VARIANCE');
+    };
+    const u = user({ canView: true, canCount: true, canApprove: true });
+    service.findOne.mockResolvedValue(session as never);
+    (service as any).addLocation = jest.fn(async () => withValues());
+    (controller as any).service.addLocation = (service as any).addLocation;
+    service.start.mockResolvedValueOnce(withValues());
+    service.record.mockResolvedValueOnce(withValues());
+    service.approve.mockResolvedValueOnce(withValues());
+    service.post.mockResolvedValueOnce(withValues());
+    service.findOne.mockResolvedValueOnce(withValues() as never);
+    expectClean(await controller.findOne(u, 'take-cost'));
+    expectClean(await controller.start(u, { warehouseId: 'warehouse-a', scope: 'FULL' } as never));
+    expectClean(await controller.record(u, 'take-1', { lines: [{ lineId: 'line-1', countedQuantity: 1 }] }));
+    expectClean(await (controller as any).addLocation(u, 'take-1', { itemId: 'i', storageLocationId: 's' }));
+    expectClean(await controller.approve(u, 'take-1'));
+    expectClean(await controller.post(u, 'take-1'));
+  });
+
+  it('still shows the real-variance value to a reader with cost access', async () => {
+    service.findOne.mockResolvedValueOnce({ id: 'take-cost', warehouseId: 'warehouse-a', realVarianceValue: '14.0000', lines: [] });
+    const costUser = { ...user({ canView: true }), permissions: ['inventory.cost.read'], warehouseAccess: undefined } as AuthUser;
+    const result = await controller.findOne(costUser, 'take-cost') as any;
+    expect(result.realVarianceValue).toBe('14.0000');
+  });
+
   it('requires the warehouse count grant before cancelling a session', async () => {
     await expect(
       controller.cancel(user({ canView: true, canCount: false }), 'take-1', {}),

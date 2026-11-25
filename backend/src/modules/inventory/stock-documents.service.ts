@@ -57,6 +57,8 @@ export interface StockDocumentLineInput {
   batchId?: string;
   /** The shelf the goods sat on, when the document names one. */
   storageLocationId?: string;
+  /** Transfer only: the shelf of the receiving warehouse the goods go onto. Optional; omitted means they arrive unlocated. */
+  toStorageLocationId?: string;
 }
 
 /**
@@ -294,6 +296,7 @@ export class StockDocumentsService {
         batchNumber: line.batch?.batchNumber ?? null,
         expiryDate: line.batch?.expiryDate?.toISOString().slice(0, 10) ?? null,
         storageLocationId: line.storageLocationId ?? null,
+        toStorageLocationId: (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null,
         storageLocationCode: line.storageLocation?.code ?? null,
         storageLocationNameEn: line.storageLocation?.nameEn ?? null,
         storageLocationNameAr: line.storageLocation?.nameAr ?? null,
@@ -445,6 +448,7 @@ export class StockDocumentsService {
         unitQuantity: Prisma.Decimal | null;
         batchId: string | null;
         storageLocationId: string | null;
+        toStorageLocationId?: string | null;
       }> = [];
       const itemModel = (tx as { item?: typeof this.prisma.item }).item ?? this.prisma.item;
       const batchModel = (tx as { itemBatch?: typeof this.prisma.itemBatch }).itemBatch ?? this.prisma.itemBatch;
@@ -561,20 +565,67 @@ export class StockDocumentsService {
           if (!lot) throw new BadRequestException(`Line ${index + 1}: the lot does not belong to this item`);
           batchId = lot.id;
         }
+        // On a transfer the named shelf is the one the goods leave from, in the
+        // source warehouse; on every other document it is in the document's
+        // warehouse.
+        const isTransfer = kind === StockDocumentKind.TRANSFER;
+        const shelfWarehouse = isTransfer ? dto.fromWarehouseId : dto.toWarehouseId;
         let storageLocationId: string | null = null;
         if (raw.storageLocationId) {
           const location = await locationModel.findFirst({
             where: {
               id: String(raw.storageLocationId),
               companyId,
-              warehouseId: dto.toWarehouseId ? String(dto.toWarehouseId) : undefined,
+              warehouseId: shelfWarehouse ? String(shelfWarehouse) : undefined,
+              // A shelf that was switched off may still hold stock that has to
+              // leave it; goods may only be put onto an active one.
+              deletedAt: null,
+              ...(isTransfer || kind === StockDocumentKind.WRITE_OFF || ((kind === StockDocumentKind.ADJUSTMENT || kind === StockDocumentKind.COUNT) && Number(raw.quantity) < 0) ? {} : { isActive: true }),
             },
             select: { id: true },
           });
           if (!location) {
-            throw new BadRequestException(`Line ${index + 1}: the storage location is not in this warehouse`);
+            const off = await locationModel.findFirst({
+              where: { id: String(raw.storageLocationId), companyId, warehouseId: shelfWarehouse ? String(shelfWarehouse) : undefined, deletedAt: null, isActive: false },
+              select: { code: true },
+            });
+            if (off) {
+              throw new BadRequestException({
+                code: 'STOCK_DOC_LOCATION_INACTIVE',
+                message:
+                  `السطر ${index + 1}: الموقع ${off.code} غير مفعّل ولا يستقبل بضاعة أو فائضًا (يمكن السحب منه فقط). فعّل الموقع أو اختر موقعًا نشطًا؛ بياناتك محفوظة ولم يتغير أي رصيد. / ` +
+                  `Line ${index + 1}: location ${off.code} is inactive and cannot receive goods or a surplus (goods may only leave it). Activate it or choose an active location; your data is kept and no balance changed.`,
+                errors: { lineNumber: String(index + 1), locationCode: off.code.slice(0, 64) },
+              });
+            }
+            throw new BadRequestException({
+              code: 'STOCK_DOC_LOCATION_INVALID',
+              message:
+                `السطر ${index + 1}: الموقع المختار ليس في ${isTransfer ? 'المخزن المحوَّل منه' : 'مخزن المستند'}. اختر موقعًا من نفس المخزن وبياناتك محفوظة. / ` +
+                `Line ${index + 1}: the chosen location is not in the ${isTransfer ? 'source warehouse' : 'document warehouse'}. Pick a location of that warehouse; your data is kept.`,
+              errors: { lineNumber: String(index + 1) },
+            });
           }
           storageLocationId = location.id;
+        }
+        let toStorageLocationId: string | null = null;
+        if (raw.toStorageLocationId) {
+          const target = isTransfer && dto.toWarehouseId
+            ? await locationModel.findFirst({
+                where: { id: String(raw.toStorageLocationId), companyId, warehouseId: String(dto.toWarehouseId), deletedAt: null, isActive: true },
+                select: { id: true },
+              })
+            : null;
+          if (!target) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_TARGET_LOCATION_INVALID',
+              message:
+                `السطر ${index + 1}: موقع الاستلام يجب أن يكون في المخزن المحوَّل إليه، وفي مستند تحويل فقط. اختر موقعًا من مخزن الاستلام أو اتركه فارغًا ليصل الصنف بلا موقع. بياناتك محفوظة. / ` +
+                `Line ${index + 1}: the receiving location must belong to the receiving warehouse, on a transfer only. Pick one of its locations, or leave it empty so the goods arrive unlocated. Your data is kept.`,
+              errors: { lineNumber: String(index + 1) },
+            });
+          }
+          toStorageLocationId = target.id;
         }
 
         lines.push({
@@ -588,6 +639,7 @@ export class StockDocumentsService {
           unitQuantity,
           batchId,
           storageLocationId,
+          toStorageLocationId,
         });
       }
 
@@ -669,6 +721,8 @@ export class StockDocumentsService {
               unitQuantity: line.unitQuantity,
               batchId: line.batchId,
               storageLocationId: line.storageLocationId,
+              // new column: written through a cast so this compiles before and after prisma generate
+              ...({ toStorageLocationId: line.toStorageLocationId ?? null } as object),
             })),
           },
         },
@@ -1087,6 +1141,29 @@ export class StockDocumentsService {
       }> = [];
       let valueChange = new Prisma.Decimal(0);
 
+      // Source-shelf checks read a shelf and then act on it, so the item locks
+      // are taken up front in one sorted order.
+      const lockedWarehouses = (
+        document.kind === StockDocumentKind.TRANSFER
+          ? [fromWarehouseId, toWarehouseId]
+          : document.kind === StockDocumentKind.WRITE_OFF
+            ? [toWarehouseId]
+            : []
+      ).filter((w): w is string => !!w);
+      if (lockedWarehouses.length) {
+        // Same order as an issue: every item advisory key first (sorted over
+        // both ends), then the warehouse rows (sorted), never the reverse.
+        const keys = Array.from(
+          new Set(lockedWarehouses.flatMap((w) => document.lines.map((l) => `${w}:${l.itemId}`))),
+        ).sort();
+        for (const key of keys) {
+          await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+        }
+        for (const w of Array.from(new Set(lockedWarehouses)).sort()) {
+          await this.warehouses.lockForPosting(tx, companyId, w);
+        }
+      }
+
       for (const line of document.lines) {
         if (document.kind === StockDocumentKind.TRANSFER) {
           // Out of the source branch, into the destination, at the cost the
@@ -1171,6 +1248,22 @@ export class StockDocumentsService {
             batchId: line.batchId ?? null,
             storageLocationId: line.storageLocationId ?? null,
           });
+          const receivingShelf = (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null;
+          if (receivingShelf) {
+            const ok = await tx.storageLocation.findFirst({
+              where: { id: receivingShelf, companyId, warehouseId: toWarehouseId ?? undefined, deletedAt: null, isActive: true },
+              select: { id: true },
+            });
+            if (!ok) {
+              throw new BadRequestException({
+                code: 'STOCK_DOC_TARGET_LOCATION_INVALID',
+                message:
+                  `المستند ${document.documentNumber}: موقع الاستلام لم يعد نشطًا أو حُذف. صحّح موقع الاستلام في المسودة أو اتركه فارغًا ثم رحّل من جديد؛ لم يتغير أي رصيد. / ` +
+                  `Document ${document.documentNumber}: the receiving location is no longer active or was deleted. Correct it on the draft or leave it empty, then post again; no balance changed.`,
+                errors: { locationId: receivingShelf },
+              });
+            }
+          }
           await this.move(tx, {
             companyId,
             branchId: document.branchId,
@@ -1191,7 +1284,9 @@ export class StockDocumentsService {
             requireStock: false,
             warehouseId: toWarehouseId,
             batchId: line.batchId ?? null,
-            storageLocationId: line.storageLocationId ?? null,
+            // The source shelf belongs to the source warehouse; the receiving shelf
+            // is the one the document names for it, or none (arrive unlocated).
+            storageLocationId: (line as { toStorageLocationId?: string | null }).toStorageLocationId ?? null,
           });
 
           // The lots travel with the goods. Only what the lots actually hold
@@ -1215,6 +1310,27 @@ export class StockDocumentsService {
         // ADJUSTMENT, WRITE_OFF and COUNT all come down to "this many units move".
         let quantity = line.quantity;
         let unitCost = line.unitCost;
+        // Re-check the line's shelf as it is NOW: a shelf may have been deleted
+        // or switched off since the draft was written. Goods may leave an
+        // inactive shelf (a deficit drains it) but never arrive on one.
+        if (
+          line.storageLocationId &&
+          (document.kind === StockDocumentKind.ADJUSTMENT || document.kind === StockDocumentKind.COUNT)
+        ) {
+          const shelfNow = await tx.storageLocation.findFirst({
+            where: { id: line.storageLocationId, companyId, deletedAt: null },
+            select: { code: true, isActive: true },
+          });
+          if (!shelfNow || (quantity.greaterThan(0) && !shelfNow.isActive)) {
+            throw new BadRequestException({
+              code: 'STOCK_DOC_LOCATION_INVALID',
+              message:
+                `المستند ${document.documentNumber}: ${shelfNow ? `الموقع ${shelfNow.code} لم يعد نشطًا ولا يستقبل فائضًا` : 'موقع السطر حُذف'}. صحّح موقع السطر في المسودة أو اتركه فارغًا ثم رحّل من جديد؛ لم يتغير أي رصيد. / ` +
+                `Document ${document.documentNumber}: ${shelfNow ? `location ${shelfNow.code} is no longer active and cannot receive a surplus` : 'the line location was deleted'}. Correct the line location on the draft or leave it empty, then post again; no balance changed.`,
+              errors: { lineNumber: String(line.lineNumber) },
+            });
+          }
+        }
         // For an issue (negative adjustment or write-off) take the warehouse
         // lock before the branch balance lock, as transfer and reversal do;
         // taking them in the opposite order can deadlock.
@@ -1277,7 +1393,31 @@ export class StockDocumentsService {
 
         const direction = quantity.greaterThan(0) ? StockDirection.IN : StockDirection.OUT;
         const absoluteQuantity = quantity.abs();
-        const totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
+        let totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
+        // Goods that leave a warehouse are valued at THAT warehouse's own
+        // average, and the whole warehouse value leaves with the last unit. The
+        // branch average blends other warehouses and would leave the selected
+        // warehouse with value and no quantity (or the reverse), so the branch
+        // book and the warehouse books would drift apart.
+        if (
+          direction === StockDirection.OUT &&
+          toWarehouseId &&
+          typeof (this.ledger as unknown as { position?: unknown }).position === 'function'
+        ) {
+          const shelfBook = await this.ledger.position(tx, {
+            companyId,
+            branchId: document.branchId,
+            warehouseId: toWarehouseId,
+            itemId: line.itemId,
+          });
+          if (shelfBook.quantity.greaterThan(0)) {
+            const priced = this.ledger.issuePrice(shelfBook, absoluteQuantity);
+            totalCost = priced.value.toDecimalPlaces(MONEY_SCALE);
+            unitCost = absoluteQuantity.isZero()
+              ? unitCost
+              : totalCost.div(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
+          }
+        }
 
         await tx.stockDocumentLine.update({
           where: { id: line.id },
@@ -1733,6 +1873,13 @@ export class StockDocumentsService {
           data: {
             receivedQuantity: { increment: allocation.quantity },
             remainingQuantity: { increment: allocation.quantity },
+            // What stays and what arrives are valued together: the lot's
+            // average moves to the weighted cost by remaining quantity.
+            unitCost: destination.remainingQuantity
+              .mul(destination.unitCost)
+              .plus(allocation.quantity.mul(source.unitCost))
+              .div(destination.remainingQuantity.plus(allocation.quantity))
+              .toDecimalPlaces(4),
             // Merging held goods into a lot sitting OPEN would release them.
             ...(sourceHold !== 'OPEN' && destination.status === 'OPEN'
               ? { status: sourceHold }
@@ -1807,6 +1954,8 @@ export class StockDocumentsService {
       );
     }
 
+    await this.assertSourceLocation(tx, input);
+
     await tx.stockMovement.create({
       data: {
         companyId: input.companyId,
@@ -1855,6 +2004,156 @@ export class StockDocumentsService {
         // path may still need to undo a movement whose shelf has been emptied.
         { allowNegative: !input.requireStock },
       );
+    }
+  }
+
+  /// Corrects only the shelves of a draft document: the source shelf and, on
+  /// a transfer, the receiving shelf. Quantities, units, lots, numbers and
+  /// permissions are untouched. A key left out keeps its stored value; null
+  /// clears it. Refused once the document is reviewed or approved, because the
+  /// approval was given for the document as it was.
+  async updateDraftLocations(
+    companyId: string,
+    userId: string,
+    id: string,
+    body: {
+      expectedVersion?: unknown;
+      lines?: Array<{ lineNumber?: number; storageLocationId?: string | null; toStorageLocationId?: string | null }>;
+    },
+    mayReadCost = true,
+  ) {
+    const bad = (code: string, ar: string, en: string, extra: Record<string, string> = {}) =>
+      new BadRequestException({ code, message: `${ar} / ${en}`, errors: extra });
+    if (!Number.isSafeInteger(body?.expectedVersion)) {
+      throw bad('STOCK_DOC_VERSION_REQUIRED', 'أرسل رقم نسخة المستند الذي فتحته. بياناتك محفوظة.', 'Send the version of the document you opened. Your data is kept.');
+    }
+    if (!Array.isArray(body.lines) || body.lines.length === 0) {
+      throw bad('STOCK_DOC_LOCATIONS_EMPTY', 'لم تُرسل أي أسطر لتصحيح مواقعها.', 'No lines were sent to correct.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const document = await tx.stockDocument.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!document) throw new NotFoundException('Stock document not found');
+      if (document.status !== InvoiceStatus.DRAFT) {
+        throw bad('STOCK_DOC_NOT_DRAFT', 'لا يمكن تعديل مواقع مستند تم ترحيله. استخدم العكس ثم أنشئ مستندًا جديدًا.', 'The locations of a posted document cannot be edited. Reverse it and create a new one.');
+      }
+      if (document.approvedAt || document.reviewedAt) {
+        throw bad('STOCK_DOC_APPROVED', 'المستند تمت مراجعته أو اعتماده، فلا تُعدَّل مواقعه دون إعادة المراجعة. أعد المستند للمسودة أو أنشئ بدلًا منه.', 'This document was reviewed or approved, so its locations cannot change without a new review. Send it back to draft or create a replacement.');
+      }
+      const isTransfer = document.kind === StockDocumentKind.TRANSFER;
+      const claimed = await tx.stockDocument.updateMany({
+        where: { id, companyId, status: InvoiceStatus.DRAFT, editVersion: body.expectedVersion as number },
+        data: { editVersion: { increment: 1 } },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          code: 'STOCK_DOC_VERSION_CHANGED',
+          message: 'تغير المستند بعد أن فتحته. أعد تحميله ثم أعد التصحيح؛ لم يُحفظ شيء. / The document changed after you opened it. Reload it and correct again; nothing was saved.',
+        });
+      }
+      const locationModel = (tx as { storageLocation?: typeof this.prisma.storageLocation }).storageLocation ?? this.prisma.storageLocation;
+      const sourceWarehouse = isTransfer ? document.fromWarehouseId : document.toWarehouseId;
+      const seen = new Set<number>();
+      for (const change of body.lines!) {
+        const line = document.lines.find((l) => l.lineNumber === Number(change.lineNumber));
+        if (!line || seen.has(line.lineNumber)) {
+          throw bad('STOCK_DOC_LINE_UNKNOWN', `السطر ${String(change.lineNumber)} غير موجود في المستند أو مكرر.`, `Line ${String(change.lineNumber)} is not in this document or is repeated.`, { lineNumber: String(change.lineNumber).slice(0, 12) });
+        }
+        seen.add(line.lineNumber);
+        const data: Record<string, unknown> = {};
+        if (change.storageLocationId !== undefined) {
+          if (change.storageLocationId === null) data.storageLocationId = null;
+          else {
+            const found = await locationModel.findFirst({
+              where: { id: String(change.storageLocationId), companyId, warehouseId: sourceWarehouse ?? undefined, deletedAt: null, ...(isTransfer || document.kind === StockDocumentKind.WRITE_OFF || ((document.kind === StockDocumentKind.ADJUSTMENT || document.kind === StockDocumentKind.COUNT) && line.quantity.lessThan(0)) ? {} : { isActive: true }) },
+              select: { id: true },
+            });
+            if (!found) {
+              throw bad('STOCK_DOC_LOCATION_INVALID', `السطر ${line.lineNumber}: الموقع ليس في ${isTransfer ? 'المخزن المحوَّل منه' : 'مخزن المستند'}. اختر موقعًا من نفس المخزن.`, `Line ${line.lineNumber}: the location is not in the ${isTransfer ? 'source warehouse' : 'document warehouse'}, was deleted, or is switched off for receiving goods. Pick an active location of that warehouse.`, { lineNumber: String(line.lineNumber) });
+            }
+            data.storageLocationId = found.id;
+          }
+        }
+        if (change.toStorageLocationId !== undefined) {
+          if (change.toStorageLocationId === null) data.toStorageLocationId = null;
+          else {
+            const found = isTransfer && document.toWarehouseId
+              ? await locationModel.findFirst({
+                  where: { id: String(change.toStorageLocationId), companyId, warehouseId: document.toWarehouseId, deletedAt: null, isActive: true },
+                  select: { id: true },
+                })
+              : null;
+            if (!found) {
+              throw bad('STOCK_DOC_TARGET_LOCATION_INVALID', `السطر ${line.lineNumber}: موقع الاستلام يجب أن يكون في المخزن المحوَّل إليه وفي مستند تحويل فقط. اتركه فارغًا ليصل الصنف بلا موقع.`, `Line ${line.lineNumber}: the receiving location must be an active location of the receiving warehouse, on a transfer only. Leave it empty so the goods arrive unlocated.`, { lineNumber: String(line.lineNumber) });
+            }
+            data.toStorageLocationId = found.id;
+          }
+        }
+        if (Object.keys(data).length) {
+          await tx.stockDocumentLine.update({ where: { id: line.id }, data: data as never });
+        }
+      }
+      await this.auditInTx(tx, { companyId, userId, action: 'UPDATE', entity: 'stock_documents', entityId: id });
+    });
+    return this.findOne(companyId, id, mayReadCost);
+  }
+
+  /// A write-off or a transfer out takes from a named shelf. Located stock
+  /// may not leave without one; a named shelf must hold the quantity. An item
+  /// with no located stock keeps the old behaviour.
+  private async assertSourceLocation(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      itemId: string;
+      direction: StockDirection;
+      quantity: Prisma.Decimal;
+      referenceType: string;
+      referenceNumber: string;
+      warehouseId?: string | null;
+      batchId?: string | null;
+      storageLocationId?: string | null;
+    },
+  ) {
+    if (input.direction !== StockDirection.OUT || !input.warehouseId) return;
+    if (input.referenceType !== 'STOCK_WRITE_OFF' && input.referenceType !== 'STOCK_TRANSFER_OUT') return;
+    const rows = await tx.$queryRaw<Array<{ id: string; code: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+      SELECT l."id" AS "id", l."code" AS "code",
+             SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) AS "quantity"
+        FROM "stock_movements" m
+        JOIN "storage_locations" l ON l."id" = m."storageLocationId"
+       WHERE m."companyId" = ${input.companyId}::uuid
+         AND m."warehouseId" = ${input.warehouseId}::uuid
+         AND m."itemId" = ${input.itemId}::uuid
+         ${input.batchId ? Prisma.sql`AND m."batchId" = ${input.batchId}::uuid` : Prisma.empty}
+       GROUP BY l."id", l."code"
+       HAVING SUM(CASE WHEN m."direction" = 'IN' THEN m."quantity" ELSE -m."quantity" END) > 0
+       ORDER BY l."code"
+    `);
+    if (!input.storageLocationId) {
+      if (!rows.length) return;
+      const list = rows.map((r) => `${r.code}: ${new Prisma.Decimal(r.quantity).toFixed(MONEY_SCALE)}`);
+      throw new BadRequestException({
+        code: 'STOCK_DOC_LOCATION_REQUIRED',
+        message:
+          `المستند ${input.referenceNumber}: الصنف له رصيد موزع على مواقع (${list.join('، ')}). اختر الموقع الذي يخرج منه الصنف في هذا السطر ثم رحّل من جديد؛ بياناتك محفوظة ولم يتغير أي رصيد. / ` +
+          `Document ${input.referenceNumber}: the item is stored on locations (${list.join(', ')}). Choose the location this line takes from, then post again. Your data is kept and no balance changed.`,
+        errors: { locations: rows.map((r) => ({ locationId: r.id, code: r.code, quantity: new Prisma.Decimal(r.quantity).toFixed(MONEY_SCALE) })) },
+      });
+    }
+    const held = rows.find((r) => r.id === input.storageLocationId);
+    const have = held ? new Prisma.Decimal(held.quantity) : new Prisma.Decimal(0);
+    if (have.lessThan(input.quantity)) {
+      const list = rows.map((r) => `${r.code}: ${new Prisma.Decimal(r.quantity).toFixed(MONEY_SCALE)}`);
+      throw new BadRequestException({
+        code: 'STOCK_DOC_SHELF_SHORT',
+        message:
+          `المستند ${input.referenceNumber}: الموقع المختار يحتوي ${have.toFixed(MONEY_SCALE)} فقط والمطلوب ${input.quantity.toFixed(MONEY_SCALE)}. ${list.length ? `المتاح: ${list.join('، ')}. ` : ''}خفّض الكمية أو اختر موقعًا آخر أو وزّعها على عدة أسطر ثم رحّل من جديد؛ بياناتك محفوظة. / ` +
+          `Document ${input.referenceNumber}: the chosen location holds only ${have.toFixed(MONEY_SCALE)} but ${input.quantity.toFixed(MONEY_SCALE)} is needed. ${list.length ? `Available: ${list.join(', ')}. ` : ''}Lower the quantity, pick another location, or split it over several lines, then post again. Your data is kept.`,
+        errors: { locationId: input.storageLocationId, requested: input.quantity.toFixed(MONEY_SCALE), available: have.toFixed(MONEY_SCALE) },
+      });
     }
   }
 

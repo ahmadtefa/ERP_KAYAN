@@ -18,6 +18,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { addToLotCost, boundCoverageMissing, legacyIdentityAmbiguous, legacyIdentityError, receiptFor, receiptLotMovements, refreshLotPrimaryLocation, removeFromLotCost } from '../inventory/lot-primary-location';
 
 const MONEY_SCALE = 4;
 
@@ -455,6 +456,243 @@ export class ReturnsService {
     return this.findOne(companyId, 'sales', created.id, mayReadCost);
   }
 
+  /// Takes the shelf and lot lock of every item on a return, in one fixed
+  /// order, with the same key every other stock writer uses.
+  private async lockItems(tx: Prisma.TransactionClient, warehouseId: string | null, itemIds: string[]) {
+    if (!warehouseId) return;
+    for (const id of [...new Set(itemIds)].sort()) {
+      await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${warehouseId}:${id}`}, 0))`,
+      );
+    }
+  }
+
+  /// A purchase return gives goods back to the supplier from the lot and the
+  /// shelf the receipt put them on, or says plainly why it cannot.
+  private async takeBackFromReceipt(
+    tx: Prisma.TransactionClient,
+    args: {
+      companyId: string;
+      warehouseId: string | null;
+      itemId: string;
+      lineNumber: number;
+      quantity: Prisma.Decimal;
+      receipt: { batchNumber: string | null; storageLocationId: string | null } | null;
+      /// the receipt movement (lot, cost) of the original line, when known
+      receiptMovement?: { batchId: string | null; unitCost: Prisma.Decimal } | null;
+    },
+  ): Promise<{ lotId: string | null; shelfId: string | null }> {
+    const { companyId, warehouseId, itemId, lineNumber, quantity, receipt, receiptMovement } = args;
+    if (!receipt || !warehouseId) return { lotId: null, shelfId: null };
+    let lotId: string | null = null;
+    if (receiptMovement?.batchId || receipt.batchNumber) {
+      const lot = await tx.itemBatch.findFirst({
+        where: receiptMovement?.batchId
+          ? { id: receiptMovement.batchId, companyId }
+          : { companyId, warehouseId, itemId, batchNumber: receipt.batchNumber!, deletedAt: null },
+        select: { id: true, remainingQuantity: true, batchNumber: true },
+      });
+      if (lot) {
+        const lotName = lot.batchNumber ?? receipt.batchNumber ?? '';
+        if (lot.remainingQuantity.lessThan(quantity)) {
+          throw new BadRequestException({
+            code: 'PURCHASE_RETURN_LOT_SHORT',
+            message:
+              `السطر ${lineNumber}: الدفعة ${lotName} المتبقي منها ${lot.remainingQuantity.toFixed(MONEY_SCALE)} فقط والمطلوب إرجاعه ${quantity.toFixed(MONEY_SCALE)}، فجزء منها بِيع أو نُقل. قلل الكمية المرتجعة إلى المتاح؛ بيانات المرتجع محفوظة. / ` +
+              `Line ${lineNumber}: lot ${lotName} has only ${lot.remainingQuantity.toFixed(MONEY_SCALE)} left to return, not ${quantity.toFixed(MONEY_SCALE)}, because part of it was sold or moved. Reduce the returned quantity to what is left; the return data is kept.`,
+            errors: { lineNumber: String(lineNumber), lot: lotName.slice(0, 60), remaining: lot.remainingQuantity.toFixed(MONEY_SCALE) },
+          });
+        }
+        lotId = lot.id;
+        if (receiptMovement?.batchId) await removeFromLotCost(tx, lot.id, quantity, new Prisma.Decimal(receiptMovement.unitCost));
+      }
+    }
+    if (receipt.storageLocationId) {
+      const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
+        SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+          FROM "stock_movements"
+         WHERE "companyId" = ${companyId}::uuid
+           AND "warehouseId" = ${warehouseId}::uuid
+           AND "itemId" = ${itemId}::uuid
+           AND "storageLocationId" = ${receipt.storageLocationId}::uuid
+           ${lotId ? Prisma.sql`AND "batchId" = ${lotId}::uuid` : Prisma.empty}
+      `);
+      const have = new Prisma.Decimal(rows[0]?.quantity ?? 0);
+      if (have.lessThan(quantity)) {
+        throw new BadRequestException({
+          code: 'PURCHASE_RETURN_SHELF_SHORT',
+          message:
+            `السطر ${lineNumber}: موقع الاستلام يحوي ${have.toFixed(MONEY_SCALE)} فقط والمطلوب إرجاعه ${quantity.toFixed(MONEY_SCALE)}، فالبضاعة نُقلت من موقعها. أعدها إلى موقع الاستلام بنقل مواقع ثم أعد الترحيل؛ بيانات المرتجع محفوظة. / ` +
+            `Line ${lineNumber}: the receiving location holds only ${have.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}, because the goods were moved off it. Move them back to that location, then post again; the return data is kept.`,
+          errors: { lineNumber: String(lineNumber), available: have.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
+        });
+      }
+    }
+    if (lotId) {
+      const claimed = await tx.itemBatch.updateMany({
+        where: { id: lotId, remainingQuantity: { gte: quantity } },
+        data: { remainingQuantity: { decrement: quantity } },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          'تغيرت الدفعة أثناء الترحيل؛ أعد المحاولة. / The lot changed while posting; try again.',
+        );
+      }
+      await tx.itemBatch.updateMany({
+        where: { id: lotId, remainingQuantity: { lte: 0 }, status: 'OPEN' },
+        data: { status: 'CLOSED' },
+      });
+    }
+    return { lotId, shelfId: receipt.storageLocationId };
+  }
+
+  /// Reverses a posted return by mirroring the movements that return itself
+  /// wrote for the line: the same lot, shelf and cost, in the opposite
+  /// direction. Returns false when the return has no movements bound to its
+  /// line (posted before that existed); the caller then keeps its old
+  /// behaviour. Nothing is written when a guard refuses.
+  private async undoReturnMovements(
+    tx: Prisma.TransactionClient,
+    args: {
+      companyId: string;
+      userId: string;
+      branchId: string;
+      warehouseId: string | null;
+      itemId: string;
+      lineId: string;
+      lineNumber: number;
+      quantity: Prisma.Decimal;
+      costTotal: Prisma.Decimal;
+      document: { id: string; invoiceNumber: string | null };
+      returnType: 'SALES_RETURN' | 'PURCHASE_RETURN';
+    },
+  ): Promise<boolean> {
+    const { companyId, userId, branchId, warehouseId, itemId, lineId, lineNumber, quantity: lineQuantity, costTotal: lineCost, document, returnType } = args;
+    const moves = await tx.$queryRaw<
+      Array<{ batchId: string | null; storageLocationId: string | null; quantity: Prisma.Decimal; unitCost: Prisma.Decimal; totalCost: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT "batchId", "storageLocationId", "quantity", "unitCost", "totalCost"
+        FROM "stock_movements"
+       WHERE "companyId" = ${companyId}::uuid
+         AND "referenceType" = ${returnType}
+         AND "referenceId" = ${document.id}::uuid
+         AND "sourceLineId" = ${lineId}::uuid
+         AND "itemId" = ${itemId}::uuid
+       ORDER BY "createdAt" ASC
+    `);
+    // Movements of this return that are not tied to any line: written before
+    // the line was stored on them. If they hold a lot or a shelf, nobody can
+    // say whose they are, so mirroring (or the old unbatched write) would put
+    // stock on the wrong lot or shelf. Refuse; nothing is written.
+    const untied = await tx.$queryRaw<Array<{ n: bigint | number }>>(Prisma.sql`
+      SELECT COUNT(*) AS n
+        FROM "stock_movements"
+       WHERE "companyId" = ${companyId}::uuid
+         AND "referenceType" = ${returnType}
+         AND "referenceId" = ${document.id}::uuid
+         AND "itemId" = ${itemId}::uuid
+         AND "sourceLineId" IS NULL
+         AND ("batchId" IS NOT NULL OR "storageLocationId" IS NOT NULL)
+    `);
+    const covered = moves.reduce((t, m) => t.plus(new Prisma.Decimal(m.quantity)), new Prisma.Decimal(0));
+    if (Number(untied[0]?.n ?? 0) > 0 || (moves.length > 0 && !covered.equals(lineQuantity))) {
+      throw legacyIdentityError(`${returnType}_REVERSE_LEGACY_AMBIGUOUS`, document.invoiceNumber, lineNumber);
+    }
+    if (moves.length > 0) {
+      const movedCost = moves.reduce((t, m) => t.plus(new Prisma.Decimal(m.totalCost)), new Prisma.Decimal(0));
+      if (movedCost.minus(lineCost).abs().greaterThan(0.01)) {
+        throw new BadRequestException({
+          code: 'RETURN_REVERSE_COST_MISMATCH',
+          message:
+            `السطر ${lineNumber} من المستند ${document.invoiceNumber ?? ''}: تكلفة حركات المخزون المسجلة (${movedCost.toFixed(MONEY_SCALE)}) لا تساوي تكلفة السطر في القيد المحاسبي (${new Prisma.Decimal(lineCost).toFixed(MONEY_SCALE)})، فلا يمكن عكسه دون أن يختل المخزون أو الحسابات. لم يتغير شيء وبياناتك محفوظة. أبلغ المسؤول أو المحاسب بالمستند ورقم السطر للتحقق من التكلفة الأصلية. / ` +
+            `Line ${lineNumber} of ${document.invoiceNumber ?? ''}: the recorded stock movement cost (${movedCost.toFixed(MONEY_SCALE)}) does not match the line cost in the accounting entry (${new Prisma.Decimal(lineCost).toFixed(MONEY_SCALE)}), so reversing it would put stock and accounts out of step. Nothing changed and your data is kept. Give your administrator or accountant the document and line number to verify the original cost.`,
+          errors: { lineNumber: String(lineNumber) },
+        });
+      }
+    }
+    if (!moves.length) return false;
+    const takingAway = returnType === 'SALES_RETURN';
+    for (const m of moves) {
+      const qty = new Prisma.Decimal(m.quantity);
+      const unitCost = new Prisma.Decimal(m.unitCost);
+      if (takingAway) {
+        if (m.batchId) {
+          const lot = await tx.itemBatch.findFirst({ where: { id: m.batchId, companyId }, select: { remainingQuantity: true, batchNumber: true } });
+          if (!lot || lot.remainingQuantity.lessThan(qty)) {
+            throw new BadRequestException({
+              code: 'RETURN_REVERSE_LOT_SHORT',
+              message:
+                `السطر ${lineNumber}: الدفعة ${lot?.batchNumber ?? ''} المتبقي منها ${(lot?.remainingQuantity ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE)} فقط والمطلوب سحبه ${qty.toFixed(MONEY_SCALE)} لأن جزءًا منها بِيع أو نُقل بعد المرتجع. أرجع تلك الحركات أولًا ثم أعد عكس المرتجع. / ` +
+                `Line ${lineNumber}: lot ${lot?.batchNumber ?? ''} has only ${(lot?.remainingQuantity ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE)} left to take back, not ${qty.toFixed(MONEY_SCALE)}, because part of it was sold or moved after the return. Undo those first, then reverse the return again.`,
+              errors: { lineNumber: String(lineNumber), quantity: qty.toFixed(MONEY_SCALE) },
+            });
+          }
+        }
+        if (m.storageLocationId && warehouseId) {
+          const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(Prisma.sql`
+            SELECT SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS "quantity"
+              FROM "stock_movements"
+             WHERE "companyId" = ${companyId}::uuid
+               AND "warehouseId" = ${warehouseId}::uuid
+               AND "itemId" = ${itemId}::uuid
+               AND "storageLocationId" = ${m.storageLocationId}::uuid
+               ${m.batchId ? Prisma.sql`AND "batchId" = ${m.batchId}::uuid` : Prisma.empty}
+          `);
+          const have = new Prisma.Decimal(rows[0]?.quantity ?? 0);
+          if (have.lessThan(qty)) {
+            throw new BadRequestException({
+              code: 'RETURN_REVERSE_SHELF_SHORT',
+              message:
+                `السطر ${lineNumber}: الموقع الذي أُعيدت إليه البضاعة يحوي ${have.toFixed(MONEY_SCALE)} فقط والمطلوب سحبه ${qty.toFixed(MONEY_SCALE)}، فقد نُقلت منه. أعدها إلى هذا الموقع بنقل مواقع ثم أعد عكس المرتجع. / ` +
+                `Line ${lineNumber}: the location the goods went back to holds only ${have.toFixed(MONEY_SCALE)}, not ${qty.toFixed(MONEY_SCALE)}, because they were moved off it. Move them back to that location, then reverse the return again.`,
+              errors: { lineNumber: String(lineNumber), available: have.toFixed(MONEY_SCALE), quantity: qty.toFixed(MONEY_SCALE) },
+            });
+          }
+        }
+        if (m.batchId) {
+          await removeFromLotCost(tx, m.batchId, qty, unitCost);
+          const claimed = await tx.itemBatch.updateMany({
+            where: { id: m.batchId, remainingQuantity: { gte: qty } },
+            data: { remainingQuantity: { decrement: qty } },
+          });
+          if (claimed.count !== 1) {
+            throw new BadRequestException('تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.');
+          }
+          await tx.itemBatch.updateMany({ where: { id: m.batchId, remainingQuantity: { lte: 0 }, status: 'OPEN' }, data: { status: 'CLOSED' } });
+        }
+      } else if (m.batchId) {
+        await addToLotCost(tx, m.batchId, qty, unitCost);
+        const lot = await tx.itemBatch.findFirst({ where: { id: m.batchId, companyId }, select: { status: true } });
+        await tx.itemBatch.update({
+          where: { id: m.batchId },
+          data: { remainingQuantity: { increment: qty }, ...(lot?.status === 'CLOSED' ? { status: 'OPEN' } : {}) },
+        });
+      }
+      await tx.stockMovement.create({
+        data: {
+          companyId,
+          branchId,
+          warehouseId,
+          itemId,
+          batchId: m.batchId,
+          storageLocationId: m.storageLocationId,
+          ...({ sourceLineId: lineId } as object),
+          movementDate: new Date(),
+          direction: takingAway ? StockDirection.OUT : StockDirection.IN,
+          quantity: qty,
+          unitCost,
+          totalCost: new Prisma.Decimal(m.totalCost),
+          referenceType: `${returnType}_REVERSAL`,
+          referenceId: document.id,
+          referenceNumber: document.invoiceNumber,
+          createdBy: userId,
+        },
+      });
+      if (m.batchId) await refreshLotPrimaryLocation(tx, companyId, m.batchId, null);
+    }
+    return true;
+  }
+
   async postSalesReturn(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -523,6 +761,9 @@ export class ReturnsService {
       if (warehouseId && !document.warehouseId) {
         await tx.salesInvoice.update({ where: { id: document.id }, data: { warehouseId } });
       }
+      // The item locks first, sorted, as issues take them; then lot, shelf
+      // and balance rows.
+      await this.lockItems(tx, warehouseId, document.lines.map((l) => l.itemId).filter((x): x is string => !!x));
 
       for (const line of document.lines) {
         // The row of the original invoice is locked for the length of this
@@ -607,8 +848,8 @@ export class ReturnsService {
             // FEFO issue could not see the stock, and a lot the sale had
             // emptied stayed closed. The original OUT movements are the record
             // of which lot each unit left, so they are read back here.
-            const consumed = document.originalInvoiceId
-              ? await tx.stockMovement.findMany({
+            const allOut = (document.originalInvoiceId
+              ? ((await tx.stockMovement.findMany({
                   where: {
                     companyId,
                     itemId: item.id,
@@ -616,11 +857,78 @@ export class ReturnsService {
                     referenceType: 'SALES_INVOICE',
                     referenceId: document.originalInvoiceId,
                   },
-                  select: { batchId: true, quantity: true, unitCost: true },
+                  // sourceLineId needs the regenerated Prisma client; the
+                  // cast compiles before and after `prisma generate`.
+                  select: { batchId: true, storageLocationId: true, quantity: true, unitCost: true, sourceLineId: true } as never,
                   orderBy: { createdAt: 'asc' },
-                })
+                })) as unknown as Array<{ batchId: string | null; storageLocationId: string | null; quantity: Prisma.Decimal; unitCost: Prisma.Decimal; sourceLineId?: string | null }>)
+              : []);
+            // Movements written since the sale line was stored on them say
+            // which line each unit left for; older ones cannot, and are read
+            // for the whole invoice and item as before.
+            const lineBound = allOut.some((row) => row.sourceLineId);
+            if (!lineBound && legacyIdentityAmbiguous(allOut)) {
+              const sameItemLines = await tx.salesInvoiceLine.count({
+                where: { invoiceId: document.originalInvoiceId!, itemId: item.id },
+              });
+              if (sameItemLines > 1) {
+                throw legacyIdentityError('SALES_RETURN_LEGACY_AMBIGUOUS', document.invoiceNumber, line.lineNumber);
+              }
+            }
+            if (lineBound && !allOut.some((row) => row.sourceLineId === matching.id)) {
+              throw legacyIdentityError('SALES_RETURN_LEGACY_AMBIGUOUS', document.invoiceNumber, line.lineNumber);
+            }
+            let consumed = (lineBound ? allOut.filter((row) => row.sourceLineId === matching.id) : allOut).map((row) => ({
+              ...row,
+              quantity: new Prisma.Decimal(row.quantity),
+              unitCost: new Prisma.Decimal(row.unitCost),
+            }));
+            // Movements written in one transaction share a timestamp and carry
+            // random ids, so their order is not a record of anything. When the
+            // sale line names its shelves in order, that order is the one the
+            // employee chose; return along it.
+            const allocationOrder = Array.isArray((matching as { locationAllocations?: unknown }).locationAllocations)
+              ? ((matching as unknown as { locationAllocations: Array<{ storageLocationId?: string }> }).locationAllocations).map((a) => a.storageLocationId ?? '')
               : [];
-            const lotRows = consumed.filter((row) => row.batchId !== null);
+            if (allocationOrder.length && consumed.every((row) => allocationOrder.includes(row.storageLocationId ?? ''))) {
+              consumed = [...consumed].sort(
+                (a, b) => allocationOrder.indexOf(a.storageLocationId ?? '') - allocationOrder.indexOf(b.storageLocationId ?? ''),
+              );
+            }
+            // Earlier returns of this same invoice already put some of it back,
+            // lot by lot and shelf by shelf. Take that off what each OUT can
+            // still give back, so a second return continues where the first
+            // stopped instead of refilling the first shelf again.
+            const priorRows = await tx.$queryRaw<Array<{ batchId: string | null; storageLocationId: string | null; quantity: Prisma.Decimal }>>(Prisma.sql`
+              SELECT m."batchId" AS "batchId", m."storageLocationId" AS "storageLocationId",
+                     SUM(CASE WHEN m."referenceType" = 'SALES_RETURN' THEN m."quantity" ELSE -m."quantity" END) AS "quantity"
+                FROM "stock_movements" m
+                JOIN "sales_invoices" r ON r."id" = m."referenceId"
+                ${lineBound
+                  ? Prisma.sql`JOIN "sales_invoice_lines" rl ON rl."id" = m."sourceLineId" AND rl."originalLineId" = ${matching.id}::uuid`
+                  : Prisma.empty}
+               WHERE m."companyId" = ${companyId}::uuid
+                 AND m."itemId" = ${item.id}::uuid
+                 AND m."referenceType" IN ('SALES_RETURN', 'SALES_RETURN_REVERSAL')
+                 AND r."originalInvoiceId" = ${document.originalInvoiceId}::uuid
+               GROUP BY m."batchId", m."storageLocationId"
+            `);
+            const restoredBy = new Map<string, Prisma.Decimal>(
+              priorRows.map((r) => [`${r.batchId ?? ''}|${r.storageLocationId ?? ''}`, new Prisma.Decimal(r.quantity)]),
+            );
+            const consumedLeft = consumed
+              .map((row) => {
+                const key = `${row.batchId ?? ''}|${row.storageLocationId ?? ''}`;
+                const done = restoredBy.get(key) ?? new Prisma.Decimal(0);
+                const taken = Prisma.Decimal.min(done, row.quantity);
+                restoredBy.set(key, done.minus(taken));
+                return { ...row, quantity: row.quantity.minus(taken) };
+              })
+              .filter((row) => row.quantity.greaterThan(0));
+            if (lineBound && consumedLeft.reduce((t, r) => t.plus(r.quantity), new Prisma.Decimal(0)).lessThan(line.quantity)) {
+              throw legacyIdentityError('SALES_RETURN_LEGACY_AMBIGUOUS', document.invoiceNumber, line.lineNumber);
+            }
+            const lotRows = consumedLeft.filter((row) => row.batchId !== null);
             // Return the quantity lot by lot in the order it left. Anything the
             // invoice took from an unbatched shelf - or everything, when the
             // original movements are not available - goes to the shelf as
@@ -642,6 +950,7 @@ export class ReturnsService {
               // undone, and refusing to reopen would silently lose the stock.
               // A lot still in QUARANTINE or EXPIRED keeps that state - the
               // return puts goods back, it does not clear a quality hold.
+              await addToLotCost(tx, lot.id, giveBack, new Prisma.Decimal(row.unitCost));
               await tx.itemBatch.update({
                 where: { id: lot.id },
                 data: {
@@ -649,7 +958,7 @@ export class ReturnsService {
                   ...(lot.status === 'CLOSED' ? { status: 'OPEN' } : {}),
                 },
               });
-              const lineCost = giveBack.mul(lot.unitCost).toDecimalPlaces(MONEY_SCALE);
+              const lineCost = giveBack.mul(row.unitCost).toDecimalPlaces(MONEY_SCALE);
               await tx.stockMovement.create({
                 data: {
                   companyId,
@@ -657,11 +966,44 @@ export class ReturnsService {
                   warehouseId,
                   itemId: item.id,
                   batchId: lot.id,
+                  // back onto the shelf this sale took it from
+                  storageLocationId: row.storageLocationId ?? null,
                   movementDate: document.invoiceDate,
                   direction: StockDirection.IN,
                   quantity: giveBack,
-                  unitCost: lot.unitCost,
+                  unitCost: row.unitCost,
                   totalCost: lineCost,
+                  ...({ sourceLineId: line.id } as object),
+                  referenceType: 'SALES_RETURN',
+                  referenceId: document.id,
+                  referenceNumber: document.invoiceNumber,
+                  notes: `Return of ${document.originalInvoice?.invoiceNumber ?? ''}`,
+                  createdBy: userId,
+                },
+              });
+              await refreshLotPrimaryLocation(tx, companyId, lot.id, null);
+              unbatched = unbatched.minus(giveBack);
+            }
+            // An item that keeps no lots goes back to the shelf each OUT left.
+            let shelfSplit = false;
+            for (const row of consumedLeft) {
+              if (row.batchId !== null || !row.storageLocationId) continue;
+              if (unbatched.lessThanOrEqualTo(0)) break;
+              const giveBack = Prisma.Decimal.min(unbatched, row.quantity);
+              shelfSplit = true;
+              await tx.stockMovement.create({
+                data: {
+                  companyId,
+                  branchId: document.branchId,
+                  warehouseId,
+                  itemId: item.id,
+                  storageLocationId: row.storageLocationId,
+                  movementDate: document.invoiceDate,
+                  direction: StockDirection.IN,
+                  quantity: giveBack,
+                  unitCost,
+                  totalCost: unitCost.mul(giveBack).toDecimalPlaces(MONEY_SCALE),
+                  ...({ sourceLineId: line.id } as object),
                   referenceType: 'SALES_RETURN',
                   referenceId: document.id,
                   referenceNumber: document.invoiceNumber,
@@ -682,7 +1024,8 @@ export class ReturnsService {
                   direction: StockDirection.IN,
                   quantity: unbatched,
                   unitCost,
-                  totalCost: returnedCost,
+                  totalCost: shelfSplit ? unitCost.mul(unbatched).toDecimalPlaces(MONEY_SCALE) : returnedCost,
+                  ...({ sourceLineId: line.id } as object),
                   referenceType: 'SALES_RETURN',
                   referenceId: document.id,
                   referenceNumber: document.invoiceNumber,
@@ -1070,6 +1413,12 @@ export class ReturnsService {
         throw new BadRequestException('This return has just been posted by someone else.');
       }
 
+      await this.lockItems(
+        tx,
+        await this.warehouses.resolve(tx, companyId, document.branchId, document.warehouseId),
+        document.lines.flatMap((l) => (l.itemId ? [l.itemId] : [])),
+      );
+
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsPayable',
         'inventory',
@@ -1217,17 +1566,56 @@ export class ReturnsService {
             reference: document.invoiceNumber,
           });
 
+          const originalReceipt = line.originalLineId
+            ? await tx.purchaseInvoiceLine.findUnique({
+                where: { id: line.originalLineId },
+                select: { id: true, batchNumber: true, storageLocationId: true, quantity: true, lineNumber: true, invoiceId: true, itemId: true },
+              })
+            : null;
+          // The original receipt movement says which lot the goods went into,
+          // even when the line carries no lot number. Two identical lines of
+          // one invoice map to their movements in line order.
+          let receiptMovement: { batchId: string | null; unitCost: Prisma.Decimal } | null = null;
+          if (originalReceipt?.invoiceId && originalReceipt.itemId) {
+            const moves = await receiptLotMovements(tx, companyId, originalReceipt.invoiceId, originalReceipt.itemId);
+            const siblings = await tx.purchaseInvoiceLine.findMany({
+              where: { invoiceId: originalReceipt.invoiceId, itemId: originalReceipt.itemId },
+              select: { lineNumber: true, quantity: true, storageLocationId: true },
+              orderBy: { lineNumber: 'asc' },
+            });
+            const same = (a: { quantity: Prisma.Decimal; storageLocationId: string | null }) =>
+              new Prisma.Decimal(a.quantity).equals(originalReceipt.quantity) &&
+              (a.storageLocationId ?? null) === (originalReceipt.storageLocationId ?? null);
+            const index = siblings.filter(same).findIndex((l) => l.lineNumber === originalReceipt.lineNumber);
+            if (legacyIdentityAmbiguous(moves) || boundCoverageMissing(moves, originalReceipt.id)) {
+              throw legacyIdentityError('PURCHASE_RETURN_LEGACY_AMBIGUOUS', document.invoiceNumber, line.lineNumber);
+            }
+            const pick = receiptFor(moves, { id: originalReceipt.id, quantity: new Prisma.Decimal(originalReceipt.quantity), storageLocationId: originalReceipt.storageLocationId }, index);
+            if (pick) receiptMovement = { batchId: pick.batchId, unitCost: new Prisma.Decimal(pick.unitCost) };
+          }
+          const back = await this.takeBackFromReceipt(tx, {
+            companyId,
+            warehouseId,
+            itemId: item.id,
+            lineNumber: line.lineNumber,
+            quantity: line.quantity,
+            receipt: originalReceipt,
+            receiptMovement,
+          });
           await tx.stockMovement.create({
             data: {
               companyId,
               branchId: document.branchId,
               warehouseId,
               itemId: item.id,
+              batchId: back.lotId,
+              storageLocationId: back.shelfId,
               movementDate: document.invoiceDate,
               direction: StockDirection.OUT,
               quantity: line.quantity,
               unitCost,
               totalCost: returnedCost,
+              ...({ sourceLineId: line.id } as object),
               referenceType: 'PURCHASE_RETURN',
               referenceId: document.id,
               referenceNumber: document.invoiceNumber,
@@ -1235,6 +1623,7 @@ export class ReturnsService {
               createdBy: userId,
             },
           });
+          if (back.lotId) await refreshLotPrimaryLocation(tx, companyId, back.lotId, null);
           await tx.stockBalance.update({
             where: {
               companyId_branchId_itemId: {
@@ -1352,6 +1741,9 @@ export class ReturnsService {
         if (warehouseId && !document.warehouseId) {
           await tx.salesInvoice.update({ where: { id: document.id }, data: { warehouseId } });
         }
+        // Every item's advisory lock first, in one sorted order, before any
+        // balance or lot row is locked (issues take them in that order).
+        await this.lockItems(tx, warehouseId, document.lines.map((l) => l.itemId).filter((x): x is string => !!x));
         for (const line of document.lines) {
           const originalLine = await this.findOriginalLineById(tx, line);
           if (originalLine) {
@@ -1399,23 +1791,30 @@ export class ReturnsService {
             );
           }
 
-          await tx.stockMovement.create({
-            data: {
-              companyId,
-              branchId: document.branchId,
-              warehouseId,
-              itemId: line.itemId,
-              movementDate: new Date(),
-              direction: StockDirection.OUT,
-              quantity: line.quantity,
-              unitCost: line.unitCost,
-              totalCost: line.costTotal,
-              referenceType: 'SALES_RETURN_REVERSAL',
-              referenceId: document.id,
-              referenceNumber: document.invoiceNumber,
-              createdBy: userId,
-            },
+          await this.lockItems(tx, warehouseId, [line.itemId]);
+          const mirrored = await this.undoReturnMovements(tx, {
+            companyId, userId, branchId: document.branchId, warehouseId, itemId: line.itemId,
+            lineId: line.id, lineNumber: line.lineNumber, quantity: new Prisma.Decimal(line.quantity), costTotal: new Prisma.Decimal(line.costTotal), document, returnType: 'SALES_RETURN',
           });
+          if (!mirrored) {
+            await tx.stockMovement.create({
+              data: {
+                companyId,
+                branchId: document.branchId,
+                warehouseId,
+                itemId: line.itemId,
+                movementDate: new Date(),
+                direction: StockDirection.OUT,
+                quantity: line.quantity,
+                unitCost: line.unitCost,
+                totalCost: line.costTotal,
+                referenceType: 'SALES_RETURN_REVERSAL',
+                referenceId: document.id,
+                referenceNumber: document.invoiceNumber,
+                createdBy: userId,
+              },
+            });
+          }
           await tx.stockBalance.update({
             where: {
               companyId_branchId_itemId: {
@@ -1480,6 +1879,7 @@ export class ReturnsService {
       if (warehouseId && !document.warehouseId) {
         await tx.purchaseInvoice.update({ where: { id: document.id }, data: { warehouseId } });
       }
+      await this.lockItems(tx, warehouseId, document.lines.map((l) => l.itemId).filter((x): x is string => !!x));
       for (const line of document.lines) {
         const originalLine = await this.findOriginalPurchaseLineById(tx, line);
         const totalCost = line.inventoryCostTotal.isZero()
@@ -1498,23 +1898,30 @@ export class ReturnsService {
           });
         }
         if (!line.itemId) continue;
-        await tx.stockMovement.create({
-          data: {
-            companyId,
-            branchId: document.branchId,
-            warehouseId,
-            itemId: line.itemId,
-            movementDate: new Date(),
-            direction: StockDirection.IN,
-            quantity: line.quantity,
-            unitCost,
-            totalCost,
-            referenceType: 'PURCHASE_RETURN_REVERSAL',
-            referenceId: document.id,
-            referenceNumber: document.invoiceNumber,
-            createdBy: userId,
-          },
+        await this.lockItems(tx, warehouseId, [line.itemId]);
+        const mirrored = await this.undoReturnMovements(tx, {
+          companyId, userId, branchId: document.branchId, warehouseId, itemId: line.itemId,
+          lineId: line.id, lineNumber: line.lineNumber, quantity: new Prisma.Decimal(line.quantity), costTotal: totalCost, document, returnType: 'PURCHASE_RETURN',
         });
+        if (!mirrored) {
+          await tx.stockMovement.create({
+            data: {
+              companyId,
+              branchId: document.branchId,
+              warehouseId,
+              itemId: line.itemId,
+              movementDate: new Date(),
+              direction: StockDirection.IN,
+              quantity: line.quantity,
+              unitCost,
+              totalCost,
+              referenceType: 'PURCHASE_RETURN_REVERSAL',
+              referenceId: document.id,
+              referenceNumber: document.invoiceNumber,
+              createdBy: userId,
+            },
+          });
+        }
         await tx.stockBalance.upsert({
           where: {
             companyId_branchId_itemId: {

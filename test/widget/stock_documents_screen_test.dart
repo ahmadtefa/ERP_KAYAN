@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -84,6 +88,7 @@ class _DocumentsApi extends ApiClient {
     // Answered before `queries` is recorded on purpose: `queries` is the list
     // of stock-document reads, and the existing test asserts queries.first is
     // the documents query. A warehouse lookup is not a document read.
+    if (path == '/inventory/locations') { final wh=query?['warehouseId'];return [{'id':wh=='wh-main'?'source-shelf':'target-shelf','warehouseId':wh,'code':wh=='wh-main'?'A-01':'Z-01','nameEn':'Shelf','nameAr':'رف','isActive':true}]; }
     if (path == '/inventory/warehouses') {
       if (noWarehouses) return const [];
       return [
@@ -163,6 +168,7 @@ Finder tableText(String value) => find.byWidgetPredicate(
 );
 
 void main() {
+  final visualKey=GlobalKey();
   Future<void> pump(
     WidgetTester tester,
     _DocumentsApi api, {
@@ -179,12 +185,13 @@ void main() {
           apiClientProvider.overrideWithValue(api),
           if (user != null) currentUserProvider.overrideWithValue(user),
         ],
-        child: MaterialApp(
+        child: RepaintBoundary(key:visualKey,child: MaterialApp(
+          theme: ThemeData(fontFamily: 'IBMPlexSansArabic'),
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: const Scaffold(body: StockDocumentsScreen()),
-        ),
+        )),
       ),
     );
     await tester.pumpAndSettle();
@@ -359,6 +366,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add at least one line.'), findsOneWidget);
     expect(api.posts, isEmpty);
+  });
+
+  testWidgets('transfer draft selects source and target shelves in their own stores', (tester) async {
+    await tester.runAsync(() async {await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();});
+    await tester.runAsync(() async {await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();});
+    final api=_DocumentsApi();await pump(tester,api,user:const AppUser(id:'u2',username:'u2',fullName:'Manager',companyId:'c1',permissions:['inventory.stock.adjust']));
+    await tester.tap(find.text('New document'));await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'Kind'));await tester.pumpAndSettle();await tester.tap(find.text('Transfer').last);await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'To store'));await tester.pumpAndSettle();await tester.tap(find.text('Second store').last);await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('stock-document-barcode')),'CARTON');await tester.testTextInput.receiveAction(TextInputAction.done);await tester.pumpAndSettle();
+    Future<void> pick(String button,String option) async {await tester.tap(find.text(button));await tester.pumpAndSettle();await tester.tap(find.widgetWithText(DropdownButtonFormField<String>,'Location'));await tester.pumpAndSettle();await tester.tap(find.text(option).last);await tester.pumpAndSettle();await tester.tap(find.text('Apply'));await tester.pumpAndSettle();}
+    await pick('Source location: not selected','A-01 • Shelf');await pick('Destination location: unlocated','Z-01 • Shelf');
+    final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;await tester.runAsync(() async {final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/stock-document-transfer.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();});
+    await tester.tap(find.text('Create'));await tester.pumpAndSettle();final line=(api.posts.single['lines'] as List).single as Map;expect(line['storageLocationId'],'source-shelf');expect(line['toStorageLocationId'],'target-shelf');expect(line['quantity'],'1');expect(line['unitName'],'carton');expect(tester.takeException(),isNull);
   });
 
   testWidgets('a bad quantity is named on its own line, cleared on edit, and a server refusal lands there too', (tester) async {

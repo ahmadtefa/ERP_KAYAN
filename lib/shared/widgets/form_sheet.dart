@@ -544,6 +544,7 @@ class _FormSheetState extends State<_FormSheet> {
               decoration: InputDecoration(
                 labelText: field.label,
                 helperText: field.helper,
+                helperMaxLines: 4,
               ),
               validator: (value) {
                 final serverError = _fieldErrors[field.key];
@@ -573,6 +574,7 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
+              helperMaxLines: 4,
             ),
             items: [
               for (final option in field.options)
@@ -702,6 +704,7 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
+              helperMaxLines: 4,
               suffixIcon:
                   field.clearable &&
                       !widget.readOnly &&
@@ -749,6 +752,7 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
+              helperMaxLines: 4,
             ),
             validator: (value) => _validate(field, value),
             onChanged: (_) => setState(() => _fieldErrors.remove(field.key)),

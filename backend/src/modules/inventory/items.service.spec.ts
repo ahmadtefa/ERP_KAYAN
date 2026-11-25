@@ -30,6 +30,7 @@ function build() {
     itemUnit: { create: jest.fn().mockResolvedValue({}) },
     stockMovement: { create: jest.fn().mockResolvedValue({}) },
     stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
+    storageLocation: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   const prisma = {
   itemUnit: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -144,6 +145,38 @@ describe('ItemsService opening stock', () => {
         ],
       }),
     );
+  });
+
+  it('puts item opening stock on the chosen shelf of the branch warehouse', async () => {
+    const { service, tx } = build();
+    tx.storageLocation.findFirst.mockResolvedValue({ code: 'A-01', isActive: true, warehouseId: 'warehouse-1' });
+    await service.create('company-1', 'user-1', {
+      code: 'SHELF1', nameEn: 'Shelf item', nameAr: 'صنف', openingQuantity: '5', openingUnitCost: '10',
+      openingStorageLocationId: 'loc-1',
+    }, 'branch-1');
+    expect(tx.stockMovement.create.mock.calls[0][0].data.storageLocationId).toBe('loc-1');
+  });
+
+  it('refuses an opening shelf of another warehouse', async () => {
+    const { service, tx } = build();
+    tx.storageLocation.findFirst.mockResolvedValue({ code: 'A-01', isActive: true, warehouseId: 'other' });
+    await expect(service.create('company-1', 'user-1', {
+      code: 'SHELF3', nameEn: 'Shelf item', nameAr: 'صنف', openingQuantity: '5', openingUnitCost: '10',
+      openingStorageLocationId: 'loc-1',
+    }, 'branch-1')).rejects.toThrow(/A-01.*مخزنًا آخر/s);
+    expect(tx.stockMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses an inactive opening shelf with the location, the fix, and writes nothing', async () => {
+    const { service, tx } = build();
+    tx.storageLocation.findFirst.mockResolvedValue({ code: 'A-01', isActive: false, warehouseId: 'w' });
+    await expect(
+      service.create('company-1', 'user-1', {
+        code: 'SHELF2', nameEn: 'Shelf item', nameAr: 'صنف', openingQuantity: '5', openingUnitCost: '10',
+        openingStorageLocationId: 'loc-1',
+      }, 'branch-1'),
+    ).rejects.toThrow(/A-01.*غير مفعّل/s);
+    expect(tx.stockMovement.create).not.toHaveBeenCalled();
   });
 
   it('refuses half an opening stock pair before writing anything', async () => {

@@ -31,7 +31,7 @@ import {
 } from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
 import { BatchesService } from '../inventory/batches.service';
-import { refreshLotPrimaryLocation } from '../inventory/lot-primary-location';
+import { boundCoverageMissing, legacyIdentityAmbiguous, legacyIdentityError, receiptFor, receiptLotMovements, refreshLotPrimaryLocation, removeFromLotCost } from '../inventory/lot-primary-location';
 import { batchPolicyOf, receiptProblems } from '../../common/warehouse/batch-policy';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -707,6 +707,15 @@ export class PurchaseInvoicesService {
         });
       }
 
+      // One fixed lock order for every item on the document, taken before any
+      // stock row or lot is touched (same key as sales, moves and write-offs).
+      if (warehouseId) {
+        await this.batches.lockItemsStock(
+          tx,
+          warehouseId,
+          invoice.lines.flatMap((l) => (l.itemId ? [l.itemId] : [])),
+        );
+      }
       await this.assertLineShelves(tx, companyId, warehouseId, invoice.lines);
 
       for (const line of invoice.lines) {
@@ -740,7 +749,7 @@ export class PurchaseInvoicesService {
         // such an item would sit in the ledger where no sale could ever take it.
         const policy = batchPolicyOf(item);
         let lotId: string | null = null;
-        if (policy.requiresBatch || line.batchNumber || line.batchExpiryDate || line.batchProductionDate) {
+        if (policy.requiresBatch || policy.requiresProductionDate || policy.requiresExpiryDate || line.batchNumber || line.batchExpiryDate || line.batchProductionDate) {
           if (!warehouseId) {
             throw new BadRequestException({
               code: 'PURCHASE_LOT_NEEDS_WAREHOUSE',
@@ -787,12 +796,15 @@ export class PurchaseInvoicesService {
         }
 
         await tx.stockMovement.create({
+          // sourceLineId needs the regenerated Prisma client; the cast keeps
+          // the file compiling before and after `prisma generate`.
           data: {
             companyId,
             branchId: invoice.branchId,
             warehouseId,
             itemId: item.id,
             batchId: lotId,
+            sourceLineId: line.id,
             storageLocationId: line.storageLocationId ?? null,
             movementDate: invoice.invoiceDate,
             direction: StockDirection.IN,
@@ -803,7 +815,7 @@ export class PurchaseInvoicesService {
             referenceId: invoice.id,
             referenceNumber: invoice.invoiceNumber,
             createdBy: userId,
-          },
+          } as never,
         });
         if (lotId) await refreshLotPrimaryLocation(tx, companyId, lotId, null);
 
@@ -940,6 +952,17 @@ export class PurchaseInvoicesService {
       // The journal claim itself happens inside PostingService.reverse,
       // below, in the same transaction as the stock going back out.
 
+      if (warehouseId) {
+        await this.batches.lockItemsStock(
+          tx,
+          warehouseId,
+          invoice.lines.flatMap((l) => (l.itemId ? [l.itemId] : [])),
+        );
+      }
+
+      // Receipt movements already matched to an earlier line of this reversal,
+      // so two lines of one item (same shelf, same size) take two different receipts.
+      const usedReceipts = new Set<string>();
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
@@ -987,22 +1010,42 @@ export class PurchaseInvoicesService {
         // The receipt went into a lot and onto a shelf; the reversal takes it
         // from exactly those, or says plainly why it cannot.
         let reverseLotId: string | null = null;
-        if (line.batchNumber && warehouseId) {
-          const lot = await tx.itemBatch.findFirst({
-            where: { companyId, warehouseId, itemId: line.itemId, batchNumber: line.batchNumber, deletedAt: null },
-            select: { id: true, remainingQuantity: true },
-          });
+        let reverseLotName: string = line.batchNumber ?? '';
+        if (warehouseId) {
+          // The lot is the one the receipt movement itself recorded. A lot the
+          // system named (dates given, no number) leaves line.batchNumber empty,
+          // so the line cannot identify it; the original IN movement can.
+          const received = await receiptLotMovements(tx, companyId, invoice.id, line.itemId);
+          if (legacyIdentityAmbiguous(received) || boundCoverageMissing(received, line.id)) {
+            throw legacyIdentityError('PURCHASE_REVERSE_LEGACY_AMBIGUOUS', invoice.invoiceNumber, line.lineNumber);
+          }
+          const picked = receiptFor(received, line, 0, usedReceipts);
+          if (picked) usedReceipts.add(picked.id);
+          let lot: { id: string; remainingQuantity: Prisma.Decimal; batchNumber?: string } | null = null;
+          if (picked?.batchId) {
+            lot = await tx.itemBatch.findFirst({
+              where: { id: picked.batchId, companyId },
+              select: { id: true, remainingQuantity: true, batchNumber: true },
+            });
+          } else if (line.batchNumber) {
+            lot = await tx.itemBatch.findFirst({
+              where: { companyId, warehouseId, itemId: line.itemId, batchNumber: line.batchNumber, deletedAt: null },
+              select: { id: true, remainingQuantity: true, batchNumber: true },
+            });
+          }
           if (lot) {
+            reverseLotName = lot.batchNumber ?? reverseLotName;
             if (lot.remainingQuantity.lessThan(line.quantity)) {
               throw new BadRequestException({
                 code: 'PURCHASE_REVERSE_LOT_USED',
                 message:
-                  `لا يمكن عكس السطر ${line.lineNumber}: الدفعة ${line.batchNumber} المتبقي منها ${lot.remainingQuantity.toFixed(MONEY_SCALE)} فقط والمطلوب ${line.quantity.toFixed(MONEY_SCALE)} لأن جزءًا منها بِيع أو نُقل. أرجع مبيعات هذه الدفعة أولًا أو استخدم مرتجع مشتريات بالكمية المتبقية. / ` +
-                  `Cannot reverse line ${line.lineNumber}: lot ${line.batchNumber} has only ${lot.remainingQuantity.toFixed(MONEY_SCALE)} left, not ${line.quantity.toFixed(MONEY_SCALE)}, because part of it was sold or moved. Undo those sales first, or use a purchase return for the remaining quantity.`,
-                errors: { lineNumber: String(line.lineNumber), lot: line.batchNumber.slice(0, 60), remaining: lot.remainingQuantity.toFixed(MONEY_SCALE) },
+                  `لا يمكن عكس السطر ${line.lineNumber}: الدفعة ${reverseLotName} المتبقي منها ${lot.remainingQuantity.toFixed(MONEY_SCALE)} فقط والمطلوب ${line.quantity.toFixed(MONEY_SCALE)} لأن جزءًا منها بِيع أو نُقل. أرجع مبيعات هذه الدفعة أولًا أو استخدم مرتجع مشتريات بالكمية المتبقية. / ` +
+                  `Cannot reverse line ${line.lineNumber}: lot ${reverseLotName} has only ${lot.remainingQuantity.toFixed(MONEY_SCALE)} left, not ${line.quantity.toFixed(MONEY_SCALE)}, because part of it was sold or moved. Undo those sales first, or use a purchase return for the remaining quantity.`,
+                errors: { lineNumber: String(line.lineNumber), lot: reverseLotName.slice(0, 60), remaining: lot.remainingQuantity.toFixed(MONEY_SCALE) },
               });
             }
             reverseLotId = lot.id;
+            if (picked) await removeFromLotCost(tx, lot.id, line.quantity, new Prisma.Decimal(picked.unitCost));
           }
         }
         if (line.storageLocationId && warehouseId) {
@@ -1036,6 +1079,10 @@ export class PurchaseInvoicesService {
               'تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.',
             );
           }
+          await tx.itemBatch.updateMany({
+            where: { id: reverseLotId, remainingQuantity: { lte: 0 }, status: 'OPEN' },
+            data: { status: 'CLOSED' },
+          });
         }
 
         await tx.stockMovement.create({

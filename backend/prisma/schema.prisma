@@ -1153,6 +1153,8 @@ model OpeningBalanceLine {
   customerId       String? @db.Uuid
   supplierId       String? @db.Uuid
   itemId           String? @db.Uuid
+  /// Shelf of the opening warehouse that receives an item line. Null = unlocated.
+  storageLocationId String? @db.Uuid
   debit            Decimal @default(0) @db.Decimal(19, 4)
   credit           Decimal @default(0) @db.Decimal(19, 4)
 
@@ -1416,6 +1418,8 @@ model StockDocumentLine {
   /// and the shelf it sat on. Null on legacy rows.
   batchId           String? @db.Uuid
   storageLocationId String? @db.Uuid
+  /// Transfer only: the shelf of the receiving warehouse. Null means the goods arrive unlocated.
+  toStorageLocationId String? @db.Uuid
 
   document        StockDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
   item            Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -1778,6 +1782,12 @@ model StockMovement {
   /// do not name a lot. A batch movement always names both.
   batchId           String? @db.Uuid
   storageLocationId String? @db.Uuid
+
+  /// The document line this movement was written for (a purchase invoice
+  /// line for a receipt). Lets a reversal or a return find its own receipt
+  /// without guessing from order or size. Null on movements recorded before
+  /// it existed.
+  sourceLineId String? @db.Uuid
 
   referenceType   String  @db.VarChar(32)
   referenceId     String? @db.Uuid
@@ -3167,6 +3177,8 @@ model StockTakeLine {
   sessionId String  @db.Uuid
   itemId    String  @db.Uuid
   batchId   String? @db.Uuid
+  /// The shelf this row counts. Null is the unlocated bucket of the item (and lot).
+  storageLocationId String? @db.Uuid
 
   systemQuantity  Decimal  @default(0) @db.Decimal(19, 4)
   countedQuantity Decimal? @db.Decimal(19, 4)

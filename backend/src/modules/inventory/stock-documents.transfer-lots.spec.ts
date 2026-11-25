@@ -57,6 +57,7 @@ describe('lots on a document transfer', () => {
           if (data.remainingQuantity?.increment) {
             row.remainingQuantity = row.remainingQuantity.plus(data.remainingQuantity.increment);
           }
+          if (data.unitCost !== undefined) row.unitCost = data.unitCost;
           return row;
         }),
         updateMany: jest.fn(async ({ where, data }: any) => {
@@ -157,6 +158,19 @@ describe('lots on a document transfer', () => {
     expect(state.lots).toHaveLength(2);
     expect(state.lots[1].remainingQuantity.toFixed(4)).toBe('8.0000');
     expect(state.lots[1].receivedQuantity.toFixed(4)).toBe('8.0000');
+  });
+
+  it('re-averages a destination lot by remaining quantity when goods are merged into it', async () => {
+    // 5 left at 6 each, 3 arrive at 12 each: (30 + 36) / 8 = 8.25.
+    const { state, move } = makeService(
+      [lot({})],
+      [lot({ id: 'lot-in-to', warehouseId: TO, receivedQuantity: D('9'), remainingQuantity: D('5'), unitCost: D('6') })],
+    );
+
+    await move(3);
+
+    expect(state.lots[1].remainingQuantity.toFixed(4)).toBe('8.0000');
+    expect(state.lots[1].unitCost.toFixed(4)).toBe('8.2500');
   });
 
   it('takes the soonest expiry first and splits a transfer across two lots', async () => {

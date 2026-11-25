@@ -141,9 +141,8 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
             ColumnSpec(
               _arabic ? 'البنود' : 'Lines',
               numeric: true,
-              value: (r) => r['lineCount'] == null
-                  ? '—'
-                  : asString(r['lineCount'])!,
+              value: (r) =>
+                  r['lineCount'] == null ? '—' : asString(r['lineCount'])!,
             ),
             ColumnSpec(
               _arabic ? 'تاريخ الفتح' : 'Opened',
@@ -162,7 +161,6 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
     );
   }
 
-
   Future<void> _start() async {
     if (_starting) return;
     setState(() => _starting = true);
@@ -171,7 +169,13 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
       final warehouses = await client.getList('/inventory/warehouses');
       if (!mounted) return;
       if (warehouses.isEmpty) {
-        showMessage(context, _arabic ? 'لا توجد مستودعات نشطة.' : 'No active warehouses are available.', error: true);
+        showMessage(
+          context,
+          _arabic
+              ? 'لا توجد مستودعات نشطة.'
+              : 'No active warehouses are available.',
+          error: true,
+        );
         return;
       }
       List<Json> items = const [];
@@ -209,30 +213,49 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                 children: [
                   DropdownButtonFormField<String>(
                     initialValue: warehouseId,
-                    decoration: InputDecoration(labelText: _arabic ? 'المستودع' : 'Warehouse'),
+                    decoration: InputDecoration(
+                      labelText: _arabic ? 'المستودع' : 'Warehouse',
+                    ),
                     items: [
                       for (final warehouse in warehouses)
                         DropdownMenuItem(
                           value: text(warehouse, 'id'),
-                          child: Text('${text(warehouse, 'code')} — ${_arabic ? text(warehouse, 'nameAr', fallback: text(warehouse, 'nameEn')) : text(warehouse, 'nameEn', fallback: text(warehouse, 'nameAr'))}'),
+                          child: Text(
+                            '${text(warehouse, 'code')} — ${_arabic ? text(warehouse, 'nameAr', fallback: text(warehouse, 'nameEn')) : text(warehouse, 'nameEn', fallback: text(warehouse, 'nameAr'))}',
+                          ),
                         ),
                     ],
-                    onChanged: (value) => setDialogState(() => warehouseId = value ?? warehouseId),
+                    onChanged: (value) => setDialogState(
+                      () => warehouseId = value ?? warehouseId,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SegmentedButton<String>(
                     segments: [
-                      ButtonSegment(value: 'FULL', label: Text(_arabic ? 'كامل' : 'Full')),
-                      ButtonSegment(value: 'PARTIAL', label: Text(_arabic ? 'جزئي' : 'Partial')),
+                      ButtonSegment(
+                        value: 'FULL',
+                        label: Text(_arabic ? 'كامل' : 'Full'),
+                      ),
+                      ButtonSegment(
+                        value: 'PARTIAL',
+                        label: Text(_arabic ? 'جزئي' : 'Partial'),
+                      ),
                     ],
                     selected: {scope},
-                    onSelectionChanged: (values) => setDialogState(() => scope = values.first),
+                    onSelectionChanged: (values) =>
+                        setDialogState(() => scope = values.first),
                   ),
                   const SizedBox(height: 8),
                   if (scope == 'PARTIAL')
                     Expanded(
                       child: items.isEmpty
-                          ? Center(child: Text(_arabic ? 'تعذر تحميل الأصناف.' : 'No items could be loaded.'))
+                          ? Center(
+                              child: Text(
+                                _arabic
+                                    ? 'تعذر تحميل الأصناف.'
+                                    : 'No items could be loaded.',
+                              ),
+                            )
                           : ListView.builder(
                               itemCount: items.length,
                               itemBuilder: (context, index) {
@@ -241,9 +264,15 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                                 return CheckboxListTile(
                                   dense: true,
                                   value: selected.contains(id),
-                                  title: Text('${text(item, 'code')} — ${_arabic ? text(item, 'nameAr', fallback: text(item, 'nameEn')) : text(item, 'nameEn', fallback: text(item, 'nameAr'))}'),
+                                  title: Text(
+                                    '${text(item, 'code')} — ${_arabic ? text(item, 'nameAr', fallback: text(item, 'nameEn')) : text(item, 'nameEn', fallback: text(item, 'nameAr'))}',
+                                  ),
                                   onChanged: (value) => setDialogState(() {
-                                    if (value == true) { selected.add(id); } else { selected.remove(id); }
+                                    if (value == true) {
+                                      selected.add(id);
+                                    } else {
+                                      selected.remove(id);
+                                    }
                                   }),
                                 );
                               },
@@ -253,20 +282,27 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                     const Spacer(),
                   TextField(
                     onChanged: (value) => notes = value,
-                    decoration: InputDecoration(labelText: _arabic ? 'ملاحظات' : 'Notes'),
+                    decoration: InputDecoration(
+                      labelText: _arabic ? 'ملاحظات' : 'Notes',
+                    ),
                   ),
                 ],
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_arabic ? 'إلغاء' : 'Cancel')),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(_arabic ? 'إلغاء' : 'Cancel'),
+              ),
               FilledButton(
-                onPressed: scope == 'PARTIAL' && selected.isEmpty ? null : () => Navigator.pop(dialogContext, {
-                  'warehouseId': warehouseId,
-                  'scope': scope,
-                  if (scope == 'PARTIAL') 'itemIds': selected.toList(),
-                  if (notes.trim().isNotEmpty) 'notes': notes.trim(),
-                }),
+                onPressed: scope == 'PARTIAL' && selected.isEmpty
+                    ? null
+                    : () => Navigator.pop(dialogContext, {
+                        'warehouseId': warehouseId,
+                        'scope': scope,
+                        if (scope == 'PARTIAL') 'itemIds': selected.toList(),
+                        if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+                      }),
                 child: Text(_arabic ? 'فتح الجرد' : 'Open count'),
               ),
             ],
@@ -277,7 +313,12 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
       final created = await client.post('/inventory/stock-takes', body: draft);
       await ref.read(stockTakesProvider.notifier).refreshQuietly();
       if (!mounted) return;
-      showMessage(context, _arabic ? 'تم فتح الجرد وتجميد أرصدة النظام.' : 'Count opened; system quantities are frozen.');
+      showMessage(
+        context,
+        _arabic
+            ? 'تم فتح الجرد وتجميد أرصدة النظام.'
+            : 'Count opened; system quantities are frozen.',
+      );
       if (created['id'] is String) await _openSession({'id': created['id']});
     } catch (error) {
       if (mounted) showMessage(context, error, error: true);
@@ -290,7 +331,9 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
     final id = text(row, 'id');
     if (id.isEmpty) return;
     try {
-      final session = await ref.read(apiClientProvider).getObject('/inventory/stock-takes/$id');
+      final session = await ref
+          .read(apiClientProvider)
+          .getObject('/inventory/stock-takes/$id');
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -298,10 +341,22 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
           session: session,
           arabic: _arabic,
           userId: ref.read(currentUserProvider)?.id ?? '',
-          canCount: ref.read(currentUserProvider)?.can('inventory.stocktake.count') ?? false,
-          canApprove: ref.read(currentUserProvider)?.can('inventory.stocktake.approve') ?? false,
-          canPost: ref.read(currentUserProvider)?.can('inventory.stocktake.post') ?? false,
-          canCancel: ref.read(currentUserProvider)?.can('inventory.stocktake.create') ?? false,
+          canCount:
+              ref.read(currentUserProvider)?.can('inventory.stocktake.count') ??
+              false,
+          canApprove:
+              ref
+                  .read(currentUserProvider)
+                  ?.can('inventory.stocktake.approve') ??
+              false,
+          canPost:
+              ref.read(currentUserProvider)?.can('inventory.stocktake.post') ??
+              false,
+          canCancel:
+              ref
+                  .read(currentUserProvider)
+                  ?.can('inventory.stocktake.create') ??
+              false,
           api: ref.read(apiClientProvider),
           onChanged: _refreshAfterAction,
         ),
@@ -425,7 +480,6 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
   }
 }
 
-
 class _StockTakeDetailDialog extends StatefulWidget {
   const _StockTakeDetailDialog({
     required this.session,
@@ -502,6 +556,24 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   bool get _ar => widget.arabic;
   String _t(String ar, String en) => _ar ? ar : en;
 
+  String _locationLabel(Json line) {
+    final id = text(line, 'storageLocationId');
+    if (id.isEmpty) return _t('بدون موقع محدد', 'Unlocated stock');
+    final code = text(line, 'storageLocationCode', fallback: id);
+    final name = _ar
+        ? text(
+            line,
+            'storageLocationNameAr',
+            fallback: text(line, 'storageLocationNameEn'),
+          )
+        : text(
+            line,
+            'storageLocationNameEn',
+            fallback: text(line, 'storageLocationNameAr'),
+          );
+    return name.isEmpty ? code : '$code - $name';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -536,8 +608,8 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
   Future<void> _scanCountBarcode(String rawCode) async {
     final code = rawCode.trim();
     if (code.isEmpty || _busy) return;
-    final editable = widget.canCount &&
-        text(_session, 'status').toUpperCase() == 'COUNTING';
+    final editable =
+        widget.canCount && text(_session, 'status').toUpperCase() == 'COUNTING';
     if (!editable) {
       _barcode.clear();
       return;
@@ -661,8 +733,8 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
                     _t(
-                      'باركود ${match.itemCode} يتبع أكثر من دفعة، والملصق لا يحدد أيها. اختر الدفعة التي أمامك.',
-                      'Barcode ${match.itemCode} covers more than one batch and the label does not say which. Choose the batch in front of you.',
+                      'باركود ${match.itemCode} يتبع أكثر من موقع أو دفعة. اختر الموقع والدفعة الموجودين أمامك.',
+                      'Barcode ${match.itemCode} covers more than one location or batch. Choose the location and batch in front of you.',
                     ),
                   ),
                 ),
@@ -674,7 +746,7 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                       '${_t('الدفعة', 'Batch')}: ${text(line, 'batchNumber', fallback: '—')}',
                     ),
                     subtitle: Text(
-                      '${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity', fallback: '0')}',
+                      '${_locationLabel(line)} | ${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity', fallback: '0')}',
                     ),
                     onTap: () => Navigator.of(dialogContext).pop(line),
                   ),
@@ -710,11 +782,164 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     return quantityAfterScan(current: previous, sameSelection: true);
   }
 
+  Future<void> _addLocation() async {
+    if (_busy) return;
+    List<Json> locations;
+    try {
+      locations =
+          (await widget.api.getList(
+                '/inventory/locations',
+                query: {'warehouseId': text(_session, 'warehouseId')},
+              ))
+              .where(
+                (r) =>
+                    text(r, 'warehouseId') == text(_session, 'warehouseId') &&
+                    r['isActive'] == true &&
+                    r['deletedAt'] == null,
+              )
+              .toList();
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    final choices = <String, Json>{};
+    for (final line in listOf(_session['lines'])) {
+      choices['${text(line, 'itemId')}|${text(line, 'batchId')}'] = line;
+    }
+    String? selected;
+    String? locationId;
+    String? error;
+    var saving = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialog) => AlertDialog(
+          title: Text(_t('إضافة موقع للجرد', 'Add count location')),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _t(
+                      'يبدأ الموقع بكمية نظام صفر. عند توزيع رصيد بلا موقع، قلّل سطره بنفس الكمية حتى لا تزيد إجمالي المخزون.',
+                      'The new location starts at zero system quantity. When assigning unlocated stock, lower its old row by the same quantity to avoid adding stock.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: _t('الصنف والدفعة', 'Item and batch'),
+                    ),
+                    items: [
+                      for (final entry in choices.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(
+                            '${text(entry.value, 'itemCode')} | ${text(entry.value, 'batchNumber', fallback: 'No lot')}',
+                          ),
+                        ),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) => setDialog(() => selected = value),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: _t('الموقع', 'Location'),
+                    ),
+                    items: [
+                      for (final row in locations)
+                        DropdownMenuItem(
+                          value: text(row, 'id'),
+                          child: Text(
+                            '${text(row, 'code')} - ${_ar ? text(row, 'nameAr', fallback: text(row, 'nameEn')) : text(row, 'nameEn', fallback: text(row, 'nameAr'))}',
+                          ),
+                        ),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) => setDialog(() => locationId = value),
+                  ),
+                  if (locations.isEmpty)
+                    Text(
+                      _t(
+                        'لا توجد مواقع نشطة. أضف موقعًا في مخزن الجرد ثم أعد المحاولة.',
+                        'No active locations. Add a location in this warehouse and try again.',
+                      ),
+                    ),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
+              child: Text(_t('إلغاء', 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: saving || selected == null || locationId == null
+                  ? null
+                  : () async {
+                      setDialog(() => saving = true);
+                      try {
+                        final line = choices[selected]!;
+                        final result = await widget.api.post(
+                          '/inventory/stock-takes/${text(_session, 'id')}/locations',
+                          body: {
+                            'itemId': text(line, 'itemId'),
+                            'batchId': line['batchId'],
+                            'storageLocationId': locationId,
+                          },
+                        );
+                        if (!mounted || !dialogContext.mounted) return;
+                        setState(() => _session = result);
+                        Navigator.pop(dialogContext);
+                        await widget.onChanged('locations');
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          setDialog(() {
+                            error = _t(
+                              'تعذرت إضافة الموقع. راجع الصنف والدفعة والموقع وحالة الجرد؛ إدخالاتك محفوظة.',
+                              'Location was not added. Check the item, batch, location and count status; your input is kept.',
+                            );
+                            saving = false;
+                          });
+                        }
+                      }
+                    },
+              child: Text(_t('إضافة موقع', 'Add location')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _act(String suffix, {Object? body, String? success}) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final result = await widget.api.post('/inventory/stock-takes/${text(_session, 'id')}/$suffix', body: body);
+      final result = await widget.api.post(
+        '/inventory/stock-takes/${text(_session, 'id')}/$suffix',
+        body: body,
+      );
       if (result.isNotEmpty && result.containsKey('lines')) {
         _session = result;
       } else {
@@ -757,7 +982,15 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
       });
     });
     if (rest.isEmpty) return null;
-    return ApiFailure(error.message, statusCode: error.statusCode, code: error.code, fieldErrors: rest, userAction: error.userAction, requestId: error.requestId, cause: error.cause);
+    return ApiFailure(
+      error.message,
+      statusCode: error.statusCode,
+      code: error.code,
+      fieldErrors: rest,
+      userAction: error.userAction,
+      requestId: error.requestId,
+      cause: error.cause,
+    );
   }
 
   Future<void> _approveWithConfirmation() async {
@@ -799,11 +1032,16 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
         title: Text(_t('إلغاء الجرد', 'Cancel stock take')),
         content: TextField(
           onChanged: (value) => reason = value,
-          decoration: InputDecoration(labelText: _t('سبب الإلغاء', 'Cancellation reason')),
+          decoration: InputDecoration(
+            labelText: _t('سبب الإلغاء', 'Cancellation reason'),
+          ),
           maxLines: 2,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(_t('رجوع', 'Back'))),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(_t('رجوع', 'Back')),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, reason.trim()),
             child: Text(_t('تأكيد الإلغاء', 'Confirm cancellation')),
@@ -812,7 +1050,11 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
       ),
     );
     if (value == null || !mounted) return;
-    await _act('cancel', body: {'reason': value}, success: _t('تم إلغاء الجرد.', 'Count cancelled.'));
+    await _act(
+      'cancel',
+      body: {'reason': value},
+      success: _t('تم إلغاء الجرد.', 'Count cancelled.'),
+    );
   }
 
   Future<void> _save({required bool finish}) async {
@@ -823,12 +1065,20 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
       final id = text(line, 'id');
       final raw = _counts[id] ?? text(line, 'countedQuantity');
       if (raw.trim().isEmpty) {
-        if (finish) errors[id] = _t('أدخل الكمية المعدودة قبل الإنهاء.', 'Enter the counted quantity before finishing.');
+        if (finish) {
+          errors[id] = _t(
+            'أدخل الكمية المعدودة قبل الإنهاء.',
+            'Enter the counted quantity before finishing.',
+          );
+        }
         continue;
       }
       final value = double.tryParse(raw.trim());
       if (value == null || !value.isFinite || value < 0) {
-        errors[id] = _t('أدخل رقمًا صحيحًا لا يقل عن صفر.', 'Enter a number that is zero or more.');
+        errors[id] = _t(
+          'أدخل رقمًا صحيحًا لا يقل عن صفر.',
+          'Enter a number that is zero or more.',
+        );
         continue;
       }
       // The figure and the unit it was counted in travel together. Without
@@ -849,11 +1099,27 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     });
     if (errors.isNotEmpty) return;
     if (payload.isEmpty) {
-      showMessage(context, _t('أدخل كمية معدودة واحدة على الأقل.', 'Enter at least one counted quantity.'), error: true);
+      showMessage(
+        context,
+        _t(
+          'أدخل كمية معدودة واحدة على الأقل.',
+          'Enter at least one counted quantity.',
+        ),
+        error: true,
+      );
       return;
     }
     _payloadLineIds = ids;
-    await _act('count', body: {'lines': payload, 'finish': finish}, success: finish ? _t('تم إنهاء العد وإرساله للمراجعة.', 'Count finished and sent for review.') : _t('تم حفظ العد.', 'Count saved.'));
+    await _act(
+      'count',
+      body: {'lines': payload, 'finish': finish},
+      success: finish
+          ? _t(
+              'تم إنهاء العد وإرساله للمراجعة.',
+              'Count finished and sent for review.',
+            )
+          : _t('تم حفظ العد.', 'Count saved.'),
+    );
   }
 
   @override
@@ -863,34 +1129,50 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
     final openedByMe = text(_session, 'createdBy') == widget.userId;
     final editable = widget.canCount && status == 'COUNTING';
     return AlertDialog(
-      title: Text('${text(_session, 'code')} — ${_t('تفاصيل الجرد', 'Stock take details')}'),
+      title: Text(
+        '${text(_session, 'code')} — ${_t('تفاصيل الجرد', 'Stock take details')}',
+      ),
       content: SizedBox(
         width: 1000,
         height: 560,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              Chip(
-                label: Text(
-                  "${_t('المستودع', 'Warehouse')}: "
-                  "${_ar ? text(_session, 'warehouseNameAr', fallback: text(_session, 'warehouseNameEn')) : text(_session, 'warehouseNameEn', fallback: text(_session, 'warehouseNameAr'))}",
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Chip(
+                  label: Text(
+                    "${_t('المستودع', 'Warehouse')}: "
+                    "${_ar ? text(_session, 'warehouseNameAr', fallback: text(_session, 'warehouseNameEn')) : text(_session, 'warehouseNameEn', fallback: text(_session, 'warehouseNameAr'))}",
+                  ),
                 ),
-              ),
-              Chip(
-                label: Text(
-                  "${_t('الحالة', 'Status')}: ${text(_session, 'status')}",
+                Chip(
+                  label: Text(
+                    "${_t('الحالة', 'Status')}: ${text(_session, 'status')}",
+                  ),
                 ),
-              ),
-              Chip(
-                label: Text("${_t('البنود', 'Lines')}: ${lines.length}"),
-              ),
-              Chip(
-                label: Text(
-                  "${_t('الفروق', 'Variances')}: ${text(_session, 'varianceCount', fallback: '0')}",
+                Chip(label: Text("${_t('البنود', 'Lines')}: ${lines.length}")),
+                Chip(
+                  label: Text(
+                    "${_t('الفروق', 'Variances')}: ${text(_session, 'varianceCount', fallback: '0')}",
+                  ),
                 ),
-              ),
-            ]),
+                if (_session.containsKey('assignedQuantity'))
+                  Chip(
+                    label: Text(
+                      '${_t('توزيع دون زيادة مخزون', 'Assigned, no added stock')}: ${text(_session, 'assignedQuantity')}',
+                    ),
+                  ),
+                if (_session.containsKey('realVarianceValue'))
+                  Chip(
+                    label: Text(
+                      '${_t('قيمة الفرق الفعلي', 'Real variance value')}: ${text(_session, 'realVarianceValue')}',
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 8),
             // Scanning a shelf label finds the line it belongs to and raises
             // its count by one, so the counter never hunts for a row in a long
@@ -901,11 +1183,23 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                 key: const ValueKey('stock-take-barcode'),
                 controller: _barcode,
                 arabic: _ar,
-                label: _t('امسح باركود الصنف للعد', 'Scan an item barcode to count it'),
+                label: _t(
+                  'امسح باركود الصنف للعد',
+                  'Scan an item barcode to count it',
+                ),
                 enabled: editable && !_busy,
                 onSubmitted: _scanCountBarcode,
               ),
             ),
+            if (editable)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton.icon(
+                  onPressed: _busy ? null : _addLocation,
+                  icon: const Icon(Icons.add_location_alt_outlined),
+                  label: Text(_t('إضافة موقع للجرد', 'Add count location')),
+                ),
+              ),
             const SizedBox(height: 8),
             Expanded(
               child: lines.isEmpty
@@ -918,54 +1212,102 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
                         return Card(
                           child: Padding(
                             padding: const EdgeInsets.all(8),
-                            child: Row(children: [
-                              Expanded(flex: 4, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('${text(line, 'itemCode')} — ${_ar ? text(line, 'itemNameAr', fallback: text(line, 'itemNameEn')) : text(line, 'itemNameEn', fallback: text(line, 'itemNameAr'))}', style: Theme.of(context).textTheme.titleSmall),
-                                Text('${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity')}  •  ${_t('الدفعة', 'Batch')}: ${text(line, 'batchNumber', fallback: '—')}'),
-                                Text('${_t('الفرق', 'Variance')}: ${text(line, 'varianceQuantity')}  •  ${_t('القيمة', 'Value')}: ${text(line, 'varianceValue')}'),
-                              ])),
-                              // The key carries the current figure, so a scan (or
-                              // a save that answers with a new one) recreates the
-                              // field with that value instead of leaving the old
-                              // text in the box.
-                              SizedBox(width: 150, child: TextFormField(
-                                key: ValueKey(
-                                  'count-$id-${_counts[id] ?? text(line, 'countedQuantity')}',
-                                ),
-                                initialValue:
-                                    _counts[id] ?? text(line, 'countedQuantity'),
-                                enabled: editable && !_busy,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: InputDecoration(
-                                  labelText: _t('الكمية المعدودة', 'Counted qty'),
-                                  isDense: true,
-                                  // The unit the figure is counted in, so "1"
-                                  // next to "قطعة" is not mistaken for a carton.
-                                  suffixText: _scanUnits[id],
-                                  filled: _lastScannedLineId == id,
-                                  errorText: _lineErrors[id],
-                                ),
-                                onChanged: (value) {
-                                  _counts[id] = value;
-                                  if (_lineErrors.containsKey(id)) setState(() => _lineErrors.remove(id));
-                                },
-                              )),
-                              // What the counted figure means in base units: the
-                              // exact number the frozen system figure is compared
-                              // with. Shown, never posted - the server converts
-                              // once, from the unit sent with the count.
-                              if (_scanUnits[id] != null)
-                                Padding(
-                                  padding: const EdgeInsetsDirectional.only(start: 8),
-                                  child: SizedBox(
-                                    width: 140,
-                                    child: Text(
-                                      _baseEquivalentFor(line, _counts[id] ?? text(line, 'countedQuantity')),
-                                      style: Theme.of(context).textTheme.bodySmall,
-                                    ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 4,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${text(line, 'itemCode')} — ${_ar ? text(line, 'itemNameAr', fallback: text(line, 'itemNameEn')) : text(line, 'itemNameEn', fallback: text(line, 'itemNameAr'))}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall,
+                                      ),
+                                      Text(
+                                        '${_t('كمية النظام', 'System')}: ${text(line, 'systemQuantity')}  •  ${_t('الدفعة', 'Batch')}: ${text(line, 'batchNumber', fallback: '—')}',
+                                      ),
+                                      Text(
+                                        '${_t('الموقع', 'Location')}: ${_locationLabel(line)}',
+                                        key: ValueKey('count-location-$id'),
+                                      ),
+                                      Text(
+                                        '${_t('الفرق', 'Variance')}: ${text(line, 'varianceQuantity')}  •  ${_t('القيمة', 'Value')}: ${text(line, 'varianceValue')}',
+                                      ),
+                                      if (line.containsKey(
+                                        'assignmentQuantity',
+                                      ))
+                                        Text(
+                                          '${_t('توزيع موقع', 'Location assignment')}: ${text(line, 'assignmentQuantity')} | ${_t('الفرق الفعلي', 'Real variance')}: ${text(line, 'realVarianceQuantity')}',
+                                        ),
+                                    ],
                                   ),
                                 ),
-                            ]),
+                                // The key carries the current figure, so a scan (or
+                                // a save that answers with a new one) recreates the
+                                // field with that value instead of leaving the old
+                                // text in the box.
+                                SizedBox(
+                                  width: 150,
+                                  child: TextFormField(
+                                    key: ValueKey(
+                                      'count-$id-${_counts[id] ?? text(line, 'countedQuantity')}',
+                                    ),
+                                    initialValue:
+                                        _counts[id] ??
+                                        text(line, 'countedQuantity'),
+                                    enabled: editable && !_busy,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    decoration: InputDecoration(
+                                      labelText: _t(
+                                        'الكمية المعدودة',
+                                        'Counted qty',
+                                      ),
+                                      isDense: true,
+                                      // The unit the figure is counted in, so "1"
+                                      // next to "قطعة" is not mistaken for a carton.
+                                      suffixText: _scanUnits[id],
+                                      filled: _lastScannedLineId == id,
+                                      errorText: _lineErrors[id],
+                                    ),
+                                    onChanged: (value) {
+                                      _counts[id] = value;
+                                      if (_lineErrors.containsKey(id)) {
+                                        setState(() => _lineErrors.remove(id));
+                                      }
+                                    },
+                                  ),
+                                ),
+                                // What the counted figure means in base units: the
+                                // exact number the frozen system figure is compared
+                                // with. Shown, never posted - the server converts
+                                // once, from the unit sent with the count.
+                                if (_scanUnits[id] != null)
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      start: 8,
+                                    ),
+                                    child: SizedBox(
+                                      width: 140,
+                                      child: Text(
+                                        _baseEquivalentFor(
+                                          line,
+                                          _counts[id] ??
+                                              text(line, 'countedQuantity'),
+                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         );
                       },
@@ -975,16 +1317,41 @@ class _StockTakeDetailDialogState extends State<_StockTakeDetailDialog> {
         ),
       ),
       actions: [
-        if (editable) OutlinedButton(onPressed: _busy ? null : () => _save(finish: false), child: Text(_t('حفظ العد', 'Save count'))),
-        if (editable) FilledButton(onPressed: _busy ? null : () => _save(finish: true), child: Text(_t('إنهاء وإرسال للمراجعة', 'Finish & review'))),
+        if (editable)
+          OutlinedButton(
+            onPressed: _busy ? null : () => _save(finish: false),
+            child: Text(_t('حفظ العد', 'Save count')),
+          ),
+        if (editable)
+          FilledButton(
+            onPressed: _busy ? null : () => _save(finish: true),
+            child: Text(_t('إنهاء وإرسال للمراجعة', 'Finish & review')),
+          ),
         if (widget.canApprove && !openedByMe && status == 'REVIEW')
-          FilledButton.tonal(onPressed: _busy ? null : _approveWithConfirmation, child: Text(_t('اعتماد', 'Approve'))),
+          FilledButton.tonal(
+            onPressed: _busy ? null : _approveWithConfirmation,
+            child: Text(_t('اعتماد', 'Approve')),
+          ),
         if (widget.canPost && status == 'APPROVED')
-          FilledButton(onPressed: _busy ? null : _postWithConfirmation, child: Text(_t('ترحيل', 'Post'))),
+          FilledButton(
+            onPressed: _busy ? null : _postWithConfirmation,
+            child: Text(_t('ترحيل', 'Post')),
+          ),
         if (widget.canCancel && (status == 'COUNTING' || status == 'REVIEW'))
-          OutlinedButton(onPressed: _busy ? null : _cancelWithReason, child: Text(_t('إلغاء الجرد', 'Cancel count'))),
-        if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_t('إغلاق', 'Close'))),
+          OutlinedButton(
+            onPressed: _busy ? null : _cancelWithReason,
+            child: Text(_t('إلغاء الجرد', 'Cancel count')),
+          ),
+        if (_busy)
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: Text(_t('إغلاق', 'Close')),
+        ),
       ],
     );
   }

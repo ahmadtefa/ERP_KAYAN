@@ -184,9 +184,11 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
       ),
     },
     stockDocumentLine: { update: jest.fn(async (_args: { where: { id: string }; data: { unitCost: Prisma.Decimal } }) => ({})) },
+    $executeRaw: jest.fn(async () => 0),
     $queryRaw: jest.fn(async (query: Prisma.Sql) => {
       const text = query.sql.replace(/"/g, '');
       const values = query.values as unknown[];
+      if (text.includes('JOIN storage_locations')) return [];
       if (text.includes('FROM warehouses')) {
         const warehouseId = String(values[0]);
         await acquireLock(warehouseId);

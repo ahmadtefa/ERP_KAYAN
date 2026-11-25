@@ -76,6 +76,9 @@ export interface ReceiveLotInput {
 }
 
 export interface IssueInput {
+  /// The document line this issue is for (a sales invoice line), stored on
+  /// the OUT movement so a return can find its own source.
+  sourceLineId?: string | null;
   branchId: string;
   /// Null only when the branch has no warehouse defined at all; the sale then
   /// issues the way it did before warehouses existed.
@@ -145,6 +148,11 @@ export interface TransferInput {
   quantity: QuantityInput;
   reason?: string | null;
   documentDate?: string | null;
+  /// Shelf the goods leave in the source warehouse. Required when the lot has
+  /// located stock there.
+  fromStorageLocationId?: string | null;
+  /// Optional shelf the goods land on in the destination warehouse.
+  toStorageLocationId?: string | null;
 }
 
 export type QuantityInput = string | number | Prisma.Decimal;
@@ -564,8 +572,10 @@ export class BatchesService {
           // The lot keeps the average of what it actually cost.
           unitCost: movingAverage(
             {
-              quantity: existing.receivedQuantity,
-              value: existing.receivedQuantity.mul(existing.unitCost),
+              // weighted by what is still on hand: units already sold or
+              // reversed out no longer carry any of the lot's cost
+              quantity: existing.remainingQuantity,
+              value: existing.remainingQuantity.mul(existing.unitCost),
             },
             { quantity: lot.quantity, value: lot.quantity.mul(lot.unitCost) },
           ).unitCost.toDecimalPlaces(MONEY_SCALE),
@@ -1001,6 +1011,7 @@ export class BatchesService {
             warehouseId: warehouse.id,
             itemId: item.id,
             batchId: allocation.batchId,
+            ...(input.sourceLineId ? ({ sourceLineId: input.sourceLineId } as object) : {}),
             storageLocationId: input.storageLocationId ?? null,
             movementDate: input.documentDate ? dayOnly(input.documentDate) : today,
             direction: StockDirection.OUT,
@@ -1139,6 +1150,7 @@ export class BatchesService {
         branchId: warehouse.branchId,
         warehouseId: warehouse.id,
         itemId: item.id,
+        ...(input.sourceLineId ? ({ sourceLineId: input.sourceLineId } as object) : {}),
         storageLocationId: input.storageLocationId ?? null,
         movementDate: today,
         direction: StockDirection.OUT,
@@ -1438,6 +1450,52 @@ export class BatchesService {
     const date = input.documentDate ? dayOnly(input.documentDate) : dayOnly(new Date());
 
     return this.prisma.$transaction(async (tx) => {
+      // Both warehouses' item locks, in one fixed order, before anything is read.
+      for (const key of [`${from.id}:${batch.itemId}`, `${to.id}:${batch.itemId}`].sort()) {
+        const [w, i] = key.split(':');
+        await this.lockItemStock(tx, w, i);
+      }
+      const fromShelf = input.fromStorageLocationId || null;
+      if (fromShelf) {
+        await this.requireLocationForIssue(tx, companyId, from.id, fromShelf);
+        const here = (await this.lotQuantitiesAt(tx, companyId, from.id, batch.itemId, fromShelf)).get(batch.id) ?? new Prisma.Decimal(0);
+        if (here.lessThan(quantity)) {
+          throw new BadRequestException({
+            code: 'TRANSFER_LOCATION_SHORT',
+            message:
+              `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذه الدفعة والمطلوب ${quantity.toFixed(MONEY_SCALE)}. اختر موقعًا آخر أو قلل الكمية؛ بياناتك محفوظة. / ` +
+              `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this lot, not ${quantity.toFixed(MONEY_SCALE)}. Pick another location or lower the quantity; what you entered is kept.`,
+            errors: { available: here.toFixed(MONEY_SCALE), quantity: quantity.toFixed(MONEY_SCALE) },
+          });
+        }
+      } else {
+        const placed = await this.placedRows(tx, companyId, from.id, batch.itemId, batch.id);
+        if (placed.length) {
+          const list = placed.map((r) => `${r.code}: ${r.quantity.toFixed(MONEY_SCALE)}`);
+          throw new BadRequestException({
+            code: 'TRANSFER_LOCATION_REQUIRED',
+            message:
+              `هذه الدفعة موزعة على مواقع (${list.join('، ')}). حدد الموقع الذي تخرج منه البضاعة ثم أعد التحويل؛ بياناتك محفوظة. / ` +
+              `This lot is stored on locations (${list.join(', ')}). Choose the location the goods leave from, then transfer again; what you entered is kept.`,
+            errors: { locations: placed.map((r) => ({ locationId: r.id, code: r.code, quantity: r.quantity.toFixed(MONEY_SCALE) })) },
+          });
+        }
+      }
+      const toShelf = input.toStorageLocationId || null;
+      if (toShelf) {
+        const target = await tx.storageLocation.findFirst({
+          where: { id: toShelf, companyId, warehouseId: to.id, deletedAt: null, isActive: true },
+          select: { id: true },
+        });
+        if (!target) {
+          throw new BadRequestException({
+            code: 'TRANSFER_TARGET_LOCATION_INVALID',
+            message:
+              'موقع الوجهة غير موجود أو غير مفعّل في المخزن المستلم. اختر موقعًا نشطًا من المخزن المستلم أو اتركه فارغًا؛ بياناتك محفوظة. / ' +
+              'The destination location is not an active location of the receiving warehouse. Choose an active location there, or leave it empty; what you entered is kept.',
+          });
+        }
+      }
       const claimed = await tx.itemBatch.updateMany({
         where: { id: batch.id, remainingQuantity: { gte: quantity } },
         data: { remainingQuantity: { decrement: quantity }, updatedBy: userId },
@@ -1470,6 +1528,12 @@ export class BatchesService {
           data: {
             receivedQuantity: { increment: quantity },
             remainingQuantity: { increment: quantity },
+            // What arrives keeps its cost: the lot averages the goods already
+            // there with the goods that came in, weighted by quantity on hand.
+            unitCost: movingAverage(
+              { quantity: destination.remainingQuantity, value: destination.remainingQuantity.mul(destination.unitCost) },
+              { quantity, value: quantity.mul(batch.unitCost) },
+            ).unitCost.toDecimalPlaces(MONEY_SCALE),
             // Merging held goods into a lot that sits OPEN would release them,
             // so the destination copy takes the source state when it is held.
             ...(sourceHold !== 'OPEN' && destination.status === 'OPEN'
@@ -1513,6 +1577,7 @@ export class BatchesService {
             warehouseId: warehouse.id,
             itemId: batch.itemId,
             batchId,
+            storageLocationId: direction === StockDirection.OUT ? fromShelf : toShelf,
             movementDate: date,
             direction,
             quantity,
@@ -1526,6 +1591,9 @@ export class BatchesService {
           },
         });
       }
+
+      await refreshLotPrimaryLocation(tx, companyId, batch.id, null);
+      await refreshLotPrimaryLocation(tx, companyId, destinationId, null);
 
       // Both sides are in the same branch, so the branch book nets to zero
       // while each shelf's own average moves by exactly what the goods were

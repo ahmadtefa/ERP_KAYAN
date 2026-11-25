@@ -91,6 +91,7 @@ class _DraftLine {
       customerId = row?['customerId'] as String?,
       supplierId = row?['supplierId'] as String?,
       itemId = row?['itemId'] as String?,
+      storageLocationId = row?['storageLocationId'] as String?,
       debit = _controller(row?['debit']),
       credit = _controller(row?['credit']),
       quantity = _controller(row?['quantity']),
@@ -101,6 +102,8 @@ class _DraftLine {
   String? customerId;
   String? supplierId;
   String? itemId;
+  String? storageLocationId;
+  String? storageLocationLabel;
   final TextEditingController debit;
   final TextEditingController credit;
   final TextEditingController quantity;
@@ -367,6 +370,8 @@ class _DraftDialogState extends State<_DraftDialog> {
         if (line.supplierId != null) 'supplierId': line.supplierId,
         if (line.itemId != null) ...{
           'itemId': line.itemId,
+          if (line.storageLocationId != null)
+            'storageLocationId': line.storageLocationId,
           'quantity': line.quantity.text.trim(),
           'unitCost': line.unitCost.text.trim(),
         },
@@ -591,9 +596,23 @@ class _DraftDialogState extends State<_DraftDialog> {
                 line.itemId,
                 (id) {
                   line.itemId = id;
+                  line.storageLocationId = null;
                   if (id != null) _chooseAccount(line, accounts, '1104');
                 },
                 optional: true,
+              ),
+            if (line.itemId != null)
+              TextButton.icon(
+                onPressed: _saving ? null : () => _pickShelf(line),
+                icon: const Icon(Icons.shelves),
+                label: Text(
+                  line.storageLocationId == null
+                      ? _label(
+                          'موقع الرصيد: بدون موقع',
+                          'Opening location: unlocated',
+                        )
+                      : '${_label('موقع الرصيد', 'Opening location')}: ${line.storageLocationLabel ?? _label('محدد', 'selected')}',
+                ),
               ),
             Row(
               children: [
@@ -658,6 +677,106 @@ class _DraftDialogState extends State<_DraftDialog> {
     );
   }
 
+  Future<void> _pickShelf(_DraftLine line) async {
+    var warehouse = _warehouse;
+    if (warehouse == null) {
+      final rows = widget.warehouses
+          .where((r) => r['branchId'] == _branch)
+          .toList();
+      rows.sort((a, b) {
+        final d =
+            (b['isDefault'] == true ? 1 : 0) - (a['isDefault'] == true ? 1 : 0);
+        return d != 0 ? d : '${a['code']}'.compareTo('${b['code']}');
+      });
+      if (rows.isNotEmpty) warehouse = rows.first['id'] as String?;
+    }
+    if (warehouse == null) {
+      showMessage(
+        context,
+        _label(
+          'اختر مخزنًا للرصيد أولًا.',
+          'Choose an opening warehouse first.',
+        ),
+        error: true,
+      );
+      return;
+    }
+    try {
+      final rows =
+          (await widget.api.getList(
+                '/inventory/locations',
+                query: {'warehouseId': warehouse},
+              ))
+              .where(
+                (r) =>
+                    r['warehouseId'] == warehouse &&
+                    r['isActive'] == true &&
+                    r['deletedAt'] == null,
+              )
+              .toList();
+      if (!mounted) return;
+      String? selected = line.storageLocationId;
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setPicker) => AlertDialog(
+            title: Text(
+              _label('موقع الرصيد الافتتاحي', 'Opening stock location'),
+            ),
+            content: SizedBox(
+              width: 420,
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: rows.any((r) => r['id'] == selected)
+                    ? selected
+                    : null,
+                decoration: InputDecoration(
+                  labelText: _label('الموقع', 'Location'),
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('Unlocated / بدون موقع'),
+                  ),
+                  for (final row in rows)
+                    DropdownMenuItem(
+                      value: row['id'] as String,
+                      child: Text(
+                        '${row['code']} - ${_label('${row['nameAr'] ?? row['nameEn'] ?? ''}', '${row['nameEn'] ?? row['nameAr'] ?? ''}')}',
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setPicker(() => selected = value),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(_label('إلغاء', 'Cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, selected ?? ''),
+                child: Text(_label('تطبيق', 'Apply')),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (result != null && mounted) {
+        final picked = rows.where((r) => r['id'] == result);
+        _change(() {
+          line.storageLocationId = result.isEmpty ? null : result;
+          line.storageLocationLabel = picked.isEmpty
+              ? null
+              : '${picked.first['code']}';
+          if (result.isNotEmpty) _warehouse = warehouse;
+        });
+      }
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -700,6 +819,9 @@ class _DraftDialogState extends State<_DraftDialog> {
                       : (branch) {
                           _branch = branch;
                           _warehouse = null;
+                          for (final line in _lines) {
+                            line.storageLocationId = null;
+                          }
                         },
                   errorKey: 'branchId',
                 ),
@@ -739,13 +861,12 @@ class _DraftDialogState extends State<_DraftDialog> {
                   onChanged: (_) => _change(() => _errors.remove('asOfDate')),
                 ),
                 if (warehouses.isNotEmpty || _warehouse != null)
-                  _picker(
-                    l10n.warehouse,
-                    warehouses,
-                    _warehouse,
-                    (id) => _warehouse = id,
-                    optional: true,
-                  ),
+                  _picker(l10n.warehouse, warehouses, _warehouse, (id) {
+                    _warehouse = id;
+                    for (final line in _lines) {
+                      line.storageLocationId = null;
+                    }
+                  }, optional: true),
                 TextField(
                   controller: _description,
                   enabled: !_saving,

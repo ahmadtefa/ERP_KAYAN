@@ -1556,6 +1556,14 @@
   ],
   "separateEvidence": {
     "nativePG": "backend/scripts/isolated-pg-location-concurrency.cjs: issue,writeoff,mixed contention; move/assign/reconcile; sales A/B vs B/A. See parent reports for limitations.",
-    "protectedFlow": "No activated installed Windows/auth/licence-chain acceptance claimed."
+    "protectedFlow": "No activated installed Windows/auth/licence-chain acceptance claimed.",
+    "purchaseAndReturns": "Latest35 regressions purchase24/24 and sales20/20 plus1 opt-in bridge skipped. Durable-bound originals/returns and historical ambiguity/mixed/partial/cost-incomplete refusal pass. Not blanket lifecycle or installed acceptance.",
+    "transferUI": "354a11d2: source and optional target shelf controls, fixed source warehouse, clear target, refusal retention, uncertain-write guard. Widget29 pass; actual Flutter HTTP production-service migrated SQL bridge passes separately; auth/controller/licence/install omitted.",
+    "nativePGPurchase": "backend/scripts/isolated-pg-purchase-concurrency.cjs native PostgreSQL14: receipt/issue/returns/reversals/transfers, stockdoc edit/post, count add/finish/record races, item opening, OB post/reverse/shortage/duplicates/history/origin guards. Synthetic only; last final run35 all scoped assertions pass; all synthetic journals balanced.",
+    "valuation": "Reversal removes contribution cost; later receipt weights remaining quantity; after18 returned sales restore original issue cost into lot average and transfer merge weights destination lot. Independent original regressions plus subsequent writeoff pass. Not blanket accounting acceptance.",
+    "stockDocuments": "Explicit transfer source/optional target and guarded old-draft correction integrated. Actual Flutter HTTP service SQL read/correct/save/post passes. Native edit/post both orders pass. No controller/auth/licence/install coverage in bridge.",
+    "stockCounts": "Per-shelf snapshot/add-row. Independent migrated SQL9/9 deficit, surplus, issue-after-freeze, mixed lots, inactive semantics, lot and lot-less neutral assignment, non-destructive duplicate migration. Native add/add, finish/add and finish/record fixed and passing. Controller financial redaction9 tests pass. Not full auth/UI/SQL/install proof.",
+    "opening": "Item-create shelf actual native create persistence and invalid-shelf rollback pass. Accounting OB lot-less branch/warehouse/shelf post/reverse pass after31, tracked goods explicitly refuse after33, historical branch-only reversal passes after34; incomplete/ambiguous original movement refuses atomically after35. Duplicate post/reverse and issue overlap pass on PG14. Lot-policy transition via master-data restore remains unqualified. No invented lot opening workflow.",
+    "generalWriteoff": "Selected warehouse average/whole-drain costing32 resolves actual20 value drift. Migrated SQL stockdoc10/10 excluding opt-in bridge; actual transfer correction UI/HTTP/SQL bridge independently passes. Full general reversal and installed controls remain unqualified."
   }
 }
