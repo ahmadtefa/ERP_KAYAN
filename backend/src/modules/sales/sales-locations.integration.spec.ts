@@ -718,4 +718,101 @@ const placedNow = async (db: PGlite) => {
 
   });
 
+
+  describe('an invoice above the stock on hand is refused at save', () => {
+    const invoiceCount = async () => Number((await db.query<{ n: string }>(`SELECT COUNT(*)::text n FROM sales_invoices`)).rows[0].n);
+    const body = (...qty: string[]) => ({
+      customerId: CUSTOMER, invoiceDate: '2026-11-07', warehouseId: WAREHOUSE,
+      lines: qty.map((quantity) => ({ itemId: ITEM, quantity, unitPrice: '10', taxRate: '0' })),
+    }) as never;
+    const failure = async (work: Promise<unknown>) => { try { await work; return null; } catch (e) { return e as { response?: { code?: string; message?: string; errors?: any } }; } };
+
+    it('refuses create above the branch balance, writes nothing, then saves at the balance with gap-free numbering', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      const { service } = serviceWith(db);
+      const err = await failure(service.create(COMPANY, BRANCH, USER, body('41'), undefined, true, { mayReadStock: true }));
+      expect(err?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(err?.response?.message).toContain('41.0000');
+      expect(err?.response?.message).toContain('40.0000');
+      expect(err?.response?.message).toContain('IT-1');
+      expect(err?.response?.message).toContain('The invoice was not saved');
+      expect(err?.response?.message).toContain('لم تُحفظ الفاتورة');
+      expect(err?.response?.errors.lines).toHaveLength(1);
+      expect(err?.response?.errors.lines[0]).toMatchObject({ lineNumbers: [1], itemCode: 'IT-1', requested: '41.0000', available: '40.0000', scope: 'WAREHOUSE' });
+      expect(await invoiceCount()).toBe(0);
+      const ok = (await service.create(COMPANY, BRANCH, USER, body('40'), undefined, true, { mayReadStock: true })) as { invoiceNumber: string; status: string };
+      expect([ok.invoiceNumber, ok.status]).toEqual([expect.stringMatching(/^SI-0*1$/), 'draft']);
+      expect(await invoiceCount()).toBe(1);
+    });
+
+    it('adds the lines of one item together', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      const { service } = serviceWith(db);
+      const err = await failure(service.create(COMPANY, BRANCH, USER, body('25', '25'), undefined, true, { mayReadStock: true }));
+      expect(err?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(err?.response?.errors.lines[0]).toMatchObject({ lineNumbers: [1, 2], requested: '50.0000', available: '40.0000' });
+      expect(await invoiceCount()).toBe(0);
+    });
+
+    it('does not tell a caller without stock-read permission the balance', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      const { service } = serviceWith(db);
+      const err = await failure(service.create(COMPANY, BRANCH, USER, body('41'), undefined, true, { mayReadStock: false }));
+      expect(err?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(JSON.stringify(err?.response)).not.toContain('40.0000');
+      expect(err?.response?.errors.lines[0].available).toBeUndefined();
+      expect(await invoiceCount()).toBe(0);
+    });
+
+    it('checks the selected warehouse as well as the branch total', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      // The branch holds 40 but this warehouse only 30 of it (the rest sits elsewhere).
+      await db.query(`UPDATE warehouse_stock_balances SET quantity=30, value=150 WHERE "warehouseId"=$1 AND "itemId"=$2`, [WAREHOUSE, ITEM]);
+      const { service } = serviceWith(db);
+      const named = await failure(service.create(COMPANY, BRANCH, USER, body('35'), undefined, true, { mayReadStock: true }));
+      expect(named?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(named?.response?.errors.lines[0]).toMatchObject({ scope: 'WAREHOUSE', requested: '35.0000', available: '30.0000' });
+      expect(named?.response?.message).toContain('30.0000');
+      // No warehouse named: the branch default is the one posting would use.
+      const unnamed = await failure(service.create(COMPANY, BRANCH, USER, { ...(body('35') as object), warehouseId: undefined } as never, undefined, true, { mayReadStock: true }));
+      expect(unnamed?.response?.errors.lines[0]).toMatchObject({ scope: 'WAREHOUSE', available: '30.0000' });
+      expect(await invoiceCount()).toBe(0);
+      await service.create(COMPANY, BRANCH, USER, body('30'), undefined, true, { mayReadStock: true });
+      expect(await invoiceCount()).toBe(1);
+    });
+
+    it('is also enforced on the path order and quotation conversion use', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      const { service, prisma } = serviceWith(db);
+      // createInTransaction is what both conversions call. A caller that passes
+      // no stock-view option still gets the check, with the balance withheld.
+      const err = await failure((prisma as any).$transaction((tx: any) =>
+        service.createInTransaction(COMPANY, BRANCH, USER, body('41'), tx)));
+      expect(err?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(err?.response?.errors.lines[0].available).toBeUndefined();
+      expect(await invoiceCount()).toBe(0);
+      const ok = await (prisma as any).$transaction((tx: any) => service.createInTransaction(COMPANY, BRANCH, USER, body('40'), tx));
+      expect((ok as { status: string }).status).toBeDefined();
+      expect(await invoiceCount()).toBe(1);
+    });
+
+    it('refuses editing a draft above the balance and keeps the saved lines exactly', async () => {
+      await seedLot(db, 'L1', 40, '2027-01-01', 5);
+      await seedShelf(db, 40, 200);
+      const { service } = serviceWith(db);
+      const created = (await service.create(COMPANY, BRANCH, USER, body('10'), undefined, true, { mayReadStock: true })) as { id: string };
+      const lines = async () => (await db.query(`SELECT "lineNumber", quantity::text q FROM sales_invoice_lines WHERE "invoiceId"=$1 ORDER BY "lineNumber"`, [created.id])).rows;
+      const before = await lines();
+      const err = await failure(service.updateDraft(COMPANY, BRANCH, USER, created.id, body('50'), true, { mayReadStock: true }));
+      expect(err?.response?.code).toBe('SALES_SAVE_STOCK_SHORT');
+      expect(await lines()).toEqual(before);
+      await service.updateDraft(COMPANY, BRANCH, USER, created.id, body('40'), true, { mayReadStock: true });
+      expect((await lines())[0]).toMatchObject({ q: '40.0000' });
+    });
+  });
 });

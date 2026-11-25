@@ -50,7 +50,9 @@ function makeService(itemOverride: any = milkItem) {
     },
     salesInvoiceLine: { update: jest.fn(async () => ({})) },
     customer: { findFirst: jest.fn(async () => ({ id: CUSTOMER, isActive: true })) },
-    item: { findFirst: itemFind },
+    // The save-time stock check reads the item rows and the branch balances.
+    item: { findFirst: itemFind, findMany: jest.fn(async (args: any) => [itemOverride].filter((i) => args.where.id.in.includes(i.id))) },
+    warehouse: { findFirst: jest.fn(async () => null) },
     costCenter: { findFirst: jest.fn() },
     stockMovement: { create: jest.fn(async () => ({})) },
     stockBalance: { update: jest.fn(async () => ({})) },
@@ -59,7 +61,7 @@ function makeService(itemOverride: any = milkItem) {
     $queryRaw: jest.fn(async (query?: { sql?: string; strings?: string[] }) =>
       String(query?.sql ?? (query?.strings ?? []).join('?')).includes('storage_locations')
         ? []
-        : [{ quantity: D(50), value: D(375) }]),
+        : [{ itemId: itemOverride.id, quantity: D(50), value: D(375) }]),
   };
 
   const prisma = {

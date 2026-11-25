@@ -135,6 +135,7 @@ export class QuotationsController {
       user.userId,
       id,
       dto ?? {},
+      { mayReadStock: user.isSuperAdmin || (user.permissions ?? []).includes('inventory.stock.read') },
     );
   }
 

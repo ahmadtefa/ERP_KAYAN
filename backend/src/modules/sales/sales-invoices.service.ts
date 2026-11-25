@@ -84,6 +84,9 @@ interface PreparedInvoice {
 
 interface SalesInvoicePreparationOptions {
   pricesExcludeTax?: boolean;
+  /// Set by a person saving an invoice from the screen: the save is refused when
+  /// a stock item's total quantity is above the branch balance.
+  stockCheck?: { mayReadStock: boolean };
 }
 
 /// The seller's choice of shelves for one line, kept in the line's own unit.
@@ -278,9 +281,10 @@ export class SalesInvoicesService {
     dto: CreateSalesInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
     mayReadCost = true,
+    stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     const created = await this.prisma.$transaction((tx) =>
-      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
+      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits, { stockCheck: stockView }),
     );
 
     await this.audit.record({
@@ -330,6 +334,10 @@ export class SalesInvoicesService {
     );
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
+    // Every way of raising an invoice, including order and quotation conversion,
+    // refuses stock that is not there; conversion callers that cannot tell the
+    // person's stock permission default to showing no balance.
+    await this.assertStockCovers(tx, companyId, branchId, dto.warehouseId, lines, (options.stockCheck ?? { mayReadStock: false }).mayReadStock);
 
       const invoiceNumber = await this.numbers.next(
         tx,
@@ -407,6 +415,7 @@ export class SalesInvoicesService {
     id: string,
     dto: CreateSalesInvoiceDto,
     mayReadCost = true,
+    stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -461,6 +470,8 @@ export class SalesInvoicesService {
       }
 
       if (locked[0].salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
+
+      await this.assertStockCovers(tx, companyId, branchId, dto.warehouseId ?? invoice.warehouseId, lines, stockView.mayReadStock);
 
       await tx.salesInvoice.update({
         where: { id },
@@ -687,6 +698,126 @@ export class SalesInvoicesService {
   /// touch an expired lot: the engine skips those and answers with how many
   /// short the invoice is.
   /// What the warehouse holds on real locations for one item, per location.
+  /// Refuses a save whose quantities cannot be issued from the stock on hand.
+  ///
+  /// Posting makes the same comparisons under a lock; this is the early refusal
+  /// so an invoice that could never be posted is not saved as a draft at all.
+  /// Quantities of the same item on several lines are added together first.
+  /// Two books are compared, the way posting reads them: the branch total
+  /// (stock_balances) and the warehouse the invoice will issue from
+  /// (warehouse_stock_balances). The warehouse is the one named on the invoice,
+  /// else the branch default; when none can be found without creating one, only
+  /// the branch total is checked and posting decides. Nothing is written, and the
+  /// person's screen keeps what they typed. This is not a reservation: two
+  /// people saving at once can both pass, and the locked check at post stays.
+  private async assertStockCovers(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    branchId: string,
+    namedWarehouseId: string | null | undefined,
+    lines: Array<{ lineNumber: number; itemId: string | null; quantity: Prisma.Decimal; isAdditionalCharge: boolean }>,
+    mayReadStock: boolean,
+  ) {
+    const wanted = new Map<string, { total: Prisma.Decimal; lineNumbers: number[] }>();
+    for (const line of lines) {
+      if (line.isAdditionalCharge || !line.itemId) continue;
+      const entry = wanted.get(line.itemId) ?? { total: new Prisma.Decimal(0), lineNumbers: [] };
+      entry.total = entry.total.plus(line.quantity);
+      entry.lineNumbers.push(line.lineNumber);
+      wanted.set(line.itemId, entry);
+    }
+    if (wanted.size === 0) return;
+    const items = await tx.item.findMany({
+      where: { id: { in: [...wanted.keys()] }, companyId, deletedAt: null },
+      select: { id: true, code: true, nameEn: true, nameAr: true, unit: true, isStockTracked: true },
+    });
+    const tracked = items.filter((i) => i.isStockTracked);
+    if (tracked.length === 0) return;
+
+    // The warehouse posting would use, found without creating anything.
+    let warehouse: { id: string; code: string } | null = null;
+    if (namedWarehouseId) {
+      warehouse = await tx.warehouse.findFirst({
+        where: { id: namedWarehouseId, companyId, branchId, deletedAt: null, isActive: true },
+        select: { id: true, code: true },
+      });
+    } else {
+      warehouse = await tx.warehouse.findFirst({
+        where: { companyId, branchId, deletedAt: null },
+        orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
+        select: { id: true, code: true },
+      });
+    }
+    const itemIds = tracked.map((i) => i.id);
+    const idList = Prisma.join(itemIds.map((id) => Prisma.sql`${id}::uuid`));
+    const branchRows = await tx.$queryRaw<Array<{ itemId: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+      SELECT "itemId", "quantity"
+        FROM "stock_balances"
+       WHERE "companyId" = ${companyId}::uuid
+         AND "branchId" = ${branchId}::uuid
+         AND "itemId" IN (${idList})
+    `);
+    const branchHave = new Map(branchRows.map((r) => [r.itemId, new Prisma.Decimal(r.quantity)]));
+    const warehouseHave = new Map<string, Prisma.Decimal>();
+    if (warehouse) {
+      const rows = await tx.$queryRaw<Array<{ itemId: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+        SELECT "itemId", "quantity"
+          FROM "warehouse_stock_balances"
+         WHERE "companyId" = ${companyId}::uuid
+           AND "warehouseId" = ${warehouse.id}::uuid
+           AND "itemId" IN (${idList})
+      `);
+      for (const r of rows) warehouseHave.set(r.itemId, new Prisma.Decimal(r.quantity));
+    }
+    const zero = new Prisma.Decimal(0);
+    const f = (d: Prisma.Decimal) => d.toFixed(MONEY_SCALE);
+    const short = tracked
+      .map((item) => {
+        const need = wanted.get(item.id)!;
+        const inBranch = branchHave.get(item.id) ?? zero;
+        const inWarehouse = warehouse ? (warehouseHave.get(item.id) ?? zero) : null;
+        // The warehouse is the tighter, more specific book when it is known.
+        const scope: 'WAREHOUSE' | 'BRANCH' | null =
+          inWarehouse !== null && inWarehouse.lessThan(need.total)
+            ? 'WAREHOUSE'
+            : inBranch.lessThan(need.total) ? 'BRANCH' : null;
+        return { item, need, scope, have: scope === 'WAREHOUSE' ? inWarehouse! : inBranch };
+      })
+      .filter((x) => x.scope !== null)
+      .sort((a, b) => Math.min(...a.need.lineNumbers) - Math.min(...b.need.lineNumbers));
+    if (short.length === 0) return;
+    const parts = short.map(({ item, need, have, scope }) => {
+      const lineList = need.lineNumbers.join(', ');
+      const label = `${item.code} ${item.nameAr || item.nameEn}`.trim();
+      const whCode = warehouse?.code ?? '';
+      const whereAr = scope === 'WAREHOUSE' ? `في المخزن ${whCode}` : 'في فرع الفاتورة';
+      const whereEn = scope === 'WAREHOUSE' ? `in warehouse ${whCode}` : 'in the invoice branch';
+      return mayReadStock
+        ? { ar: `${label} (سطر ${lineList}): المطلوب ${f(need.total)} والمتاح ${whereAr} ${f(have)} ${item.unit}`,
+            en: `${item.code} ${item.nameEn} (line ${lineList}): requested ${f(need.total)}, available ${whereEn} ${f(have)} ${item.unit}` }
+        : { ar: `${label} (سطر ${lineList}): المطلوب ${f(need.total)} أكبر من المتاح ${whereAr}`,
+            en: `${item.code} ${item.nameEn} (line ${lineList}): requested ${f(need.total)} is more than is available ${whereEn}` };
+    });
+    throw new BadRequestException({
+      code: 'SALES_SAVE_STOCK_SHORT',
+      message:
+        `لم تُحفظ الفاتورة: الكمية أكبر من رصيد المخزون. ${parts.map((p) => p.ar).join('؛ ')}. ` +
+        `خفّض الكمية إلى المتاح أو غيّر المخزن أو احذف الصنف من الفاتورة ثم احفظ من جديد؛ بياناتك كما أدخلتها ولم يُنشأ مستند. / ` +
+        `The invoice was not saved: the quantity is more than the stock on hand. ${parts.map((p) => p.en).join('; ')}. ` +
+        `Lower the quantity to what is available, choose another warehouse, or remove the item, then save again; your entries are kept and no document was created.`,
+      errors: {
+        lines: short.map(({ item, need, have, scope }) => ({
+          lineNumbers: need.lineNumbers,
+          itemCode: item.code,
+          requested: f(need.total),
+          scope,
+          ...(scope === 'WAREHOUSE' && warehouse ? { warehouseCode: warehouse.code } : {}),
+          ...(mayReadStock ? { available: f(have) } : {}),
+        })),
+      },
+    });
+  }
+
   private async placedStock(
     tx: Prisma.TransactionClient,
     companyId: string,

@@ -465,6 +465,7 @@ export class SalesOrdersService {
     id: string,
     dto: Record<string, unknown> = {},
     mayReadCost = false,
+    stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const invoiceId = await this.prisma.$transaction(async (tx) => {
@@ -543,7 +544,7 @@ export class SalesOrdersService {
       const invoice = await this.invoices.createInTransaction(companyId, branchId, userId, {
         invoiceDate: String(dto.invoiceDate ?? new Date().toISOString().slice(0, 10)),
         customerId: order.customerId, notes: `From sales order ${order.orderNumber}`, lines: invoiceLines,
-      } as never, tx, orderUnits);
+      } as never, tx, orderUnits, { stockCheck: stockView });
       await tx.salesInvoice.update({
         where: { id: invoice.id },
         data: { salesOrderId: id, orderConversionKey: identity.key, orderConversionHash: identity.hash },

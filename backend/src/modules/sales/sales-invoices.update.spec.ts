@@ -14,8 +14,14 @@ const ITEM_ID = '66666666-6666-4666-8666-666666666666';
 describe('SalesInvoicesService.updateDraft', () => {
   function serviceWith(existing: Record<string, unknown>) {
     const tx = {
-      $queryRaw: jest.fn().mockResolvedValue([{ status: InvoiceStatus.DRAFT }]),
+      // The row lock, then the save-time balance read.
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([{ status: InvoiceStatus.DRAFT }])
+        .mockResolvedValue([{ itemId: ITEM_ID, quantity: new Prisma.Decimal('100') }]),
       salesInvoice: { update: jest.fn().mockResolvedValue({}) },
+      // The save-time stock check: a stock item with plenty on hand, no warehouse found.
+      warehouse: { findFirst: jest.fn().mockResolvedValue(null) },
+      item: { findMany: jest.fn().mockResolvedValue([{ id: ITEM_ID, code: 'W', nameEn: 'Widget', nameAr: 'صنف', unit: 'pc', isStockTracked: true }]) },
     };
     const prisma = {
       salesInvoice: { findFirst: jest.fn().mockResolvedValue(existing) },

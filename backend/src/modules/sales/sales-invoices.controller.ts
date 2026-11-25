@@ -49,7 +49,7 @@ export class SalesInvoicesController {
   @Post()
   @RequirePermissions('sales.invoices.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSalesInvoiceDto) {
-    return this.service.create(user.companyId, user.branchId, user.userId, dto, undefined, canReadCost(user)).then((result) => this.redact(user, result));
+    return this.service.create(user.companyId, user.branchId, user.userId, dto, undefined, canReadCost(user), { mayReadStock: user.isSuperAdmin || (user.permissions ?? []).includes('inventory.stock.read') }).then((result) => this.redact(user, result));
   }
 
   @Put(':id')
@@ -59,7 +59,7 @@ export class SalesInvoicesController {
     @Param('id') id: string,
     @Body() dto: CreateSalesInvoiceDto,
   ) {
-    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto, canReadCost(user)).then((result) => this.redact(user, result));
+    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto, canReadCost(user), { mayReadStock: user.isSuperAdmin || (user.permissions ?? []).includes('inventory.stock.read') }).then((result) => this.redact(user, result));
   }
 
   @Put(':id/order-allocation')

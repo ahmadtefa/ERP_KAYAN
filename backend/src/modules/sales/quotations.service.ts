@@ -703,6 +703,7 @@ export class QuotationsService {
     userId: string,
     id: string,
     dto: { invoiceDate?: string; warehouseId?: string; notes?: string } = {},
+    stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -793,7 +794,7 @@ export class QuotationsService {
         discountPercent: quotation.discountType === 'PERCENT' ? quotation.discountPercent.toFixed(RATE_SCALE) : undefined,
         discountAmount: quotation.discountAmount.toFixed(MONEY_SCALE),
         lines,
-      }, tx, undefined, { pricesExcludeTax: true });
+      }, tx, undefined, { pricesExcludeTax: true, stockCheck: stockView });
       // Do not silently create a different debt if prices-including-tax,
       // discount allocation, or line rounding changes the accepted offer.
       // A discrepancy aborts the entire transaction for explicit correction.

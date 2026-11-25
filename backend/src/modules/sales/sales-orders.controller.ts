@@ -87,6 +87,7 @@ export class SalesOrdersController {
       id,
       dto ?? {},
       canReadCost(user),
+      { mayReadStock: user.isSuperAdmin || (user.permissions ?? []).includes('inventory.stock.read') },
     ).then((result) => this.redact(user, result));
   }
 }

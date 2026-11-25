@@ -67,7 +67,7 @@ describe('quotation conversion transaction', () => {
     expect(invoices.createInTransaction).toHaveBeenCalledTimes(1);
     expect(invoices.create).not.toHaveBeenCalled();
     expect(invoices.createInTransaction.mock.calls[0][3].lines[0].taxRate).toBe('0.0000');
-    expect(invoices.createInTransaction.mock.calls[0][6]).toEqual({ pricesExcludeTax: true });
+    expect(invoices.createInTransaction.mock.calls[0][6]).toEqual({ pricesExcludeTax: true, stockCheck: { mayReadStock: false } });
     expect(audit.recordRequired).toHaveBeenCalledTimes(2);
     await expect(service.convert('co','branch','user','q1')).rejects.toThrow(/already been converted/);
     expect(state.invoices).toEqual(['i1']);
