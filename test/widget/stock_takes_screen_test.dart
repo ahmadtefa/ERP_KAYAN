@@ -32,6 +32,8 @@ class _StockTakesApi extends ApiClient {
   ApiFailure? failCount;
   bool failCreate = false;
   bool confirmedCreate = false;
+  bool wrongCreateProof = false;
+  bool missingWarehouse = false;
   final createKeys = <String?>[];
 
   /// A list of sessions that are all still being counted. The approval tests
@@ -86,6 +88,15 @@ class _StockTakesApi extends ApiClient {
       ];
     }
     if (path == '/inventory/warehouses') {
+      if (missingWarehouse)
+        return [
+          {
+            'id': 'wh-1',
+            'code': 'MAIN',
+            'nameEn': 'Main store',
+            'nameAr': 'الرئيسي',
+          },
+        ];
       return [
         {
           'id': 'wh-1',
@@ -239,7 +250,10 @@ class _StockTakesApi extends ApiClient {
         'key': Uri.decodeComponent(path.split('/').last),
         'state': confirmedCreate ? 'COMPLETED' : 'ABSENT',
         'session': confirmedCreate
-            ? {'id': 'st-new', 'warehouseId': 'wh-2'}
+            ? {
+                'id': 'st-new',
+                'warehouseId': wrongCreateProof ? 'wrong' : 'wh-2',
+              }
             : null,
       };
     }
@@ -817,6 +831,117 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('stock-take-new')));
       await tester.pumpAndSettle();
       expect(find.text('ST-001 — Stock take details'), findsOneWidget);
+      expect(api.createKeys, hasLength(1));
+    },
+  );
+
+  testWidgets(
+    'Arabic retained count missing warehouse stays safe until exact read proof',
+    (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File('assets/fonts/IBMPlexSansArabic-Regular.ttf')
+                      .readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+      await tester.runAsync(() async {
+        await (FontLoader('MaterialIcons')..addFont(
+              Future.value(
+                ByteData.sublistView(
+                  File(
+                    '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+                  ).readAsBytesSync(),
+                ),
+              ),
+            ))
+            .load();
+      });
+
+      final api = _StockTakesApi()..failCreate = true;
+      Future<void> open() async {
+        await pump(
+          tester,
+          api,
+          locale: const Locale('ar'),
+          permissions: [
+            'inventory.stocktake.read',
+            'inventory.stocktake.create',
+          ],
+        );
+        await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('SECOND').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'ملاحظات'),
+        'جرد المخزن الثاني',
+      );
+      await tester.tap(find.text('فتح الجرد'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog).last,
+          matching: find.byType(FilledButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('إلغاء'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      api.missingWarehouse = true;
+      await open();
+      expect(find.text('المستودع المحفوظ غير متاح'), findsWidgets);
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'ملاحظات'))
+            .controller!
+            .text,
+        'جرد المخزن الثاني',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'فتح الجرد'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(tester.takeException(), isNull);
+      final boundary =
+          visualKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('/downloads/count-create-retained-ar.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+      await tester.tap(find.text('إلغاء'));
+      await tester.pumpAndSettle();
+      api.confirmedCreate = true;
+      api.wrongCreateProof = true;
+      await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'فتح الجرد'),
+            )
+            .onPressed,
+        isNull,
+      );
       expect(api.createKeys, hasLength(1));
     },
   );
