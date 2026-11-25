@@ -25,10 +25,12 @@ class _ReportsApi extends ApiClient {
   final reportQueries = <Map<String, dynamic>?>[];
   @override
   Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async {
-    if (path == '/inventory/warehouses') return [
+    if (path == '/inventory/warehouses') {
+      return [
       {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'nameAr': 'Main'},
       {'id': 'wh-2', 'code': 'BR2', 'nameEn': 'Second store', 'nameAr': 'Second'},
-    ];
+      ];
+    }
     return [];
   }
 
