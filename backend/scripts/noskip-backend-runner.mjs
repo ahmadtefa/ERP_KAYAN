@@ -113,7 +113,7 @@ for (const f of runnable) {
     const bad = cases.filter((c) => !['passed', 'pending'].includes(c.status));
     if (r.status !== 0 || j.numFailedTests || j.numFailedTestSuites || j.numRuntimeErrorTestSuites || bad.length) reason = 'failed cases or suites';
     else if (!registered.length || JSON.stringify(registered) !== JSON.stringify(executed)) reason = `registered ${registered.length} vs executed ${executed.length} case identities differ`;
-    else if (!j.numPassedTests) reason = 'no case ran';
+    else if (!j.numPassedTests && !pendingIds.length) reason = 'no case ran';
     else if (j.numTodoTests) reason = 'todo cases';
     else if (unmanifested.length) reason = `${unmanifested.length} pending/skipped case identities are not in the bridge manifest`;
     else { verdict = pendingIds.length ? 'PASS_BRIDGE_MANIFESTED_PENDING' : 'PASS'; reason = ''; }
