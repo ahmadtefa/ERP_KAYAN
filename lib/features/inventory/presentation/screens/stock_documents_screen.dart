@@ -397,6 +397,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         {
           'storageLocationId': line['storageLocationId'],
           'toStorageLocationId': line['toStorageLocationId'],
+          'sourceLabel': line['storageLocationCode'],
+          'targetLabel': line['toStorageLocationCode'],
         },
     ];
     String? error;
@@ -747,6 +749,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                                   picked['id'];
                                               line['toStorageLocationCode'] =
                                                   picked['code'];
+                                              line['splits'] = null;
                                               failure = null;
                                             });
                                           }
