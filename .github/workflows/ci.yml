@@ -319,6 +319,8 @@ jobs:
           DATABASE_URL="$TEMPLATE_DB" node scripts/apply-migrations.mjs
           DATABASE_URL="$TEMPLATE_DB" KAYAN_SEED_ACCOUNT_CODE_SCHEME=LEGACY npx ts-node prisma/seed.ts
           LEGACY_API=http://127.0.0.1:3001/api/v1
+          # Scenarios that also read PostgreSQL directly must read the database their API writes to.
+          LEGACY_DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/erp_kayan_legacy?schema=public'
           LEGACY_PID=""
           trap 'kill "$API_PID" $LEGACY_PID 2>/dev/null || true' EXIT
           fresh_legacy() {
@@ -343,7 +345,7 @@ jobs:
           }
           fresh_legacy
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
-          if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs "$LEGACY_API"; then
+          if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 DATABASE_URL="$LEGACY_DATABASE_URL" python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs "$LEGACY_API"; then
             echo "::group::API logs after accounting scenario failure"
             cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"
@@ -368,7 +370,7 @@ jobs:
           fi
           fresh_legacy
           echo "Running customer collections and supplier payments end to end: invoices, allocations, reversals, refusals, permissions, balances and the journal behind each one..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-collections-payments.mjs "$LEGACY_API"; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 DATABASE_URL="$LEGACY_DATABASE_URL" python ../scripts/ci-diagnose.py node scripts/scenario-collections-payments.mjs "$LEGACY_API"; then
             echo "::group::API logs after collections and payments scenario failure"
             cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"
@@ -417,7 +419,7 @@ jobs:
           # it must not be in place while the ageing/reconciliation checks run.
           fresh_legacy
           echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs "$LEGACY_API"; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 DATABASE_URL="$LEGACY_DATABASE_URL" python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs "$LEGACY_API"; then
             echo "::group::API logs after statement scenario failure"
             cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"
