@@ -55,6 +55,18 @@ class _ItemTaxApi extends ApiClient {
           'branchNameAr': 'فرع القاهرة',
           'isDefault': false,
         },
+        // Inactive default of the branch: must be ignored like the server does.
+        {
+          'id': 'dead',
+          'branchId': 'br',
+          'code': '0DEAD',
+          'nameEn': 'Dead warehouse',
+          'nameAr': 'مخزن معطل',
+          'branchNameEn': 'Cairo branch',
+          'branchNameAr': 'فرع القاهرة',
+          'isDefault': true,
+          'isActive': false,
+        },
       ];
     }
     if (path == '/inventory/locations') {
@@ -226,6 +238,7 @@ void main() {
           findsOneWidget,
         );
         expect(find.textContaining(ar ? 'مخزن الملحق' : 'Annex'), findsNothing);
+        expect(find.textContaining(ar ? 'مخزن معطل' : 'Dead'), findsNothing);
         await tester.tap(loc);
         await tester.pumpAndSettle();
         expect(find.textContaining('WRONG'), findsNothing);

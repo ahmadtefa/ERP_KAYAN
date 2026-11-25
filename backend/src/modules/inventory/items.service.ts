@@ -446,11 +446,32 @@ export class ItemsService {
           'inventory',
           'openingBalanceEquity',
         ]);
-        const warehouseId = await this.warehouses.resolve(
-          tx,
-          companyId,
-          branchId!,
-        );
+        // The target is the branch's first ACTIVE warehouse, default first then
+        // lowest code. The item form shows exactly this one. A branch whose
+        // warehouses are all inactive is refused (never silently stocked into an
+        // inactive warehouse); a branch with none gets one created by resolve().
+        const activeWarehouse = await tx.warehouse.findFirst({
+          where: { companyId, branchId: branchId!, deletedAt: null, isActive: true },
+          orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
+          select: { id: true },
+        });
+        let warehouseId: string | null;
+        if (activeWarehouse) {
+          warehouseId = activeWarehouse.id;
+        } else {
+          const anyWarehouse = await tx.warehouse.findFirst({
+            where: { companyId, branchId: branchId!, deletedAt: null },
+            select: { id: true },
+          });
+          if (anyWarehouse) {
+            throw new BadRequestException({
+              code: 'ITEM_OPENING_WAREHOUSE_INACTIVE',
+              message:
+                'كل مخازن الفرع غير مفعّلة، فلا يمكن حفظ كمية افتتاحية. فعّل مخزنًا للفرع أو احفظ الصنف بدون كمية افتتاحية؛ بيانات الصنف المُدخلة محفوظة. / All warehouses of this branch are inactive, so opening stock cannot be saved. Activate a branch warehouse or save the item without opening stock; the item data you entered is kept.',
+            });
+          }
+          warehouseId = await this.warehouses.resolve(tx, companyId, branchId!);
+        }
         const asOf = new Date(new Date().toISOString().slice(0, 10));
         const openingShelfId =
           typeof dto.openingStorageLocationId === 'string' && dto.openingStorageLocationId

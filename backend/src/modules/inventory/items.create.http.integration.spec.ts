@@ -188,6 +188,49 @@ const vmLacksDynamicImport = !(
     expect(await count(db, `SELECT count(*) AS n FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='OK-DEST2' AND m."warehouseId"='${WAREHOUSE}' AND m."storageLocationId"='${SHELF}'`)).toBe(1);
   });
 
+  const addBranch = async (id: string, code: string, warehouses: Array<[string, string, boolean, boolean]>) => {
+    await db.exec(`INSERT INTO branches (id, "companyId", code, "nameEn", "nameAr", "updatedAt") VALUES ('${id}','${COMPANY}','${code}','Branch ${code}','فرع ${code}',now())`);
+    for (const [wid, wcode, isDefault, isActive] of warehouses) {
+      await db.exec(`INSERT INTO warehouses (id,"companyId","branchId",code,"nameEn","nameAr","isDefault","isActive","updatedAt") VALUES ('${wid}','${COMPANY}','${id}','${wcode}','WH ${wcode}','مخزن ${wcode}',${isDefault},${isActive},now())`);
+    }
+  };
+  const movementWarehouse = async (code: string) =>
+    (await db.query<{ w: string }>(`SELECT m."warehouseId" AS w FROM stock_movements m JOIN items i ON i.id=m."itemId" WHERE i.code='${code}'`)).rows.map((r) => r.w);
+
+  it('2d. destination proof: an INACTIVE default warehouse is skipped; stock goes to the first ACTIVE one (what the form shows)', async () => {
+    const B = '99999999-9999-4999-8999-999999999991';
+    await addBranch(B, 'B4', [
+      ['99999999-9999-4999-8999-9999999999a1', 'D1', true, false],
+      ['99999999-9999-4999-8999-9999999999a2', 'Z9', false, true],
+      ['99999999-9999-4999-8999-9999999999a3', 'M5', false, true],
+    ]);
+    const r = await post(payload('OK-INACT'), B);
+    expect(r.status).toBe(201);
+    expect(await movementWarehouse('OK-INACT')).toEqual(['99999999-9999-4999-8999-9999999999a3']);
+  });
+
+  it('2e. every warehouse of the branch inactive: refused with a specific message, item, movement and journal not kept', async () => {
+    const B = '99999999-9999-4999-8999-999999999992';
+    await addBranch(B, 'B5', [['99999999-9999-4999-8999-9999999999b1', 'D2', true, false]]);
+    const journalsBefore = await journalRows();
+    const r = await post(payload('NO-ACTIVE'), B);
+    expect(r.status).toBe(400);
+    expect(r.json.code).toBe('ITEM_OPENING_WAREHOUSE_INACTIVE');
+    expect(await itemRows('NO-ACTIVE')).toBe(0);
+    expect(await movementRows('NO-ACTIVE')).toBe(0);
+    expect(await journalRows()).toBe(journalsBefore);
+  });
+
+  it('2f. branch with no warehouse: one is created for the branch on save and holds the stock', async () => {
+    const B = '99999999-9999-4999-8999-999999999993';
+    await addBranch(B, 'B6', []);
+    const r = await post(payload('OK-NOWH'), B);
+    expect(r.status).toBe(201);
+    const wh = await movementWarehouse('OK-NOWH');
+    expect(wh.length).toBe(1);
+    expect(await count(db, `SELECT count(*) AS n FROM warehouses WHERE id='${wh[0]}' AND "branchId"='${B}' AND "isDefault"=true AND "isActive"=true`)).toBe(1);
+  });
+
   it('3b. a location of another branch is refused with the existing Arabic message and nothing is kept', async () => {
     const before = await journalRows();
     const r = await post(payload('BAD-LOC', { openingStorageLocationId: OTHER_SHELF }));

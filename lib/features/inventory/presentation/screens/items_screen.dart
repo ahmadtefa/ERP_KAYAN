@@ -119,8 +119,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         final client = ref.read(apiClientProvider);
         final warehouses = (await client.getList(
           '/inventory/warehouses',
-          query: {'branchId': user!.branchId},
+          query: {'branchId': user!.branchId, 'includeInactive': 'true'},
         )).where((row) => text(row, 'branchId') == user.branchId).toList();
+        final allBranchWarehouses = warehouses.length;
+        // Same eligibility as the server: active (and not deleted) warehouses only.
+        warehouses.removeWhere(
+          (row) => row['isActive'] == false || row['deletedAt'] != null,
+        );
         warehouses.sort((a, b) {
           final byDefault =
               (b['isDefault'] == true ? 1 : 0) -
@@ -129,7 +134,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ? byDefault
               : text(a, 'code').compareTo(text(b, 'code'));
         });
-        if (warehouses.isEmpty) {
+        if (warehouses.isEmpty && allBranchWarehouses > 0) {
+          openingWhere = openingArabic
+              ? 'كل مخازن فرعك غير مفعّلة، فلن يُحفظ رصيد افتتاحي حتى تفعّل مخزنًا.'
+              : 'All warehouses of your branch are inactive, so opening stock will be refused until one is activated.';
+        } else if (warehouses.isEmpty) {
           openingWhere = openingArabic
               ? 'لا يوجد مخزن لفرعك حاليًا؛ سيُنشأ مخزن للفرع تلقائيًا عند الحفظ ويُسجَّل الرصيد عليه.'
               : 'Your branch has no warehouse yet; one is created for the branch on save and the stock is recorded on it.';
@@ -167,6 +176,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           }
         }
       } on Object {
+        openingWhere = openingArabic
+            ? 'تعذّر عرض المخزن المستهدف. الرصيد يُسجَّل على أول مخزن مفعّل في فرعك (الافتراضي أولًا) ويمكنك ترك الرف فارغًا.'
+            : 'The target warehouse could not be loaded. Opening stock goes to the first active warehouse of your branch (default first); you can leave the shelf empty.';
         // Opening stock can remain explicitly unlocated if the catalogue is unavailable.
       }
     }
@@ -211,8 +223,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             l10n.openingQuantity,
             kind: FieldKind.decimal,
             helper: openingArabic
-                ? 'الحفظ يضيف الكمية ويُرحّل قيد المخزون وحقوق الملكية فورًا.'
-                : 'Save immediately posts this stock and its inventory/equity entry.',
+                ? '$openingWhere الحفظ يضيف الكمية ويُرحّل قيد المخزون وحقوق الملكية فورًا.'
+                : '$openingWhere Save immediately posts this stock and its inventory/equity entry.',
           ),
           FieldSpec(
             'openingStorageLocationId',
@@ -222,8 +234,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             kind: FieldKind.select,
             options: openingLocations,
             helper: openingArabic
-                ? '$openingWhere اختر رفًا أو ممرًا داخل هذا المخزن إن أردت، وإلا يُسجَّل الرصيد على المخزن نفسه.'
-                : '$openingWhere Optionally pick a shelf or aisle inside that warehouse; otherwise the stock is recorded on the warehouse itself.',
+                ? 'اختياري: رف أو ممر داخل المخزن المذكور أعلاه. إن تركته فارغًا يُسجَّل الرصيد على المخزن نفسه.'
+                : 'Optional: a shelf or aisle inside the warehouse named above. If left empty the stock is recorded on the warehouse itself.',
           ),
           if (canManageInventoryCost)
             FieldSpec(

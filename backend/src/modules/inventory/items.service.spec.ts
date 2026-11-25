@@ -31,6 +31,7 @@ function build() {
     stockMovement: { create: jest.fn().mockResolvedValue({}) },
     stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
     storageLocation: { findFirst: jest.fn().mockResolvedValue(null) },
+    warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-1' }) },
   };
   const prisma = {
   itemUnit: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
