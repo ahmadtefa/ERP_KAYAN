@@ -88,6 +88,12 @@ class _StockTakesApi extends ApiClient {
           'nameEn': 'Main store',
           'nameAr': 'المخزن الرئيسي',
         },
+        {
+          'id': 'wh-2',
+          'code': 'SECOND',
+          'nameEn': 'Second store',
+          'nameAr': 'المخزن الثاني',
+        },
       ];
     }
     if (path == '/inventory/items') {
@@ -446,28 +452,54 @@ void main() {
   );
 
   testWidgets('refresh reloads counts without a stock action', (tester) async {
-    final api=_StockTakesApi();await pump(tester,api);final before=api.listCalls;
-    await tester.tap(find.byTooltip('Refresh'));await tester.pumpAndSettle();
-    expect(api.listCalls,greaterThan(before));expect(api.posts,isEmpty);
+    final api = _StockTakesApi();
+    await pump(tester, api);
+    final before = api.listCalls;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    expect(api.listCalls, greaterThan(before));
+    expect(api.posts, isEmpty);
   });
 
-  testWidgets('back from cancellation and closing details sends nothing', (tester) async {
-    final api=_StockTakesApi();await pump(tester,api,permissions:['inventory.stocktake.read','inventory.stocktake.create']);
-    await tester.tap(find.text('ST-001'));await tester.pumpAndSettle();
-    await tester.tap(find.text('Cancel count'));await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField,'Cancellation reason'),'not sent');
-    await tester.tap(find.text('Back'));await tester.pumpAndSettle();
-    expect(find.text('ST-001 — Stock take details'),findsOneWidget);
-    await tester.tap(find.text('Close'));await tester.pumpAndSettle();
-    expect(find.text('ST-001 — Stock take details'),findsNothing);expect(api.posts,isEmpty);
+  testWidgets('back from cancellation and closing details sends nothing', (
+    tester,
+  ) async {
+    final api = _StockTakesApi();
+    await pump(
+      tester,
+      api,
+      permissions: ['inventory.stocktake.read', 'inventory.stocktake.create'],
+    );
+    await tester.tap(find.text('ST-001'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel count'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Cancellation reason'),
+      'not sent',
+    );
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('ST-001 — Stock take details'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('ST-001 — Stock take details'), findsNothing);
+    expect(api.posts, isEmpty);
   });
 
-  testWidgets('confirming post targets the approved session and refreshes', (tester) async {
-    final api=_StockTakesApi();await pump(tester,api);final before=api.listCalls;
-    await tester.tap(find.byTooltip('Post'));await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton,'Post'));await tester.pumpAndSettle();
-    expect(api.posts.where((x)=>x.endsWith('/post')),hasLength(1));
-    expect(api.posts.single,'/inventory/stock-takes/st-2/post');expect(api.listCalls,greaterThan(before));
+  testWidgets('confirming post targets the approved session and refreshes', (
+    tester,
+  ) async {
+    final api = _StockTakesApi();
+    await pump(tester, api);
+    final before = api.listCalls;
+    await tester.tap(find.byTooltip('Post'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Post'));
+    await tester.pumpAndSettle();
+    expect(api.posts.where((x) => x.endsWith('/post')), hasLength(1));
+    expect(api.posts.single, '/inventory/stock-takes/st-2/post');
+    expect(api.listCalls, greaterThan(before));
   });
 
   testWidgets('lists sessions with warehouse, scope, lines and status', (
@@ -621,6 +653,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'new count warehouse selection and notes preserve chosen scope payload',
+    (tester) async {
+      final api = _StockTakesApi();
+      await pump(
+        tester,
+        api,
+        permissions: ['inventory.stocktake.read', 'inventory.stocktake.create'],
+      );
+      await tester.tap(find.byKey(const ValueKey('stock-take-new')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('SECOND').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Notes'),
+        ' second warehouse audit ',
+      );
+      await tester.tap(find.text('Open count'));
+      await tester.pumpAndSettle();
+      expect(api.bodies['/inventory/stock-takes'], {
+        'warehouseId': 'wh-2',
+        'scope': 'FULL',
+        'notes': 'second warehouse audit',
+      });
+    },
+  );
   testWidgets('creates a full stock take and opens its frozen count lines', (
     tester,
   ) async {

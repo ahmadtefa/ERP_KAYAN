@@ -245,3 +245,8 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 07:50 expiry navigation routes
 - Three new synthetic feed + GoRouter tests tap Notification centre, lot row and expired Write off route. Exact destination paths checked, no scan requested. These qualify navigation only, not destination screens or write-off execution.
 - Partial register143mapped/48open of original191 sites. No production UI change or visual claim in this navigation-only batch. Full expiry suite and analyze checked locally, no CI/install claim.
+
+### 08:02 count warehouse and notes controls
+- New exact-payload widget selects second warehouse and notes, proves FULL count payload preserves chosen warehouse and trimmed notes. Successful path only; source-site mapping does not imply error/restart retention.
+- Newly found create-count gap routed to parent: dialog closes before request so refusal loses input; server open endpoint has no create idempotency key, so naive retained retry after lost response could duplicate frozen sessions. No unsafe retry patch made; backend exact-key contract requested.
+- Partial register145mapped/46open of191. Full stock-take widget suite and analyze checked. No SQL, installed or CI proof implied.

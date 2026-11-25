@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 143,
-    "OPEN_UNMAPPED": 48
+    "MAPPED_WIDGET": 145,
+    "OPEN_UNMAPPED": 46
   },
   "controls": [
     {
@@ -817,8 +817,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 220,
       "source": "onChanged: (value) => setDialogState(() => warehouseId = value ?? warehouseId),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "new count warehouse selection and notes preserve chosen scope payload",
+          "proofLevel": "synthetic widget exact warehouse2/FULL/trimmednotes request; successful path only, create error/restart retention remains open"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
@@ -850,8 +856,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
       "line": 254,
       "source": "TextField(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_takes_screen_test.dart",
+          "test": "new count warehouse selection and notes preserve chosen scope payload",
+          "proofLevel": "synthetic widget exact warehouse2/FULL/trimmednotes request; successful path only, create error/restart retention remains open"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
