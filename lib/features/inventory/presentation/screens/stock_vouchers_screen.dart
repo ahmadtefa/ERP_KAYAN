@@ -358,17 +358,55 @@ class _StockVoucherDetailScreenState
     if (mounted) _refresh();
   }
 
-  Future<void> _action(String action, int? version) async {
+  /// What each step does, from the stock document service: review and approve
+  /// only change the voucher's status. Posting moves the balance of the
+  /// warehouse and makes a journal entry when the stock value changes.
+  /// Reversing cancels both.
+  String _effect(String action, String? voucherKind) {
+    final receipt = voucherKind == 'RECEIPT';
+    switch (action) {
+      case 'review':
+        return _label(
+          context,
+          'تُسجَّل المراجعة. رصيد المخزن لا يتغير.',
+          'The review is recorded. The warehouse balance does not change.',
+        );
+      case 'approve':
+        return _label(
+          context,
+          'يُعتمد الإذن. رصيد المخزن لا يتغير إلا عند الترحيل.',
+          'The voucher is approved. The warehouse balance changes only when it is posted.',
+        );
+      case 'post':
+        return receipt
+            ? _label(
+                context,
+                'ستُضاف الكميات إلى رصيد المخزن، ويُنشأ قيد محاسبي عند تغيّر القيمة.',
+                'The quantities are added to the warehouse balance, and a journal entry is made when the value changes.',
+              )
+            : _label(
+                context,
+                'ستُخصم الكميات من رصيد المخزن، ويُنشأ قيد محاسبي عند تغيّر القيمة.',
+                'The quantities are taken from the warehouse balance, and a journal entry is made when the value changes.',
+              );
+      case 'reverse':
+        return _label(
+          context,
+          'يلغي العكس أثر الإذن على الرصيد وعلى قيده المحاسبي إن وُجد.',
+          'Reversing cancels the voucher\'s effect on the balance and on its journal entry, if it has one.',
+        );
+      default:
+        return _label(context, 'هل تريد تنفيذ العملية؟', 'Proceed with this action?');
+    }
+  }
+
+  Future<void> _action(String action, int? version, [String? voucherKind]) async {
     if (_busy || _confirming) return;
     setState(() => _confirming = true);
     final ok = await confirmAction(
       context,
       title: _label(context, 'تأكيد العملية', 'Confirm action'),
-      message: _label(
-        context,
-        'هل تريد تنفيذ العملية؟',
-        'Proceed with this action?',
-      ),
+      message: _effect(action, voucherKind),
       confirmLabel: _label(context, 'تأكيد', 'Confirm'),
       destructive: action == 'reverse',
     );
@@ -393,7 +431,13 @@ class _StockVoucherDetailScreenState
         _refresh();
         showMessage(
           context,
-          _label(context, 'تم تحديث الإذن', 'Voucher refreshed'),
+          switch (action) {
+            'review' => _label(context, 'تمت مراجعة الإذن.', 'Voucher reviewed.'),
+            'approve' => _label(context, 'تم اعتماد الإذن.', 'Voucher approved.'),
+            'post' => _label(context, 'تم ترحيل الإذن.', 'Voucher posted.'),
+            'reverse' => _label(context, 'تم عكس الإذن.', 'Voucher reversed.'),
+            _ => _label(context, 'تم تحديث الإذن', 'Voucher refreshed'),
+          },
         );
       }
     } catch (error) {
@@ -529,7 +573,7 @@ class _StockVoucherDetailScreenState
                       OutlinedButton(
                         onPressed: _busy || _confirming
                             ? null
-                            : () => _action('review', version),
+                            : () => _action('review', version, text(doc, 'voucherKind')),
                         child: Text(_label(context, 'مراجعة', 'Review')),
                       ),
                     if (status == 'draft' &&
@@ -540,7 +584,7 @@ class _StockVoucherDetailScreenState
                       OutlinedButton(
                         onPressed: _busy || _confirming
                             ? null
-                            : () => _action('approve', version),
+                            : () => _action('approve', version, text(doc, 'voucherKind')),
                         child: Text(_label(context, 'اعتماد', 'Approve')),
                       ),
                     if (status == 'draft' &&
@@ -551,7 +595,7 @@ class _StockVoucherDetailScreenState
                       FilledButton(
                         onPressed: _busy || _confirming
                             ? null
-                            : () => _action('post', version),
+                            : () => _action('post', version, text(doc, 'voucherKind')),
                         child: Text(_label(context, 'ترحيل', 'Post')),
                       ),
                     if (status == 'posted' &&
@@ -560,7 +604,7 @@ class _StockVoucherDetailScreenState
                       OutlinedButton(
                         onPressed: _busy || _confirming
                             ? null
-                            : () => _action('reverse', version),
+                            : () => _action('reverse', version, text(doc, 'voucherKind')),
                         child: Text(_label(context, 'عكس', 'Reverse')),
                       ),
                   ],
