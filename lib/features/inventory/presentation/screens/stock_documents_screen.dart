@@ -131,9 +131,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
       final confirmed = await confirmAction(
         context,
         title: label,
-        message: _arabic
-            ? 'هل تريد تنفيذ العملية على المستند ${text(row, 'documentNumber')}؟'
-            : 'Apply this action to document ${text(row, 'documentNumber')}?',
+        message: _statusEffect(row, reverse: reverse),
         confirmLabel: label,
         destructive: reverse,
       );
@@ -145,7 +143,9 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         if (mounted) {
           showMessage(
             context,
-            _arabic ? 'تم تحديث المستند.' : 'Document updated.',
+            reverse
+                ? (_arabic ? 'تم عكس المستند.' : 'Document reversed.')
+                : (_arabic ? 'تم ترحيل المستند.' : 'Document posted.'),
           );
         }
       } catch (error) {
@@ -162,6 +162,61 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
       if (mounted) setState(() => _changingStatus = false);
     }
   }
+
+  /// What pressing Post or Reverse will do, in words, before it is done.
+  /// Only effects the posting code already has are named: stock movements
+  /// and, when the value changes, a journal entry.
+  String _statusEffect(Json row, {required bool reverse}) {
+    final number = text(row, 'documentNumber');
+    final kind = text(row, 'kind').toUpperCase();
+    if (reverse) {
+      return _arabic
+          ? 'عكس المستند $number يلغي أثره على الأرصدة وعلى القيد المرتبط به إن وُجد. هل تريد المتابعة؟'
+          : 'Reversing $number cancels its effect on stock and on its journal entry, if it has one. Continue?';
+    }
+    final what = switch (kind) {
+      'COUNT' => _arabic
+          ? 'سيُضبط رصيد كل صنف على الكمية المعدودة ويُسجَّل الفرق.'
+          : 'Each item balance will be set to the counted quantity and the difference recorded.',
+      'TRANSFER' => _arabic
+          ? 'ستنتقل الكميات من مخزن إلى آخر${_movement(row) == null ? '' : ' (${_movement(row)})'}.'
+          : 'The quantities will move between stores${_movement(row) == null ? '' : ' (${_movement(row)})'}.',
+      _ => _arabic
+          ? 'ستُضاف الكميات إلى الرصيد أو تُخصم منه حسب إشارتها.'
+          : 'The quantities will be added to or removed from the balance.',
+    };
+    final tail = _arabic
+        ? ' يتغير الرصيد، ويُنشأ قيد محاسبي عند تغيّر القيمة.'
+        : ' Stock balances change, and a journal entry is made when the value changes.';
+    return _arabic
+        ? 'ترحيل المستند $number: $what$tail'
+        : 'Post $number: $what$tail';
+  }
+
+  String _kindHelp(String kind) {
+    return switch (kind) {
+      'COUNT' => _arabic
+          ? 'جرد: اكتب الكمية التي عددتها فعلًا لكل صنف. عند الترحيل يُضبط الرصيد عليها ويُسجَّل الفرق.'
+          : 'Count: enter the quantity you actually counted for each item. When posted, the balance is set to it and the difference is recorded.',
+      'TRANSFER' => _arabic
+          ? 'تحويل: ينقل الكمية من مخزن إلى مخزن آخر.'
+          : 'Transfer: moves the quantity from one store to another.',
+      _ => _arabic
+          ? 'تسوية: اكتب الزيادة أو النقص في الرصيد (بإشارة سالبة للنقص).'
+          : 'Adjustment: enter how much to add to or remove from the balance (negative to remove).',
+    };
+  }
+
+  Widget _sectionTitle(BuildContext context, String title) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          title,
+          style: Theme.of(context)
+              .textTheme
+              .titleSmall
+              ?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      );
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
@@ -1434,7 +1489,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   // never taller than the window. Asking for a fixed height made
                   // the inner Column overflow when the dialog shrank.
                   width: MediaQuery.sizeOf(context).width.clamp(320.0, 840.0),
-                  height: MediaQuery.sizeOf(context).height.clamp(240.0, 480.0),
+                  height: (MediaQuery.sizeOf(context).height * 0.85).clamp(240.0, 620.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -1444,6 +1499,10 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          _sectionTitle(
+                            context,
+                            _arabic ? 'بيانات المستند' : 'Document details',
+                          ),
                           SizedBox(
                             width: 210,
                             child: DropdownButtonFormField<String>(
@@ -1476,6 +1535,13 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   });
                                 }
                               },
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, bottom: 10),
+                            child: Text(
+                              _kindHelp(kind),
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
                           SizedBox(
@@ -1527,6 +1593,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                               }),
                             ),
                           ),
+                          if (kind == 'TRANSFER') const SizedBox(height: 10),
                           if (kind == 'TRANSFER')
                             SizedBox(
                               width: 200,
@@ -1560,6 +1627,19 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                 }),
                               ),
                             ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _sectionTitle(
+                              context,
+                              _arabic
+                                  ? 'الأصناف والكميات'
+                                  : 'Items and quantities',
+                            ),
+                          ),
                           TextButton.icon(
                             onPressed: addLine,
                             icon: const Icon(Icons.add_rounded, size: 18),
@@ -1567,7 +1647,6 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
                       BarcodeScanField(
                         key: const ValueKey('stock-document-barcode'),
                         controller: barcode,
@@ -1849,6 +1928,13 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                                   );
                                 },
                               ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _arabic
+                            ? 'يُحفظ كمسودة. لا تتغير الأرصدة إلا عند الترحيل من قائمة المستندات.'
+                            : 'Saved as a draft. Stock balances change only when you post it from the list.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 8),
                       TextField(
