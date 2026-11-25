@@ -514,6 +514,46 @@ void main() {
 
   }
 
+  for(final arabic in [false,true]) {
+  testWidgets('a templated refusal shows cause and fix, never the server body, in both languages Arabic=$arabic', (tester) async {
+    await tester.runAsync(() async {
+      await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
+      await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File(materialIconsFontPath).readAsBytesSync())))).load();
+    });
+    final api = _DocumentsApi()..refusePost = const ApiFailure(
+      'Lot held by Mona Hassan, 12 Tahrir St, balance 48,250 EGP / Lot held by Mona Hassan, 12 Tahrir St, balance 48,250 EGP',
+      statusCode: 400, code: 'STOCK_DOC_LOT_SHORT', fieldErrors: {'lineNumber': '1'},
+    );
+    await pump(tester, api, locale:Locale(arabic?'ar':'en'), user: const AppUser(
+      id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
+      permissions: ['inventory.stock.adjust'],
+    ));
+    await tester.tap(find.byTooltip(arabic?'ترحيل':'Post'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, arabic?'ترحيل':'Post'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.textContaining(arabic?'تحمل أقل من الكمية المطلوبة':'holds less than the quantity needed'), findsOneWidget);
+    expect(find.textContaining(arabic?'خفّض الكمية أو وزّعها':'Lower the quantity or split'), findsOneWidget);
+    expect(find.textContaining('Mona'), findsNothing);
+    expect(find.textContaining('Tahrir'), findsNothing);
+    expect(find.textContaining('48,250'), findsNothing);
+    final boundary = visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final image=await boundary.toImage();final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
+      await screenshotFile(arabic?'stockdoc-lot-short-ar.png':'stockdoc-lot-short.png').writeAsBytes(bytes!.buffer.asUint8List());image.dispose();
+    });
+    expect(api.posts.single['path'], '/inventory/stock-documents/d-2/post');
+    expect(find.text('Document updated.'), findsNothing);
+    await tester.tap(find.text(arabic?'حسنًا':'OK'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip(arabic?'ترحيل':'Post'), findsOneWidget);
+    expect(find.text('TRF-001'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  }
+
   const storeAdjuster = AppUser(
     id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
     permissions: ['inventory.stock.adjust'],
