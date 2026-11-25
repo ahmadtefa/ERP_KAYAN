@@ -510,14 +510,14 @@ void main() {
 
   }
 
-  const _adjuster = AppUser(
+  const storeAdjuster = AppUser(
     id: 'u2', username: 'u2', fullName: 'Store manager', companyId: 'c1',
     permissions: ['inventory.stock.adjust'],
   );
 
   testWidgets('post confirmation: a transfer says no journal entry, a write-off says one may be made', (tester) async {
     final api = _DocumentsApi();
-    await pump(tester, api, user: _adjuster);
+    await pump(tester, api, user: storeAdjuster);
     await tester.tap(find.byTooltip('Post').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('Post TRF-001'), findsOneWidget);
@@ -537,7 +537,7 @@ void main() {
       'Choose the lot to move on line 1 or split the quantity over lots, then post again; no balance changed and your data is kept.',
       statusCode: 400, code: 'STOCK_DOC_TRANSFER_LOT_REQUIRED',
     );
-    await pump(tester, api, user: _adjuster);
+    await pump(tester, api, user: storeAdjuster);
     await tester.tap(find.byTooltip('Post').first);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Post'));
@@ -549,7 +549,7 @@ void main() {
 
   testWidgets('reversing asks first, names the effect, then reverses', (tester) async {
     final api = _DocumentsApi();
-    await pump(tester, api, user: _adjuster);
+    await pump(tester, api, user: storeAdjuster);
     await tester.tap(find.byTooltip('Reverse').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('Reversing ADJ-001 cancels its effect'), findsOneWidget);
