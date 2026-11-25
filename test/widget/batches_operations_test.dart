@@ -137,6 +137,7 @@ class _BatchApi extends ApiClient {
     if (path == '/inventory/locations') {
       shelfQueries.add(query);
       if (!locationsAvailable) return [];
+      if (query?['warehouseId'] == 'wh-2') return [{'id':'loc-target','code':'T-01','nameEn':'Target shelf','nameAr':'رف الاستلام','warehouseId':'wh-2','isActive':true}];
       return [
         if (secondLocation) {'id': 'loc-2', 'code': 'B-02', 'nameEn': 'Shelf B', 'warehouseId': 'wh-1', 'isActive': false},
         {
@@ -396,7 +397,7 @@ void main() {
       expect(controllers, contains('12.5'));
     });
 
-    testWidgets('transfer sends both warehouses', (tester) async {
+    testWidgets('transfer sends both warehouses and selected destination shelf', (tester) async {
       final api = _BatchApi();
       await pump(tester, api);
 
@@ -406,14 +407,64 @@ void main() {
         '3',
       );
       await pickDropdownItem(tester, 'To warehouse', 'SEC • Second');
+      await pickDropdownItem(tester, 'Destination location (optional)', 'T-01 • Target shelf');
       await tapText(tester, 'Transfer');
 
       final (path, body) = api.posted.single;
       expect(path, '/inventory/batches/transfer');
       expect(body['fromWarehouseId'], 'wh-1');
+      expect(body['fromStorageLocationId'], 'loc-1');
+      expect(body['toStorageLocationId'], 'loc-target');
       expect(body['toWarehouseId'], 'wh-2');
       expect(body['batchId'], 'lot-1');
       expect(body['quantity'], 3);
+    });
+
+    testWidgets('transfer sources stay explicit for a split lot and render with actual fonts', (tester) async {
+      await tester.runAsync(() async {
+        await (FontLoader('IBMPlexSansArabic')..addFont(Future.value(ByteData.sublistView(File('assets/fonts/IBMPlexSansArabic-Regular.ttf').readAsBytesSync())))).load();
+        await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(File('/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf').readAsBytesSync())))).load();
+      });
+      final ar = Platform.environment['KAYAN_ARABIC_COMPACT'] == '1';
+      final row=_lot(location:null)..['locations']=[{'locationId':'loc-1','quantity':'40.0000'}];
+      final api=_BatchApi(lots:[row]);
+      await pump(tester,api,locale:Locale(ar?'ar':'en'));
+      if(ar){tester.view.physicalSize=const Size(700,1100);await tester.pumpAndSettle();}
+      await tapText(tester,ar?'تحويل':'Transfer');
+      await pickDropdownItem(tester,ar?'إلى مستودع':'To warehouse',ar?'SEC • الثاني':'SEC • Second');
+      await tester.enterText(find.widgetWithText(TextFormField,ar?'الكمية':'Quantity'),'3');
+      await tapText(tester,ar?'تحويل':'Transfer');
+      expect(api.posted,isEmpty);
+      await pickDropdownItem(tester,ar?'موقع الصرف':'Source location',ar?'A-01 • ممر أ رف ١':'A-01 • Aisle A shelf 1');
+      await pickDropdownItem(tester,ar?'موقع الاستلام (اختياري)':'Destination location (optional)',ar?'T-01 • رف الاستلام':'T-01 • Target shelf');
+      final boundary=visualKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {final image=await boundary.toImage();final data=await image.toByteData(format:ui.ImageByteFormat.png);await File('/downloads/batch-transfer-${ar?'ar':'desktop'}.png').writeAsBytes(data!.buffer.asUint8List());image.dispose();});
+      expect(tester.takeException(),isNull);
+      await tapText(tester,ar?'تحويل':'Transfer');
+      expect(api.posted.single.$2['fromStorageLocationId'],'loc-1');
+      expect(api.posted.single.$2['toStorageLocationId'],'loc-target');
+    });
+
+    testWidgets('transfer can clear a destination back to unlocated and retains input after refusal', (tester) async {
+      final api=_BatchApi(failPost:const ApiFailure('Source location is short. Reduce quantity.',statusCode:400));
+      await pump(tester,api);await tapText(tester,'Transfer');
+      await pickDropdownItem(tester,'To warehouse','SEC • Second');
+      await pickDropdownItem(tester,'Destination location (optional)','T-01 • Target shelf');
+      await tapText(tester,'Clear destination location');
+      await tester.enterText(find.widgetWithText(TextFormField,'Quantity'),'3');
+      await tester.enterText(find.widgetWithText(TextFormField,'Reason (optional)'),'physical move');
+      await tapText(tester,'Transfer');await tapText(tester,'OK');
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Quantity')).controller!.text,'3');
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Reason (optional)')).controller!.text,'physical move');
+      expect(find.text('A-01 • Aisle A shelf 1'),findsWidgets);
+      expect(find.text('Clear destination location'),findsNothing);
+    });
+
+    testWidgets('uncertain transfer blocks duplicate stock movement', (tester) async {
+      final api=_BatchApi(failPost:const NetworkFailure());await pump(tester,api);await tapText(tester,'Transfer');
+      await pickDropdownItem(tester,'To warehouse','SEC • Second');await tapText(tester,'Transfer');
+      expect(find.textContaining('Could not confirm whether the stock movement completed.'),findsOneWidget);await tapText(tester,'OK');
+      expect(tester.widget<FilledButton>(find.descendant(of:find.byType(AlertDialog),matching:find.widgetWithText(FilledButton,'Transfer'))).onPressed,isNull);
     });
 
     testWidgets('a transfer to the same warehouse is refused before posting', (
@@ -425,7 +476,8 @@ void main() {
       await tapText(tester, 'Transfer');
       // Choosing the source again must not reach the server, which would
       // answer with a validation error the operator can do nothing about.
-      await pickDropdownItem(tester, 'From warehouse', 'MAIN • Main store');
+      final source = tester.widget<DropdownButtonFormField<String>>(find.widgetWithText(DropdownButtonFormField<String>, 'From warehouse'));
+      expect(source.onChanged, isNull);
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Quantity'),
         '3',

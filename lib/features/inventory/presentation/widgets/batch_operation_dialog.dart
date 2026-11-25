@@ -73,6 +73,7 @@ Map<String, dynamic> batchOperationBody({
   String? productionDate,
   String? expiryDate,
   String? storageLocationId,
+  String? toStorageLocationId,
   List<Json>? locationAllocations,
   String? documentDate,
 }) {
@@ -92,6 +93,12 @@ Map<String, dynamic> batchOperationBody({
       body['fromWarehouseId'] = warehouseId;
       body['toWarehouseId'] = toWarehouseId;
       body['batchId'] = batchId;
+      if ((storageLocationId ?? '').isNotEmpty) {
+        body['fromStorageLocationId'] = storageLocationId;
+      }
+      if ((toStorageLocationId ?? '').isNotEmpty) {
+        body['toStorageLocationId'] = toStorageLocationId;
+      }
     case BatchOperation.writeOff:
       body['warehouseId'] = warehouseId;
       body['batchId'] = batchId;
@@ -119,12 +126,15 @@ Map<String, dynamic> batchOperationBody({
       body['storageLocationId'] = storageLocationId;
     }
   }
-  if ((operation == BatchOperation.issue || operation == BatchOperation.writeOff) &&
+  if ((operation == BatchOperation.issue ||
+          operation == BatchOperation.writeOff) &&
       storageLocationId != null &&
       storageLocationId.isNotEmpty) {
     body['storageLocationId'] = storageLocationId;
   }
-  if (operation == BatchOperation.issue && locationAllocations != null && locationAllocations.isNotEmpty) {
+  if (operation == BatchOperation.issue &&
+      locationAllocations != null &&
+      locationAllocations.isNotEmpty) {
     body.remove('storageLocationId');
     body['locationAllocations'] = locationAllocations;
   }
@@ -194,6 +204,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   String? _warehouseId;
   String? _toWarehouseId;
   String? _locationId;
+  String? _toLocationId;
   bool _busy = false;
   bool _uncertain = false;
   bool _splitSources = false;
@@ -232,7 +243,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
 
   @override
   void dispose() {
-    for (final controller in _sourceAmounts.values) { controller.dispose(); }
+    for (final controller in _sourceAmounts.values) {
+      controller.dispose();
+    }
     _batchNumber.dispose();
     _quantity.dispose();
     _unitCost.dispose();
@@ -285,7 +298,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
   }
 
   Future<void> _submit() async {
-    if (_busy || _uncertain || !(_form.currentState?.validate() ?? false)) return;
+    if (_busy || _uncertain || !(_form.currentState?.validate() ?? false)) {
+      return;
+    }
     final user = ref.read(currentUserProvider);
     final branchId =
         user?.branchId ?? text(widget.batch ?? const {}, 'branchId');
@@ -322,14 +337,27 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
         final raw = entry.value.text.trim();
         if (raw.isEmpty) continue;
         if (_number(raw) != null) {
-          setState(() => _sourceError = _label('أدخل كمية أكبر من صفر حتى ٤ أرقام عشرية لكل موقع أو اتركه فارغًا.', 'Enter a positive quantity with up to 4 decimals for each source, or leave it blank.'));
+          setState(
+            () => _sourceError = _label(
+              'أدخل كمية أكبر من صفر حتى ٤ أرقام عشرية لكل موقع أو اتركه فارغًا.',
+              'Enter a positive quantity with up to 4 decimals for each source, or leave it blank.',
+            ),
+          );
           return;
         }
         sum += Decimal.parse(raw);
-        allocations.add({'storageLocationId': entry.key, 'quantity': num.parse(raw)});
+        allocations.add({
+          'storageLocationId': entry.key,
+          'quantity': num.parse(raw),
+        });
       }
       if (allocations.isEmpty || sum != Decimal.parse(_quantity.text.trim())) {
-        setState(() => _sourceError = _label('مجموع كميات المواقع يجب أن يساوي كمية الصرف. عدّل التوزيع ثم أعد المحاولة؛ بياناتك محفوظة.', 'Source quantities must add up to the issued quantity. Adjust the split and retry; your entries are kept.'));
+        setState(
+          () => _sourceError = _label(
+            'مجموع كميات المواقع يجب أن يساوي كمية الصرف. عدّل التوزيع ثم أعد المحاولة؛ بياناتك محفوظة.',
+            'Source quantities must add up to the issued quantity. Adjust the split and retry; your entries are kept.',
+          ),
+        );
         return;
       }
     }
@@ -346,6 +374,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
             ? null
             : text(widget.batch!, 'id'),
         toWarehouseId: _toWarehouseId,
+        toStorageLocationId: _toLocationId,
         quantity: _quantity.text,
         unitCost: _unitCost.text,
         reason: _reason.text,
@@ -369,11 +398,23 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
-      if ((operation == BatchOperation.issue || operation == BatchOperation.writeOff) &&
-          !(error is ApiFailure && error.statusCode != null && error.statusCode! >= 400 && error.statusCode! < 500) &&
-          error is! PermissionFailure && error is! AuthFailure && error is! SessionExpiredFailure) {
+      if ((operation == BatchOperation.issue ||
+              operation == BatchOperation.writeOff ||
+              operation == BatchOperation.transfer) &&
+          !(error is ApiFailure &&
+              error.statusCode != null &&
+              error.statusCode! >= 400 &&
+              error.statusCode! < 500) &&
+          error is! PermissionFailure &&
+          error is! AuthFailure &&
+          error is! SessionExpiredFailure) {
         setState(() => _uncertain = true);
-        _fail(_label('تعذر التأكد هل تمت الحركة. بياناتك محفوظة ولن نرسلها مرة ثانية. أغلق النافذة وحدّث الأرصدة وراجع الحركة قبل أي محاولة جديدة.', 'Could not confirm whether the stock movement completed. Your entries are kept and will not be submitted again. Close this form, refresh balances and check movements before any new attempt.'));
+        _fail(
+          _label(
+            'تعذر التأكد هل تمت الحركة. بياناتك محفوظة ولن نرسلها مرة ثانية. أغلق النافذة وحدّث الأرصدة وراجع الحركة قبل أي محاولة جديدة.',
+            'Could not confirm whether the stock movement completed. Your entries are kept and will not be submitted again. Close this form, refresh balances and check movements before any new attempt.',
+          ),
+        );
         return;
       }
       if (error is ApiFailure &&
@@ -554,7 +595,9 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                       onChanged: (value) => setState(() {
                         _warehouseId = value;
                         _locationId = null;
-                        for (final c in _sourceAmounts.values) { c.clear(); }
+                        for (final c in _sourceAmounts.values) {
+                          c.clear();
+                        }
                       }),
                     ),
                   ),
@@ -562,11 +605,14 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _warehouseField(
+                      enabled: false,
                       label: _label('من مستودع', 'From warehouse'),
                       value: _warehouseId,
                       fieldKey: 'warehouseId',
-                      onChanged: (value) =>
-                          setState(() => _warehouseId = value),
+                      onChanged: (value) => setState(() {
+                        _warehouseId = value;
+                        _locationId = null;
+                      }),
                     ),
                   ),
                   Padding(
@@ -575,8 +621,10 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                       label: _label('إلى مستودع', 'To warehouse'),
                       value: _toWarehouseId,
                       fieldKey: 'toWarehouseId',
-                      onChanged: (value) =>
-                          setState(() => _toWarehouseId = value),
+                      onChanged: (value) => setState(() {
+                        _toWarehouseId = value;
+                        _toLocationId = null;
+                      }),
                     ),
                   ),
                 ],
@@ -649,8 +697,16 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     ),
                   ),
                 ],
+                if (operation == BatchOperation.transfer &&
+                    _toWarehouseId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: _transferTargetField(_toWarehouseId!),
+                  ),
                 if ((operation == BatchOperation.receive ||
-                        (operation == BatchOperation.issue || operation == BatchOperation.writeOff)) &&
+                        (operation == BatchOperation.issue ||
+                            operation == BatchOperation.writeOff ||
+                            operation == BatchOperation.transfer)) &&
                     _warehouseId != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -722,13 +778,21 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
       builder: (context, ref, _) {
         final shelves = ref.watch(batchShelvesOfProvider(warehouseId));
         final rows = (shelves.value ?? prefetched)
-            .where((row) => widget.operation != BatchOperation.receive || row['isActive'] != false)
+            .where(
+              (row) =>
+                  (widget.operation != BatchOperation.receive &&
+                      widget.operation != BatchOperation.transfer) ||
+                  row['isActive'] != false,
+            )
             .toList(growable: false);
         final sourceRequired =
-            (widget.operation == BatchOperation.issue || widget.operation == BatchOperation.writeOff) &&
+            (widget.operation == BatchOperation.issue ||
+                widget.operation == BatchOperation.writeOff ||
+                widget.operation == BatchOperation.transfer) &&
             (listOf(widget.batch?['locations']).isNotEmpty ||
                 asString(widget.batch?['storageLocationId']) != null);
         final dropdown = DropdownButtonFormField<String>(
+          key: ValueKey('source-$warehouseId-${_locationId ?? "none"}'),
           initialValue: rows.any((row) => text(row, 'id') == _locationId)
               ? _locationId
               : null,
@@ -741,6 +805,7 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
                     'Storage location (optional)',
                   ),
             errorText: _fieldErrors['storageLocationId'],
+            errorMaxLines: 3,
             helperText: shelves.isLoading
                 ? _label('جارٍ تحميل المواقع...', 'Loading locations...')
                 : shelves.hasError
@@ -767,8 +832,8 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
           ),
           validator: (value) => sourceRequired && (value ?? '').isEmpty
               ? _label(
-                  'اختر الموقع الذي ستصرف منه البضاعة. للصرف الموزع فعّل توزيع الكمية على مواقع.',
-                  'Choose the physical source location. For split issue, turn on Split quantity across locations.',
+                  'اختر الموقع الفعلي الذي تخرج منه البضاعة. التحويل والشطب من موقع واحد في كل عملية.',
+                  'Choose the physical source location. Transfer and write-off use one source per operation.',
                 )
               : null,
           items: [
@@ -786,38 +851,158 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
             _locationId = value;
           }),
         );
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (widget.operation == BatchOperation.issue)
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(_label('توزيع الكمية على مواقع', 'Split quantity across locations')),
-              value: _splitSources,
-              onChanged: _busy ? null : (v) => setState(() { _splitSources = v; _sourceError = null; }),
-            ),
-          if (!_splitSources) dropdown,
-          if (_splitSources) ...[
-            Text(_label('أدخل كمية الصرف من كل موقع بوحدة الصنف الأساسية. يتم صرف التوزيع كله معًا أو لا شيء.', 'Enter the issue quantity from each source in base units. All sources commit together or none do.')),
-            for (final row in rows)
-              Padding(padding: const EdgeInsets.only(top: 8), child: TextFormField(
-                key: ValueKey('issue-source-${text(row, 'id')}'),
-                controller: _sourceAmounts.putIfAbsent(text(row, 'id'), () => TextEditingController()),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(labelText: '${text(row, 'code')} • ${_locationName(row)}',
-                  helperText: _label('كمية الصرف من هذا الموقع', 'Quantity to issue from this source')),
-                onChanged: (_) => setState(() => _sourceError = null),
-              )),
-            if (shelves.hasError || rows.isEmpty)
-              TextButton.icon(onPressed: () => ref.invalidate(batchShelvesOfProvider(warehouseId)), icon: const Icon(Icons.refresh), label: Text(_label('حدّث مواقع التخزين', 'Refresh storage locations'))),
-            if (_sourceError != null) Text(_sourceError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.operation == BatchOperation.issue)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  _label(
+                    'توزيع الكمية على مواقع',
+                    'Split quantity across locations',
+                  ),
+                ),
+                value: _splitSources,
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() {
+                        _splitSources = v;
+                        _sourceError = null;
+                      }),
+              ),
+            if (!_splitSources) dropdown,
+            if (_splitSources) ...[
+              Text(
+                _label(
+                  'أدخل كمية الصرف من كل موقع بوحدة الصنف الأساسية. يتم صرف التوزيع كله معًا أو لا شيء.',
+                  'Enter the issue quantity from each source in base units. All sources commit together or none do.',
+                ),
+              ),
+              for (final row in rows)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TextFormField(
+                    key: ValueKey('issue-source-${text(row, 'id')}'),
+                    controller: _sourceAmounts.putIfAbsent(
+                      text(row, 'id'),
+                      () => TextEditingController(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: '${text(row, 'code')} • ${_locationName(row)}',
+                      helperText: _label(
+                        'كمية الصرف من هذا الموقع',
+                        'Quantity to issue from this source',
+                      ),
+                    ),
+                    onChanged: (_) => setState(() => _sourceError = null),
+                  ),
+                ),
+              if (shelves.hasError || rows.isEmpty)
+                TextButton.icon(
+                  onPressed: () =>
+                      ref.invalidate(batchShelvesOfProvider(warehouseId)),
+                  icon: const Icon(Icons.refresh),
+                  label: Text(
+                    _label('حدّث مواقع التخزين', 'Refresh storage locations'),
+                  ),
+                ),
+              if (_sourceError != null)
+                Text(
+                  _sourceError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+            ],
+            if (widget.operation == BatchOperation.writeOff)
+              Text(
+                _label(
+                  'الشطب من موقع واحد في كل عملية. الشطب الموزع دفعة واحدة غير متاح بعد.',
+                  'Write-off uses one source per operation. Atomic split write-off is not available yet.',
+                ),
+              ),
           ],
-          if (widget.operation == BatchOperation.writeOff)
-            Text(_label('الشطب من موقع واحد في كل عملية. الشطب الموزع دفعة واحدة غير متاح بعد.', 'Write-off uses one source per operation. Atomic split write-off is not available yet.')),
-        ]);
+        );
       },
     );
   }
 
+  Widget _transferTargetField(String warehouseId) {
+    final shelves = ref.watch(batchShelvesOfProvider(warehouseId));
+    final rows = (shelves.value ?? widget.locations)
+        .where(
+          (row) =>
+              text(row, 'warehouseId') == warehouseId &&
+              row['isActive'] != false,
+        )
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String>(
+          key: ValueKey('target-$warehouseId-${_toLocationId ?? "none"}'),
+          initialValue: rows.any((row) => text(row, 'id') == _toLocationId)
+              ? _toLocationId
+              : null,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: _label(
+              'موقع الاستلام (اختياري)',
+              'Destination location (optional)',
+            ),
+            helperText: shelves.hasError
+                ? _label(
+                    'تعذر تحميل المواقع. حدّث القائمة.',
+                    'Could not load locations. Refresh to retry.',
+                  )
+                : _label(
+                    'اتركه فارغًا للاستلام بدون موقع محدد.',
+                    'Leave empty to receive as unlocated stock.',
+                  ),
+            helperMaxLines: 2,
+            suffixIcon: IconButton(
+              tooltip: _label(
+                'تحديث مواقع التخزين',
+                'Refresh storage locations',
+              ),
+              onPressed: () =>
+                  ref.invalidate(batchShelvesOfProvider(warehouseId)),
+              icon: const Icon(Icons.refresh),
+            ),
+          ),
+          items: [
+            for (final row in rows)
+              DropdownMenuItem(
+                value: text(row, 'id'),
+                child: Text(
+                  '${text(row, 'code')} • ${_locationName(row)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: (value) => setState(() => _toLocationId = value),
+        ),
+        if (_toLocationId != null)
+          TextButton(
+            onPressed: () => setState(() => _toLocationId = null),
+            child: Text(
+              _label('مسح موقع الاستلام', 'Clear destination location'),
+            ),
+          ),
+        Text(
+          _label(
+            'التحويل من موقع واحد في كل عملية. كرر العملية لنقل كميات من مواقع أخرى.',
+            'Transfer uses one source per operation. Repeat to move quantities from other sources.',
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _warehouseField({
+    bool enabled = true,
     required String label,
     required String? value,
     required String fieldKey,
@@ -842,11 +1027,13 @@ class _BatchOperationDialogState extends ConsumerState<_BatchOperationDialog> {
             ),
           ),
       ],
-      onChanged: (value) {
-        _clearField(fieldKey);
-        if (fieldKey == 'warehouseId') _clearField('toWarehouseId');
-        onChanged(value);
-      },
+      onChanged: !enabled
+          ? null
+          : (value) {
+              _clearField(fieldKey);
+              if (fieldKey == 'warehouseId') _clearField('toWarehouseId');
+              onChanged(value);
+            },
       validator: _required,
     );
   }
