@@ -272,3 +272,7 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 ### 08:47 catalogue search and destinations
 - Three new synthetic API widget cases qualify trimmed search/filter/reset, exact selected item picture editor then return, and exact selected item location screen/read. No image upload or backend effect claim.
 - Existing item create/edit tax cases rerun to map actual save triggers, no extra test count invented. Partial register156mapped/35open of191. Focused catalogue and tax suites/analyze pass; no production code or visual change in this batch.
+
+### 08:58 stock destinations and read controls
+- Four new synthetic widget cases pass: balance to vouchers and return with balance reload; cost-center report and its refresh read; exact balance item location route/read; ledger Close without balance mutation or reload.
+- Full analyze clean. Register161mapped/30open of191 snapshot callback sites. Export/OS behaviors remain open. No runtime source or visible layout change.

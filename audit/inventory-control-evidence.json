@@ -2,8 +2,8 @@
   "basisCommit": "3a09f498ff3e6c3ccafc279e4df099f23f789fdd",
   "scope": "Partial register of direct callback and text-input source sites in 15 inventory screen files. Does not count dynamic shared form fields, widget helpers, toolbar/export internals, or every option as a separate control. Counts differ from earlier broad syntactic scan; neither count is full product coverage. Unmatched sites remain open, not failures. Mapped evidence is synthetic widget-level, never implied SQL/HTTP/install proof. Supplement 2026-11-25 maps seven existing stock-document source sites to passing tests. Original line numbers are snapshot locators, not current line numbers. New lot/split/location controls are outside original191-site count and remain separately evidenced in lifecycle audit; no whole-product denominator implied.",
   "counts": {
-    "MAPPED_WIDGET": 156,
-    "OPEN_UNMAPPED": 35
+    "MAPPED_WIDGET": 161,
+    "OPEN_UNMAPPED": 30
   },
   "controls": [
     {
@@ -730,15 +730,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 104,
       "source": "onPressed: _openVouchers,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_destination_controls_test.dart",
+          "test": "stock vouchers destination returns and reloads original balance",
+          "proofLevel": "synthetic API exact navigation/read/refresh/close only; not OS export or backend mutation proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 113,
       "source": "onPressed: _openCostCenterReport,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_destination_controls_test.dart",
+          "test": "stock cost center route refresh rereads the same source",
+          "proofLevel": "synthetic API exact navigation/read/refresh/close only; not OS export or backend mutation proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -770,15 +782,27 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 149,
       "source": "onPressed: () => Navigator.of(context).push(",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_destination_controls_test.dart",
+          "test": "stock location destination uses selected balance item",
+          "proofLevel": "synthetic API exact navigation/read/refresh/close only; not OS export or backend mutation proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 268,
       "source": "onPressed: _refresh,",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_destination_controls_test.dart",
+          "test": "stock cost center route refresh rereads the same source",
+          "proofLevel": "synthetic API exact navigation/read/refresh/close only; not OS export or backend mutation proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
@@ -812,8 +836,14 @@
       "screen": "lib/features/inventory/presentation/screens/stock_screen.dart",
       "line": 596,
       "source": "onPressed: () => Navigator.of(context).pop(),",
-      "state": "OPEN_UNMAPPED",
-      "evidence": []
+      "state": "MAPPED_WIDGET",
+      "evidence": [
+        {
+          "file": "test/widget/stock_destination_controls_test.dart",
+          "test": "stock ledger Close dismisses without changing balances",
+          "proofLevel": "synthetic API exact navigation/read/refresh/close only; not OS export or backend mutation proof"
+        }
+      ]
     },
     {
       "screen": "lib/features/inventory/presentation/screens/stock_takes_screen.dart",
