@@ -91,3 +91,7 @@ Production service hunk integrated. Worker test hunk overlapped independent prob
 - Native42 two-original split/post exact orders pass: edit-first4 lines/version1 then post, post-first2 original lines/version0 and split refuses. Server stopped, all synthetic journal sums0.
 - Analyze and TypeScript noEmit clean. Worker test hunks excluded when overlapping independent regression cases. Logs patch41-ar-split.out, patch41-split-auth.out, patch41-direct-item.out, patch42-split.out, patch42-rollback.out, patch42-native.out.
 - Remaining acceptance: full every-control register unchanged35 mapped/156 open; installed Windows login/licence/device/installer; generic reversal other kinds, repeated-equal-line historical ambiguity/sourceLineId coverage; no universal multi-lot feature claim (explicit one-lot per line supported, split limited2 per UI operation).
+
+## Generic non-transfer reversal gap, 05:23
+
+Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and generic COUNT10->8 post/reverse tests fail: ledger and warehouse restore but itemBatch remains12 or8 rather than10. reverse lot loop only restores WRITE_OFF and negative ADJUSTMENT. Backend owner notified; positive COUNT probe added awaiting run. Do not present generic stock-document reversals as fully accepted. Evidence patch42-generic-reverse.out.

@@ -372,4 +372,8 @@ const vmReady =
     const err=await failure(documents.updateDraftLocations(COMPANY,USER,doc.id,{expectedVersion:0,lines:[{lineNumber:1,splits:[1,2].map(()=>({batchId:lotId,quantity:1}))},{lineNumber:2,splits:[{batchId:lotId,quantity:1},{batchId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',quantity:1}]}]}));expect(err?.code).toBe('STOCK_DOC_LOT_INVALID');const rows=(await db.query<{lineNumber:number,quantity:string}>(`SELECT "lineNumber",quantity::text FROM stock_document_lines WHERE "documentId"=$1 ORDER BY "lineNumber"`,[doc.id])).rows;expect(rows).toEqual([{lineNumber:1,quantity:'2.0000'},{lineNumber:2,quantity:'2.0000'}]);expect((await one(db,`SELECT "editVersion"::text v FROM stock_documents WHERE id=$1`,[doc.id])).v).toBe('0');expect(await shelf(SHELF)).toBe(6);
   });
 
+  it.each([{name:'positive adjustment',kind:'adjustment',quantity:2},{name:'negative count',kind:'count',quantity:0,countedQuantity:8},{name:'positive count',kind:'count',quantity:0,countedQuantity:12}])('generic $name post reverse restores lot and ledger together',async input=>{
+    const before={a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)};const doc=await documents.create(COMPANY,BRANCH,USER,{kind:input.kind,documentDate:'2026-11-25',toWarehouseId:WAREHOUSE,lines:[{itemId:ITEM,quantity:input.quantity,...('countedQuantity' in input?{countedQuantity:input.countedQuantity}:{}),unitCost:12,batchId:await batch(),storageLocationId:SHELF}]} as never) as unknown as {id:string};await documents.post(COMPANY,USER,doc.id);await documents.reverse(COMPANY,USER,doc.id);expect({a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)}).toEqual(before);
+  });
+
 });
