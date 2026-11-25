@@ -116,3 +116,8 @@ Transfer42 proofs remain scoped. New independent positive ADJUSTMENT+2 and gener
 - Explicitly show each staged split part's physical source code beside its quantity and lot, rather than hiding differing sources behind the common line summary.
 - Actual Flutter retained-refusal/edit/save/post/reverse native bridge passes with the source-aware summary. Inspected screenshot `/downloads/stock-document-lot-split.png`: readable A source per part and T destination, no overlap.
 - Full Flutter analyze clean. Stockdoc units/controller/warehouses/cost/source/writeoff/transfer-lots/warehouse guard and response permissions: 9 suites, 80 tests pass locally. These do not override the three known isolated integration failures.
+
+### 05:33 extended inverse failures, explicit fixture scope
+- Writeoff2 then actual receipt2@24 then inverse: physical lot12@14.4 vs expected14. Same original physical contribution loss as negative adjustment, not a warehouse valuation-policy change.
+- Synthetic legacy mismatch: post generic adjustment+2 with named lot then clear only the posted line's batchId. Reverse succeeds, ledger/books restore10 but lot stays12. Must bind proven original identity or refuse atomically. This is intentionally a corrupted/legacy fixture, not evidence that UI can clear a posted line.
+- Both probes allow exact inverse or unchanged atomic refusal. Both currently fail. Reported to parent for backend owner. `/tmp/patch43-extra-inverse.out`.
