@@ -294,7 +294,7 @@ export class ChequesService {
         await this.vouchers.post(companyId, userId, voucherId, options);
       } catch (error) {
         // Nothing was booked: put the cheque back and drop the unposted draft.
-        await this.prisma.$executeRaw(Prisma.sql`UPDATE cheques SET status = ${current.status}, "updatedAt" = now() WHERE id = ${id}::uuid AND status = ${target}`);
+        await this.prisma.$executeRaw(Prisma.sql`UPDATE cheques SET status = ${current.status}, "cashAccountId" = ${current.cashAccountId}::uuid, "updatedAt" = now() WHERE id = ${id}::uuid AND status = ${target}`);
         if (voucherId) {
           await this.prisma.$executeRaw(Prisma.sql`UPDATE cash_vouchers SET "deletedAt" = now() WHERE id = ${voucherId}::uuid AND status = 'DRAFT'`);
         }

@@ -285,7 +285,7 @@ class _ChequesScreenState extends ConsumerState<ChequesScreen> {
     try {
       await ref.read(apiClientProvider).post(
         '/cheques/${text(row, 'id')}/$action',
-        body: {if (note != null) 'note': note, if (accountId != null) 'cashAccountId': accountId},
+        body: {'note': ?note, 'cashAccountId': ?accountId},
       );
       if (mounted) showMessage(context, _arabic ? 'تم' : 'Done');
     } catch (error) {
