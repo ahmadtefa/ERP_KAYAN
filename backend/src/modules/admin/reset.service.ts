@@ -701,15 +701,20 @@ export class ResetService {
             return count;
           });
 
-          await tx.account.updateMany({
-            where: { companyId: me.companyId },
-            data: { parentId: null },
-          });
+          // Children first, one level at a time. Flattening the tree to
+          // parentId = null before deleting is refused by the eight-digit
+          // chart rule (an account of 4+ digits must have its parent), which
+          // made every reset of a setup-created company fail.
           await step('accounts', async () => {
-            const { count } = await tx.account.deleteMany({
-              where: { companyId: me.companyId },
-            });
-            return count;
+            let total = 0;
+            for (let pass = 0; pass < 50; pass++) {
+              const { count } = await tx.account.deleteMany({
+                where: { companyId: me.companyId, children: { none: {} } },
+              });
+              if (count === 0) break;
+              total += count;
+            }
+            return total;
           });
           await step('companySettings', async () => {
             const { count } = await tx.companySetting.deleteMany({

@@ -144,6 +144,9 @@ describe('ResetService', () => {
       tx[model] = {
         deleteMany: async () => {
           if (failOn === model) throw new Error(`${model} failed`);
+          // The chart is deleted leaf-first in passes until a pass removes
+          // nothing: the mock's tree is one level, so the second pass is empty.
+          if (model === 'account' && deletions.includes('account')) return { count: 0 };
           deletions.push(model);
           return { count: 1 };
         },
