@@ -78,6 +78,14 @@ class AppErrorMessageResolver {
   /// the only server value used is a plain line number. Each sentence says
   /// what is wrong and how to fix it, and that the data is kept.
   static const _stockDocReasons = <String, List<String>>{
+    'WRITE_OFF_SELF_APPROVAL': [
+      'لا يمكنك اعتماد مستند إعدام أنشأته أنت. يجب أن يعتمده شخص آخر لديه صلاحية الاعتماد. المستند محفوظ كما هو.',
+      'You cannot approve a write-off you created yourself. Another person with approval permission must approve it. The document is unchanged.',
+    ],
+    'WRITE_OFF_NOT_APPROVED': [
+      'لا يمكن ترحيل مستند الإعدام قبل اعتماده. يجب أن يعتمده أولًا شخص آخر غير من أنشأه، ثم يُرحَّل. المستند محفوظ كما هو.',
+      'A write-off cannot be posted before it is approved. A person other than its creator must approve it first, then it can be posted. The document is unchanged.',
+    ],
     'STOCK_DOC_APPROVED': [
       'المستند تمت مراجعته أو اعتماده فلا تُعدَّل مواقعه. أعده للمسودة أو أنشئ مستندًا جديدًا. بياناتك محفوظة.',
       'This document was reviewed or approved, so its locations cannot be changed. Return it to draft or create a new document. Your data is kept.',

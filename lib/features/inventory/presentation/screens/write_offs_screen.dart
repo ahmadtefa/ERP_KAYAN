@@ -93,9 +93,9 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     final user = ref.watch(currentUserProvider);
     final canApprove = user?.can('inventory.writeoff.approve') ?? false;
     final canPost = user?.can('inventory.writeoff.post') ?? false;
-    // The server's create route is guarded by the stock-adjust grant, and it
+    // The server records a write-off under inventory.writeoff.create and
     // refuses a warehouse the caller may not issue from.
-    final canCreate = user?.can('inventory.stock.adjust') ?? false;
+    final canCreate = user?.can('inventory.writeoff.create') ?? false;
 
     return ModuleScaffold(
       title: _arabic ? 'الإعدام' : 'Write-offs',

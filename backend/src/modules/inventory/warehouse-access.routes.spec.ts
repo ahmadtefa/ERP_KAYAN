@@ -41,7 +41,7 @@ const user = (grants: WarehouseGrant[] | null | undefined = GRANTS): AuthUser =>
     companyId: COMPANY,
     branchId: BRANCH,
     isSuperAdmin: false,
-    permissions: [],
+    permissions: ['inventory.stock.adjust', 'inventory.writeoff.create'],
     warehouseAccess: grants,
   }) as unknown as AuthUser;
 
@@ -172,6 +172,21 @@ describe('warehouse grants are enforced on the warehouse routes', () => {
         ),
       ).toThrow(ForbiddenException);
       expect(calls).toEqual([]);
+    });
+
+    it('records a write-off only under its own grant, not under stock-adjust alone', async () => {
+      const { service, calls } = documentsService();
+      const controller = new StockDocumentsController(service as never);
+      const body = { kind: 'WRITE_OFF', toWarehouseId: STORE_A, reason: 'spillage', lines: [] };
+      const adjustOnly = { ...user(), permissions: ['inventory.stock.adjust'] } as AuthUser;
+      expect(() => controller.create(adjustOnly, body, undefined)).toThrow(ForbiddenException);
+      expect(calls).toEqual([]);
+      const writeOffOnly = { ...user(), permissions: ['inventory.writeoff.create'] } as AuthUser;
+      expect(() => controller.create(writeOffOnly, body, undefined)).not.toThrow();
+      // A storekeeper allowed to write off is still not allowed to adjust other documents.
+      expect(() =>
+        controller.create(writeOffOnly, { kind: 'ADJUSTMENT', toWarehouseId: STORE_A, lines: [] }, undefined),
+      ).toThrow(ForbiddenException);
     });
 
     it('still refuses a write-off into an ungranted store', async () => {

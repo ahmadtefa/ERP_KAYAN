@@ -1000,7 +1000,10 @@ export class StockDocumentsService {
       throw new BadRequestException('Only a draft write-off can be approved');
     }
     if (document.createdBy && document.createdBy === userId) {
-      throw new BadRequestException('The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.');
+      throw new BadRequestException({
+        code: 'WRITE_OFF_SELF_APPROVAL',
+        message: 'The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.',
+      });
     }
 
     const claimed = await this.prisma.stockDocument.updateMany({
@@ -1054,9 +1057,10 @@ export class StockDocumentsService {
     // alternative endpoint can bypass it.
     if (initialDocument.kind === StockDocumentKind.WRITE_OFF &&
         (!initialDocument.approvedAt || !initialDocument.approvedBy)) {
-      throw new BadRequestException(
-        'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
-      );
+      throw new BadRequestException({
+        code: 'WRITE_OFF_NOT_APPROVED',
+        message: 'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
+      });
     }
     if (initialDocument.kind === StockDocumentKind.TRANSFER &&
         initialDocument.lines.some((line) => !line.quantity.greaterThan(0))) {

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, ForbiddenException, Controller, Get, Headers, Param, Post, Put, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
@@ -46,7 +46,6 @@ export class StockDocumentsController {
   }
 
   @Post()
-  @RequirePermissions('inventory.stock.adjust')
   create(
     @CurrentUser() user: AuthUser,
     @Body() body: Record<string, unknown>,
@@ -55,6 +54,16 @@ export class StockDocumentsController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const kind = String(body.kind ?? '').toUpperCase();
+    // A write-off is recorded under its own grant (inventory.writeoff.create),
+    // so a storekeeper can be allowed to write off without being allowed to
+    // adjust stock in general. Every other kind keeps the stock-adjust grant.
+    const needed = kind === 'WRITE_OFF' ? 'inventory.writeoff.create' : 'inventory.stock.adjust';
+    if (!user.isSuperAdmin && !user.permissions.includes(needed)) {
+      throw new ForbiddenException(
+        `ليس لديك صلاحية تنفيذ هذا الإجراء (${needed}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ` +
+          `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
+      );
+    }
     if (kind === 'WRITE_OFF') {
       assertWarehouseAccess(user, body.toWarehouseId as string, 'issue');
     }

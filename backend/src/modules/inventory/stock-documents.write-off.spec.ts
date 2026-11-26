@@ -200,7 +200,7 @@ describe('a documentary write-off', () => {
   it('will not let the person who recorded the loss approve it', async () => {
     const { service } = makeService();
 
-    await expect(service.approve(COMPANY, AUTHOR, 'doc-wo')).rejects.toThrow(/cannot approve/i);
+    await expect(service.approve(COMPANY, AUTHOR, 'doc-wo')).rejects.toMatchObject({ response: { code: 'WRITE_OFF_SELF_APPROVAL' } });
   });
 
   it('approves once and reports the second approval as already done', async () => {
@@ -229,9 +229,9 @@ describe('a documentary write-off', () => {
   it('does not post an unapproved write-off', async () => {
     const { service } = makeService();
 
-    await expect(service.post(COMPANY, APPROVER, 'doc-wo')).rejects.toThrow(
-      /must be approved before it is posted/i,
-    );
+    await expect(service.post(COMPANY, APPROVER, 'doc-wo')).rejects.toMatchObject({
+      response: { code: 'WRITE_OFF_NOT_APPROVED' },
+    });
   });
 
   it('lets the approver post the loss they signed, and the recorder too', async () => {

@@ -228,7 +228,7 @@ void main() {
     await pump(
       tester,
       api,
-      permissions: const ['inventory.stock.read', 'inventory.stock.adjust'],
+      permissions: const ['inventory.stock.read', 'inventory.writeoff.create'],
     );
     await tester.tap(find.text('New write-off').first);
     await tester.pumpAndSettle();
