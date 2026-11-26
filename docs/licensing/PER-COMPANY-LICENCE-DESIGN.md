@@ -94,6 +94,17 @@ Company setup: the `COMPANY_ACTIVATION` key creates the company in state `AWAITI
 * Manual v1 rollback is not advertised as safe once the v2 state has accrued anything the v1 file lacks: a newer applied key, a spent keyId, a higher watermark, or any second licence. Even with one company, restoring the v1 file would drop a spent key. Only the exact pre-migration state (v2 sequence equals the committed sequence and no applied key added) may be restored, by an authorised recovery, from the verified backup.
 * Downgrade: no down-migration, no data dropped. Old binaries must be tested for real: the pre-change code is run (startup, status, activation, seat reservation, a write path, reconcile) against the v2 state and the migrated database. Expected: `LICENSE_STATE_DAMAGED`, licensed writes refused, no write to the state or licence tables. This is an integration test; the parser test alone is not claimed as proof.
 
+## 4f. Corrections from prototype testing (revision 3)
+
+* HMAC: canonical JSON with sorted keys at every level. The v1 store's top-level-only canonicalisation is safe for its flat shape but would drop nested licence entries; v2 must not reuse it. Per-field nested tamper tests exist.
+* Marker is a genesis plus a sequence floor, not a file digest. A normal update writes the file durably, then raises the floor; a crash between the two is accepted (file sequence above floor); a file below the floor is refused.
+* Commit requires the exact expected transformation of the verified v1 backup (companyId, clock, enforcement, suspension, key order, sequence v1+1, `migratedFrom` digest). Extra entries or keys fail.
+* Backups: exclusive create, fsync, mode 0600 check, digest file, state backup and key backup verified separately; a crash between them completes on restart; a mismatching key backup stops.
+* Directory fsync errors are errors on POSIX. On Windows Node cannot fsync a directory; durability there is UNVERIFIED and needs a Windows test before any claim.
+* Exclusion: an advisory lock cannot bind an already running old service. Proven hazard: a live old process overwrites the v2 file with its in-memory v1 state on its next write. The new build detects it (marker committed, state v1: no fallback) but cannot prevent it. Therefore the requirement is operational: the licensed service is stopped, verified by the service manager/installer (not by an in-app lock) before migration, and the installer must not start the old binary afterwards. A recovery path from the v1 backup plus the clobbering v1 file (re-run migration from the newer v1) must be designed and tested before enablement.
+* Old store on a v2 file: observed result is an integrity failure (TAMPERED), not "format 2", because the old MAC check runs first. Both map to LICENSE_STATE_DAMAGED. A service-level test remains to be done.
+* First admin: capability is the verified signed COMPANY_ACTIVATION key (signature checked with the public key), single use, company-bound, recorded in the entry; a keyId alone is not accepted.
+
 ## 5. Restore
 
 * Company backup: never carries or changes a licence link; restoring into a different company must not relink anything.
