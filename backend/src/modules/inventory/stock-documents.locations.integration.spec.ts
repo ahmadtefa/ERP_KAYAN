@@ -32,6 +32,8 @@ import { pglitePrisma } from '../../testing/pglite-adapter';
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const BRANCH = '22222222-2222-4222-8222-222222222222';
 const USER = '33333333-3333-4333-8333-333333333333';
+// A write-off is approved and posted by somebody other than the person who recorded it.
+const APPROVER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const WAREHOUSE = '44444444-4444-4444-8444-444444444444';
 const WAREHOUSE_2 = '55555555-5555-4555-8555-555555555555';
 const ITEM = '66666666-6666-4666-8666-666666666666';
@@ -74,6 +76,8 @@ async function freshDatabase(): Promise<PGlite> {
 
     INSERT INTO users (id, "companyId", username, "fullNameEn", "fullNameAr", "passwordHash", "isActive", "isSuperAdmin", "tokenVersion", "updatedAt")
     VALUES ('${USER}', '${COMPANY}', 'storekeeper', 'Storekeeper', 'أمين المخزن',
+            'not-a-real-hash', true, false, 0, now()),
+           ('${APPROVER}', '${COMPANY}', 'approver', 'Approver', 'معتمد',
             'not-a-real-hash', true, false, 0, now());
 
     INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "updatedAt")
@@ -260,9 +264,6 @@ const vmReady =
       kind: 'write_off', documentDate: '2026-11-08', toWarehouseId: WAREHOUSE, branchId: BRANCH, reason: 'damaged',
       lines: [{ itemId: ITEM, quantity: -2, ...line }],
     } as never) as unknown as { id: string };
-    const APPROVER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-    await db.exec(`INSERT INTO users (id, "companyId", username, "fullNameEn", "fullNameAr", "passwordHash", "isActive", "isSuperAdmin", "tokenVersion", "updatedAt")
-      VALUES ('${APPROVER}', '${COMPANY}', 'approver', 'Approver', 'معتمد', 'x', true, false, 0, now()) ON CONFLICT DO NOTHING`);
     await documents.approve(COMPANY, APPROVER, created.id);
     return created.id;
   };
@@ -270,7 +271,7 @@ const vmReady =
   it('write-off drains the named shelf and the lot, and the warehouse balance follows', async () => {
     const id = await writeOff({ batchId: await batch(), storageLocationId: SHELF });
     const before = await wh(WAREHOUSE);
-    await documents.post(COMPANY, USER, id);
+    await documents.post(COMPANY, APPROVER, id);
     expect(await shelf(SHELF)).toBe(4);
     expect(await shelf(SHELF_B)).toBe(4);
     expect((await lot(WAREHOUSE)).r).toBe('8.0000');
@@ -281,7 +282,7 @@ const vmReady =
 
   it('write-off with no shelf is refused while the lot is on shelves, names them, writes nothing', async () => {
     const id = await writeOff({ batchId: await batch() });
-    const err = await failure(documents.post(COMPANY, USER, id));
+    const err = await failure(documents.post(COMPANY, APPROVER, id));
     expect(err?.code).toBe('STOCK_DOC_LOCATION_REQUIRED');
     expect(String(err?.message)).toContain('A-01: 6.0000');
     expect((await lot(WAREHOUSE)).r).toBe('10.0000');
@@ -289,26 +290,26 @@ const vmReady =
 
   it('write-off of more than the shelf holds is refused with the shelf named', async () => {
     const id = await writeOff({ batchId: await batch(), storageLocationId: SHELF_B, quantity: -5 });
-    const err = await failure(documents.post(COMPANY, USER, id));
+    const err = await failure(documents.post(COMPANY, APPROVER, id));
     expect(err?.code).toBe('STOCK_DOC_SHELF_SHORT');
     expect(await shelf(SHELF_B)).toBe(4);
     expect((await lot(WAREHOUSE)).r).toBe('10.0000');
   });
   it('full two-shelf write-off exposes any residual warehouse value',async()=>{
-    const id=await writeOff({batchId:await batch(),storageLocationId:SHELF,quantity:-6});await documents.post(COMPANY,USER,id);
-    const second=await writeOff({batchId:await batch(),storageLocationId:SHELF_B,quantity:-4});await documents.post(COMPANY,USER,second);
+    const id=await writeOff({batchId:await batch(),storageLocationId:SHELF,quantity:-6});await documents.post(COMPANY, APPROVER,id);
+    const second=await writeOff({batchId:await batch(),storageLocationId:SHELF_B,quantity:-4});await documents.post(COMPANY, APPROVER,second);
     const actual=await wh(WAREHOUSE);const branch=await one(db,`SELECT quantity::text q,value::text v FROM stock_balances WHERE "itemId"=$1`,[ITEM]);const warehouseSum=await one(db,`SELECT SUM(quantity)::text q,SUM(value)::text v FROM warehouse_stock_balances WHERE "itemId"=$1`,[ITEM]);const movements=await one(db,`SELECT SUM(CASE WHEN direction='IN' THEN "totalCost" ELSE -"totalCost" END)::text v FROM stock_movements WHERE "itemId"=$1 AND "warehouseId"=$2`,[ITEM,WAREHOUSE]);console.log('FULL_WRITE_OFF_VALUE',{actual,branch,warehouseSum,movements});expect(actual.q).toBe('0.0000');expect(actual.v).toBe('0.0000');expect(branch.v).toBe(warehouseSum.v);
   });
 
   it('transfer post reverse restores exact source target lot and branch values',async()=>{
     const id=await draft({batchId:await batch(),storageLocationId:SHELF,toStorageLocationId:SHELF_W2});
     const before={a:await shelf(SHELF),b:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)};
-    await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);
+    await documents.post(COMPANY, USER,id);await documents.reverse(COMPANY,USER,id);
     expect({a:await shelf(SHELF),b:await shelf(SHELF_W2),w1:await wh(WAREHOUSE),w2:await wh(WAREHOUSE_2),l1:await lot(WAREHOUSE),l2:await lot(WAREHOUSE_2)}).toEqual(before);
   });
   it('writeoff post reverse restores exact shelf lot warehouse branch values',async()=>{
     const id=await writeOff({batchId:await batch(),storageLocationId:SHELF});const before={a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)};
-    await documents.post(COMPANY,USER,id);await documents.reverse(COMPANY,USER,id);
+    await documents.post(COMPANY, APPROVER,id);await documents.reverse(COMPANY,USER,id);
     expect({a:await shelf(SHELF),w:await wh(WAREHOUSE),l:await lot(WAREHOUSE)}).toEqual(before);
   });
 
@@ -416,7 +417,7 @@ const vmReady =
   });
 
   it('writeoff reversed after real receipt restores original physical contribution or refuses atomically',async()=>{
-    const id=await writeOff({batchId:await batch(),storageLocationId:SHELF});await documents.post(COMPANY,USER,id);await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L1',quantity:2,unitCost:24,storageLocationId:SHELF,expiryDate:'2027-02-01'});const before={a:await shelf(SHELF),l:await lot(WAREHOUSE),w:await wh(WAREHOUSE)};const err=await failure(documents.reverse(COMPANY,USER,id));if(err){expect({a:await shelf(SHELF),l:await lot(WAREHOUSE),w:await wh(WAREHOUSE)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');return;}const end=await lot(WAREHOUSE);expect(Number(end.r)).toBe(12);expect(Number(end.c)).toBeCloseTo(14,3);expect(await wh(WAREHOUSE)).toEqual({q:'12.0000',v:'168.0000'});
+    const id=await writeOff({batchId:await batch(),storageLocationId:SHELF});await documents.post(COMPANY,APPROVER,id);await batches.receive(COMPANY,USER,{branchId:BRANCH,warehouseId:WAREHOUSE,itemId:ITEM,batchNumber:'L1',quantity:2,unitCost:24,storageLocationId:SHELF,expiryDate:'2027-02-01'});const before={a:await shelf(SHELF),l:await lot(WAREHOUSE),w:await wh(WAREHOUSE)};const err=await failure(documents.reverse(COMPANY,USER,id));if(err){expect({a:await shelf(SHELF),l:await lot(WAREHOUSE),w:await wh(WAREHOUSE)}).toEqual(before);expect((await one(db,`SELECT status FROM stock_documents WHERE id=$1`,[id])).status).toBe('POSTED');return;}const end=await lot(WAREHOUSE);expect(Number(end.r)).toBe(12);expect(Number(end.c)).toBeCloseTo(14,3);expect(await wh(WAREHOUSE)).toEqual({q:'12.0000',v:'168.0000'});
   });
 
   it.each([8,12])('count %s after real receipt preserves original physical contribution',async countedQuantity=>{
