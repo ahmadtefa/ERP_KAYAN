@@ -1,4 +1,4 @@
-import { companyClosesSignIn, resetResumeAllowsSetupSignIn } from '../../common/auth/company-sign-in';
+import { companyClosesSignIn } from '../../common/auth/company-sign-in';
 import {
   BadRequestException,
   Injectable,
@@ -67,8 +67,7 @@ export class AuthService {
 
     const companyClosed =
       user !== null &&
-      companyClosesSignIn(user.company) &&
-      !(await resetResumeAllowsSetupSignIn(this.prisma, user, user.company));
+      companyClosesSignIn(user.company);
     if (!user || user.deletedAt !== null || !user.isActive || companyClosed) {
       this.logger.warn(
         `Sign-in refused for "${username}": ${

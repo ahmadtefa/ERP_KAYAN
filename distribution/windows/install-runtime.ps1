@@ -367,8 +367,7 @@ function New-CompanyDatabase([hashtable]$Settings, [string]$FromDatabase, [strin
   # A new company means a database of its own, never the previous company's
   # database emptied. The previous database is backed up and verified, then
   # left exactly as it is, and the new one is created beside it - the same
-  # arrangement the manual "Reset (start fresh)" tool uses, so the customer can
-  # always get the old company back.
+  # arrangement, so the customer can always get the old company back.
   $stamp = Get-Date -Format 'yyyyMMddHHmmss'
   $newDatabase = 'erp_kayan_' + $stamp
   $backupDir = Join-Path $ProgramDataRoot ('backups\before-new-company-' + $stamp)
@@ -981,9 +980,9 @@ foreach ($entry in $userSettings.GetEnumerator()) {
   $settings[$entry.Key] = $entry.Value
 }
 # The company database of this installation is either the original
-# 'erp_kayan', or one this product created for "a new company" or a
-# reset: erp_kayan_<yyyyMMddHHmmss> (the shape New-CompanyDatabase and
-# reset-kayan.ps1 generate). The name is checked against this before it
+# 'erp_kayan', or one this product created for "a new company":
+# erp_kayan_<yyyyMMddHHmmss> (the shape New-CompanyDatabase
+# generates). The name is checked against this before it
 # is ever put into SQL. The rest of the connection is fixed too - the
 # bundled role, the loopback address and port 5432 - so a database
 # somewhere else is refused whatever it is called.

@@ -36,14 +36,10 @@ describe('SetupService status and public setup boundary', () => {
     });
   });
 
-  it('treats a company retired by a reset as setup again, not recovery', async () => {
-    // The settings screen tells the operator the program "will ask to be set
-    // up again". The reset keeps the row for exactly that, so this state must
-    // open setup - while a live company without a usable account stays the
-    // recovery case below.
+  it('keeps setup closed over a retired company that still has an account', async () => {
     const { service } = makeService(0, 1, 0, true);
     expect(await service.status()).toMatchObject({
-      needsSetup: true, recoveryRequired: false, companyCount: 0, hasUsers: true,
+      needsSetup: false, recoveryRequired: true, companyCount: 0, hasUsers: true,
     });
   });
 
@@ -102,67 +98,28 @@ describe('SetupService status and public setup boundary', () => {
     },
   );
 
-  describe('setup after a reset (public route) needs the proven reset state and the kept administrator', () => {
-    const argon2 = jest.requireActual('argon2') as typeof import('argon2');
-    async function build(opts: { resetUserId: string | null; users?: number; companyActive?: boolean }) {
-      const hash = await argon2.hash('Kept-Admin-Password-1');
+  describe('public setup over a retired company', () => {
+    function build(users: number) {
       const prisma = {
         company: {
           count: jest.fn().mockResolvedValue(0),
-          findFirst: jest.fn().mockResolvedValue(
-            opts.companyActive === false ? null : { id: 'retired', isActive: true },
-          ),
+          findFirst: jest.fn().mockResolvedValue({ id: 'retired' }),
         },
-        user: {
-          count: jest.fn().mockResolvedValue(opts.users ?? 1),
-          findMany: jest.fn().mockResolvedValue(
-            (opts.users ?? 1) === 1 ? [{ id: 'kept', companyId: 'retired', username: 'admin', passwordHash: hash }] : [{}, {}],
-          ),
-        },
-        auditLog: {
-          findFirst: jest.fn().mockResolvedValue(opts.resetUserId === null ? null : { userId: opts.resetUserId }),
-        },
+        user: { count: jest.fn().mockResolvedValue(users) },
         $transaction: jest.fn(),
       };
       return { prisma, service: new SetupService(prisma as any, {} as any, licensingStub) };
     }
-    const dto = (over: Record<string, unknown> = {}) =>
-      ({ adminUsername: 'admin', adminPassword: 'Kept-Admin-Password-1', ...over }) as any;
+    const dto = () => ({ adminUsername: 'admin', adminPassword: 'Some-Password-12345' }) as any;
 
-    it('reopens setup for the administrator the RESET audit entry names, with their credentials', async () => {
-      const { prisma, service } = await build({ resetUserId: 'kept' });
-      await expect(service.initialSetup(dto())).rejects.toThrow();
-      expect(prisma.$transaction).toHaveBeenCalled();
-    });
-
-    it('closes setup when no RESET audit entry names the kept account (retired some other way)', async () => {
-      const { prisma, service } = await build({ resetUserId: null });
+    it('is closed when the retired company still has its account', async () => {
+      const { prisma, service } = build(1);
       await expect(service.initialSetup(dto())).rejects.toThrow('Initial setup is closed');
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('closes setup when the RESET entry names a different account', async () => {
-      const { prisma, service } = await build({ resetUserId: 'someone-else' });
-      await expect(service.initialSetup(dto())).rejects.toThrow('Initial setup is closed');
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-    });
-
-    it('refuses a stranger who does not know the kept account password', async () => {
-      const { prisma, service } = await build({ resetUserId: 'kept' });
-      await expect(service.initialSetup(dto({ adminPassword: 'Attacker-Chosen-Password-9' }))).rejects.toThrow(
-        'current password',
-      );
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-    });
-
-    it('refuses a different username even with the right password', async () => {
-      const { prisma, service } = await build({ resetUserId: 'kept' });
-      await expect(service.initialSetup(dto({ adminUsername: 'attacker' }))).rejects.toThrow('current password');
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-    });
-
-    it('closes setup when a suspended retired company is all that is left', async () => {
-      const { prisma, service } = await build({ resetUserId: 'kept', companyActive: false });
+    it('is closed when only the retired company row is left', async () => {
+      const { prisma, service } = build(0);
       await expect(service.initialSetup(dto())).rejects.toThrow('Initial setup is closed');
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });

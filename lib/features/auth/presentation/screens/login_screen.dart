@@ -48,7 +48,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// can sign in. The setup screen answers that before the sign-in form can
   /// do anything useful.
   bool? _setupNeeded;
-  bool _setupKeptAdministrator = false;
   bool _setupRecoveryRequired = false;
   bool _setupBusy = false;
   String? _setupError;
@@ -71,7 +70,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           healthValue: status['recoveryRequired'],
         );
         _setupNeeded = !_setupRecoveryRequired && status['needsSetup'] == true;
-        _setupKeptAdministrator = _setupNeeded == true && status['hasUsers'] == true;
       });
     } catch (_) {
       // The server being unreachable is the sign-in form's own error to
@@ -454,7 +452,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: CompanySetupForm(
                         onSubmit: _runSetup,
                         busy: _setupBusy,
-                        keptAdministrator: _setupKeptAdministrator,
                         error: _setupError,
                         fieldErrors: _setupFieldErrors,
                       ),

@@ -175,6 +175,11 @@ jobs:
         run: |
           grep -E '^PASS\s+\S*licensing-seats\.multi\.postgres\.spec\.ts' /tmp/kayan-jest.log \
             || { echo '::error title=Licence seats (several licences)::the PostgreSQL several-licence seat spec did not pass or did not run'; exit 1; }
+      - name: Prove the setup, backup, restore spec ran on PostgreSQL
+        if: always()
+        run: |
+          grep -E '^PASS\s+\S*setup-backup-restore\.postgres\.spec\.ts' /tmp/kayan-jest.log \
+            || { echo '::error title=Setup backup restore::the PostgreSQL setup, backup, restore spec did not pass or did not run'; exit 1; }
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma
@@ -710,7 +715,7 @@ jobs:
       - name: Render stock documents pilot pictures
         env:
           KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/stockdoc-pictures
-        run: python scripts/ci-diagnose.py flutter test test/widget/stock_documents_screen_test.dart test/widget/stock_transfer_create_errors_test.dart test/widget/stock_takes_screen_test.dart test/widget/reset_recovery_visual_test.dart test/widget/item_opening_shelf_test.dart test/widget/write_offs_pictures_test.dart --reporter expanded
+        run: python scripts/ci-diagnose.py flutter test test/widget/stock_documents_screen_test.dart test/widget/stock_transfer_create_errors_test.dart test/widget/stock_takes_screen_test.dart test/widget/item_opening_shelf_test.dart test/widget/write_offs_pictures_test.dart --reporter expanded
       - name: Upload stock documents pilot pictures
         uses: actions/upload-artifact@v4
         with:

@@ -44,7 +44,6 @@ const REQUIRED = [
   ['build\\web\\index.html', 'the Flutter web bundle'],
   ['install-runtime.ps1', 'first run and upgrade'],
   ['repair-runtime.ps1', 'the repair action'],
-  ['reset-kayan.ps1', 'starting a new company'],
   ['repair-kayan.bat', 'the Start menu repair entry'],
   ['remove-runtime.ps1', 'uninstall cleanup'],
   ['database-control.ps1', 'starting and stopping the database'],

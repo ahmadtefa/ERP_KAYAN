@@ -101,10 +101,9 @@ describe('HealthController', () => {
     expect(res.recoveryRequired).toBe(true);
   });
 
-  it('asks for setup, not recovery, after a reset retired the company', async () => {
-    // The settings screen promises the program "will ask to be set up again".
-    // The reset keeps the company row so that promise can be kept; /health has
-    // to agree with /setup/status or the shell shows recovery instead.
+  it('asks for recovery, not setup, when the only company is retired', async () => {
+    // Setup opens only on a pristine installation. A retired company and its
+    // account are existing data: setup must stay closed over them.
     mockPrisma.company.count.mockImplementation((args?: { where?: unknown }) =>
       Promise.resolve(args?.where ? 0 : 1),
     );
@@ -115,9 +114,8 @@ describe('HealthController', () => {
 
     const res = await controller.check();
 
-    expect(res.needsSetup).toBe(true);
-    expect(res.recoveryRequired).toBe(false);
-    // Live companies only, so a retired row cannot make this look set up.
+    expect(res.needsSetup).toBe(false);
+    expect(res.recoveryRequired).toBe(true);
     expect(mockPrisma.company.count).toHaveBeenCalledWith({ where: { deletedAt: null } });
     expect(mockPrisma.user.count).toHaveBeenCalledWith();
   });

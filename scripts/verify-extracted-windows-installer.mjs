@@ -48,7 +48,6 @@ export const REQUIRED_SUFFIXES = [
   'public-key.pem',
   'install-runtime.ps1',
   'repair-runtime.ps1',
-  'reset-kayan.ps1',
   'remove-runtime.ps1',
   'remove-everything.ps1',
   'repair-kayan.bat',

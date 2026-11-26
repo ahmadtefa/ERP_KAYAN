@@ -57,14 +57,12 @@ export class HealthController {
           'database setup-state query',
         );
         const [companies, users, active, retired] = counts;
-        // Same three states as /setup/status, so the shell and the login
-        // screen never disagree: a reset retired its company and kept the row
-        // for setup to complete again; user rows with no live and no retired
-        // company is a damaged database and genuine recovery; a live company
-        // that lost every usable account is recovery too.
-        const wasReset = companies === 0 && retired !== null;
-        needsSetup = companies === 0 && (users === 0 || wasReset);
-        recoveryRequired = companies === 0 ? !wasReset && users > 0 : active === 0;
+        // Same states as /setup/status, so the shell and the login screen
+        // never disagree: setup only on a pristine installation; user rows
+        // with no live company, or a live company that lost every usable
+        // account, is recovery.
+        needsSetup = companies === 0 && users === 0 && retired === null;
+        recoveryRequired = companies === 0 ? users > 0 : active === 0;
       } catch (error) {
         HealthController.logger.warn(
           `Database is reachable but setup-state details were not ready: ${(error as Error).message}`,

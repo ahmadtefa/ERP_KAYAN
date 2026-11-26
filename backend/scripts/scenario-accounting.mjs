@@ -1588,6 +1588,41 @@ async function main() {
       token = again.data.accessToken;
       refreshToken = again.data.refreshToken ?? refreshToken;
     }
+
+    // The normal self-service password screen works, and a refused change
+    // leaves the credentials as they were.
+    const TEMP_PASSWORD = 'CI-only-Temp-Password-98765';
+    const refusedChange = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: 'Not-The-Password-12345', newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
+    });
+    const stillOld = await api('/auth/login', { method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true });
+    const changedOnce = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: PASSWORD, newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
+    });
+    const changedBack = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: TEMP_PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD },
+    });
+    check(
+      'the normal password change works, and a refused change leaves the credentials unchanged',
+      refusedChange.status >= 400 && stillOld.status === 201 && changedOnce.status < 300 && changedBack.status < 300,
+      `refused ${refusedChange.status}, old password still works ${stillOld.status}, change ${changedOnce.status}, change back ${changedBack.status}`,
+    );
+    const afterChange = await api('/auth/login', { method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true });
+    check(
+      'the administrator can sign in with the original credentials after the change and change back',
+      afterChange.status === 201 && Boolean(afterChange.data?.accessToken),
+      `status ${afterChange.status}`,
+    );
+    if (afterChange.data?.accessToken) {
+      token = afterChange.data.accessToken;
+      refreshToken = afterChange.data.refreshToken ?? refreshToken;
+    }
   }
 
   // ─────────────────────── 19. the server defends itself against a flood

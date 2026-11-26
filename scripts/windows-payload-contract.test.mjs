@@ -198,7 +198,6 @@ test('nothing the install or the repair runs reaches the network', async () => {
   const offline = [
     'distribution/windows/install-runtime.ps1',
     'distribution/windows/repair-runtime.ps1',
-    'distribution/windows/reset-kayan.ps1',
     'distribution/windows/database-control.ps1',
     'distribution/windows/remove-runtime.ps1',
     'distribution/windows/remove-everything.ps1',

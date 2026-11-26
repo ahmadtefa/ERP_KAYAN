@@ -4,7 +4,6 @@ import {
 } from '@nestjs/common';
 import { AccountType, BranchKind, Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { findResetAdmin } from '../../common/auth/company-sign-in';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { LicensingService } from '../licensing/licensing.service';
@@ -57,98 +56,35 @@ export class SetupService {
         select: { id: true },
       }),
     ]);
-    // Three states, and they must not be confused with each other:
-    //
-    //  * no live company and a retired row: a reset, which the settings screen
-    //    promises will ask to be set up again - so setup, over that row;
-    //  * no live company and no retired row: a pristine installation, so setup
-    //    can create the first company;
-    //  * user rows but no live company and nothing retired: nobody can reach
-    //    them, which is recovery, not a fresh install.
-    //
-    // Recovery also covers a live company that has lost every account able to
-    // sign in. Neither recovery case may reopen public setup.
-    const wasReset = companies === 0 && retiredCompany !== null;
+    // Setup is open only on a pristine installation: no company (live or
+    // retired) and no account. User rows with no live company are recovery,
+    // never setup, and so is a live company that lost every usable account.
     return {
-      needsSetup: companies === 0 && (users === 0 || wasReset),
-      recoveryRequired: companies === 0 ? !wasReset && users > 0 : activeCompanyUsers === 0,
+      needsSetup: companies === 0 && users === 0 && retiredCompany === null,
+      recoveryRequired: companies === 0 ? users > 0 : activeCompanyUsers === 0,
       companyCount: companies,
       hasUsers: users > 0,
     };
   }
 
-  /**
-   * First-run setup is public. After a reset it may only complete for the
-   * administrator the reset kept: the installation must be in the proven reset
-   * state (see findResetAdmin) and the caller must give that account's username
-   * and CURRENT password. Otherwise anyone who can reach the port could set a
-   * password on the preserved administrator and take over the installation.
-   */
-  private async requireResetAdminProof(
-    client: Parameters<typeof findResetAdmin>[0],
-    dto: InitialSetupDto,
-  ): Promise<void> {
-    const closed = new ConflictException(
-      'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
-    );
-    const kept = await findResetAdmin(client);
-    if (!kept) throw closed;
-    const sameName = kept.username.toLowerCase() === dto.adminUsername.trim().toLowerCase();
-    const samePassword = sameName && (await argon2.verify(kept.passwordHash, dto.adminPassword).catch(() => false));
-    if (!sameName || !samePassword) {
-      throw new ConflictException(
-        'Setup after a reset continues with the administrator account the reset kept. Enter that account\'s username and its current password.',
-      );
-    }
-  }
-
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
     // This endpoint is public so a genuinely empty installation can be
     // initialized. It must never become an account-recovery endpoint: any
-    // existing account closes it, so a stranger cannot adopt somebody's users.
-    //
-    // A live company closes it too, because one installation holds one active
-    // company. A company that the reset retired does not - reset keeps that
-    // row precisely so setup can be completed against it again, and the row is
-    // reused rather than duplicated. This preflight avoids hashing on the
-    // common closed-route path; the transaction repeats both checks under the
-    // advisory lock.
-    // A reset retires its company and keeps exactly one account - the
-    // administrator who pressed the button - so that setup can complete
-    // against them instead of duplicating either. Both conditions have to
-    // hold together: one orphaned account with no retired company is a
-    // damaged database and stays closed, and so does any second account.
-    // A retired company with no account at all is equally not a reset: the
-    // reset always keeps the operator, so such a row is leftover data, and
-    // reviving it through this public route would adopt it.
+    // existing account, live company or retired company closes it, so a
+    // stranger cannot adopt somebody's users or data.
     const [companyRows, userRows, retiredCompany] = await Promise.all([
       this.prisma.company.count({ where: { deletedAt: null } }),
       this.prisma.user.count(),
       this.prisma.company.findFirst({
         where: { deletedAt: { not: null } },
-        orderBy: { deletedAt: 'desc' },
         select: { id: true },
       }),
     ]);
-    // The guard used to be `userRows > 0 && !resumingAfterReset`, which let
-    // an installation whose only company is retired and which has no account
-    // at all through to the insert. That state is not a reset - the reset
-    // always keeps its operator - it is leftover data, and completing setup
-    // over it revived it. Only a live company, or a state where exactly the
-    // one retained account sits behind the retired company, may proceed.
-    const resumingAfterReset = retiredCompany !== null && userRows === 1;
-    // A retired company without its one kept account is not a reset: close it
-    // here as well, or the route would revive leftover data.
-    const retiredWithoutAccount =
-      retiredCompany !== null && userRows === 0;
-    if (companyRows > 0 ||
-        (userRows > 0 && !resumingAfterReset) ||
-        retiredWithoutAccount) {
+    if (companyRows > 0 || userRows > 0 || retiredCompany !== null) {
       throw new ConflictException(
         'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
       );
     }
-    if (resumingAfterReset) await this.requireResetAdminProof(this.prisma, dto);
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
     if (dto.logoBase64) {
       const buffer = Buffer.from(dto.logoBase64, 'base64');
@@ -162,33 +98,18 @@ export class SetupService {
       // the authoritative company check must occur after acquiring the lock.
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(172895144, 485772)`);
       // Repeat the check only after acquiring the transaction-scoped lock.
-      // Any existing account closes setup, and so does a live company; only a
-      // company the reset retired may be completed again.
-      const [existingCompanies, existingUsers, retiredCompany] = await Promise.all([
+      const [existingCompanies, existingUsers, retiredInTransaction] = await Promise.all([
         tx.company.count({ where: { deletedAt: null } }),
         tx.user.count(),
-        tx.company.findFirst({
-          where: { deletedAt: { not: null } },
-          orderBy: { deletedAt: 'desc' },
-          select: { id: true },
-        }),
+        tx.company.findFirst({ where: { deletedAt: { not: null } }, select: { id: true } }),
       ]);
-      const resumeInTransaction = retiredCompany !== null && existingUsers === 1;
-      if (resumeInTransaction) await this.requireResetAdminProof(tx, dto);
-      const retiredWithoutAccountInTransaction =
-        retiredCompany !== null && existingUsers === 0;
-      if (existingCompanies > 0 ||
-          (existingUsers > 0 && !resumeInTransaction) ||
-          retiredWithoutAccountInTransaction) {
+      if (existingCompanies > 0 || existingUsers > 0 || retiredInTransaction !== null) {
         throw new ConflictException(
           'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
         );
       }
 
-      // Complete setup against the retired row instead of adding a second
-      // company: one installation holds one active company, and the reset
-      // kept this row for exactly this moment. The request's own code and
-      // names are what the operator is entering now, so they win.
+      // The request's own code and names are what the operator is entering.
       const profile = {
         code: dto.companyCode,
         nameEn: dto.companyNameEn,
@@ -199,22 +120,7 @@ export class SetupService {
         logoData: logo?.data ?? null,
         logoMime: logo?.mime ?? null,
       };
-      // A brand-new company, or a retired one with no accounts left, gets the
-      // eight digit chart. A retired company that still holds a chart keeps its
-      // own scheme, so the starter accounts never mix two numbering systems.
-      const retiredAccounts = retiredCompany
-        ? await tx.account.count({ where: { companyId: retiredCompany.id, deletedAt: null } })
-        : 0;
-      const company = retiredCompany
-        ? await tx.company.update({
-            where: { id: retiredCompany.id },
-            data: {
-              ...profile,
-              deletedAt: null,
-              ...(retiredAccounts === 0 ? { accountCodeScheme: 'EIGHT_DIGIT' as const } : {}),
-            },
-          })
-        : await tx.company.create({ data: { ...profile, accountCodeScheme: 'EIGHT_DIGIT' } });
+      const company = await tx.company.create({ data: { ...profile, accountCodeScheme: 'EIGHT_DIGIT' } });
 
       const isBranch = dto.facilityKind === 'BRANCH';
       const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;
@@ -260,42 +166,17 @@ export class SetupService {
       await this.seedPermissions(tx);
       const roles = await this.seedRoles(tx, company.id);
 
-      // The first administrator of this company: the retained one when a
-      // reset kept it, otherwise a new account. A reset deletes every role and
-      // branch assignment but keeps the administrator so nobody locks
-      // themselves out, so that account has to be re-linked here or the
-      // installation would come back with an administrator who cannot do
-      // anything. Its identity is kept as it is; only the password the
-      // operator just typed replaces the old one.
-      const retainedAdmin = retiredCompany
-        ? await tx.user.findFirst({
-            where: { companyId: company.id },
-            orderBy: [{ isSuperAdmin: 'desc' }, { createdAt: 'asc' }],
-            select: { id: true },
-          })
-        : null;
-      const admin = retainedAdmin
-        ? await tx.user.update({
-            where: { id: retainedAdmin.id },
-            data: {
-              passwordHash,
-              fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-              fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-              isSuperAdmin: true,
-              isActive: true,
-              deletedAt: null,
-            },
-          })
-        : await tx.user.create({
-            data: {
-              companyId: company.id,
-              username: dto.adminUsername,
-              fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-              fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-              passwordHash,
-              isSuperAdmin: true,
-            },
-          });
+      // The first administrator of this company.
+      const admin = await tx.user.create({
+        data: {
+          companyId: company.id,
+          username: dto.adminUsername,
+          fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
+          fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
+          passwordHash,
+          isSuperAdmin: true,
+        },
+      });
 
       await tx.userRole.create({
         data: {
