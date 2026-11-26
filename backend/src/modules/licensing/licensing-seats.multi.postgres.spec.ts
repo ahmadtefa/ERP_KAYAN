@@ -107,53 +107,53 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
   const code = (e: any) => e?.response?.code ?? e?.code;
 
   it('licence A adopts the unowned rows; licences B and C start empty and count only their own', async () => {
-    await service.activate(key({ licenseId: 'lic_A', seats: { mode: 'CAP', value: 2 } }));
-    await addLicence('lic_B', 1, 5);
-    await addLicence('lic_C', 2, 10);
-    expect(await service.seatsUsedForLicense('lic_A')).toBe(2);
-    expect(await service.seatsUsedForLicense('lic_B')).toBe(0);
-    expect(await service.seatsUsedForLicense('lic_C')).toBe(0);
+    await service.activate(key({ licenseId: 'lic_A-0001', seats: { mode: 'CAP', value: 2 } }));
+    await addLicence('lic_B-0001', 1, 5);
+    await addLicence('lic_C-0001', 2, 10);
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(2);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(0);
+    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(0);
   });
 
   it('A is full, and that does not stop B: B takes its one seat, then is full itself', async () => {
-    await expect(reserveFor('lic_A', 'a-3')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
-    await expect(reserveFor('lic_B', 'b-1')).resolves.toMatchObject({ reserved: true, used: 1, limit: 1 });
-    await expect(reserveFor('lic_B', 'b-2')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
-    expect(await service.seatsUsedForLicense('lic_A')).toBe(2);
-    expect(await service.seatsUsedForLicense('lic_B')).toBe(1);
+    await expect(reserveFor('lic_A-0001', 'a-3')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
+    await expect(reserveFor('lic_B-0001', 'b-1')).resolves.toMatchObject({ reserved: true, used: 1, limit: 1 });
+    await expect(reserveFor('lic_B-0001', 'b-2')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(2);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(1);
     const rows = await prisma.licenseSeatUsage.findMany({ where: { username: 'b-1' } });
-    expect(rows.map((r) => r.licenseId)).toEqual(['lic_B']);
+    expect(rows.map((r) => r.licenseId)).toEqual(['lic_B-0001']);
   });
 
   it("another licence's seats do not move this licence's file watermark", async () => {
     const before = store.current.maxSeatsUsed;
-    await reserveFor('lic_C', 'c-1');
+    await reserveFor('lic_C-0001', 'c-1');
     expect(store.current.maxSeatsUsed).toBe(before);
   });
 
   it('a late unowned row counts for the oldest licence only', async () => {
     await prisma.licenseSeatUsage.create({ data: { username: 'late-legacy', reason: 'MIGRATION_EXISTING', licenseId: null } });
-    expect(await service.seatsUsedForLicense('lic_A')).toBe(3);
-    expect(await service.seatsUsedForLicense('lic_B')).toBe(1);
-    expect(await service.seatsUsedForLicense('lic_C')).toBe(1);
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(3);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(1);
+    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(1);
   });
 
   it('concurrent creations on one licence never exceed its limit, and leave the others alone', async () => {
-    const beforeA = await service.seatsUsedForLicense('lic_A');
-    const beforeB = await service.seatsUsedForLicense('lic_B');
-    const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => reserveFor('lic_C', `c-race-${i}`)));
+    const beforeA = await service.seatsUsedForLicense('lic_A-0001');
+    const beforeB = await service.seatsUsedForLicense('lic_B-0001');
+    const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => reserveFor('lic_C-0001', `c-race-${i}`)));
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);        // C: limit 2, 1 used
     for (const r of results.filter((x): x is PromiseRejectedResult => x.status === 'rejected')) {
       expect(code(r.reason)).toBe('LICENSE_SEATS_EXHAUSTED');
     }
-    expect(await service.seatsUsedForLicense('lic_C')).toBe(2);
-    expect(await service.seatsUsedForLicense('lic_A')).toBe(beforeA);
-    expect(await service.seatsUsedForLicense('lic_B')).toBe(beforeB);
+    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(2);
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(beforeA);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(beforeB);
   });
 
   it('a seat for an unknown licence is refused and writes nothing', async () => {
     const before = await prisma.licenseSeatUsage.count();
-    await expect(reserveFor('lic_NOPE', 'x')).rejects.toMatchObject({ response: { code: 'LICENSE_NOT_FOUND_FOR_COMPANY' } });
+    await expect(reserveFor('lic_NOPE-0001', 'x')).rejects.toMatchObject({ response: { code: 'LICENSE_NOT_FOUND_FOR_COMPANY' } });
     expect(await prisma.licenseSeatUsage.count()).toBe(before);
   });
 
