@@ -62,6 +62,9 @@ import { startGui } from './license-gui.mjs';
 
 const VERSION = '1.1.0';
 const KEY_PREFIX = 'KYN1';
+// Format 2 (per-company) keys. A licence registered with --company issues
+// these; every other licence keeps issuing KYN1 exactly as before.
+const KEY_PREFIX_V2 = 'KYN2';
 const REQUEST_PREFIX = 'KYNREQ1';
 const REGISTER_VERSION = 1;
 const MAX_TERM_MONTHS = 1200;
@@ -342,7 +345,7 @@ function newKeyId() {
 /** Exactly the text the product verifies: `KYN1.<payload>`. */
 function signPayload(payload, privateKey) {
   const json = JSON.stringify(payload);
-  const signedText = `${KEY_PREFIX}.${b64url(json)}`;
+  const signedText = `${payload.v === 2 ? KEY_PREFIX_V2 : KEY_PREFIX}.${b64url(json)}`;
   const signature = sign(null, Buffer.from(signedText, 'utf8'), privateKey);
   return `${signedText}.${signature.toString('base64url')}`;
 }
@@ -352,8 +355,8 @@ function readPayload(key, publicKey) {
     .replace(/\s+/g, '')
     .trim();
   const parts = text.split('.');
-  if (parts.length !== 3 || parts[0] !== KEY_PREFIX) {
-    refuse('That is not a KAYAN key (it should start with KYN1.).');
+  if (parts.length !== 3 || (parts[0] !== KEY_PREFIX && parts[0] !== KEY_PREFIX_V2)) {
+    refuse('That is not a KAYAN key (it should start with KYN1. or KYN2.).');
   }
   const payloadJson = unb64url(parts[1]).toString('utf8');
   const payload = JSON.parse(payloadJson);
@@ -425,7 +428,10 @@ function recordKey(register, licence, entry) {
   register.keys.push({
     keyId: entry.payload.keyId,
     licenseId: entry.payload.licenseId,
-    type: entry.payload.type,
+    // The register keeps the logical type (a COMPANY_ACTIVATION is an ACTIVATION here).
+    type: entry.logicalType ?? entry.payload.type,
+    format: entry.payload.v === 2 ? 2 : 1,
+    companyRef: entry.payload.companyRef ?? null,
     machineId: entry.payload.machineId ?? null,
     term: entry.payload.term ? termMonths(entry.payload.term) : null,
     seats: entry.payload.seats ?? null,
@@ -541,6 +547,9 @@ function createLicence(input) {
     seatsUsed: 0,
     term: termMonths(term),
     machineId: null,
+    // Per-company licence: a vendor-chosen opaque reference, no business data.
+    companyRef: input.company ? `cmp-${randomBytes(12).toString('base64url')}` : null,
+    companyLabel: input.company && input.label ? String(input.label).slice(0, 80) : null,
     startsAt: null,
     expiresAt: null,
     status: 'registered',
@@ -564,12 +573,15 @@ function commandLicenceCreate(args) {
     ref: args.ref,
     seats: args.seats,
     term: args.term,
+    company: Boolean(args.company),
+    label: typeof args.label === 'string' ? args.label : null,
   });
   console.log(`تم تسجيل الترخيص. / Licence registered.
   licence   : ${licence.licenseId}
   seats     : ${licence.seats}
   term      : ${describeTerm(term)}
   customer  : ${licence.ref ?? '(no note)'}
+  company   : ${licence.companyRef ?? '(none: format 1 keys, existing company)'}
 
 Next: issue an activation key for the machine the customer named.
   node ${basename(process.argv[1] ?? 'kayan-license.mjs')} issue activation --licence ${licence.licenseId} --machine KM-...`);
@@ -784,6 +796,17 @@ function issueKey(input) {
     }
   }
 
+  if (licence.companyRef) {
+    // Per-company licence: format 2 payload bound to the company reference.
+    payload = {
+      ...payload,
+      v: 2,
+      type: type === 'ACTIVATION' ? 'COMPANY_ACTIVATION' : type,
+      companyRef: licence.companyRef,
+      displayLabel: licence.companyLabel ?? null,
+    };
+  }
+
   if (input.dryRun) {
     return { key: null, payload, licence, preview: previewOf(payload) };
   }
@@ -793,7 +816,7 @@ function issueKey(input) {
   const check = readPayload(key, publicKey);
   if (!check.valid) refuse('The key did not verify after signing; refusing to issue it.');
 
-  recordKey(register, licence, { payload, key });
+  recordKey(register, licence, { payload, key, logicalType: type });
   saveRegister(privateKey, register);
   audit({
     action: 'issue',
@@ -820,6 +843,8 @@ function previewOf(payload) {
     state: payload.state ?? null,
     issuedAt: payload.issuedAt,
     note: payload.note ?? null,
+    companyRef: payload.companyRef ?? null,
+    displayLabel: payload.displayLabel ?? null,
   };
 }
 
@@ -1225,6 +1250,8 @@ function guiApi() {
         ref: body?.ref,
         seats: body?.seats,
         term: body?.term,
+        company: Boolean(body?.company),
+        label: typeof body?.label === 'string' ? body.label : null,
       });
       return { licence };
     },

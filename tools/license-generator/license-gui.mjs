@@ -91,6 +91,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
         <div>
           <label for="licence-ref">مرجع أو ملاحظة إدارية — reference (optional)</label>
           <input id="licence-ref" maxlength="160" placeholder="مثال: عقد 2026-001">
+          <label for="licence-company"><input type="checkbox" id="licence-company"> شركة جديدة داخل البرنامج (مفاتيح بصيغة 2) — new company inside the program (format 2 keys). Leave unticked for the existing company.</label>
         </div>
         <div>
           <label for="licence-seats">حد المستخدمين — seat limit</label>
@@ -451,6 +452,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     updateIssueAvailability();
     api('/api/licence-create', {
       ref: $('licence-ref').value.trim(),
+      company: $('licence-company').checked,
       seats: seats,
       term: $('licence-term').value
     }).then(function (payload) {

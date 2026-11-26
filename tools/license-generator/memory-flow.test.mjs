@@ -65,3 +65,24 @@ test('register, select ID, issue and verify using an in-memory synthetic Ed25519
   const changed = `${prefix}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${signature}`;
   assert.equal(api.verifyKey(changed).valid, false);
 });
+
+test('company licence issues format 2 keys bound to its companyRef; other licences stay format 1', () => {
+  const api = generator.guiApi();
+  const legacy = api.createLicence({ ref: 'synthetic-legacy', seats: 2, term: '1y' }).licence;
+  const company = api.createLicence({ ref: 'synthetic-company', seats: 4, term: '1y', company: true, label: 'Synthetic Co' }).licence;
+  assert.equal(legacy.companyRef, null);
+  assert.match(company.companyRef, /^cmp-[A-Za-z0-9_-]{16}$/);
+  const old = api.issueKey({ type: 'activation', licenceId: legacy.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  assert.ok(old.key.startsWith('KYN1.'));
+  assert.equal(api.verifyKey(old.key).payload.companyRef, undefined);
+  const act = api.issueKey({ type: 'activation', licenceId: company.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  assert.ok(act.key.startsWith('KYN2.'));
+  const checked = api.verifyKey(act.key);
+  assert.equal(checked.valid, true);
+  assert.equal(checked.payload.type, 'COMPANY_ACTIVATION');
+  assert.equal(checked.payload.companyRef, company.companyRef);
+  assert.equal(checked.payload.displayLabel, 'Synthetic Co');
+  const renewal = api.issueKey({ type: 'renewal', licenceId: company.licenseId, term: '6m' });
+  assert.ok(renewal.key.startsWith('KYN2.'));
+  assert.equal(api.verifyKey(renewal.key).payload.companyRef, company.companyRef);
+});
