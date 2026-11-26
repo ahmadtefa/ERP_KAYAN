@@ -294,11 +294,15 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   /// by side. Three fixed `Expanded` fields in a plain Row were what overflowed
   /// on narrow screens.
   static const double _stackBreakpoint = 560;
+  static const double _minFieldWidth = 300;
 
   Widget _fieldRow(List<Widget> fields) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < _stackBreakpoint) {
+        // Each field needs room for its whole bilingual label; a label that
+        // would be clipped is a defect, so stack instead of squeezing.
+        final needed = fields.length * _minFieldWidth + (fields.length - 1) * 12;
+        if (constraints.maxWidth < _stackBreakpoint || constraints.maxWidth < needed) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
