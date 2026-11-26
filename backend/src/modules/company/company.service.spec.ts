@@ -227,27 +227,9 @@ describe('CompanyService', () => {
     });
   });
 
-  describe('publicOptions', () => {
-    it('returns only active company names and codes for pre-login selection', async () => {
-      const options = [
-        { code: 'A', nameEn: 'Alpha', nameAr: 'ألفا' },
-        { code: 'B', nameEn: 'Beta', nameAr: 'بيتا' },
-      ];
-      (prisma.company.findMany as jest.Mock).mockResolvedValue(options);
-
-      await expect(service.publicOptions()).resolves.toEqual(options);
-      expect(prisma.company.findMany).toHaveBeenCalledWith({
-        where: { isActive: true, deletedAt: null },
-        select: { code: true, nameEn: true, nameAr: true },
-        orderBy: [{ nameAr: 'asc' }, { code: 'asc' }],
-        take: 100,
-      });
-    });
-  });
-
   describe('publicBranding', () => {
     it('returns default branding when no active company exists', async () => {
-      (prisma.company.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await service.publicBranding();
 
@@ -259,14 +241,14 @@ describe('CompanyService', () => {
     });
 
     it('returns company branding when active company exists', async () => {
-      (prisma.company.findFirst as jest.Mock).mockResolvedValue({
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([{
         id: 'comp-1',
         nameEn: 'Kayan Co',
         nameAr: 'شركة كيان',
         logoData: null,
         logoPath: 'logo.png',
         updatedAt,
-      });
+      }]);
 
       const result = await service.publicBranding();
 
@@ -275,6 +257,21 @@ describe('CompanyService', () => {
         nameAr: 'شركة كيان',
         logoUrl: `/companies/logo/comp-1?v=${updatedAt.getTime()}`,
       });
+    });
+  });
+
+  describe('publicBranding with several companies', () => {
+    it('stays neutral and never names one company to everyone', async () => {
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([
+        { id: 'a', nameEn: 'Alpha', nameAr: 'ألفا', logoData: null, logoPath: null, updatedAt },
+        { id: 'b', nameEn: 'Beta', nameAr: 'بيتا', logoData: null, logoPath: null, updatedAt },
+      ]);
+      await expect(service.publicBranding()).resolves.toEqual({
+        nameEn: 'KAYAN ERP',
+        nameAr: 'نظام كيان',
+        logoUrl: null,
+      });
+      await expect(service.getLogo()).resolves.toBeNull();
     });
   });
 

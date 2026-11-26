@@ -117,20 +117,10 @@ export class CompanyService {
     return this.getProfile(companyId);
   }
 
-  /// Minimal company choices for pre-authentication forms. Do not expose ids,
-  /// tax/contact details, or inactive tenants: the login/password-change picker
-  /// needs only an unambiguous display name and the code the API expects.
-  async publicOptions() {
-    return this.prisma.company.findMany({
-      where: { isActive: true, deletedAt: null },
-      select: { code: true, nameEn: true, nameAr: true },
-      orderBy: [{ nameAr: 'asc' }, { code: 'asc' }],
-      take: 100,
-    });
-  }
-
-  /// Public branding (no sign-in): the first active company, or the defaults
-  /// when the installation has no company yet.
+  /// Public branding (no sign-in): the one active company's name, or the
+  /// defaults when the installation has none. With several companies the
+  /// sign-in screen is neutral: it must not show one company's name to people
+  /// who belong to another, and the username decides the company after sign-in.
   async publicBranding() {
     const company = await this.defaultCompany();
     if (!company) {
@@ -273,7 +263,7 @@ export class CompanyService {
 
   /// Returns the logo bytes for a company: the database copy, or the legacy
   /// file of an installation that was set up before logos moved into the
-  /// database. `companyId` omitted means the default (first active) company.
+  /// database. `companyId` omitted means the sole active company (none when there are several).
   async getLogo(
     companyId?: string,
   ): Promise<{ data: Buffer; mime: string } | null> {
@@ -576,11 +566,15 @@ export class CompanyService {
 
   /// ────────────────────────────────────────────────────────────── helpers
 
+  /// The company the pre-sign-in screens may name: only when exactly one
+  /// company is active. Otherwise null (neutral KAYAN branding).
   private async defaultCompany() {
-    return this.prisma.company.findFirst({
+    const active = await this.prisma.company.findMany({
       where: { isActive: true, deletedAt: null },
       orderBy: { createdAt: 'asc' },
+      take: 2,
     });
+    return active.length === 1 ? active[0] : null;
   }
 
   private logoUrl(company: {

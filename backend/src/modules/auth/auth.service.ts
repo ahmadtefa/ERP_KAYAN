@@ -50,6 +50,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { username },
       include: {
+        company: { select: { isActive: true, deletedAt: true } },
         userRoles: {
           include: {
             role: { include: { rolePermissions: { include: { permission: true } } } },
@@ -63,14 +64,18 @@ export class AuthService {
     // username exists would let an attacker enumerate accounts.
     const invalid = new UnauthorizedException('Invalid username or password');
 
-    if (!user || user.deletedAt !== null || !user.isActive) {
+    const companyClosed =
+      user !== null && (!user.company || !user.company.isActive || user.company.deletedAt !== null);
+    if (!user || user.deletedAt !== null || !user.isActive || companyClosed) {
       this.logger.warn(
         `Sign-in refused for "${username}": ${
           user === null
             ? 'no such account'
             : user.deletedAt !== null
               ? 'account deleted'
-              : 'account inactive'
+              : !user.isActive
+                ? 'account inactive'
+                : 'company suspended or retired'
         }`,
       );
       await this.audit.record({
@@ -196,7 +201,7 @@ export class AuthService {
   /** Change a password before sign-in without revealing whether an account exists. */
   async changeOwnPassword(
     username: string,
-    companyCode: string,
+    companyCode: string | undefined,
     currentPassword: string,
     newPassword: string,
     confirmPassword: string,
@@ -213,7 +218,14 @@ export class AuthService {
         username: username.trim(),
         deletedAt: null,
         isActive: true,
-        company: { code: companyCode.trim().toUpperCase(), isActive: true },
+        // The username alone finds the account (it is unique across the
+        // installation). A code from an older screen is still honoured, but
+        // no screen has to ask for one.
+        company: {
+          isActive: true,
+          deletedAt: null,
+          ...(companyCode?.trim() ? { code: companyCode.trim().toUpperCase() } : {}),
+        },
       },
     });
     if (!user || (user.lockedUntil && user.lockedUntil > new Date())) throw invalid;
@@ -298,6 +310,7 @@ export class AuthService {
       include: {
         user: {
           include: {
+            company: { select: { isActive: true, deletedAt: true } },
             userRoles: {
               include: {
                 role: {
@@ -325,7 +338,13 @@ export class AuthService {
     }
 
     const user = stored.user;
-    if (user.deletedAt !== null || !user.isActive) {
+    if (
+      user.deletedAt !== null ||
+      !user.isActive ||
+      !user.company ||
+      !user.company.isActive ||
+      user.company.deletedAt !== null
+    ) {
       await this.prisma.refreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },

@@ -23,6 +23,7 @@ const activePrincipal = {
   isSuperAdmin: false,
   deletedAt: null,
   tokenVersion: 0,
+  company: { isActive: true, deletedAt: null as Date | null },
   userRoles: [
     {
       role: {
@@ -108,6 +109,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
         isSuperAdmin: true,
         deletedAt: true,
         tokenVersion: true,
+        company: { select: { isActive: true, deletedAt: true } },
         userRoles: {
           where: {
             companyId: payload.companyId,
@@ -302,6 +304,16 @@ describe('JwtAuthGuard account status and live authorization', () => {
       },
       select: { id: true },
     });
+  });
+
+  it('rejects every person of a suspended or retired company', async () => {
+    for (const company of [
+      { isActive: false, deletedAt: null },
+      { isActive: true, deletedAt: new Date('2026-11-01T00:00:00Z') },
+    ]) {
+      const { guard } = makeGuard({ principal: { ...activePrincipal, company } });
+      await expect(guard.canActivate(makeContext().context)).rejects.toBeInstanceOf(UnauthorizedException);
+    }
   });
 
   it('rejects access tokens revoked by reset', async () => {

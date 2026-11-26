@@ -22,6 +22,7 @@ function build(overrides: Record<string, unknown> = {}) {
     isActive: true,
     isSuperAdmin: false,
     tokenVersion: 3,
+    company: { isActive: true, deletedAt: null },
     deletedAt: null,
     lockedUntil: null,
     failedLoginCount: 0,
@@ -120,6 +121,37 @@ describe('POST /auth/login outcomes', () => {
         status: 401,
       });
     }
+  });
+
+  it('refuses everyone of a suspended or retired company, even with the right password', async () => {
+    jest.mocked(argon2.verify).mockResolvedValue(true);
+    for (const company of [
+      { isActive: false, deletedAt: null },
+      { isActive: true, deletedAt: new Date() },
+    ]) {
+      const { service, jwt } = build({ company });
+      await expect(service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
+      expect(jwt.signAsync).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses a refresh for a suspended company and revokes its sessions', async () => {
+    const { service, prisma, userRow } = build({ company: { isActive: false, deletedAt: null } });
+    const updateMany = jest.fn();
+    (prisma as unknown as { refreshToken: Record<string, unknown> }).refreshToken = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'rt-2',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+        user: userRow,
+      }),
+      updateMany,
+    };
+    await expect(service.refresh('live-token')).rejects.toMatchObject({ status: 401 });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { userId: userRow.id, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 
   it('refuses an account that is still locked', async () => {

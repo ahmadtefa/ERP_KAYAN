@@ -7,11 +7,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/backend/company_setup_data.dart';
 import '../../../../core/backend/setup_state.dart';
 import '../../../../core/error/failure.dart';
-import '../../../../core/json/json_utils.dart';
 import '../../../../core/storage/credentials_store.dart';
-import '../../../../shared/widgets/app_error_dialog.dart';
-import '../../../../shared/widgets/field_option.dart';
-import '../../../../shared/widgets/searchable_select_field.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
@@ -196,28 +192,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _changePassword() async {
-    final List<Json> companyOptions;
-    try {
-      companyOptions = await ref.read(apiClientProvider).getList('/companies/options');
-    } catch (error) {
-      if (mounted) showAppError(context, error);
-      return;
-    }
-    if (!mounted) return;
-    if (companyOptions.isEmpty) {
-      showAppPlainError(
-        context,
-        Localizations.localeOf(context).languageCode == 'ar'
-            ? 'لا توجد شركة نشطة للاختيار.'
-            : 'There are no active companies to choose from.',
-      );
-      return;
-    }
-
     final username = TextEditingController(text: _username.text.trim());
-    String? selectedCompanyCode = companyOptions.length == 1
-        ? text(companyOptions.first, 'code')
-        : null;
     final currentPassword = TextEditingController();
     final newPassword = TextEditingController();
     final confirmPassword = TextEditingController();
@@ -247,26 +222,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       enabled: !saving,
                       textInputAction: TextInputAction.next,
                       decoration: InputDecoration(labelText: context.l10n.username),
-                    ),
-                    SearchableSelectField(
-                      value: selectedCompanyCode,
-                      enabled: !saving,
-                      decoration: InputDecoration(
-                        labelText: arabic ? 'الشركة' : 'Company',
-                      ),
-                      options: [
-                        for (final company in companyOptions)
-                          FieldOption(
-                            text(company, 'code'),
-                            '${arabic ? text(company, 'nameAr') : text(company, 'nameEn')} · ${text(company, 'code')}',
-                          ),
-                      ],
-                      validator: (value) => value == null || value.isEmpty
-                          ? (arabic ? 'اختر الشركة.' : 'Choose a company.')
-                          : null,
-                      onChanged: (value) => setDialogState(
-                        () => selectedCompanyCode = value,
-                      ),
                     ),
                     TextField(
                       controller: currentPassword,
@@ -329,13 +284,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ? null
                     : () async {
                         final currentUser = username.text.trim();
-                        final company = selectedCompanyCode?.trim() ?? '';
                         final current = currentPassword.text;
                         final next = newPassword.text;
-                        if (currentUser.length < 3 || company.isEmpty || current.isEmpty) {
+                        if (currentUser.length < 3 || current.isEmpty) {
                           setDialogState(() => error = arabic
-                              ? 'أكمل اسم المستخدم وكود الشركة وكلمة المرور الحالية.'
-                              : 'Enter the username, company code, and current password.');
+                              ? 'أكمل اسم المستخدم وكلمة المرور الحالية.'
+                              : 'Enter the username and current password.');
                           return;
                         }
                         if (next.length < 12 || next.length > 200) {
@@ -357,7 +311,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             '/auth/change-password',
                             body: {
                               'username': currentUser,
-                              'companyCode': company,
                               'currentPassword': current,
                               'newPassword': next,
                               'confirmPassword': confirmPassword.text,

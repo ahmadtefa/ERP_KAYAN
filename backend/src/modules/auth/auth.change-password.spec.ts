@@ -57,7 +57,7 @@ describe('self-service password change', () => {
     expect(prisma.user.findFirst).toHaveBeenCalledWith({
       where: {
         username: 'cashier', deletedAt: null, isActive: true,
-        company: { code: 'KAYAN', isActive: true },
+        company: { code: 'KAYAN', isActive: true, deletedAt: null },
       },
     });
     const update = tx.user.updateMany.mock.calls[0]![0];
@@ -77,6 +77,20 @@ describe('self-service password change', () => {
     expect(JSON.stringify(tx.auditLog.create.mock.calls)).not.toContain('a-brand-new-secret');
     expect(JSON.stringify(tx.auditLog.create.mock.calls)).not.toContain('correct-current-password');
     expect(user.passwordHash).not.toBe(update.data.passwordHash);
+  });
+
+  it('finds the account by username alone: no company code is needed or sent to the lookup', async () => {
+    const { service, prisma } = await fixture();
+    await service.changeOwnPassword(
+      'cashier', undefined, 'correct-current-password',
+      'a-brand-new-secret', 'a-brand-new-secret',
+    );
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        username: 'cashier', deletedAt: null, isActive: true,
+        company: { isActive: true, deletedAt: null },
+      },
+    });
   });
 
   it('refuses a stale verification if the account or password changed before the update', async () => {

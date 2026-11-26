@@ -122,6 +122,8 @@ export class JwtAuthGuard implements CanActivate {
         isSuperAdmin: true,
         deletedAt: true,
         tokenVersion: true,
+        // A suspended or retired company stops all of its people at once.
+        company: { select: { isActive: true, deletedAt: true } },
         userRoles: {
           where: {
             companyId: payload.companyId,
@@ -181,6 +183,9 @@ export class JwtAuthGuard implements CanActivate {
       !principal.isActive ||
       principal.deletedAt !== null ||
       principal.companyId !== payload.companyId ||
+      !principal.company ||
+      !principal.company.isActive ||
+      principal.company.deletedAt !== null ||
       principal.tokenVersion !== (payload.tokenVersion ?? 0)
     ) {
       throw new UnauthorizedException('Account is inactive or unavailable');

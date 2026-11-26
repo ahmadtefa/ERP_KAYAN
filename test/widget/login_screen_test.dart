@@ -32,11 +32,7 @@ class _CompanyOptionsApi implements ApiClient {
   Future<List<Map<String, dynamic>>> getList(
     String path, {
     Map<String, dynamic>? query,
-  }) async => path == '/companies/options'
-      ? [
-          {'code': 'ACME', 'nameEn': 'Acme', 'nameAr': 'أكمي'},
-        ]
-      : const [];
+  }) async => const [];
 }
 
 class _PasswordChangeApi implements ApiClient {
@@ -148,10 +144,10 @@ void main() {
     expect(find.text('Current password'), findsOneWidget);
     expect(find.text('New password'), findsOneWidget);
     expect(find.text('Confirm new password'), findsOneWidget);
-    // Company is selected from the public options endpoint, not typed as a
-    // free-form code. The login form stays mounted behind the dialog.
-    expect(find.byType(SearchableSelectField), findsOneWidget);
-    expect(find.text('Acme · ACME'), findsOneWidget);
+    // The username alone finds the company: no company chooser and no
+    // company code field. The login form stays mounted behind the dialog.
+    expect(find.byType(SearchableSelectField), findsNothing);
+    expect(find.text('Company'), findsNothing);
     expect(find.byType(TextField), findsNWidgets(6));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
   });
@@ -168,7 +164,7 @@ void main() {
     await tester.enterText(find.byType(TextFormField).first, 'sara');
     await tester.tap(find.widgetWithText(TextButton, 'Change password'));
     await tester.pumpAndSettle();
-    expect(find.text('Acme · ACME'), findsOneWidget);
+    expect(find.text('Acme · ACME'), findsNothing);
 
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(3), 'CurrentPassword!123');
@@ -181,7 +177,6 @@ void main() {
     expect(api.posts.single.$1, '/auth/change-password');
     expect(api.posts.single.$2, {
       'username': 'sara',
-      'companyCode': 'ACME',
       'currentPassword': 'CurrentPassword!123',
       'newPassword': 'NewPassword!12345',
       'confirmPassword': 'NewPassword!12345',
