@@ -28,6 +28,17 @@ void main() {
     expect(resolver.resolve(const ApiFailure('synthetic raw',statusCode:503)).businessMessage,isNull);
   });
 
+  test('cheque conflicts are explained in both languages without the server text', () {
+    for (final code in ['CHEQUE_DUPLICATE', 'CHEQUE_STATE']) {
+      final failure = ApiFailure('synthetic raw', statusCode: 409, code: code);
+      final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
+      final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;
+      expect(ar, contains('الشيك'));
+      expect(en, contains('cheque'));
+      expect(en, isNot(contains('synthetic raw')));
+    }
+  });
+
   test('busy server (SERVER_BUSY) says nothing was saved and to retry, in both languages', () {
     const failure = ApiFailure('synthetic raw', statusCode: 503, code: 'SERVER_BUSY');
     final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure);

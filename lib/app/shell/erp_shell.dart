@@ -396,6 +396,14 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         accentOverride: SectionAccents.cash,
       ),
       _NavItem(
+        AppRoutes.cheques,
+        Icons.payments_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'الشيكات' : 'Cheques',
+        permissions: const ['cheques.read'],
+        group: _NavGroup.accounting,
+        accentOverride: SectionAccents.cash,
+      ),
+      _NavItem(
         AppRoutes.journalEntries,
         Icons.menu_book_outlined,
         l10n.journalEntries,

@@ -42,6 +42,7 @@ type Row = {
   id: string; companyId: string; branchId: string; direction: ChequeDirection; chequeNumber: string; bankName: string;
   partyName: string | null; customerId: string | null; supplierId: string | null; cashAccountId: string | null;
   amount: Prisma.Decimal; currency: string; issueDate: Date; dueDate: Date; status: ChequeStatus;
+  partyEn?: string | null; partyAr?: string | null;
   allocations: ChequeAllocation[] | null; voucherId: string | null; notes: string | null; createdAt: Date;
 };
 
@@ -56,6 +57,8 @@ function view(r: Row, today: string) {
     chequeNumber: r.chequeNumber,
     bankName: r.bankName,
     partyName: r.partyName,
+    partyEn: r.partyEn ?? null,
+    partyAr: r.partyAr ?? null,
     customerId: r.customerId,
     supplierId: r.supplierId,
     cashAccountId: r.cashAccountId,
@@ -187,11 +190,16 @@ export class ChequesService {
   }
 
   private async rows(companyId: string, where: Prisma.Sql): Promise<Row[]> {
-    return this.prisma.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM cheques WHERE "companyId" = ${companyId}::uuid ${where} ORDER BY "dueDate" ASC, "chequeNumber" ASC`);
+    return this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      SELECT q.*, COALESCE(cu."nameEn", su."nameEn") AS "partyEn", COALESCE(cu."nameAr", su."nameAr") AS "partyAr"
+        FROM cheques q
+        LEFT JOIN customers cu ON cu.id = q."customerId"
+        LEFT JOIN suppliers su ON su.id = q."supplierId"
+       WHERE q."companyId" = ${companyId}::uuid ${where} ORDER BY q."dueDate" ASC, q."chequeNumber" ASC`);
   }
 
   async findOne(companyId: string, id: string) {
-    const [row] = await this.rows(companyId, Prisma.sql`AND id = ${id}::uuid`);
+    const [row] = await this.rows(companyId, Prisma.sql`AND q.id = ${id}::uuid`);
     if (!row) throw new NotFoundException('Cheque not found');
     const events = await this.prisma.$queryRaw<Array<{ action: string; fromStatus: string | null; toStatus: string; note: string | null; voucherId: string | null; at: Date }>>(
       Prisma.sql`SELECT action,"fromStatus","toStatus",note,"voucherId","at" FROM cheque_events WHERE "chequeId" = ${id}::uuid ORDER BY "at" ASC`);
@@ -203,22 +211,23 @@ export class ChequesService {
     if (query.direction) {
       const d = query.direction.toUpperCase();
       if (d !== 'RECEIVED' && d !== 'ISSUED') throw new BadRequestException('direction must be RECEIVED or ISSUED');
-      parts.push(Prisma.sql`AND direction = ${d}`);
+      parts.push(Prisma.sql`AND q.direction = ${d}`);
     }
     if (query.status) {
       const s = query.status.toUpperCase();
-      if (s === 'OPEN') parts.push(Prisma.sql`AND status IN ('HELD','DEPOSITED')`);
-      else if (CHEQUE_STATUSES.includes(s as ChequeStatus)) parts.push(Prisma.sql`AND status = ${s}`);
+      if (s === 'OPEN') parts.push(Prisma.sql`AND q.status IN ('HELD','DEPOSITED')`);
+      else if (CHEQUE_STATUSES.includes(s as ChequeStatus)) parts.push(Prisma.sql`AND q.status = ${s}`);
       else throw new BadRequestException('status must be OPEN or one of ' + CHEQUE_STATUSES.join(', '));
     }
-    if (query.dueBefore) parts.push(Prisma.sql`AND "dueDate" <= ${this.date(query.dueBefore, 'dueBefore')}::date`);
-    if (query.branchScope) parts.push(Prisma.sql`AND "branchId" = ANY(${query.branchScope}::uuid[])`);
+    if (query.dueBefore) parts.push(Prisma.sql`AND q."dueDate" <= ${this.date(query.dueBefore, 'dueBefore')}::date`);
+    if (query.branchScope) parts.push(Prisma.sql`AND q."branchId" = ANY(${query.branchScope}::uuid[])`);
     const rows = await this.rows(companyId, parts.length ? Prisma.join(parts, ' ') : Prisma.empty);
     const today = new Date().toISOString().slice(0, 10);
     const data = rows.map((r) => view(r, today));
     const sum = (f: (r: ReturnType<typeof view>) => boolean) =>
       data.filter(f).reduce((a, r) => a.plus(r.amount), new Prisma.Decimal(0)).toFixed(SCALE);
     return {
+      items: data,
       rows: data,
       totals: {
         count: data.length,
@@ -238,7 +247,7 @@ export class ChequesService {
     input: { note?: string; date?: string; cashAccountId?: string } = {},
     options: { discloseBalance?: boolean } = {},
   ) {
-    const [current] = await this.rows(companyId, Prisma.sql`AND id = ${id}::uuid`);
+    const [current] = await this.rows(companyId, Prisma.sql`AND q.id = ${id}::uuid`);
     if (!current) throw new NotFoundException('Cheque not found');
     let target: ChequeStatus;
     try {

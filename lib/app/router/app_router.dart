@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/cheques/presentation/cheques_screen.dart';
 import '../../features/accounting/presentation/screens/budgets_screen.dart';
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
 import '../../features/accounting/presentation/screens/cost_centers_screen.dart';
@@ -72,6 +73,7 @@ class AppRoutes {
   static const fixedAssets = '/accounting/fixed-assets';
   static const openingBalances = '/accounting/opening-balances';
   static const cash = '/cash';
+  static const cheques = '/cheques';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
@@ -275,6 +277,8 @@ final routerProvider = Provider<GoRouter>((ref) {
                                 ? ItemThresholdsScreen()
                                 : route.path == AppRoutes.stockTakes
                                   ? StockTakesScreen()
+                                  : route.path == AppRoutes.cheques
+                                    ? ChequesScreen()
                                   : route.path == AppRoutes.writeOffs
                                     ? WriteOffsScreen()
                                     : route.path == AppRoutes.stockDocuments
@@ -294,7 +298,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 const _guardedShellPaths = <String>{
-  AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
+  AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.cheques, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
   AppRoutes.warehouses, AppRoutes.openingBalances,
   AppRoutes.batches,
@@ -325,6 +329,7 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.notifications, child: NotificationCenterScreen()),
   (path: AppRoutes.cash, child: CashScreen()),
+  (path: AppRoutes.cheques, child: ChequesScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
   (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),

@@ -426,6 +426,18 @@ class AppErrorMessageResolver {
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
       }
 
+      if (error is ApiFailure && error.statusCode == 409 && error.code == 'CHEQUE_DUPLICATE') {
+        return AppErrorText(reason: AppErrorReason.conflict, severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+            ? 'رقم الشيك هذا مسجّل من قبل لنفس البنك. راجع الرقم أو ألغِ الشيك القديم أولاً.'
+            : 'That cheque number is already registered for this bank. Check the number, or cancel the old cheque first.');
+      }
+      if (error is ApiFailure && error.statusCode == 409 && error.code == 'CHEQUE_STATE') {
+        return AppErrorText(reason: AppErrorReason.conflict, severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+            ? 'حالة الشيك لا تسمح بهذه الخطوة، أو غيّرها شخص آخر. حدّث الشاشة وراجع حالته.'
+            : 'The cheque is not in a state that allows this step, or someone else changed it. Reload and check its status.');
+      }
       if (error is ApiFailure && error.statusCode == 503 && error.code == 'SERVER_BUSY') {
         return AppErrorText(reason: AppErrorReason.server, severity: AppErrorSeverity.warning,
           businessMessage: isArabic
