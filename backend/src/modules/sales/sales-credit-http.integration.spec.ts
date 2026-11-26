@@ -200,7 +200,10 @@ const ready =
     const self = await call('creator', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'my own exception' });
     expect(self.status).toBe(403);
     expect(await approvals(INV_A)).toBe(0);
-    expect((await call('other', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'cross company' })).status).toBe(404);
+    // The second company is seeded retired (the schema allows one live company), so
+    // since company isolation its people are refused at sign-in level: 401, and nothing
+    // is written. The live two-company cross-company proof is company-isolation.postgres.spec.ts.
+    expect((await call('other', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'cross company' })).status).toBe(401);
     const cross = await call('branchB', 'POST', `/sales/invoices/${INV_A}/credit-approval`, { reason: 'wrong branch' });
     expect([403, 404]).toContain(cross.status);
     expect(await approvals(INV_A)).toBe(0);
