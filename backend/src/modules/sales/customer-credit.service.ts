@@ -256,9 +256,11 @@ export class CustomerCreditService {
            WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid`)
       : [];
     if (lock && rows[0] && new Prisma.Decimal(rows[0].creditLimit).greaterThan(0)) {
+      // FOR NO KEY UPDATE: two posts for one customer still queue, but a new draft invoice
+      // (which only needs a key-share lock for its foreign key) is not held up behind a post.
       rows = await tx.$queryRaw<Array<{ creditLimit: Prisma.Decimal; nameEn: string }>>(Prisma.sql`
         SELECT "creditLimit", "nameEn" FROM customers
-         WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`);
+         WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid FOR NO KEY UPDATE`);
     }
     const row = rows[0];
     if (!row) return null;
