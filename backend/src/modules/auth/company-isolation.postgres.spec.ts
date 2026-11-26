@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import * as path from 'node:path';
+import { Client } from 'pg';
 import * as argon2 from 'argon2';
 import { JwtService } from '@nestjs/jwt';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
@@ -15,8 +18,11 @@ import { AuthService } from './auth.service';
  * stops its own people at sign-in, at refresh and on every request, without
  * touching the other company.
  *
- * Synthetic companies and accounts with random ids; every row is removed
- * afterwards. Runs on the isolated scratch database (its name ends in
+ * Runs on its own throwaway database, migrated with the real migration files
+ * and dropped afterwards. It first checks that the shipped schema refuses a
+ * second live company, then drops that index in the throwaway database only
+ * to prove the application's isolation with two companies. That is not
+ * production multi-company support. Runs on the isolated scratch database (its name ends in
  * "specs" or "test") or when KAYAN_COMPANY_ISOLATION_PG=1.
  */
 const databaseName = (() => {
@@ -36,6 +42,9 @@ const password = 'initial-password-123';
   jest.setTimeout(120_000);
 
   let prisma: PrismaService;
+  let isoDb = '';
+  let adminUrl = '';
+  let secondLiveCompanyRefused = false;
   let auth: AuthService;
   let guard: JwtAuthGuard;
   let companies: CompanyService;
@@ -82,41 +91,73 @@ const password = 'initial-password-123';
     process.env.JWT_ACCESS_SECRET = ACCESS_SECRET;
     process.env.JWT_ACCESS_TTL = '900';
     process.env.JWT_REFRESH_TTL = '604800';
-    prisma = new PrismaService();
+    // A dedicated, throwaway database migrated with the real migration files,
+    // so nothing here can touch the shared scratch database or another spec.
+    const base = new URL(process.env.DATABASE_URL as string);
+    const admin = new URL(base.toString());
+    admin.pathname = '/postgres';
+    admin.search = '';
+    isoDb = `kayan_iso_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const adminClient = new Client({ connectionString: admin.toString() });
+    await adminClient.connect();
+    try {
+      await adminClient.query(`CREATE DATABASE ${isoDb}`);
+    } finally {
+      await adminClient.end();
+    }
+    adminUrl = admin.toString();
+    const isoUrl = new URL(base.toString());
+    isoUrl.pathname = `/${isoDb}`;
+    execFileSync('node', ['scripts/apply-migrations.mjs'], {
+      cwd: path.resolve(__dirname, '../../..'),
+      env: { ...process.env, DATABASE_URL: isoUrl.toString() },
+      stdio: 'pipe',
+    });
+    const previousUrl = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = isoUrl.toString();
+    try {
+      prisma = new PrismaService();
+    } finally {
+      process.env.DATABASE_URL = previousUrl;
+    }
     await prisma.$connect();
     const jwt = new JwtService({});
     const audit = { record: async () => {}, recordRequired: async () => {} } as never;
     auth = new AuthService(prisma, jwt, audit);
     guard = new JwtAuthGuard({ getAllAndOverride: () => false } as unknown as Reflector, jwt, prisma);
     companies = new CompanyService(prisma, audit);
-    // The schema still holds a partial unique index that allows ONE live
-    // company per installation (migration 20261014000000). Two live companies
-    // cannot exist until a migration lifts it, which is a decision the owner
-    // has not taken. So this spec lifts it on its own scratch database for the
-    // test only and puts it back afterwards (if no second live company
-    // remains). It proves what the application does once two companies exist;
-    // it does not claim the product supports them today.
-    await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS "Company_one_active_company_idx"');
+
+    // 1) The product as shipped: the migrated schema allows ONE live company.
     await seed(A, 'A');
+    try {
+      await seed(B, 'B');
+      secondLiveCompanyRefused = false;
+    } catch (error) {
+      secondLiveCompanyRefused = (error as { code?: string }).code === 'P2002';
+      await prisma.company.deleteMany({ where: { id: B.companyId } });
+    }
+    // 2) A hypothetical schema, on this throwaway database only: the
+    // one-live-company index (migration 20261014000000) is dropped so the
+    // application's company isolation can be exercised with two companies.
+    // This is NOT production multi-company support. That needs an approved
+    // migration, which the acceptance run must execute for real.
+    await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS "Company_one_active_company_idx"');
+    await prisma.branch.deleteMany({ where: { companyId: B.companyId } });
+    await prisma.user.deleteMany({ where: { id: B.userId } });
     await seed(B, 'B');
   });
 
   afterAll(async () => {
-    if (!prisma) return;
-    for (const side of [A, B]) {
-      await prisma.refreshToken.deleteMany({ where: { userId: side.userId } });
-      await prisma.userBranch.deleteMany({ where: { userId: side.userId } });
-      await prisma.auditLog.deleteMany({ where: { userId: side.userId } }).catch(() => undefined);
-      await prisma.user.deleteMany({ where: { id: side.userId } });
-      await prisma.branch.deleteMany({ where: { companyId: side.companyId } });
-      await prisma.company.deleteMany({ where: { id: side.companyId } });
+    if (prisma) await prisma.$disconnect().catch(() => undefined);
+    if (isoDb && adminUrl) {
+      const adminClient = new Client({ connectionString: adminUrl });
+      await adminClient.connect();
+      try {
+        await adminClient.query(`DROP DATABASE IF EXISTS ${isoDb} WITH (FORCE)`);
+      } finally {
+        await adminClient.end();
+      }
     }
-    await prisma
-      .$executeRawUnsafe(
-        'CREATE UNIQUE INDEX IF NOT EXISTS "Company_one_active_company_idx" ON companies ((1)) WHERE "deletedAt" IS NULL',
-      )
-      .catch(() => undefined);
-    await prisma.$disconnect();
   });
 
   afterEach(async () => {
@@ -124,6 +165,10 @@ const password = 'initial-password-123';
       where: { id: { in: [A.companyId, B.companyId] } },
       data: { isActive: true, deletedAt: null },
     });
+  });
+
+  it('keeps today\'s product rule: the migrated schema refuses a second live company', () => {
+    expect(secondLiveCompanyRefused).toBe(true);
   });
 
   it('signs each person into their own company from the username alone', async () => {
