@@ -1,6 +1,6 @@
 # Per-company licensing: design for review
 
-Status: DESIGN ONLY. Nothing here is implemented, no live data, key or protected-state file is touched, and no private key is read. The user approved the direction (reviewed 2026-11-26, WhatsApp): a company is created only through a vendor-issued, company-specific authorization, the activation tool is updated together with the program, and existing activations keep working. The protected-state migration below still needs review before code.
+Status: DESIGN, revision 2 (after engineering review). Prototype tests are isolated and not enabled in the product. Nothing here is implemented, no live data, key or protected-state file is touched, and no private key is read. The user approved the direction (reviewed 2026-11-26, WhatsApp): a company is created only through a vendor-issued, company-specific authorization, the activation tool is updated together with the program, and existing activations keep working. The protected-state migration below still needs review before code.
 
 ## 1. What exists today (verified in source)
 
@@ -39,53 +39,60 @@ What a signed company identity buys: a key issued for one company cannot be ente
 * Installation-level facts (machine id, enforcement mode, public key fingerprint, clock tamper state of the machine) stay installation-wide. Per-licence facts (expiry, seat limit, perpetual flag, seats used watermark) are per licence.
 * Company creation consumes no seat of another company. Seats are reserved against the user's company licence.
 
-## 4a. Protected state migration (DESIGN, needs review before code)
-
-Today the file holds one `licenseId`. Proposed `v:2` state:
+## 4a. Protected state v2 (DESIGN, revision 2)
 
 ```
 v: 2
-installId, enforcement, publicKeyFingerprint, sequence,
-lastSeenAt, clockState, clockSuspects      (installation-wide)
-licenses: { [licenseId]: { maxSeatLimit, maxSeatsUsed, licenseExpiresAt, perpetual, appliedKeys } }
+installId, enforcement, publicKeyFingerprint, sequence      (installation-wide)
+lastSeenAt, clockState, clockSuspects                       (installation-wide, see 4c)
+legacyLicenseId                                             (the v1 identity, immutable)
+licenses: { [licenseId]: {
+   companyId, companyRef|null, origin: "LEGACY"|"V2",
+   maxSeatLimit, maxSeatsUsed, licenseExpiresAt, perpetual,
+   appliedKeys[], suspended (per licence) } }
 ```
+`companyId` and `legacyLicenseId` are write-once. `companyRef` is write-once once set (null only for the migrated legacy entry until its first v2 key binds it). The database row carries the same three values; any disagreement between row and entry stops with `LICENSE_STATE_ID_MISMATCH` and writes nothing.
 
-Migration rules:
-1. Migration runs once, in a code path that only starts after a verified backup of the v1 file and its key file (`license-state.json.v1.bak`, same HMAC, never overwritten). The v1 file is never edited in place.
-2. The v1 `licenseId` entry becomes the first `licenses` entry with the same watermarks. No watermark is lowered. `appliedKeys` is carried over in full.
-3. Writes stay atomic (temp file then rename) with a higher `sequence`; the HMAC covers the whole v2 state with the same secret.
-4. A v1 state with entitlement watermarks but no `licenseId` ("unbound") is not migrated; it keeps the existing refusal and goes to authorised recovery.
-5. Rollback gate: an old binary reading a `v:2` file already refuses it (`state.v !== 1` gives `UNREADABLE`, reported as `LICENSE_STATE_DAMAGED`). The new build never writes v2 until the migration was confirmed, so a plain downgrade before any second company exists can restore the v1 backup. After a second licence exists, a downgrade stays locked as damaged (fail closed), not licensed under the first row. Recovery is the preserved v1 file plus an authorised procedure, not silent data loss. This needs a test against the real old store code, not an assumption.
-6. Any mismatch between the database rows and the state entries (a row with no entry, an entry with no row, a company with two rows) stops with `LICENSE_STATE_ID_MISMATCH` and writes nothing.
+## 4b. Migration state machine, locking and durability (DESIGN, revision 2)
 
-## 4b. Migration crash consistency, recovery and downgrade (DESIGN, needs review)
+Two different things were mixed before. They are now separate:
 
-The migration touches three things that cannot change in one transaction: the database (additive columns, link, marker), the protected state file, and its key file. The order and the recovery rules below make every interruption resolvable without losing a watermark or licensing the wrong company.
+* Schema-ready (`prepared`): additive, idempotent, reversible by simply ignoring it. It never changes what any binary does. It is not authoritative.
+* Authoritative marker (`committed`): a single row in the database written in the same transaction that records the digest and `sequence` of the verified v2 state. Only this row makes v2 the sole authority.
 
-State words (written to a small `license-migration.json` journal beside the state, HMAC-protected with the same secret, plus a `license_migration` row in the database):
+Precedence at every start, evaluated in this order, first match wins:
+1. Marker `committed`: v2 state is the only authority. v1 files are never read for licensing. If the v2 state is missing, corrupt, or its digest/sequence differs from the marker: `LICENSE_STATE_DAMAGED`, fail closed, nothing written, no regeneration.
+2. Marker absent, v2 state file present: a migration was interrupted after the write. Verify (exact rules in 4b-validate); if valid, commit the marker; if not, `LICENSE_STATE_DAMAGED`, both files preserved.
+3. Marker absent, journal says `prepared`/`schema-ready`, state v1: resume at the next idempotent step.
+4. Nothing: legacy behaviour, migration may start.
 
-1. `PREPARED`: preconditions hold (state file readable and HMAC valid, key file present, exactly one licence row, exactly one company, no unbound watermarks). The v1 state file is copied byte for byte to `license-state.json.v1.bak` and the copy is verified by re-reading it and checking its HMAC inside the process. Nothing is printed. The key file is copied the same way (`state.key.v1.bak`, mode 0600); only SHA-256 digests of the two copies and the originals are logged, never contents.
-2. `DB_READY`: the additive database step is committed (nullable `companyId`/`companyRef` columns, backfill of the single row to the single company, unique indexes, marker row). The old code still works against this schema because the legacy accessor reads the same oldest row and the state is still v1.
-3. `STATE_WRITTEN`: the v2 state is written atomically (temp file, then rename) with a higher `sequence`. The v1 state is not edited.
-4. `COMMITTED`: journal and marker are set to committed; the legacy file stays as the backup.
+Exclusion: the migration takes (a) a PostgreSQL advisory lock for the whole run, and (b) an exclusive lock file `license-migration.lock` beside the state (O_EXCL, holds pid and start time, stale only when the pid is gone and an operator or the run's own recovery clears it). The v1 loader cannot learn new fields, so the migration requires the application to be stopped. This is enforced: the running service holds a PostgreSQL advisory lock for as long as it is up, and the migration aborts if it cannot take that lock. Old and new processes therefore cannot both write v1 after the backup.
 
-Recovery by observed state at start-up (each start inspects journal, database marker, state file version and the two backups):
+Durability: write the temp file, `fsync` the file, rename, then `fsync` the directory; same for the backups and journal. Atomic rename alone is not relied on. A crash test must kill between each of these calls.
 
-* Journal absent, state v1, no marker: normal old behaviour; migration may start.
-* `PREPARED` only, or `PREPARED` with the DB step half applied: the DB step is idempotent (add column if absent, backfill only when null, unique index if absent), so the start-up re-runs it. The state is still v1, so nothing can be mis-licensed. No watermark has changed.
-* `DB_READY`, state still v1: re-run step 3. If the v1 file no longer matches its verified backup digest, stop and enter authorised recovery (do not overwrite either).
-* State v2 written but journal not `COMMITTED` (crash between 3 and 4): verify the v2 HMAC and that its single entry equals the v1 backup's watermarks entry for entry (monotonic: each value greater or equal); if so, set `COMMITTED`; if not, stop in `LICENSE_STATE_DAMAGED` with both files preserved.
-* State v2 but no backup or digest mismatch: refuse to run licence-dependent features (fail closed) and keep every file.
-* Database marker says migrated but the state is v1: refuse. The new build never falls back to a v1 state once the marker is set, even if the v1 file is restored from the backup, because that could lower a watermark; it stays damaged until an authorised recovery reconciles the two.
-* A restored database snapshot older than the marker: the full restore path re-runs `reconcile()`, which compares marker, rows and state; a snapshot without the marker or with fewer companies than the state entries is refused as a mismatch (nothing is dropped from the state).
+Steps: A prepare (preconditions, lock, verified backups with digests only, journal `prepared`); B schema (additive, idempotent); C write v2 temp, fsync, rename, fsync dir; D one transaction that sets the marker with the v2 digest and sequence; E journal `committed`. v1 files are never edited and are kept.
 
-Immutable binding: `companyRef` is write-once in the database (trigger-free: the service refuses an update, and a unique index prevents a second licence for the same company) and also stored in the matching protected-state entry. A restore, a replayed `keyId`, or a key for a different company cannot change either side; disagreement between the two stops with `LICENSE_STATE_ID_MISMATCH` and changes nothing. A restored company backup never contains the licence rows or links.
+### 4b-validate: exact preservation, not just numeric watermarks
+The v2 state is accepted only if, against the verified v1 backup: `legacyLicenseId` equals the v1 `licenseId`; the single entry has the same `appliedKeys` as a set with identical keyIds and order; each numeric watermark is greater or equal; `licenseExpiresAt` and `perpetual` are identical unless a later applied key explains the change; `installId`, `publicKeyFingerprint` equal; `sequence` is greater. Anything else stops.
 
-Legacy keys after migration: `KYN1` keys keep verifying and applying, but only to the licence row that existed at migration (matched by `licenseId`). A `KYN1` key whose `licenseId` is not an existing row is refused once a second company exists; creating a company needs `COMPANY_ACTIVATION` in `KYN2`. After a second company is activated, no code path reads the v1 file or the oldest row as an authority.
+Disagreements and missing files (no regeneration, no overwrite, ever):
+* State sequence lower than the marker's sequence, or journal and marker disagree: treat the higher authority (marker) as truth, refuse the lower, stop `LICENSE_STATE_DAMAGED`, preserve both.
+* `state.key` missing or unreadable with a v2 state, or HMAC fails: damaged. Never create a new key, never re-sign. Recovery is the key's own backup under an authorised procedure; the migration backup digests allow checking that the right copy was returned.
+* Backups missing or digest mismatch at any step before `committed`: abort, change nothing further.
 
-Downgrade: there is no down-migration and no data is dropped. The additive columns, rows and the v2 state remain. An old binary meets a v2 state and refuses it as damaged, so it licenses nothing and writes nothing; the second company's data stays in the database untouched. Returning to the new build restores service. Reverting to a v1 file by hand is only valid before a second company exists and only from the verified backup, as an authorised recovery.
+## 4c. Clock and suspension scope
+* Installation-wide (a property of the machine): `clockState`, `clockSuspects`, `lastSeenAt`, the clock-tamper lock. A detected rollback affects every company: all licensed writes refuse with the clock message until the shared clock is repaired through the existing recovery. Expected and tested.
+* Per licence: expiry, perpetual, seats, `suspended`. One company's expiry or suspension blocks only that company; the others continue, and a restored read-only expired state follows the existing per-licence rules.
+* A company's expiry never advances or relaxes the shared clock watermark; the shared clock never extends a company term.
 
-Tests required for this section (integration, not reasoning): a crash injected after each step (kill between steps 1 to 4 in a real file and real PostgreSQL) and the start-up recovery result; digest check of the backups without any secret in logs; the actual old store and service code (checked out from the pre-change commit) pointed at the v2 state and at the migrated database: it must lock as `LICENSE_STATE_DAMAGED` and perform no write; restore of a pre-migration snapshot after a second company exists; replay of a spent `keyId` after migration; `KYN1` key refused for an unknown licence once a second company exists; companyRef write-once.
+## 4d. Honest boundary of `companyRef`
+`companyRef` is chosen by the vendor and signed in the key. It proves the vendor authorised one more logical company on that machine. It does not prove which real-world company or name was intended, because there is no signed customer request binding a name. The design does not claim otherwise. What it does guarantee: one key creates exactly one company, once; its binding cannot be swapped afterwards; a key for another companyRef cannot be applied to it. If the vendor needs the name bound, an optional signed `displayLabel` in the key (vendor-typed) is shown in the activation screen and stored with the binding, and the operator guide says the vendor must check it against the customer.
+Company setup: the `COMPANY_ACTIVATION` key creates the company in state `AWAITING_FIRST_ADMIN` and that state is created once. First-admin provisioning is allowed only in that state, only inside the same activation session and only by presenting the same activation key id (single use, consumed on success). After success the state moves to `ACTIVE` and the endpoint refuses forever; it is not a reusable unauthenticated door. A restore or key replay cannot reopen it. Test: second attempt, replay, and restore all refused.
+
+## 4e. Legacy keys, downgrade and recovery claims
+* Consistent from migration (one company too): a `KYN1` key is accepted only when its `licenseId` equals `legacyLicenseId`, and only for the legacy company. Unknown licence ids are refused from the first start after the commit.
+* Manual v1 rollback is not advertised as safe once the v2 state has accrued anything the v1 file lacks: a newer applied key, a spent keyId, a higher watermark, or any second licence. Even with one company, restoring the v1 file would drop a spent key. Only the exact pre-migration state (v2 sequence equals the committed sequence and no applied key added) may be restored, by an authorised recovery, from the verified backup.
+* Downgrade: no down-migration, no data dropped. Old binaries must be tested for real: the pre-change code is run (startup, status, activation, seat reservation, a write path, reconcile) against the v2 state and the migrated database. Expected: `LICENSE_STATE_DAMAGED`, licensed writes refused, no write to the state or licence tables. This is an integration test; the parser test alone is not claimed as proof.
 
 ## 5. Restore
 

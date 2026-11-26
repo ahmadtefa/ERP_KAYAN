@@ -1,0 +1,78 @@
+{
+  "sourceCommit": "34d5b156fde91d1d39567c3e076efc93c35785eb",
+  "scope": "Standalone nine bridge qualification only. Does not change comprehensive acceptance or classify other skipped tests.",
+  "results": [
+    {
+      "id": "receipt",
+      "status": "PASS",
+      "fixture": "location_http_receipt_test.dart",
+      "test": "isolated receipt HTTP to actual service and location balance",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "transfer",
+      "status": "PASS",
+      "fixture": "batch_transfer_http_test.dart",
+      "test": "actual transfer dialog sends named source and target into migrated SQL",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "purchase",
+      "status": "PASS",
+      "fixture": "purchase_location_http_test.dart",
+      "test": "real purchase destination edit uses actual API read and draft save",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "sales",
+      "status": "PASS",
+      "fixture": "sales_location_http_test.dart",
+      "test": "real sales source edit retains typed carton units on actual API read and save",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "stockdoc",
+      "status": "PASS",
+      "fixture": "stock_document_locations_http_test.dart",
+      "test": "old stock transfer draft actual read correct save then post",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "count",
+      "status": "PASS",
+      "fixture": "stock_take_locations_http_test.dart",
+      "test": "actual count add record finish",
+      "sql": "pglite",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "opening",
+      "status": "PASS",
+      "fixture": "opening_locations_http_test.dart",
+      "test": "actual opening draft read post",
+      "sql": "native",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "stockdoc-lot",
+      "status": "PASS",
+      "fixture": "stock_document_lot_create_http_test.dart",
+      "test": "generic barcode transfer explicit lot create post reverse",
+      "sql": "native",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    },
+    {
+      "id": "stockdoc-split",
+      "status": "PASS",
+      "fixture": "stock_document_lot_split_http_test.dart",
+      "test": "existing transfer draft explicit lot split save post reverse",
+      "sql": "native",
+      "scope": "Flutter HTTP to production service and migrated synthetic SQL; not installed JWT/licence proof"
+    }
+  ]
+}
