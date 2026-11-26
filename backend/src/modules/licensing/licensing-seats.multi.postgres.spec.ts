@@ -115,40 +115,55 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(0);
   });
 
-  it('A is full, and that does not stop B: B takes its one seat, then is full itself', async () => {
+  it("B's seat rows do not count against A: A stays exactly full, then takes one more seat when its own limit rises", async () => {
+    await prisma.licenseSeatUsage.createMany({ data: [
+      { username: 'b-1', reason: 'USER_CREATE', licenseId: 'lic_B-0001' },
+      { username: 'b-2', reason: 'USER_CREATE', licenseId: 'lic_B-0001' },
+    ] });
     await expect(reserveFor('lic_A-0001', 'a-3')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
-    await expect(reserveFor('lic_B-0001', 'b-1')).resolves.toMatchObject({ reserved: true, used: 1, limit: 1 });
-    await expect(reserveFor('lic_B-0001', 'b-2')).rejects.toMatchObject({ response: { code: 'LICENSE_SEATS_EXHAUSTED' } });
     expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(2);
-    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(1);
-    const rows = await prisma.licenseSeatUsage.findMany({ where: { username: 'b-1' } });
-    expect(rows.map((r) => r.licenseId)).toEqual(['lic_B-0001']);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(2);
+    // If B's two rows were counted, A (limit 3) would see 4 and be refused.
+    await prisma.licenseInstallation.update({ where: { licenseId: 'lic_A-0001' }, data: { seatLimit: 3 } });
+    await expect(reserveFor('lic_A-0001', 'a-3')).resolves.toMatchObject({ reserved: true, used: 3, limit: 3 });
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(2);
   });
 
-  it("another licence's seats do not move this licence's file watermark", async () => {
+  it("the one-licence protected state refuses a seat for another licence, and writes nothing", async () => {
+    // Today's protected state belongs to licence A. Seats for B or C are
+    // reachable only with the per-company state (a later step), never by this one.
+    const before = await prisma.licenseSeatUsage.count();
+    await expect(reserveFor('lic_B-0001', 'b-3')).rejects.toMatchObject({ response: { code: 'LICENSE_STATE_ID_MISMATCH' } });
+    await expect(reserveFor('lic_C-0001', 'c-1')).rejects.toMatchObject({ response: { code: 'LICENSE_STATE_ID_MISMATCH' } });
+    expect(await prisma.licenseSeatUsage.count()).toBe(before);
+  });
+
+  it('with several licences the one-licence file watermark is left alone', async () => {
+    await prisma.licenseInstallation.update({ where: { licenseId: 'lic_A-0001' }, data: { seatLimit: 6 } });
     const before = store.current.maxSeatsUsed;
-    await reserveFor('lic_C-0001', 'c-1');
+    await reserveFor('lic_A-0001', 'a-4');
     expect(store.current.maxSeatsUsed).toBe(before);
   });
 
   it('a late unowned row counts for the oldest licence only', async () => {
+    const a = await service.seatsUsedForLicense('lic_A-0001');
     await prisma.licenseSeatUsage.create({ data: { username: 'late-legacy', reason: 'MIGRATION_EXISTING', licenseId: null } });
-    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(3);
-    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(1);
-    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(1);
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(a + 1);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(2);
+    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(0);
   });
 
-  it('concurrent creations on one licence never exceed its limit, and leave the others alone', async () => {
-    const beforeA = await service.seatsUsedForLicense('lic_A-0001');
-    const beforeB = await service.seatsUsedForLicense('lic_B-0001');
-    const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => reserveFor('lic_C-0001', `c-race-${i}`)));
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);        // C: limit 2, 1 used
+  it('concurrent creations on licence A never exceed its limit, and leave the others alone', async () => {
+    const used = await service.seatsUsedForLicense('lic_A-0001');
+    await prisma.licenseInstallation.update({ where: { licenseId: 'lic_A-0001' }, data: { seatLimit: used + 2 } });
+    const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => reserveFor('lic_A-0001', `a-race-${i}`)));
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
     for (const r of results.filter((x): x is PromiseRejectedResult => x.status === 'rejected')) {
       expect(code(r.reason)).toBe('LICENSE_SEATS_EXHAUSTED');
     }
-    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(2);
-    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(beforeA);
-    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(beforeB);
+    expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(used + 2);
+    expect(await service.seatsUsedForLicense('lic_B-0001')).toBe(2);
+    expect(await service.seatsUsedForLicense('lic_C-0001')).toBe(0);
   });
 
   it('a seat for an unknown licence is refused and writes nothing', async () => {
