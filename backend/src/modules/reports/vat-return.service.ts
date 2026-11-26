@@ -89,9 +89,20 @@ export class VatReturnService {
     const output = foldVatRows(sales);
     const input = foldVatRows(purchases);
     const net = output.tax.minus(input.tax);
+    // Flat rows and totals so the report table can show it like the others.
+    const rows = [
+      ...output.rates.map((r) => ({ side: 'OUTPUT', ...r })),
+      ...input.rates.map((r) => ({ side: 'INPUT', ...r })),
+    ];
     return {
       from,
       to,
+      rows,
+      totals: {
+        outputTax: output.tax.toFixed(SCALE),
+        inputTax: input.tax.toFixed(SCALE),
+        net: net.toFixed(SCALE),
+      },
       output: { rates: output.rates, taxableBase: output.taxableBase.toFixed(SCALE), tax: output.tax.toFixed(SCALE) },
       input: { rates: input.rates, taxableBase: input.taxableBase.toFixed(SCALE), tax: input.tax.toFixed(SCALE) },
       net: net.toFixed(SCALE),

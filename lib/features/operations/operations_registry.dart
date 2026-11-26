@@ -106,6 +106,7 @@ class OperationsRegistry {
       (slug: 'cost-centers', ar: 'تقارير مراكز التكلفة', en: 'Cost centre reports', icon: Icons.pie_chart_rounded),
       (slug: 'budgets', ar: 'تقرير الميزانيات', en: 'Budget report', icon: Icons.trending_up_rounded),
       (slug: 'reconciliation-center', ar: 'مركز التسويات', en: 'Reconciliation centre', icon: Icons.rule_rounded),
+      (slug: 'vat-return', ar: 'إقرار ضريبة القيمة المضافة', en: 'VAT return', icon: Icons.request_quote_rounded),
     ];
     return [
       for (final row in rows)

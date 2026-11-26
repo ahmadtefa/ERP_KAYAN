@@ -107,6 +107,15 @@ class _FakeApiClient extends ApiClient {
         },
       };
     }
+    if (path.startsWith('/reports/vat-return')) {
+      return {
+        'rows': [
+          {'side': 'OUTPUT', 'rate': '14.00', 'taxableBase': '1100.0000', 'tax': '154.0000', 'documents': 3},
+          {'side': 'INPUT', 'rate': '14.00', 'taxableBase': '500.0000', 'tax': '70.0000', 'documents': 2},
+        ],
+        'totals': {'outputTax': '154.0000', 'inputTax': '70.0000', 'net': '84.0000'},
+      };
+    }
     if (path.startsWith('/reports/reconciliation-center')) {
       return {
         'asOf': '2026-10-22',
@@ -207,6 +216,7 @@ const _user = AppUser(
     'reports.cash-flow.read',
     'reports.receivables-reconciliation.read',
     'reports.reconciliation-center.read',
+    'reports.vat-return.read',
     'accounting.fixedassets.read',
   ],
 );
@@ -272,6 +282,27 @@ void main() {
     expect(find.text('Reconciliation center'), findsNothing);
     expect(api.requested.any((path) => path.startsWith('/reports/cash-flow')), isTrue);
     expect(api.requested.any((path) => path.startsWith('/reports/trial-balance')), isFalse);
+  });
+
+  testWidgets('the VAT return tab shows output, input and the net, and needs its own permission', (tester) async {
+    final api = await _pump(tester);
+    await _openTab(tester, 'VAT return');
+    expect(api.requested.any((p) => p.startsWith('/reports/vat-return?from=')), isTrue);
+    expect(find.text('Sales'), findsWidgets);
+    expect(find.text('Purchases'), findsWidgets);
+    expect(find.textContaining('154'), findsWidgets);
+    expect(find.textContaining('70'), findsWidgets);
+    expect(find.textContaining('84'), findsWidgets);
+    expect(find.text('Net (positive = payable)'), findsOneWidget);
+  });
+
+  testWidgets('a reader without the VAT permission does not see the VAT tab', (tester) async {
+    const reader = AppUser(
+      id: 'r', username: 'r', fullName: 'R', companyId: 'company-1',
+      permissions: ['reports.cash-flow.read', 'reports.sales.read'],
+    );
+    await _pump(tester, user: reader);
+    expect(find.text('VAT return'), findsNothing);
   });
 
   testWidgets('a trial-balance row opens that account in the ledger', (

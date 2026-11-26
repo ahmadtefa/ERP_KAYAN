@@ -111,7 +111,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     'account-ledger', 'general-journal', 'sales', 'purchases', 'payments',
     'cash', 'outstanding-invoices', 'expenses', 'income',
     'receivables-reconciliation', 'payables-reconciliation', 'fixed-assets',
-    'cost-centers', 'budgets', 'reconciliation-center',
+    'cost-centers', 'budgets', 'reconciliation-center', 'vat-return',
   ];
 
   @override
@@ -222,6 +222,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.costCenterReport),
               Tab(text: l10n.budgetReport),
               Tab(text: _t(context, 'مركز التسويات', 'Reconciliation center')),
+              Tab(text: _t(context, 'إقرار القيمة المضافة', 'VAT return')),
             ].asMap().entries
                 .where((entry) => _visibleTabs.contains(entry.key))
                 .map((entry) => entry.value)
@@ -284,6 +285,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               18 => const _FixedAssetsReportTab(),
               19 => const _CostCentersTab(),
               20 => const _BudgetReportTab(),
+              22 => const _VatReturnTab(),
               _ => _ReconciliationCenterTab(
                 onOpenTab: _openOriginalTab,
               ),
@@ -317,6 +319,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     18 => 'fixed-assets',
     19 => 'cost-centers',
     20 => 'budgets',
+    22 => 'vat-return',
     _ => 'reconciliation-center',
   };
 
@@ -1924,6 +1927,55 @@ class _CashReportTab extends ConsumerWidget {
           numeric: true,
           value: (r) => formatAmount(asString(r['closing'])),
           emphasise: true,
+        ),
+      ],
+    );
+  }
+}
+
+/// The VAT return: output VAT on sales and input VAT on purchases per rate,
+/// credit notes subtracted, and the net due to (or refundable from) the tax authority.
+class _VatReturnTab extends ConsumerWidget {
+  const _VatReturnTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    return _RowsTab(
+      path: '/reports/vat-return?from=${period.from}&to=${period.to}',
+      summary: {
+        'outputTax': _t(context, 'ضريبة المبيعات (مخرجات)', 'Output VAT (sales)'),
+        'inputTax': _t(context, 'ضريبة المشتريات (مدخلات)', 'Input VAT (purchases)'),
+        'net': _t(context, 'الصافي (موجب = مستحق للضرائب)', 'Net (positive = payable)'),
+      },
+      columns: [
+        ColumnSpec(
+          _t(context, 'الجانب', 'Side'),
+          value: (r) => text(r, 'side') == 'OUTPUT'
+              ? _t(context, 'مبيعات', 'Sales')
+              : _t(context, 'مشتريات', 'Purchases'),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'النسبة %', 'Rate %'),
+          numeric: true,
+          value: (r) => asString(r['rate']),
+        ),
+        ColumnSpec(
+          _t(context, 'الوعاء الضريبي', 'Taxable base'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['taxableBase'])),
+        ),
+        ColumnSpec(
+          _t(context, 'الضريبة', 'VAT'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['tax'])),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'المستندات', 'Documents'),
+          numeric: true,
+          value: (r) => asString(r['documents']),
         ),
       ],
     );
