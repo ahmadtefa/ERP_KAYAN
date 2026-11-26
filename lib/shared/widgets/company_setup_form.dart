@@ -27,6 +27,7 @@ class CompanySetupForm extends StatefulWidget {
     required this.onSubmit,
     this.submitLabel = 'إنشاء الحساب والبدء / Create and start',
     this.busy = false,
+    this.keptAdministrator = false,
     this.error,
     this.fieldErrors = const {},
   });
@@ -36,6 +37,10 @@ class CompanySetupForm extends StatefulWidget {
 
   final String submitLabel;
   final bool busy;
+
+  /// After a reset the installation keeps its administrator. Setup then asks
+  /// for that account's CURRENT username and password, not for new ones.
+  final bool keptAdministrator;
   final String? error;
   final Map<String, String> fieldErrors;
 
@@ -225,10 +230,14 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
     if (username.length < 3 || username.length > 60) {
       errors['adminUsername'] = 'اسم المستخدم من ٣ إلى ٦٠ حرفًا / Username needs 3-60 characters';
     }
-    if (password.length < 8 || password.length > 200) {
+    if (widget.keptAdministrator) {
+      if (password.isEmpty) {
+        errors['adminPassword'] = 'اكتب كلمة السر الحالية للمدير / Enter the administrator\'s current password';
+      }
+    } else if (password.length < 8 || password.length > 200) {
       errors['adminPassword'] = 'كلمة السر من ٨ إلى ٢٠٠ حرف / Password needs 8-200 characters';
     }
-    if (password != _adminAgain.text) {
+    if (!widget.keptAdministrator && password != _adminAgain.text) {
       errors['adminAgain'] = 'كلمة السر والتأكيد مش زي بعض / The two passwords do not match';
     }
     final email = _email.text.trim();
@@ -509,10 +518,18 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           ],
         ),
         const SizedBox(height: 20),
-        const Text(
-          'حساب المدير الأول / First administrator',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        Text(
+          widget.keptAdministrator
+              ? 'حساب المدير المحفوظ / Preserved administrator'
+              : 'حساب المدير الأول / First administrator',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
+        if (widget.keptAdministrator) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'إعادة الضبط أبقت حساب المدير. اكتب اسم المستخدم وكلمة السر الحالية لهذا الحساب، وليس كلمة سر جديدة. تقدر تغيّرها بعد ذلك من شاشة تغيير كلمة السر. / The reset kept the administrator account. Enter that account\'s username and its current password, not a new one. You can change it afterwards from the change-password screen.',
+          ),
+        ],
         const SizedBox(height: 12),
         TextField(
           controller: _adminUsername,
@@ -532,7 +549,9 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           obscureText: _obscure,
           decoration: InputDecoration(
             errorText: _fieldErrors['adminPassword'],
-            labelText: 'كلمة السر * / Password * (8+)',
+            labelText: widget.keptAdministrator
+                ? 'كلمة السر الحالية * / Current password *'
+                : 'كلمة السر * / Password * (8+)',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
               icon: Icon(
@@ -545,6 +564,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           ),
         ),
         const SizedBox(height: 12),
+        if (!widget.keptAdministrator) ...[
         TextField(
           controller: _adminAgain,
           onChanged: (_) => _clearField('adminAgain'),
@@ -557,6 +577,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
             border: OutlineInputBorder(),
           ),
         ),
+        ],
         if (error != null) ...[
           const SizedBox(height: 12),
           Text(

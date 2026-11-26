@@ -1775,6 +1775,31 @@ async function main() {
       `setup ${setupAfterCompletion.data?.needsSetup}, companies ${setupAfterCompletion.data?.companyCount}, health ${healthAfterCompletion.data?.status}, database ${healthAfterCompletion.data?.database}`,
     );
 
+    // The normal self-service password screen works for the recovered account,
+    // and a refused change leaves the credentials as they were.
+    const TEMP_PASSWORD = 'CI-only-Temp-Password-98765';
+    const refusedChange = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: 'Not-The-Password-12345', newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
+    });
+    const stillOld = await api('/auth/login', { method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true });
+    const changedOnce = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: PASSWORD, newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
+    });
+    const changedBack = await api('/auth/change-password', {
+      method: 'POST',
+      noAuth: true,
+      json: { username: USERNAME, currentPassword: TEMP_PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD },
+    });
+    check(
+      'after recovery the normal password change works, and a refused change leaves the credentials unchanged',
+      refusedChange.status >= 400 && stillOld.status === 201 && changedOnce.status < 300 && changedBack.status < 300,
+      `refused ${refusedChange.status}, old password still works ${stillOld.status}, change ${changedOnce.status}, change back ${changedBack.status}`,
+    );
+
     const administratorAfterSetup = await api('/auth/login', {
       method: 'POST',
       json: { username: USERNAME, password: PASSWORD },

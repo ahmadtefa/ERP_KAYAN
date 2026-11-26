@@ -84,4 +84,38 @@ void main() {
       expect(find.byType(TextField), findsWidgets);
     });
   }
+
+  testWidgets('after a reset the form asks for the kept administrator current credentials, in both languages', (tester) async {
+    tester.view.physicalSize = const Size(1400, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(wrapWithApp(child: Scaffold(
+      body: SingleChildScrollView(child: CompanySetupForm(keptAdministrator: true, onSubmit: (_) async {})),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Preserved administrator'), findsOneWidget);
+    expect(find.textContaining('حساب المدير المحفوظ'), findsOneWidget);
+    expect(find.textContaining('Current password'), findsOneWidget);
+    expect(find.textContaining('كلمة السر الحالية'), findsWidgets);
+    expect(find.textContaining('not a new one'), findsOneWidget);
+    // No "confirm the new password" field, and no "new password" wording.
+    expect(find.textContaining('Confirm'), findsNothing);
+    expect(find.textContaining('Password * (8+)'), findsNothing);
+  });
+
+  testWidgets('the normal first-run form still asks for a new password and its confirmation', (tester) async {
+    tester.view.physicalSize = const Size(1400, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(wrapWithApp(child: Scaffold(
+      body: SingleChildScrollView(child: CompanySetupForm(onSubmit: (_) async {})),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('First administrator'), findsOneWidget);
+    expect(find.textContaining('Password * (8+)'), findsOneWidget);
+    expect(find.textContaining('Confirm'), findsOneWidget);
+    expect(find.textContaining('Current password'), findsNothing);
+  });
 }
