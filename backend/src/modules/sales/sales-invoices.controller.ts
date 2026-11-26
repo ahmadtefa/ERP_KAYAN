@@ -110,6 +110,15 @@ export class SalesInvoicesController {
     return this.credit.approve(user.companyId, user.userId, id, body.reason, branchReadScope(user));
   }
 
+  /// Signs for one draft invoice of a customer who is past the payment period.
+  /// Same permission and same rules as the credit-limit approval.
+  @Post(':id/payment-term-approval')
+  @RequirePermissions('sales.credit.approve')
+  approvePeriod(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: CreditApprovalDto) {
+    if (!this.credit) throw new NotFoundException('Approval is not available');
+    return this.credit.approvePeriod(user.companyId, user.userId, id, body.reason, branchReadScope(user));
+  }
+
   @Post(':id/reverse')
   @RequirePermissions('sales.invoices.post')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {

@@ -6,6 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  DEFAULT_PAYMENT_TERM_METHOD,
+  PaymentTerm,
+  PaymentTermError,
+  PaymentTermMethod,
+  validatePaymentTerm,
+} from './payment-terms';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
@@ -24,6 +31,8 @@ type PartyRow = {
   taxNumber: string | null;
   address: string | null;
   creditLimit?: Prisma.Decimal | null;
+  paymentTermMethod?: string | null;
+  paymentTermConfig?: unknown;
   isActive: boolean;
   notes: string | null;
   createdAt: Date;
@@ -678,8 +687,17 @@ export class PartiesService {
     if (kind === 'customer' && dto.creditLimit !== undefined) {
       data.creditLimit = this.money(dto.creditLimit, 'creditLimit');
     }
+    let chosenMethod: string | null = null;
+    if (kind === 'customer') {
+      const method = (dto.paymentTermMethod as string | undefined) ?? (await this.lastTermMethod(companyId));
+      const term = this.checkedTerm(method, data.paymentTermDays as number, dto.paymentTermConfig);
+      data.paymentTermMethod = term.method;
+      data.paymentTermConfig = term.config ?? Prisma.DbNull;
+      chosenMethod = term.method;
+    }
 
     const created = await model.create({ data });
+    if (chosenMethod) await this.rememberTermMethod(companyId, userId, chosenMethod);
 
     await this.audit.record({
       companyId,
@@ -731,8 +749,23 @@ export class PartiesService {
     if (dto.paymentTermDays !== undefined) {
       data.paymentTermDays = this.paymentTerm(dto.paymentTermDays);
     }
+    let chosenMethod: string | null = null;
+    if (
+      kind === 'customer' &&
+      (dto.paymentTermMethod !== undefined || dto.paymentTermConfig !== undefined || dto.paymentTermDays !== undefined)
+    ) {
+      const current = (await model.findFirst({ where: { id, companyId, deletedAt: null } })) as PartyRow | null;
+      const method = (dto.paymentTermMethod as string | undefined) ?? current?.paymentTermMethod ?? DEFAULT_PAYMENT_TERM_METHOD;
+      const days = (data.paymentTermDays as number | undefined) ?? current?.paymentTermDays ?? 0;
+      const config = dto.paymentTermConfig !== undefined ? dto.paymentTermConfig : dto.paymentTermMethod !== undefined ? undefined : current?.paymentTermConfig;
+      const term = this.checkedTerm(method, days, config);
+      data.paymentTermMethod = term.method;
+      data.paymentTermConfig = term.config ?? Prisma.DbNull;
+      if (dto.paymentTermMethod !== undefined) chosenMethod = term.method;
+    }
 
     const updated = await model.update({ where: { id }, data });
+    if (chosenMethod) await this.rememberTermMethod(companyId, userId, chosenMethod);
 
     await this.audit.record({
       companyId,
@@ -791,6 +824,39 @@ export class PartiesService {
     return days;
   }
 
+  private checkedTerm(method: string, days: number, config: unknown): PaymentTerm {
+    try {
+      return validatePaymentTerm({
+        method: method as PaymentTermMethod,
+        days,
+        config: (config ?? null) as PaymentTerm['config'],
+      });
+    } catch (error) {
+      if (error instanceof PaymentTermError) {
+        throw fieldError(error.field.startsWith('payment') ? error.field : 'paymentTermMethod', error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** The method the company chose for its last customer, for the next new one. */
+  async lastTermMethod(companyId: string): Promise<string> {
+    const rows = await this.prisma.$queryRaw<Array<{ m: string | null }>>(Prisma.sql`
+      SELECT "lastPaymentTermMethod" AS m FROM company_settings WHERE "companyId" = ${companyId}::uuid`);
+    return rows[0]?.m ?? DEFAULT_PAYMENT_TERM_METHOD;
+  }
+
+  async termDefaults(companyId: string) {
+    return { paymentTermMethod: await this.lastTermMethod(companyId) };
+  }
+
+  private async rememberTermMethod(companyId: string, userId: string, method: string) {
+    await this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO company_settings ("companyId", "lastPaymentTermMethod", "updatedAt", "updatedBy")
+      VALUES (${companyId}::uuid, ${method}, now(), ${userId}::uuid)
+      ON CONFLICT ("companyId") DO UPDATE SET "lastPaymentTermMethod" = EXCLUDED."lastPaymentTermMethod"`);
+  }
+
   private money(value: unknown, field: string): Prisma.Decimal {
     let d: Prisma.Decimal;
     try {
@@ -807,6 +873,8 @@ export class PartiesService {
     return {
       id: row.id,
       paymentTermDays: row.paymentTermDays ?? 0,
+      paymentTermMethod: row.paymentTermMethod ?? DEFAULT_PAYMENT_TERM_METHOD,
+      paymentTermConfig: row.paymentTermConfig ?? null,
       companyId: row.companyId,
       code: row.code,
       nameEn: row.nameEn,

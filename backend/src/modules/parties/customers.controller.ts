@@ -21,6 +21,13 @@ export class CustomersController {
     return this.service.findAll(user.companyId, 'customer', query);
   }
 
+  // What a new customer starts with: the payment-term method the company chose last.
+  @Get('term-defaults')
+  @RequirePermissions('parties.customers.read')
+  termDefaults(@CurrentUser() user: AuthUser) {
+    return this.service.termDefaults(user.companyId);
+  }
+
   // Declared before ':id' so 'summary' is never read as an identifier.
   @Get('summary/:id')
   @RequirePermissions('parties.customers.read')

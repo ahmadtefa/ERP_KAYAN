@@ -1,8 +1,11 @@
 import { Type } from 'class-transformer';
+import { PAYMENT_TERM_METHODS } from '../payment-terms';
 import {
   IsBoolean,
   IsEmail,
+  IsIn,
   IsInt,
+  IsObject,
   IsNumber,
   IsOptional,
   IsString,
@@ -37,11 +40,19 @@ export class UpdatePartyDto {
 }
 
 export class CreateCustomerDto extends CreatePartyDto {
+  /// One of the 12 payment-term methods; omitted means the one the company chose last.
+  @IsOptional() @IsIn([...PAYMENT_TERM_METHODS]) paymentTermMethod?: string;
+  /// The settings the method needs. Checked in the service.
+  @IsOptional() @IsObject() paymentTermConfig?: Record<string, unknown>;
   /// Informational. REQUIRES BUSINESS DECISION: whether a sale may exceed it.
   @IsOptional() @IsString() creditLimit?: string;
 }
 
 export class UpdateCustomerDto extends UpdatePartyDto {
+  /// One of the 12 payment-term methods; omitted means the one the company chose last.
+  @IsOptional() @IsIn([...PAYMENT_TERM_METHODS]) paymentTermMethod?: string;
+  /// The settings the method needs. Checked in the service.
+  @IsOptional() @IsObject() paymentTermConfig?: Record<string, unknown>;
   @IsOptional() @IsString() creditLimit?: string;
 }
 

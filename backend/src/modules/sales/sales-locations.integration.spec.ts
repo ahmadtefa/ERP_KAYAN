@@ -204,7 +204,7 @@ function serviceWith(db: PGlite) {
     {} as never,
     audit as never,
     batches,
-    ledger, { assertCanPost: async () => undefined } as never,
+    ledger, { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
     );
   return { service, prisma, ledger, batches };
 }

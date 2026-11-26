@@ -83,7 +83,7 @@ describe('cost redaction - sales invoices', () => {
         {} as never,
         {} as never,
           {} as never,
-          {} as never, { assertCanPost: async () => undefined } as never,
+          {} as never, { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
     ),
     };
   }

@@ -769,6 +769,10 @@ model CompanySetting {
 
   /// The people a quotation names. Optional, and never invented: a document
   /// prints only what the company has actually filled in.
+  /// The payment-term method last chosen for a customer: the next new customer
+  /// of this company starts with it.
+  lastPaymentTermMethod String? @db.VarChar(30)
+
   managerName       String?
   salesManagerName  String?
   salesManagerPhone String?
@@ -1545,6 +1549,11 @@ model Customer {
   /// makes the ageing report mean something.
   paymentTermDays Int @default(0)
 
+  /// How the days are counted (one of the 12 methods in payment-terms.ts) and
+  /// the extra settings that method needs (day of month, installments, ...).
+  paymentTermMethod String @default("FROM_INVOICE_DATE") @db.VarChar(30)
+  paymentTermConfig Json?
+
   /// The price list this customer buys from. Null means the item's own
   /// selling price is used.
   priceListId String? @db.Uuid
@@ -1867,6 +1876,12 @@ model SalesInvoice {
   invoiceNumber String
   invoiceDate   DateTime      @db.Date
   dueDate       DateTime?     @db.Date
+  /// The date goods were delivered or received; only the delivery-date payment
+  /// term uses it.
+  deliveryDate  DateTime?     @db.Date
+  /// Every due share when the customer's terms split the invoice (installments,
+  /// stages): [{dueDate, percent, label?}]. dueDate above is the first one.
+  dueSchedule   Json?
   customerId    String        @db.Uuid
   status        InvoiceStatus @default(DRAFT)
   currency      String        @default("EGP") @db.VarChar(3)

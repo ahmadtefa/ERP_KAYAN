@@ -85,7 +85,7 @@ const ready =
     const invoices = new SalesInvoicesService(
       prisma as never, new DocumentNumberService(), posting, new AccountMapService(), settings,
       new WarehouseService(prisma as never, audit as never), {} as never, audit as never, batches, ledger,
-      { assertCanPost: async () => undefined } as never,
+      { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
     );
     orders = new SalesOrdersService(prisma as never, new DocumentNumberService(), settings, {} as never, invoices, audit as never);
     quotes = new QuotationsService(prisma as never, new DocumentNumberService(), settings, invoices, audit as never);

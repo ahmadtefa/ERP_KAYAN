@@ -39,10 +39,10 @@ describe('SalesInvoicesService.updateDraft', () => {
       {} as never,
       audit as never,
           {} as never,
-          {} as never, { assertCanPost: async () => undefined } as never,
+          {} as never, { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
     );
     jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
-    jest.spyOn(service as any, 'dueDateFromTerms').mockResolvedValue(null);
+    jest.spyOn(service as any, 'dueFromTerms').mockResolvedValue({ dueDate: null, dueSchedule: null });
     return { service, tx, prisma, audit };
   }
 

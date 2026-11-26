@@ -103,7 +103,7 @@ function makeService(itemOverride: any = milkItem) {
     prices as never,
     audit as never,
     fakeBatches({ onHand: { quantity: 50, value: 375 } }) as never,
-    fakeLedger() as never, { assertCanPost: async () => undefined } as never,
+    fakeLedger() as never, { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
     );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'invoice-1' } as never);
 

@@ -69,6 +69,8 @@ export class SalesInvoiceLineDto {
 export class CreateSalesInvoiceDto {
   @IsDateString() invoiceDate!: string;
   @IsOptional() @IsDateString() dueDate?: string;
+  /// When the goods were delivered or received; the delivery-date payment term counts from it.
+  @IsOptional() @IsDateString() deliveryDate?: string;
   @IsUUID() customerId!: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 

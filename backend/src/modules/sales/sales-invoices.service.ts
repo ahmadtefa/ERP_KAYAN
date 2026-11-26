@@ -1,3 +1,5 @@
+import { computeDueSchedule, DEFAULT_PAYMENT_TERM_METHOD, PaymentTermConfig, PaymentTermError, PaymentTermMethod } from '../parties/payment-terms';
+import { fieldError } from '../../common/validation/field-errors';
 import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
@@ -346,6 +348,10 @@ export class SalesInvoicesService {
         'SI',
       );
 
+      const terms = dto.dueDate
+        ? { dueDate: new Date(dto.dueDate), dueSchedule: null }
+        : await this.dueFromTerms(companyId, dto.customerId, dto.invoiceDate, dto.deliveryDate ?? null, tx);
+
       return tx.salesInvoice.create({
         data: {
           warehouseId: dto.warehouseId ?? null,
@@ -356,9 +362,9 @@ export class SalesInvoicesService {
           // The due date is what the ageing report counts from. If the person
           // did not give one, the customer's payment terms decide it, so the
           // invoice is never born with no due date at all.
-          dueDate: dto.dueDate
-            ? new Date(dto.dueDate)
-            : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate), tx)),
+          dueDate: terms.dueDate,
+          dueSchedule: terms.dueSchedule ?? Prisma.DbNull,
+          deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
           discountType: prepared.documentDiscount.type,
@@ -452,9 +458,10 @@ export class SalesInvoicesService {
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
     const invoiceDate = new Date(dto.invoiceDate);
-    const dueDate = dto.dueDate
-      ? new Date(dto.dueDate)
-      : await this.dueDateFromTerms(companyId, dto.customerId, invoiceDate);
+    const terms = dto.dueDate
+      ? { dueDate: new Date(dto.dueDate), dueSchedule: null }
+      : await this.dueFromTerms(companyId, dto.customerId, dto.invoiceDate, dto.deliveryDate ?? null);
+    const dueDate = terms.dueDate;
 
     await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; salesOrderId: string | null }>>(Prisma.sql`
@@ -479,6 +486,8 @@ export class SalesInvoicesService {
           customerId: dto.customerId,
           invoiceDate,
           dueDate,
+          dueSchedule: terms.dueSchedule ?? Prisma.DbNull,
+          deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
           warehouseId: dto.warehouseId ?? invoice.warehouseId,
           discountType: prepared.documentDiscount.type,
           discountPercent: prepared.documentDiscount.percent,
@@ -872,6 +881,8 @@ export class SalesInvoicesService {
       // approval for this very invoice. Checked before the claim so the
       // invoice being posted is not already counted in the balance.
       await this.credit.assertCanPost(tx, companyId, id, creditView.mayDiscloseBalance);
+      // A customer past the agreed payment period is held the same way.
+      await this.credit.assertPeriodCanPost(tx, companyId, id, creditView.mayDiscloseBalance);
       // Claim the document before anything else happens. Two people pressing
       // Post at the same moment: the row lock lets exactly one of them win, and
       // the other is told the invoice has already been posted - instead of both
@@ -1487,23 +1498,41 @@ export class SalesInvoicesService {
 
   // ------------------------------------------------------------------ helpers
 
-  /// The due date the customer's payment terms imply, or null when they have
-  /// none.
-  private async dueDateFromTerms(
+  /**
+   * What the customer's payment terms imply for an invoice dated [invoiceDate]:
+   * the first due date (what ageing counts from) and, when the terms split the
+   * invoice into several shares, every share. No terms at all gives no due date.
+   */
+  private async dueFromTerms(
     companyId: string,
     customerId: string,
-    invoiceDate: Date,
+    invoiceDate: string,
+    deliveryDate: string | null,
     client: Prisma.TransactionClient = this.prisma,
-  ): Promise<Date | null> {
+  ): Promise<{ dueDate: Date | null; dueSchedule: Prisma.InputJsonValue | null }> {
     const customer = await client.customer.findFirst({
       where: { id: customerId, companyId },
-      select: { paymentTermDays: true },
+      select: { paymentTermDays: true, paymentTermMethod: true, paymentTermConfig: true },
     });
     const days = customer?.paymentTermDays ?? 0;
-    if (days <= 0) return null;
-    const due = new Date(invoiceDate.getTime());
-    due.setUTCDate(due.getUTCDate() + days);
-    return due;
+    const method = (customer?.paymentTermMethod ?? DEFAULT_PAYMENT_TERM_METHOD) as PaymentTermMethod;
+    if (!customer || (days <= 0 && method === DEFAULT_PAYMENT_TERM_METHOD)) return { dueDate: null, dueSchedule: null };
+    try {
+      const schedule = computeDueSchedule(
+        { method, days, config: customer.paymentTermConfig as PaymentTermConfig | null },
+        invoiceDate.slice(0, 10),
+        deliveryDate ? deliveryDate.slice(0, 10) : null,
+      );
+      return {
+        dueDate: new Date(schedule.firstDueDate),
+        dueSchedule: schedule.shares.length > 1 ? (schedule.shares as unknown as Prisma.InputJsonValue) : null,
+      };
+    } catch (error) {
+      if (error instanceof PaymentTermError) {
+        throw fieldError(error.field === 'date' ? 'invoiceDate' : 'customerId', 'The customer payment terms cannot be applied to this invoice date. Check the customer card.');
+      }
+      throw error;
+    }
   }
 
   private async prepareLines(
