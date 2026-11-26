@@ -64,6 +64,13 @@ export class StockDocumentsController {
           `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
       );
     }
+    return this.createDocument(user, body, idempotencyKey);
+  }
+
+  /// Shared by the document route and the storekeeper voucher route, which
+  /// has its own grant (inventory.stock.voucher.create) checked by the guard.
+  private createDocument(user: AuthUser, body: Record<string, unknown>, idempotencyKey?: string) {
+    const kind = String(body.kind ?? '').toUpperCase();
     if (kind === 'WRITE_OFF') {
       assertWarehouseAccess(user, body.toWarehouseId as string, 'issue');
     }
@@ -112,7 +119,7 @@ export class StockDocumentsController {
     if (voucherKind !== 'RECEIPT' && voucherKind !== 'ISSUE') {
       throw new BadRequestException('voucherKind must be RECEIPT or ISSUE');
     }
-    return this.create(user, { ...body, kind: 'ADJUSTMENT', voucherKind }, idempotencyKey);
+    return this.createDocument(user, { ...body, kind: 'ADJUSTMENT', voucherKind }, idempotencyKey);
   }
 
   @Put('vouchers/:id/draft')
