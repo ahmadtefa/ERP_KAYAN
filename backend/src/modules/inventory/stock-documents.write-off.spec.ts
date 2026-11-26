@@ -256,7 +256,7 @@ describe('a documentary write-off', () => {
     document.approvedAt = new Date();
     document.approvedBy = APPROVER;
 
-    await service.post(COMPANY, AUTHOR, 'doc-wo');
+    await service.post(COMPANY, APPROVER, 'doc-wo');
 
     expect(accounts.resolve).toHaveBeenCalledWith(tx, COMPANY, [
       'inventory',
@@ -291,7 +291,7 @@ describe('a documentary write-off', () => {
     document.lines[0].batchId = 'lot-1';
     document.lines[0].unitCost = D('10');
 
-    await service.post(COMPANY, AUTHOR, 'doc-wo');
+    await service.post(COMPANY, APPROVER, 'doc-wo');
 
     const claim = (tx.itemBatch.updateMany.mock.calls[0] as any[])[0];
     expect(claim.where).toMatchObject({ id: 'lot-1' });
@@ -310,7 +310,7 @@ describe('a documentary write-off', () => {
     document.lines[0].unitCost = D('10');
     document.lines[0].batchId = 'lot-1';
 
-    await service.post(COMPANY, AUTHOR, 'doc-wo');
+    await service.post(COMPANY, APPROVER, 'doc-wo');
 
     const claim = (tx.itemBatch.updateMany.mock.calls[0] as any[])[0];
     expect(claim.data.remainingQuantity.increment.toFixed(4)).toBe('2.0000');
@@ -333,7 +333,7 @@ describe('a documentary write-off', () => {
     document.lines[0].storageLocationId = 'bin-shelf-1';
     document.lines[0].unitCost = D('10');
 
-    await service.post(COMPANY, AUTHOR, 'doc-wo');
+    await service.post(COMPANY, APPROVER, 'doc-wo');
 
     const moved = ((service as any).move as jest.Mock).mock.calls[0][1];
     expect(moved.batchId).toBe('lot-1');
@@ -348,7 +348,7 @@ describe('a documentary write-off', () => {
     document.approvedAt = new Date();
     document.approvedBy = APPROVER;
 
-    await service.post(COMPANY, AUTHOR, 'doc-wo');
+    await service.post(COMPANY, APPROVER, 'doc-wo');
 
     const written = (tx.stockDocumentLine.update.mock.calls[0] as any[])[0];
     expect(written.where).toEqual({ id: 'line-1' });
