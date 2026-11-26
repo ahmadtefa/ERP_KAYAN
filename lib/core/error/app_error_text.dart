@@ -83,8 +83,8 @@ class AppErrorMessageResolver {
       'This document was reviewed or approved, so its locations cannot be changed. Return it to draft or create a new document. Your data is kept.',
     ],
     'STOCK_DOC_LINE_UNKNOWN': [
-      'السطر غير موجود في المستند أو مكرر. أعد فتح المستند وحاول مرة أخرى. لم يُحفظ شيء.',
-      'The line is not in this document or is repeated. Reopen the document and try again. Nothing was saved.',
+      'السطر غير موجود في المستند أو مكرر. أعد فتح المستند وحاول مرة أخرى. لم تُحفظ التصحيحات والمسودة كما هي.',
+      'The line is not in this document or is repeated. Reopen the document and try again. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_LOCATIONS_EMPTY': [
       'لم تُرسل أي أسطر لتصحيح مواقعها. اختر سطرًا واحدًا على الأقل وحاول مرة أخرى.',
@@ -103,12 +103,12 @@ class AppErrorMessageResolver {
       'The item is stored on several locations. Choose the location this line takes from, then post again. Your data is kept and no balance changed.',
     ],
     'STOCK_DOC_LOT_INVALID': [
-      'الدفعة المختارة لا تصلح لهذا الصنف في المخزن المحوَّل منه (قد تكون مشطوبة أو محذوفة). اختر دفعة أخرى. لم يُحفظ شيء.',
-      'The chosen lot cannot be used for this item in the source warehouse (it may be written off or deleted). Choose another lot. Nothing was saved.',
+      'الدفعة المختارة لا تصلح لهذا الصنف في المخزن المحوَّل منه (قد تكون مشطوبة أو محذوفة). اختر دفعة أخرى. لم تُحفظ التصحيحات والمسودة كما هي.',
+      'The chosen lot cannot be used for this item in the source warehouse (it may be written off or deleted). Choose another lot. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_LOT_SHORT': [
-      'الدفعة المختارة تحمل أقل من الكمية المطلوبة. خفّض الكمية أو وزّعها على دفعات أخرى. لم يُحفظ شيء.',
-      'The chosen lot holds less than the quantity needed. Lower the quantity or split it over other lots. Nothing was saved.',
+      'الدفعة المختارة تحمل أقل من الكمية المطلوبة. خفّض الكمية أو وزّعها على دفعات أخرى. لم تُحفظ التصحيحات والمسودة كما هي.',
+      'The chosen lot holds less than the quantity needed. Lower the quantity or split it over other lots. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_LOT_TRANSFER_ONLY': [
       'اختيار الدفعة وتقسيم الكمية متاحان لمستند التحويل فقط.',
@@ -143,12 +143,12 @@ class AppErrorMessageResolver {
       'The chosen location holds less than the quantity needed. Choose another location or lower the quantity. Your data is kept and no balance changed.',
     ],
     'STOCK_DOC_SPLIT_INVALID': [
-      'التقسيم غير صحيح: أرسل من 2 إلى 20 جزءًا، لكل جزء دفعة وكمية أكبر من صفر. لم يُحفظ شيء.',
-      'The split is not valid: send 2 to 20 parts, each with a lot and a quantity above zero. Nothing was saved.',
+      'التقسيم غير صحيح: أرسل من 2 إلى 20 جزءًا، لكل جزء دفعة وكمية أكبر من صفر. لم تُحفظ التصحيحات والمسودة كما هي.',
+      'The split is not valid: send 2 to 20 parts, each with a lot and a quantity above zero. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_SPLIT_TOTAL': [
-      'مجموع الأجزاء لا يساوي كمية السطر. عدّل الأجزاء ليصبح مجموعها مساويًا للكمية. لم يُحفظ شيء.',
-      'The parts do not add up to the line quantity. Adjust them so the total equals the line quantity. Nothing was saved.',
+      'مجموع الأجزاء لا يساوي كمية السطر. عدّل الأجزاء ليصبح مجموعها مساويًا للكمية. لم تُحفظ التصحيحات والمسودة كما هي.',
+      'The parts do not add up to the line quantity. Adjust them so the total equals the line quantity. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_TARGET_LOCATION_INVALID': [
       'موقع الاستلام يجب أن يكون في المخزن المحوَّل إليه وفي مستند تحويل فقط. اختر موقعًا صحيحًا. بياناتك محفوظة.',
