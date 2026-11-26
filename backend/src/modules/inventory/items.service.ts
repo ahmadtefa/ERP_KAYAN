@@ -293,7 +293,12 @@ export class ItemsService {
     branchId: string,
     access: WarehouseAccessUser | null,
   ): Promise<
-    | { state: 'ready'; warehouse: { id: string; code: string; nameEn: string; nameAr: string } }
+    | {
+        state: 'ready';
+        warehouse: { id: string; code: string; nameEn: string; nameAr: string };
+        /// Every active branch warehouse the caller may receive into, default first.
+        warehouses: Array<{ id: string; code: string; nameEn: string; nameAr: string }>;
+      }
     | { state: 'create' | 'inactive' | 'forbidden' }
   > {
     const c = client as Prisma.TransactionClient;
@@ -302,8 +307,9 @@ export class ItemsService {
       orderBy: [{ isDefault: 'desc' }, { code: 'asc' }],
       select: { id: true, code: true, nameEn: true, nameAr: true },
     });
-    const permitted = active.find((w) => may(access, w.id, 'receive'));
-    if (permitted) return { state: 'ready', warehouse: permitted };
+    const permittedAll = active.filter((w) => may(access, w.id, 'receive'));
+    const permitted = permittedAll[0];
+    if (permitted) return { state: 'ready', warehouse: permitted, warehouses: permittedAll };
     if (active.length > 0) return { state: 'forbidden' };
     const anyWarehouse = await c.warehouse.findFirst({
       where: { companyId, branchId, deletedAt: null },
@@ -514,23 +520,26 @@ export class ItemsService {
         }
         const shownWarehouseId =
           typeof dto.openingWarehouseId === 'string' && dto.openingWarehouseId ? dto.openingWarehouseId : null;
-        const targetId = target.state === 'ready' ? target.warehouse.id : null;
-        if (shownWarehouseId !== null || targetId !== null) {
-          // The form names the target it was shown; if that is no longer the
-          // target (warehouse changed, deactivated, grants changed since the
-          // form opened) nothing is written and the user reopens the form.
-          if (shownWarehouseId !== targetId && shownWarehouseId !== null) {
+        // The user may pick any active branch warehouse they may receive into.
+        // A choice outside that list (deactivated, not permitted, another
+        // branch) writes nothing and asks the user to reopen the form.
+        let chosenId: string | null = null;
+        if (shownWarehouseId !== null) {
+          const offered = target.state === 'ready' ? target.warehouses : [];
+          if (!offered.some((w) => w.id === shownWarehouseId)) {
             throw new ConflictException({
               code: 'ITEM_OPENING_TARGET_CHANGED',
               message:
                 'The opening stock warehouse changed since the form was opened. Reopen the form to see the current warehouse.',
             });
           }
+          chosenId = shownWarehouseId;
         }
         const warehouseId: string | null =
-          target.state === 'ready'
+          chosenId ??
+          (target.state === 'ready'
             ? target.warehouse.id
-            : await this.warehouses.resolve(tx, companyId, branchId!);
+            : await this.warehouses.resolve(tx, companyId, branchId!));
         const asOf = new Date(new Date().toISOString().slice(0, 10));
         const openingShelfId =
           typeof dto.openingStorageLocationId === 'string' && dto.openingStorageLocationId

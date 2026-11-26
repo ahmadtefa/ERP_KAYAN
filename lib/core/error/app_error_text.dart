@@ -201,8 +201,8 @@ class AppErrorMessageResolver {
       'The opening stock location belongs to a different warehouse than the branch warehouse. Choose a location of the branch warehouse. Your data is kept.',
     ],
     'ITEM_OPENING_TARGET_CHANGED': [
-      'تغيّر مخزن الرصيد الافتتاحي منذ فتح النموذج. أعد فتح النموذج لرؤية المخزن الحالي.',
-      'The opening stock warehouse changed since the form was opened. Reopen the form to see the current warehouse.',
+      'المخزن المختار للرصيد الافتتاحي لم يعد متاحًا. أعد فتح النموذج واختر من المخازن الحالية.',
+      'The chosen opening stock warehouse is no longer available. Reopen the form and choose from the current warehouses.',
     ],
     'ITEM_OPENING_WAREHOUSE_INACTIVE': [
       'كل مخازن هذا الفرع غير مفعّلة فلا يمكن حفظ رصيد افتتاحي. فعّل مخزنًا للفرع أو احفظ الصنف بدون رصيد افتتاحي.',

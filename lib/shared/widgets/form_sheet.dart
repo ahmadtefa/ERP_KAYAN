@@ -52,6 +52,8 @@ class FieldSpec {
     this.minInteger,
     this.maxInteger,
     this.nullWhenEmpty = false,
+    this.dependsOn,
+    this.optionsBy = const {},
   });
 
   /// Additional source-grounded domain constraints, applied before submit.
@@ -68,6 +70,12 @@ class FieldSpec {
   final bool required;
   final String? helper;
   final List<FieldOption> options;
+
+  /// A select whose choices depend on another select's value: [optionsBy] maps
+  /// the other field's value to this field's choices. Changing the other field
+  /// clears this one, so a choice from the old parent is never submitted.
+  final String? dependsOn;
+  final Map<String, List<FieldOption>> optionsBy;
 
   /// Use a searchable name picker instead of a dropdown for long reference lists.
   final bool searchable;
@@ -567,7 +575,9 @@ class _FormSheetState extends State<_FormSheet> {
         return Padding(
           padding: padding,
           child: DropdownButtonFormField<String>(
-            key: _fieldKeys[field.key],
+            key: field.dependsOn == null
+                ? _fieldKeys[field.key]
+                : ValueKey('${field.key}|${_selections[field.dependsOn]}'),
             focusNode: _focusNodes[field.key],
             isExpanded: true,
             initialValue: _selections[field.key],
@@ -577,7 +587,10 @@ class _FormSheetState extends State<_FormSheet> {
               helperMaxLines: 4,
             ),
             items: [
-              for (final option in field.options)
+              for (final option in field.dependsOn == null
+                  ? field.options
+                  : (field.optionsBy[_selections[field.dependsOn]] ??
+                        const <FieldOption>[]))
                 DropdownMenuItem(
                   value: option.value,
                   enabled: option.enabled,
@@ -598,6 +611,11 @@ class _FormSheetState extends State<_FormSheet> {
                     setState(() {
                       _selections[field.key] = value;
                       _fieldErrors.remove(field.key);
+                      for (final other in widget.fields) {
+                        if (other.dependsOn == field.key) {
+                          _selections[other.key] = null;
+                        }
+                      }
                     });
                     _fieldKeys[field.key]?.currentState?.validate();
                   },

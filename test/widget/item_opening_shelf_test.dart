@@ -36,6 +36,20 @@ class _ItemTaxApi extends ApiClient {
       'nameEn': 'Main warehouse',
       'nameAr': 'المخزن الرئيسي',
     },
+    'warehouses': [
+      {
+        'id': 'w',
+        'code': 'MAIN',
+        'nameEn': 'Main warehouse',
+        'nameAr': 'المخزن الرئيسي',
+      },
+      {
+        'id': 'w2',
+        'code': 'SEC',
+        'nameEn': 'Second store',
+        'nameAr': 'المخزن الثاني',
+      },
+    ],
   };
   bool targetFails = false;
   int targetCalls = 0;
@@ -73,6 +87,13 @@ class _ItemTaxApi extends ApiClient {
           'isActive': true,
         },
         {'id': 'off', 'warehouseId': 'w', 'code': 'OFF', 'isActive': false},
+        {
+          'id': 'shelf2',
+          'warehouseId': 'w2',
+          'code': 'B-07',
+          'nameEn': 'Shelf B',
+          'isActive': true,
+        },
       ];
     }
     return existing
@@ -215,17 +236,27 @@ void main() {
         // is described as an optional place inside that warehouse.
         expect(
           find.textContaining(
-            ar ? 'الفرع: فرع القاهرة' : 'Branch: Cairo branch',
+            ar ? 'فرع: فرع القاهرة' : 'branch: Cairo branch',
           ),
           findsOneWidget,
         );
+        // The warehouse is a field the user chooses from, with the suggested
+        // default already selected, not a sentence about a hidden choice.
+        final warehouseField = find.widgetWithText(
+          DropdownButtonFormField<String>,
+          ar ? 'المخزن (للرصيد الافتتاحي)' : 'Warehouse (opening stock)',
+        );
+        expect(warehouseField, findsOneWidget);
         expect(
-          find.textContaining(
-            ar ? 'المخزن: المخزن الرئيسي' : 'Warehouse: Main warehouse',
+          find.descendant(
+            of: warehouseField,
+            matching: find.textContaining(
+              ar ? 'المخزن الرئيسي' : 'Main warehouse',
+            ),
           ),
           findsOneWidget,
         );
-        expect(find.textContaining(ar ? 'مخزن الملحق' : 'Annex'), findsNothing);
+        expect(find.textContaining('Annex'), findsNothing);
         expect(find.textContaining(ar ? 'مخزن معطل' : 'Dead'), findsNothing);
         await tester.tap(loc);
         await tester.pumpAndSettle();
@@ -304,6 +335,43 @@ void main() {
   }
 
   testWidgets(
+    'choosing another warehouse swaps the shelf choices and sends that warehouse',
+    (tester) async {
+      final api = await openForm(tester, (_) {});
+      final qty = find.widgetWithText(TextFormField, 'Opening quantity');
+      await tester.ensureVisible(qty);
+      await tester.enterText(qty, '3');
+      final cost = find.widgetWithText(TextFormField, 'Opening unit cost');
+      await tester.ensureVisible(cost);
+      await tester.enterText(cost, '4');
+      final wh = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Warehouse (opening stock)',
+      );
+      final loc = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Opening stock location (optional)',
+      );
+      await tester.ensureVisible(wh);
+      await tester.tap(wh);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SEC - Second store').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(loc);
+      await tester.tap(loc);
+      await tester.pumpAndSettle();
+      expect(find.text('A-01 - Shelf A'), findsNothing);
+      await tester.tap(find.text('B-07 - Shelf B').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save').last);
+      await tester.pumpAndSettle();
+      expect(api.submitted, containsPair('openingWarehouseId', 'w2'));
+      expect(api.submitted, containsPair('openingStorageLocationId', 'shelf2'));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'restricted login: the server-resolved permitted warehouse is shown, nothing else',
     (tester) async {
       final api = await openForm(tester, (a) {
@@ -319,7 +387,7 @@ void main() {
         };
       });
       expect(api.targetCalls, 1);
-      expect(find.textContaining('Warehouse: Permitted store'), findsOneWidget);
+      expect(find.textContaining('suggested: Permitted store'), findsOneWidget);
       expect(find.textContaining('Main warehouse'), findsNothing);
     },
   );

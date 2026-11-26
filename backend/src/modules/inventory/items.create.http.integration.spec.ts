@@ -257,6 +257,28 @@ const vmLacksDynamicImport = !(
     expect(await movementWarehouse('OK-GRANT')).toEqual(['99999999-9999-4999-8999-9999999999c2']);
   });
 
+  it('2g2. the user picks the warehouse: a non-default permitted warehouse receives the stock; an unoffered one is refused with nothing written', async () => {
+    const B = '99999999-9999-4999-8999-9999999999f4';
+    await addBranch(B, 'BP', [
+      ['99999999-9999-4999-8999-9999999999f1', 'P1', true, true],
+      ['99999999-9999-4999-8999-9999999999f2', 'P2', false, true],
+      ['99999999-9999-4999-8999-9999999999f3', 'P3', false, false],
+    ]);
+    const t = await getTarget(B);
+    expect(t.json.state).toBe('ready');
+    expect(t.json.warehouses.map((w: { code: string }) => w.code)).toEqual(['P1', 'P2']);
+    const picked = '99999999-9999-4999-8999-9999999999f2';
+    const ok = await post(payload('PICK-OK', { openingWarehouseId: picked }), B);
+    expect(ok.status).toBe(201);
+    expect(await movementWarehouse('PICK-OK')).toEqual([picked]);
+    const journalsBefore = await journalRows();
+    const bad = await post(payload('PICK-BAD', { openingWarehouseId: '99999999-9999-4999-8999-9999999999f3' }), B);
+    expect(bad.status).toBe(409);
+    expect(bad.json.code ?? bad.json.errorCode).toBe('ITEM_OPENING_TARGET_CHANGED');
+    expect(await itemRows('PICK-BAD')).toBe(0);
+    expect(await journalRows()).toBe(journalsBefore);
+  });
+
   it('2h. view-only grant (cannot receive): target is forbidden, save refused with 403 and nothing is written', async () => {
     const B = '99999999-9999-4999-8999-999999999995';
     await addBranch(B, 'B8', [['99999999-9999-4999-8999-9999999999d1', 'E1', true, true]]);

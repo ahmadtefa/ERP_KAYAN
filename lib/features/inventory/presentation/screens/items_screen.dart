@@ -108,7 +108,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final canManageSalePrice = user?.canManageSalePrice ?? false;
     final canManagePurchasePrice = user?.canManagePurchasePrice ?? false;
     final canManageInventoryCost = user?.canManageInventoryCost ?? false;
-    final openingLocations = <FieldOption>[];
+    // Every warehouse the caller may receive into, and each one's shelves.
+    final openingWarehouses = <FieldOption>[];
+    final openingLocationsBy = <String, List<FieldOption>>{};
     final openingArabic = Localizations.localeOf(context).languageCode == 'ar';
     // Where opening stock lands: the branch default warehouse, shown to the user.
     String openingWhere = openingArabic
@@ -153,26 +155,43 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ? text(first, 'code')
               : warehouseName;
           openingWhere = openingArabic
-              ? 'الرصيد يُضاف على - الفرع: ${branchName.isEmpty ? 'فرعك' : branchName}، المخزن: $shownWarehouse.'
-              : 'Opening stock goes to - Branch: ${branchName.isEmpty ? 'your branch' : branchName}, Warehouse: $shownWarehouse.';
+              ? 'الرصيد يُضاف على فرع: ${branchName.isEmpty ? 'فرعك' : branchName}. اختر المخزن من القائمة (المقترح: $shownWarehouse).'
+              : 'Opening stock goes to branch: ${branchName.isEmpty ? 'your branch' : branchName}. Choose the warehouse below (suggested: $shownWarehouse).';
           final warehouseId = text(first, 'id');
           openingWarehouseId = warehouseId;
-          final rows = await client.getList(
-            '/inventory/locations',
-            query: {'warehouseId': warehouseId},
-          );
-          for (final row in rows) {
-            if (text(row, 'warehouseId') != warehouseId ||
-                row['isActive'] != true ||
-                row['deletedAt'] != null) {
-              continue;
-            }
-            openingLocations.add(
-              FieldOption(
-                text(row, 'id'),
-                '${text(row, 'code')} - ${openingArabic ? text(row, 'nameAr', fallback: text(row, 'nameEn')) : text(row, 'nameEn', fallback: text(row, 'nameAr'))}',
-              ),
+          // The server lists every permitted active warehouse of the branch;
+          // an older answer with only the default still works.
+          final offered = target['warehouses'] is List
+              ? [
+                  for (final w in target['warehouses'] as List)
+                    if (w is Map) Map<String, dynamic>.from(w),
+                ]
+              : [first];
+          for (final w in offered) {
+            final id = text(w, 'id');
+            final name = openingArabic
+                ? text(w, 'nameAr', fallback: text(w, 'nameEn'))
+                : text(w, 'nameEn', fallback: text(w, 'nameAr'));
+            openingWarehouses.add(FieldOption(id, '${text(w, 'code')} - $name'));
+            final rows = await client.getList(
+              '/inventory/locations',
+              query: {'warehouseId': id},
             );
+            final shelves = <FieldOption>[];
+            for (final row in rows) {
+              if (text(row, 'warehouseId') != id ||
+                  row['isActive'] != true ||
+                  row['deletedAt'] != null) {
+                continue;
+              }
+              shelves.add(
+                FieldOption(
+                  text(row, 'id'),
+                  '${text(row, 'code')} - ${openingArabic ? text(row, 'nameAr', fallback: text(row, 'nameEn')) : text(row, 'nameEn', fallback: text(row, 'nameAr'))}',
+                ),
+              );
+            }
+            openingLocationsBy[id] = shelves;
           }
         } else if (state == 'create') {
           openingWhere = openingArabic
@@ -196,7 +215,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         // all (it must never write stock to an unnamed warehouse). Creating the
         // item itself is unaffected.
         openingAvailable = false;
-        openingLocations.clear();
+        openingWarehouses.clear();
+        openingLocationsBy.clear();
         openingWarehouseId = null;
         if (mounted) {
           showMessage(
@@ -253,16 +273,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                 ? '$openingWhere الحفظ يضيف الكمية ويُرحّل قيد المخزون وحقوق الملكية فورًا.'
                 : '$openingWhere Save immediately posts this stock and its inventory/equity entry.',
           ),
+          if (openingWarehouses.isNotEmpty)
+            FieldSpec(
+              'openingWarehouseId',
+              openingArabic ? 'المخزن (للرصيد الافتتاحي)' : 'Warehouse (opening stock)',
+              kind: FieldKind.select,
+              options: openingWarehouses,
+              helper: openingArabic
+                  ? 'المخزن الذي تُضاف إليه الكمية الافتتاحية.'
+                  : 'The warehouse that receives the opening quantity.',
+            ),
           FieldSpec(
             'openingStorageLocationId',
-            Localizations.localeOf(context).languageCode == 'ar'
+            openingArabic
                 ? 'موقع الرصيد الافتتاحي (اختياري)'
                 : 'Opening stock location (optional)',
             kind: FieldKind.select,
-            options: openingLocations,
+            dependsOn: openingWarehouses.isEmpty ? null : 'openingWarehouseId',
+            options: const [],
+            optionsBy: openingLocationsBy,
             helper: openingArabic
-                ? 'اختياري: رف أو ممر داخل المخزن المذكور أعلاه. إن تركته فارغًا يُسجَّل الرصيد على المخزن نفسه.'
-                : 'Optional: a shelf or aisle inside the warehouse named above. If left empty the stock is recorded on the warehouse itself.',
+                ? 'اختياري: رف أو ممر داخل المخزن المختار أعلاه. إن تركته فارغًا يُسجَّل الرصيد على المخزن نفسه.'
+                : 'Optional: a shelf or aisle inside the warehouse chosen above. If left empty the stock is recorded on the warehouse itself.',
           ),
           if (canManageInventoryCost)
             FieldSpec(
@@ -280,7 +312,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           maxLines: 2,
         ),
       ],
-      initial: existing,
+      initial:
+          existing ??
+          (openingWarehouseId != null
+              ? {'openingWarehouseId': openingWarehouseId}
+              : null),
       onSubmit: (draft) async {
         final client = ref.read(apiClientProvider);
         final payload = Map<String, dynamic>.from(draft);
@@ -288,11 +324,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         // not “clear the saved value”. Clearing remains an explicit workflow.
         // The warehouse the form named. The server refuses (nothing written) if it
         // is no longer the target; without it a stale form could write elsewhere.
+        final wantsOpening =
+            payload['openingQuantity']?.toString().trim().isNotEmpty ?? false;
+        // The warehouse is mandatory whenever an opening quantity is entered;
+        // the shelf or aisle stays optional.
         if (!isEdit &&
-            openingWarehouseId != null &&
-            (payload['openingQuantity']?.toString().trim().isNotEmpty ??
-                false)) {
-          payload['openingWarehouseId'] = openingWarehouseId;
+            wantsOpening &&
+            openingWarehouses.isNotEmpty &&
+            (payload['openingWarehouseId']?.toString().isEmpty ?? true)) {
+          if (mounted) {
+            showMessage(
+              context,
+              openingArabic
+                  ? 'اختر المخزن الذي تُضاف إليه الكمية الافتتاحية.'
+                  : 'Choose the warehouse that receives the opening quantity.',
+              error: true,
+            );
+          }
+          throw const FormSubmissionCancelled();
+        }
+        if (isEdit || !wantsOpening) {
+          payload.remove('openingWarehouseId');
+          payload.remove('openingStorageLocationId');
         }
         for (final key in ['salePrice', 'purchasePrice', 'openingUnitCost']) {
           final value = payload[key];
