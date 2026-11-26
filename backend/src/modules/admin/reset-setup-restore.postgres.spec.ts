@@ -84,9 +84,13 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     }
   });
 
+  const at = async <T>(step: string, fn: () => Promise<T>): Promise<T> => {
+    try { return await fn(); } catch (e) { throw new Error(`step "${step}" failed: ${(e as Error).message}`); }
+  };
+
   it('restores the pre-reset company after reset and a second setup', async () => {
     // 1. First setup, then some business data.
-    await setup.initialSetup(dto());
+    await at('first setup', () => setup.initialSetup(dto()));
     const company = await prisma.company.findFirstOrThrow({ where: { deletedAt: null } });
     const admin = await prisma.user.findFirstOrThrow({ where: { username: 'rsr-admin' } });
     await prisma.customer.create({ data: {
@@ -97,9 +101,9 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     expect((await setup.status()).needsSetup).toBe(false);
 
     // 2. Reset (takes its own verified DUMP first).
-    const result = await reset.reset(
+    const result = await at('reset', () => reset.reset(
       { userId: admin.id, isSuperAdmin: true, companyId: company.id } as never, PASSWORD, 'RESET',
-    );
+    ));
     expect(result.needsSetup).toBe(true);
     expect(result.backupFile).toMatch(/\.dump$/);
     expect(await prisma.customer.count({ where: { code: 'CU-RSR' } })).toBe(0);
@@ -107,12 +111,12 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     expect((await setup.status()).needsSetup).toBe(true);
 
     // 3. Set up again over the retired company, as the kept administrator.
-    await setup.initialSetup(dto());
+    await at('second setup', () => setup.initialSetup(dto()));
     expect((await setup.status()).needsSetup).toBe(false);
     expect(await prisma.customer.count({ where: { code: 'CU-RSR' } })).toBe(0);
 
     // 4. Restore the pre-reset DUMP.
-    const restored = await backups.restore({ fileName: result.backupFile, confirm: true }, admin.id);
+    const restored = await at('restore', () => backups.restore({ fileName: result.backupFile, confirm: true }, admin.id));
     expect(restored.restored).toBe(true);
     await prisma.$disconnect();
     await prisma.$connect();
