@@ -175,6 +175,11 @@ jobs:
         run: |
           grep -E '^PASS\s+\S*licensing-seats\.multi\.postgres\.spec\.ts' /tmp/kayan-jest.log \
             || { echo '::error title=Licence seats (several licences)::the PostgreSQL several-licence seat spec did not pass or did not run'; exit 1; }
+      - name: Prove the reset, setup, restore spec ran on PostgreSQL
+        if: always()
+        run: |
+          grep -E '^PASS\s+\S*reset-setup-restore\.postgres\.spec\.ts' /tmp/kayan-jest.log \
+            || { echo '::error title=Reset setup restore::the PostgreSQL reset, setup, restore spec did not pass or did not run'; exit 1; }
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma
