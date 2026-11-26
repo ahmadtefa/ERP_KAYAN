@@ -1071,6 +1071,15 @@ async function main() {
     `asset entries ${auditRows.length}, run entries ${runRows.length}`,
   );
 
+  // The customer's payment terms block a new invoice while an older invoice is
+  // past due and unpaid (approval needed). The 2024 invoices above are left
+  // unpaid on purpose, so from here the customer has no terms: the sections
+  // below test accounting, and the term rule has its own real-PG spec.
+  await must('the customer moves to no payment terms', `/parties/customers/${customer.id}`, {
+    method: 'PATCH',
+    json: { paymentTermDays: 0 },
+  });
+
   // ── 12. a discounted sale in the new year (discount before tax) ────────
   // The rate travels on the line, the way the invoice form sends it: a line
   // that names no rate is treated as untaxed, so a caller that wants VAT must
