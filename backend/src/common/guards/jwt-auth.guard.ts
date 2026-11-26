@@ -1,3 +1,4 @@
+import { companyClosesSignIn } from '../auth/company-sign-in';
 import {
   CanActivate,
   ExecutionContext,
@@ -183,9 +184,7 @@ export class JwtAuthGuard implements CanActivate {
       !principal.isActive ||
       principal.deletedAt !== null ||
       principal.companyId !== payload.companyId ||
-      !principal.company ||
-      !principal.company.isActive ||
-      principal.company.deletedAt !== null ||
+      (await companyClosesSignIn(this.prisma, principal.company)) ||
       principal.tokenVersion !== (payload.tokenVersion ?? 0)
     ) {
       throw new UnauthorizedException('Account is inactive or unavailable');

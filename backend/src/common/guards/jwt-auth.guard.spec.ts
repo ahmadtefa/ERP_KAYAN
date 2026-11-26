@@ -87,7 +87,9 @@ function makeGuard(options?: {
       findUnique: jest.fn().mockResolvedValue(
         options && 'principal' in options ? options.principal : activePrincipal,
       ),
+      count: jest.fn().mockResolvedValue(5),
     },
+    company: { count: jest.fn().mockResolvedValue(1) },
     refreshToken: { findFirst: jest.fn().mockResolvedValue({ id: 'session' }) },
   } as unknown as PrismaService;
   return { guard: new JwtAuthGuard(reflector, jwt, prisma), jwt, prisma };

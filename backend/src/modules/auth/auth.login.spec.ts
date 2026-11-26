@@ -45,7 +45,9 @@ function build(overrides: Record<string, unknown> = {}) {
     user: {
       findUnique: jest.fn().mockResolvedValue(userRow),
       update: jest.fn().mockResolvedValue({ failedLoginCount: 1 }),
+      count: jest.fn().mockResolvedValue(5),
     },
+    company: { count: jest.fn().mockResolvedValue(1) },
     userBranch: { findMany: jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]) },
     refreshToken: { create: jest.fn().mockResolvedValue({}) },
   };
@@ -133,6 +135,14 @@ describe('POST /auth/login outcomes', () => {
       await expect(service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
       expect(jwt.signAsync).not.toHaveBeenCalled();
     }
+  });
+
+  it('lets the one preserved administrator of a reset installation sign in to finish setup', async () => {
+    jest.mocked(argon2.verify).mockResolvedValue(true);
+    const { service, prisma } = build({ company: { isActive: true, deletedAt: new Date() } });
+    (prisma.user.count as jest.Mock).mockResolvedValue(1);
+    (prisma.company.count as jest.Mock).mockResolvedValue(0);
+    await expect(service.login('admin', 'correct-password')).resolves.toBeDefined();
   });
 
   it('refuses a refresh for a suspended company and revokes its sessions', async () => {
