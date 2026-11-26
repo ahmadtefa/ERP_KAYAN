@@ -23,6 +23,7 @@ describe('refresh session security', () => {
           isSuperAdmin: true,
           tokenVersion: 7,
           deletedAt: null,
+          company: { isActive: true, deletedAt: null },
           lockedUntil: null,
           userRoles: [],
           userPermissions: [],
@@ -64,6 +65,7 @@ describe('refresh session security', () => {
           companyId: 'company-1',
           isActive: true,
           deletedAt: null,
+          company: { isActive: true, deletedAt: null },
           lockedUntil: null,
           failedLoginCount: 4,
           userRoles: [],
@@ -106,6 +108,7 @@ describe('refresh session security', () => {
           user: {
             id: 'active-user',
             deletedAt: null,
+            company: { isActive: true, deletedAt: null },
             isActive: true,
             userRoles: [],
             branches: [],
@@ -145,6 +148,7 @@ describe('refresh session security', () => {
           user: {
             id: 'inactive-user',
             deletedAt: null,
+            company: { isActive: true, deletedAt: null },
             isActive: false,
           },
         }),
@@ -184,6 +188,7 @@ describe('refresh session security', () => {
       isActive: true,
       isSuperAdmin: false,
       deletedAt: null,
+      company: { isActive: true, deletedAt: null },
       lockedUntil: null,
       failedLoginCount: 0,
       userRoles: [
@@ -287,6 +292,7 @@ describe('refresh session security', () => {
           companyId: 'company-1',
           isActive: true,
           deletedAt: null,
+          company: { isActive: true, deletedAt: null },
           lockedUntil: null,
           failedLoginCount: 4,
           userRoles: [],
@@ -329,6 +335,7 @@ describe('refresh session security', () => {
           user: {
             id: 'active-user',
             deletedAt: null,
+            company: { isActive: true, deletedAt: null },
             isActive: true,
             userRoles: [],
             branches: [],
@@ -368,6 +375,7 @@ describe('refresh session security', () => {
           user: {
             id: 'inactive-user',
             deletedAt: null,
+            company: { isActive: true, deletedAt: null },
             isActive: false,
           },
         }),
@@ -408,6 +416,7 @@ describe('direct per-user permission grants', () => {
       isActive: true,
       isSuperAdmin: false,
       deletedAt: null,
+      company: { isActive: true, deletedAt: null },
       lockedUntil: null,
       failedLoginCount: 0,
       userRoles: [

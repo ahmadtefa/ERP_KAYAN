@@ -89,6 +89,14 @@ const password = 'initial-password-123';
     auth = new AuthService(prisma, jwt, audit);
     guard = new JwtAuthGuard({ getAllAndOverride: () => false } as unknown as Reflector, jwt, prisma);
     companies = new CompanyService(prisma, audit);
+    // The schema still holds a partial unique index that allows ONE live
+    // company per installation (migration 20261014000000). Two live companies
+    // cannot exist until a migration lifts it, which is a decision the owner
+    // has not taken. So this spec lifts it on its own scratch database for the
+    // test only and puts it back afterwards (if no second live company
+    // remains). It proves what the application does once two companies exist;
+    // it does not claim the product supports them today.
+    await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS "Company_one_active_company_idx"');
     await seed(A, 'A');
     await seed(B, 'B');
   });
@@ -103,6 +111,11 @@ const password = 'initial-password-123';
       await prisma.branch.deleteMany({ where: { companyId: side.companyId } });
       await prisma.company.deleteMany({ where: { id: side.companyId } });
     }
+    await prisma
+      .$executeRawUnsafe(
+        'CREATE UNIQUE INDEX IF NOT EXISTS "Company_one_active_company_idx" ON companies ((1)) WHERE "deletedAt" IS NULL',
+      )
+      .catch(() => undefined);
     await prisma.$disconnect();
   });
 
