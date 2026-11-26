@@ -338,6 +338,13 @@ void main() {
     'choosing another warehouse swaps the shelf choices and sends that warehouse',
     (tester) async {
       final api = await openForm(tester, (_) {});
+      await tester.enterText(find.widgetWithText(TextFormField, 'Code'), 'OPEN-2');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Name (English)'),
+        'Second item',
+      );
+      await tester.tap(find.byType(Switch).first);
+      await tester.pumpAndSettle();
       final qty = find.widgetWithText(TextFormField, 'Opening quantity');
       await tester.ensureVisible(qty);
       await tester.enterText(qty, '3');

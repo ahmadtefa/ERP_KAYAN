@@ -14,6 +14,8 @@ Status: DESIGN, revision 4 (after two engineering reviews). Prototype tests are 
 
 1. Every company has its own licence: its own `licenseId`, activation, term and seat limit.
 2. A company cannot be created without a vendor-issued key naming it. No customer role, including ADMIN, has a create-company path.
+   Visibility rule (user instruction 13:10, relayed by main): there is no "Add company" control for normal users. No menu, button or route exists for them. The only entry is the company-activation key field on the licence/activation screen, shown only to the installation super administrator, and the API refuses every create call without a valid vendor key AND a super administrator. Tests: hidden for non-super roles (widget), 403 for every other role including ADMIN (API).
+   First admin of each additional company (user decision 13:12, relayed by main): a company-only administrator. Never an installation super administrator; installation functions (reset, full backup, company activation) stay with the installation super administrator. Test: the provisioned first admin has isSuperAdmin false and is refused the installation endpoints.
 3. A key for company A cannot be applied to company B, including on first use.
 4. The existing company and its existing v1 activation keep working unchanged.
 5. Login is routed by username (usernames are globally unique today) with no company chooser.
