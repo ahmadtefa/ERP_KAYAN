@@ -54,6 +54,8 @@ class FieldSpec {
     this.nullWhenEmpty = false,
     this.dependsOn,
     this.optionsBy = const {},
+    this.showWhenField,
+    this.showWhenValues = const {},
   });
 
   /// Additional source-grounded domain constraints, applied before submit.
@@ -76,6 +78,11 @@ class FieldSpec {
   /// clears this one, so a choice from the old parent is never submitted.
   final String? dependsOn;
   final Map<String, List<FieldOption>> optionsBy;
+
+  /// Shown only while the select named [showWhenField] holds one of
+  /// [showWhenValues]. A hidden field is not validated and not submitted.
+  final String? showWhenField;
+  final Set<String> showWhenValues;
 
   /// Use a searchable name picker instead of a dropdown for long reference lists.
   final bool searchable;
@@ -264,6 +271,10 @@ class _FormSheetState extends State<_FormSheet> {
     super.dispose();
   }
 
+  bool _visible(FieldSpec field) =>
+      field.showWhenField == null ||
+      field.showWhenValues.contains(_selections[field.showWhenField]);
+
   String? _validate(FieldSpec field, String? value) {
     if (_fieldErrors.containsKey(field.key)) return _fieldErrors[field.key];
     final text = value?.trim() ?? '';
@@ -353,6 +364,7 @@ class _FormSheetState extends State<_FormSheet> {
     }
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
+      if (!_visible(field)) continue;
       switch (field.kind) {
         case FieldKind.toggle:
           result[field.key] = _toggles[field.key] ?? false;
@@ -477,7 +489,8 @@ class _FormSheetState extends State<_FormSheet> {
                               : 'The operation may have completed. Review the list before creating another record; this form cannot be resubmitted.',
                         ),
                       ),
-                    for (final field in widget.fields) _buildField(field),
+                    for (final field in widget.fields)
+                      if (_visible(field)) _buildField(field),
                   ],
                 ),
               ),

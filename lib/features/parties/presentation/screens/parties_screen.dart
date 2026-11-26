@@ -21,6 +21,7 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/master_data_backup_actions.dart';
 import '../../presentation/widgets/party_statement_dialog.dart';
+import '../customer_terms.dart';
 import '../providers/party_providers.dart';
 
 /// Which of the two party lists a screen is showing.
@@ -70,6 +71,19 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
   Future<void> _save({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
+    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+    // A new customer starts with the payment-term method the company chose
+    // last. If that cannot be read, the plain default is used.
+    String? lastMethod;
+    if (_isCustomer && !isEdit) {
+      try {
+        final defaults = await ref.read(apiClientProvider).get('$_path/term-defaults');
+        lastMethod = defaults['paymentTermMethod']?.toString();
+      } catch (_) {
+        lastMethod = null;
+      }
+      if (!mounted) return;
+    }
     final fields = <FieldSpec>[
       if (!isEdit)
         FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
@@ -104,6 +118,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           kind: FieldKind.decimal,
           helper: l10n.creditLimitNote,
         ),
+      if (_isCustomer) ...customerTermFields(isArabic: isArabic),
       FieldSpec(
         'notes',
         l10n.description,
@@ -121,8 +136,9 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           ? (_isCustomer ? l10n.editCustomer : l10n.editSupplier)
           : (_isCustomer ? l10n.newCustomer : l10n.newSupplier),
       fields: fields,
-      initial: existing,
-      onSubmit: (draft) async {
+      initial: _isCustomer ? {...?existing, ...termInitialFrom(existing, defaultMethod: lastMethod)} : existing,
+      onSubmit: (rawDraft) async {
+        final draft = _isCustomer ? termDraftToBody(rawDraft, isArabic: isArabic) : rawDraft;
         final client = ref.read(apiClientProvider);
         try {
           if (isEdit) {

@@ -93,10 +93,12 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
   String _t(String ar, String en) => _arabic ? ar : en;
 
-  Future<void> _approveCredit(Json row) async {
+  Future<void> _approveCredit(Json row, {bool period = false}) async {
     final result = await showFormSheet(
       context,
-      title: _t('الموافقة على تجاوز حد الائتمان', 'Approve credit-limit exception'),
+      title: period
+          ? _t('الموافقة على تجاوز مدة السداد', 'Approve payment-period exception')
+          : _t('الموافقة على تجاوز حد الائتمان', 'Approve credit-limit exception'),
       fields: [FieldSpec('reason', _t('سبب الموافقة', 'Approval reason'),
         kind: FieldKind.multiline, required: true,
         helper: _t('سبب مكتوب لا يقل عن ٣ أحرف. تخص هذه الفاتورة فقط ولا ترحّلها.',
@@ -108,7 +110,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
             statusCode: 422, fieldErrors: {'reason': _t('٣ أحرف على الأقل', 'At least 3 characters')});
         }
         try {
-          await ref.read(apiClientProvider).post('$_basePath/${row['id']}/credit-approval', body: {'reason': reason});
+          await ref.read(apiClientProvider).post('$_basePath/${row['id']}/${period ? 'payment-term-approval' : 'credit-approval'}', body: {'reason': reason});
         } on ApiFailure catch (failure) {
           if (const {400, 403, 404, 409, 422}.contains(failure.statusCode)) rethrow;
           throw UncertainFormSubmission(failure);
@@ -119,8 +121,11 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     );
     if (result != null && mounted) {
       ref.invalidate(invoiceListProvider(widget.kind));
-      showMessage(context, _t('تمت الموافقة على التجاوز لهذه الفاتورة. لم تُرحّل الفاتورة.',
-        'Credit exception approved for this invoice. The invoice was not posted.'));
+      showMessage(context, period
+        ? _t('تمت الموافقة على تجاوز مدة السداد لهذه الفاتورة. لم تُرحّل الفاتورة.',
+            'Payment-period exception approved for this invoice. The invoice was not posted.')
+        : _t('تمت الموافقة على التجاوز لهذه الفاتورة. لم تُرحّل الفاتورة.',
+            'Credit exception approved for this invoice. The invoice was not posted.'));
     }
   }
 
@@ -152,6 +157,13 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
             '\n${_t('المتبقي من الفاتورة', 'Invoice outstanding')}: ${summary.invoiceAmount}'
             '\n${_t('الرصيد بعد الترحيل', 'Balance after posting')}: ${summary.projectedBalance}';
           await showAppPlainError(context, '$explanation$figures');
+        } else if (e is ApiFailure && e.code == 'CUSTOMER_PAYMENT_TERM_EXCEEDED') {
+          await showAppPlainError(
+            context,
+            _t(
+              'العميل تجاوز مدة السداد المتفق عليها، وله فواتير متأخرة. يلزم موافقة مستخدم آخر لديه صلاحية الموافقة. الفاتورة ما زالت مسودة.',
+              'The customer is past the agreed payment period and has overdue invoices. Another user with approval permission must approve it. The invoice is still a draft.'),
+          );
         } else {
           showMessage(context, e, error: true);
         }
@@ -327,6 +339,14 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
                   tooltip: _t('الموافقة على تجاوز حد الائتمان', 'Approve credit-limit exception'),
                   icon: const Icon(Icons.verified_user_outlined, size: 20),
                   onPressed: _busy ? null : () => _approveCredit(row),
+                ),
+              if (status == 'draft' && isSales &&
+                  user?.can('sales.credit.approve') == true &&
+                  text(row, 'createdBy') != user?.id)
+                IconButton(
+                  tooltip: _t('الموافقة على تجاوز مدة السداد', 'Approve payment-period exception'),
+                  icon: const Icon(Icons.event_busy_outlined, size: 20),
+                  onPressed: _busy ? null : () => _approveCredit(row, period: true),
                 ),
               if (status == 'draft' && user?.can(isSales ? 'sales.invoices.post' : 'purchases.invoices.post') == true)
                 IconButton(

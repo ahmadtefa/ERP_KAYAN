@@ -193,6 +193,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   String? _supplierReference;
   String? _notes;
   late String _invoiceDate;
+  /// When the goods were delivered or received (sales only, optional): the
+  /// customer's delivery-date payment term counts from it.
+  String? _deliveryDate;
   final _landedCosts = <_LandedCostDraft>[];
   final _documentDiscount = TextEditingController();
   DiscountKind _documentDiscountKind = DiscountKind.none;
@@ -216,6 +219,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     'reference': _supplierReference,
     'notes': _notes,
     'date': _invoiceDate,
+    'delivery': _deliveryDate,
     'discountKind': _documentDiscountKind.name,
     'discount': _documentDiscount.text,
     'costs': [
@@ -456,6 +460,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             : text(invoice, 'supplierReference');
         _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
+        _deliveryDate = text(invoice, 'deliveryDate').isEmpty
+            ? null
+            : text(invoice, 'deliveryDate').split('T').first;
         _loadingExisting = false;
       });
       _savedSnapshot = _snapshot();
@@ -1019,6 +1026,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final body = <String, dynamic>{
         if (_warehouseId != null) 'warehouseId': _warehouseId,
         'invoiceDate': _invoiceDate,
+        if (widget.kind.isSales && _deliveryDate != null)
+          'deliveryDate': _deliveryDate,
         if (widget.kind.isSales) 'customerId': _partyId,
         if (!widget.kind.isSales) 'supplierId': _partyId,
         if (!widget.kind.isSales) 'landedCostAmount': landedCost.toString(),
@@ -1146,6 +1155,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                           _headerErrors.remove('date');
                           _invoiceDate = value;
                         }),
+                        deliveryDate: _deliveryDate,
+                        onDeliveryDateChanged: (value) =>
+                            setState(() => _deliveryDate = value),
                         partyId: _partyId,
                         onPartyChanged: (value) => setState(() {
                           _headerErrors.remove('party');
@@ -1371,6 +1383,8 @@ class _Header extends StatelessWidget {
     required this.kind,
     required this.invoiceDate,
     required this.onDateChanged,
+    required this.deliveryDate,
+    required this.onDeliveryDateChanged,
     required this.partyId,
     required this.onPartyChanged,
     required this.supplierReference,
@@ -1390,6 +1404,8 @@ class _Header extends StatelessWidget {
   final Map<String, String> errors;
   final String invoiceDate;
   final ValueChanged<String> onDateChanged;
+  final String? deliveryDate;
+  final ValueChanged<String?> onDeliveryDateChanged;
   final String? partyId;
   final ValueChanged<String?> onPartyChanged;
   final String? supplierReference;
@@ -1494,6 +1510,54 @@ class _Header extends StatelessWidget {
                 ],
               ],
             ),
+            if (kind.isSales) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: SizedBox(
+                  width: 320,
+                  child: InkWell(
+                    key: const ValueKey('delivery-date'),
+                    onTap: () async {
+                      final now = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.tryParse(deliveryDate ?? '') ??
+                            DateTime.tryParse(invoiceDate) ??
+                            now,
+                        firstDate: DateTime(now.year - 5),
+                        lastDate: DateTime(now.year + 5),
+                      );
+                      if (picked == null) return;
+                      onDeliveryDateChanged(
+                        '${picked.year.toString().padLeft(4, '0')}-'
+                        '${picked.month.toString().padLeft(2, '0')}-'
+                        '${picked.day.toString().padLeft(2, '0')}',
+                      );
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: arabic
+                            ? 'تاريخ التسليم أو الاستلام (اختياري)'
+                            : 'Delivery or receipt date (optional)',
+                        helperText: arabic
+                            ? 'يُستخدم إن كانت مدة سداد العميل تُحسب من التسليم'
+                            : "Used when the customer's payment term counts from delivery",
+                        border: const OutlineInputBorder(),
+                        suffixIcon: deliveryDate == null
+                            ? const Icon(Icons.calendar_today_outlined)
+                            : IconButton(
+                                tooltip: arabic ? 'مسح' : 'Clear',
+                                icon: const Icon(Icons.clear),
+                                onPressed: () => onDeliveryDateChanged(null),
+                              ),
+                      ),
+                      child: Text(deliveryDate ?? ''),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextFormField(
               initialValue: notes,

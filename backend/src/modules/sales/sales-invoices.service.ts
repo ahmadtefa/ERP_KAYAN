@@ -1878,6 +1878,7 @@ export class SalesInvoicesService {
     invoiceNumber: string;
     invoiceDate: Date;
     dueDate: Date | null;
+    deliveryDate?: Date | null;
     status: InvoiceStatus;
     currency: string;
     subTotal: Prisma.Decimal;
@@ -1900,6 +1901,7 @@ export class SalesInvoicesService {
       invoiceNumber: invoice.invoiceNumber,
       invoiceDate: invoice.invoiceDate.toISOString().slice(0, 10),
       dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,
+      deliveryDate: invoice.deliveryDate?.toISOString().slice(0, 10) ?? null,
       status: invoice.status.toLowerCase(),
       currency: invoice.currency,
       customer: invoice.customer,
