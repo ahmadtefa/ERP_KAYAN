@@ -1687,23 +1687,71 @@ async function main() {
       `status ${administratorAfterReset.status}`,
     );
 
+    const setupBody = {
+      companyCode: reset.data?.companyCode,
+      companyNameEn: 'KAYAN CI after reset',
+      companyNameAr: 'كيان بعد إعادة الضبط',
+      facilityKind: 'HEADQUARTERS',
+      unitCode: 'MAIN',
+      unitNameEn: 'Head Office',
+      unitNameAr: 'المركز الرئيسي',
+      adminUsername: USERNAME,
+      adminPassword: PASSWORD,
+      adminFullNameEn: 'CI Administrator',
+      adminFullNameAr: 'مدير الاختبار',
+      seedChartOfAccounts: true,
+    };
+    // The setup route is public. After a reset it must not be usable by a
+    // stranger: wrong password, wrong username, and the kept account's token
+    // must not reach any business API while the company is retired.
+    const strangerSetup = await api('/setup/initial', {
+      method: 'POST',
+      noAuth: true,
+      noRetry: true,
+      json: { ...setupBody, adminPassword: 'Stranger-Chosen-Password-77' },
+    });
+    const wrongNameSetup = await api('/setup/initial', {
+      method: 'POST',
+      noAuth: true,
+      noRetry: true,
+      json: { ...setupBody, adminUsername: 'stranger-admin' },
+    });
+    check(
+      'public setup after a reset refuses a caller who does not know the kept account password or name',
+      strangerSetup.status === 409 && wrongNameSetup.status === 409,
+      `wrong password ${strangerSetup.status}, wrong username ${wrongNameSetup.status}`,
+    );
+    const businessAfterReset = await api('/accounting/settings', {
+      headers: { Authorization: `Bearer ${administratorAfterReset.data?.accessToken}` },
+    });
+    const refreshAfterReset = await api('/auth/refresh', {
+      method: 'POST',
+      noAuth: true,
+      json: { refreshToken: administratorAfterReset.data?.refreshToken },
+    });
+    check(
+      'the kept administrator token opens no business API and cannot refresh before setup is completed',
+      businessAfterReset.status === 401 && refreshAfterReset.status === 401,
+      `business ${businessAfterReset.status}, refresh ${refreshAfterReset.status}`,
+    );
+    const resetAudit = new pg.Client({ connectionString: DATABASE_URL });
+    await resetAudit.connect();
+    try {
+      const rows = await resetAudit.query(
+        `SELECT count(*)::int AS n FROM audit_logs WHERE action = 'RESET' AND entity = 'company_data' AND "userId" IS NOT NULL`,
+      );
+      check(
+        'the RESET audit entry naming the kept administrator survived the reset',
+        rows.rows[0].n >= 1,
+        `RESET entries naming a user: ${rows.rows[0].n}`,
+      );
+    } finally {
+      await resetAudit.end();
+    }
     const completedSetup = await api('/setup/initial', {
       method: 'POST',
       noAuth: true,
-      json: {
-        companyCode: reset.data?.companyCode,
-        companyNameEn: 'KAYAN CI after reset',
-        companyNameAr: 'كيان بعد إعادة الضبط',
-        facilityKind: 'HEADQUARTERS',
-        unitCode: 'MAIN',
-        unitNameEn: 'Head Office',
-        unitNameAr: 'المركز الرئيسي',
-        adminUsername: USERNAME,
-        adminPassword: PASSWORD,
-        adminFullNameEn: 'CI Administrator',
-        adminFullNameAr: 'مدير الاختبار',
-        seedChartOfAccounts: true,
-      },
+      json: setupBody,
     });
     // Setup completes against the retired company row rather than adding a
     // second company: one installation holds one active company, and the

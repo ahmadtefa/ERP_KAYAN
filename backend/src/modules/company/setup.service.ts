@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { AccountType, BranchKind, Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { findResetAdmin } from '../../common/auth/company-sign-in';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { LicensingService } from '../licensing/licensing.service';
@@ -76,6 +77,31 @@ export class SetupService {
     };
   }
 
+  /**
+   * First-run setup is public. After a reset it may only complete for the
+   * administrator the reset kept: the installation must be in the proven reset
+   * state (see findResetAdmin) and the caller must give that account's username
+   * and CURRENT password. Otherwise anyone who can reach the port could set a
+   * password on the preserved administrator and take over the installation.
+   */
+  private async requireResetAdminProof(
+    client: Parameters<typeof findResetAdmin>[0],
+    dto: InitialSetupDto,
+  ): Promise<void> {
+    const closed = new ConflictException(
+      'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
+    );
+    const kept = await findResetAdmin(client);
+    if (!kept) throw closed;
+    const sameName = kept.username.toLowerCase() === dto.adminUsername.trim().toLowerCase();
+    const samePassword = sameName && (await argon2.verify(kept.passwordHash, dto.adminPassword).catch(() => false));
+    if (!sameName || !samePassword) {
+      throw new ConflictException(
+        'Setup after a reset continues with the administrator account the reset kept. Enter that account\'s username and its current password.',
+      );
+    }
+  }
+
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
     // This endpoint is public so a genuinely empty installation can be
     // initialized. It must never become an account-recovery endpoint: any
@@ -122,6 +148,7 @@ export class SetupService {
         'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
       );
     }
+    if (resumingAfterReset) await this.requireResetAdminProof(this.prisma, dto);
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
     if (dto.logoBase64) {
       const buffer = Buffer.from(dto.logoBase64, 'base64');
@@ -147,6 +174,7 @@ export class SetupService {
         }),
       ]);
       const resumeInTransaction = retiredCompany !== null && existingUsers === 1;
+      if (resumeInTransaction) await this.requireResetAdminProof(tx, dto);
       const retiredWithoutAccountInTransaction =
         retiredCompany !== null && existingUsers === 0;
       if (existingCompanies > 0 ||
