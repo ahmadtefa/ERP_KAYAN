@@ -43,6 +43,14 @@ interface UploadedLogo {
 export class CompaniesController {
   constructor(private readonly companies: CompanyService) {}
 
+  /// Deprecated, kept for older clients: lists only a sole active company (see
+  /// `CompanyService.publicOptions`). Never lists several companies.
+  @Public()
+  @Get('options')
+  options() {
+    return this.companies.publicOptions();
+  }
+
   @Public()
   @Get('branding')
   branding() {

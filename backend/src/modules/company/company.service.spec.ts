@@ -260,6 +260,35 @@ describe('CompanyService', () => {
     });
   });
 
+  describe('pre-sign-in company states: none, one, several', () => {
+    const row = (id: string, nameEn: string) => ({
+      id, code: nameEn.toUpperCase(), nameEn, nameAr: nameEn, logoData: Buffer.from([1, 2, 3]), logoMime: 'image/png',
+      logoPath: null, updatedAt, deletedAt: null,
+    });
+    const neutral = { nameEn: 'KAYAN ERP', nameAr: 'نظام كيان', logoUrl: null };
+
+    it('none: neutral branding, no options, no logo', async () => {
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([]);
+      await expect(service.publicBranding()).resolves.toEqual(neutral);
+      await expect(service.publicOptions()).resolves.toEqual([]);
+      await expect(service.getLogo()).resolves.toBeNull();
+    });
+
+    it('one: that company names itself, and its logo bytes are served (older clients keep working)', async () => {
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([row('a', 'Alpha')]);
+      await expect(service.publicBranding()).resolves.toMatchObject({ nameEn: 'Alpha' });
+      await expect(service.publicOptions()).resolves.toEqual([{ code: 'ALPHA', nameEn: 'Alpha', nameAr: 'Alpha' }]);
+      await expect(service.getLogo()).resolves.toMatchObject({ mime: 'image/png' });
+    });
+
+    it('several: neutral everywhere. No names, no codes, no logo bytes, no options list', async () => {
+      (prisma.company.findMany as jest.Mock).mockResolvedValue([row('a', 'Alpha'), row('b', 'Beta')]);
+      await expect(service.publicBranding()).resolves.toEqual(neutral);
+      await expect(service.publicOptions()).resolves.toEqual([]);
+      await expect(service.getLogo()).resolves.toBeNull();
+    });
+  });
+
   describe('publicBranding with several companies', () => {
     it('stays neutral and never names one company to everyone', async () => {
       (prisma.company.findMany as jest.Mock).mockResolvedValue([

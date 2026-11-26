@@ -117,6 +117,18 @@ export class CompanyService {
     return this.getProfile(companyId);
   }
 
+  /// RETIRED as a chooser. Older clients still call `GET /companies/options`
+  /// before sign-in (their password-change dialog). It answers exactly as the
+  /// branding does: the one active company when the installation has one, and
+  /// an empty list otherwise. It never lists several companies, because the
+  /// username decides the company and a pre-sign-in list of every company's
+  /// name would leak them. Current clients do not call it. Remove once no
+  /// older client is in use.
+  async publicOptions() {
+    const only = await this.defaultCompany();
+    return only ? [{ code: only.code, nameEn: only.nameEn, nameAr: only.nameAr }] : [];
+  }
+
   /// Public branding (no sign-in): the one active company's name, or the
   /// defaults when the installation has none. With several companies the
   /// sign-in screen is neutral: it must not show one company's name to people

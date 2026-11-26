@@ -158,6 +158,13 @@ jobs:
               sys.exit(1)
           print('All 10 real-database suites executed; none were skipped.')
           PY
+      # The two-company spec is skipped unless its database is the scratch one,
+      # so a green log alone would not prove it ran against PostgreSQL.
+      - name: Prove the two-company isolation spec ran on PostgreSQL
+        if: always()
+        run: |
+          grep -E '^PASS\s+\S*company-isolation\.postgres\.spec\.ts' /tmp/kayan-jest.log \
+            || { echo '::error title=Company isolation::the two-company PostgreSQL spec did not pass or did not run'; exit 1; }
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma
