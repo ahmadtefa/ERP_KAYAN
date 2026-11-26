@@ -414,7 +414,7 @@ function requireLicence(register, id) {
 function markSuperseded(register, licenceId, type) {
   for (const key of register.keys) {
     if (
-      key.licenceId === licenceId &&
+      key.licenseId === licenceId &&
       key.type === type &&
       key.status === 'issued'
     ) {

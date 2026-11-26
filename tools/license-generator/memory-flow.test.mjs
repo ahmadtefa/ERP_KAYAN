@@ -86,3 +86,24 @@ test('company licence issues format 2 keys bound to its companyRef; other licenc
   assert.ok(renewal.key.startsWith('KYN2.'));
   assert.equal(api.verifyKey(renewal.key).payload.companyRef, company.companyRef);
 });
+
+test('register: a newer activation supersedes the older unused one only for the same licence and type', () => {
+  const api = generator.guiApi();
+  const a = api.createLicence({ ref: 'sup-a', seats: 2, term: '1y' }).licence;
+  const b = api.createLicence({ ref: 'sup-b', seats: 2, term: '1y' }).licence;
+  const first = api.issueKey({ type: 'activation', licenceId: a.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  const otherLicence = api.issueKey({ type: 'activation', licenceId: b.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  const renewal = api.issueKey({ type: 'renewal', licenceId: a.licenseId, term: '6m' });
+  const idOf = (key) => api.verifyKey(key).payload.keyId;
+  const status = (id) => api.state().keys.find((k) => k.keyId === id).status;
+  assert.equal(status(idOf(first.key)), 'issued');
+  const second = api.issueKey({ type: 'activation', licenceId: a.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  assert.equal(status(idOf(first.key)), 'superseded');
+  assert.equal(status(idOf(second.key)), 'issued');
+  assert.equal(status(idOf(otherLicence.key)), 'issued');   // other licence untouched
+  assert.equal(status(idOf(renewal.key)), 'issued');        // other type untouched
+  // a key the customer already applied is never rewritten to superseded
+  api.markUsed(idOf(second.key));
+  api.issueKey({ type: 'activation', licenceId: a.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
+  assert.equal(status(idOf(second.key)), 'used');
+});
