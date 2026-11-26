@@ -22,7 +22,13 @@ echo "run ${LABEL}: API start-to-healthy $(echo "$READY - $START" | bc) s (pool 
 export SERVER_PID="$API_PID"
 export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
 export LOAD_LABEL="run ${LABEL}: pool=${POOL:-10}" LOAD_RESULT_FILE="/tmp/load-result-${LABEL}.json"
-node scripts/load-check.mjs http://127.0.0.1:3000/api/v1 | tee "/tmp/load-out-${LABEL}.txt" | grep -v '^{' || true
+set +e
+node scripts/load-check.mjs http://127.0.0.1:3000/api/v1 | tee "/tmp/load-out-${LABEL}.txt" | grep -v '^{'
+RC=${PIPESTATUS[0]}
+set -e
+echo "---- unique-constraint refusals by rule (API log) ----"
+grep -o "Unique constraint refused a write: .*" "/tmp/load-api-${LABEL}.log" | sort | uniq -c || true
+test "$RC" = 0
 test -f "/tmp/load-result-${LABEL}.json"
 echo "---- pool/errors in API log (counts) ----"
 grep -ciE "timeout|ECONNREFUSED|too many clients|deadlock|P2024|P2028" "/tmp/load-api-${LABEL}.log" || true

@@ -76,6 +76,13 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       extra = { code: 'TRANSACTION_ROLLED_BACK' };
     } else if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
+      // Name the constraint (never the values) so an operator can tell which
+      // rule fired; the client still gets only the generic sentence above.
+      const meta = (exception as Prisma.PrismaClientKnownRequestError).meta as
+        { modelName?: unknown; target?: unknown } | undefined;
+      this.logger.warn(
+        `Unique constraint refused a write: model=${String(meta?.modelName ?? '?')} target=${JSON.stringify(meta?.target ?? '?')}`,
+      );
     } else if (isVoucherClaimTrigger) {
       detail =
         'One of the selected vouchers is already matched to another bank reconciliation.';
