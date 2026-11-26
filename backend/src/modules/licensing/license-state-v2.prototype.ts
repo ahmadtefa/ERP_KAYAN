@@ -294,8 +294,12 @@ export class KeyRefusal extends Error {
   constructor(message: string, readonly code: string) { super(message); }
 }
 
-/** What the caller read from the database row before applying (the service
- *  reads them from licenseInstallation and the seat table). */
+/** What the caller supplies for THIS licence: the DB row's expiry and seat
+ *  limit, and `seatsUsed` exactly as the service computes it,
+ *  max(this licence's seat rows, this licence's protected maxSeatsUsed
+ *  watermark). It is NOT a bare row count: deleted users still hold seats.
+ *  (S2 must supply it per licence; null seat rows belong to the legacy licence
+ *  only and are never stamped to a company activation.) */
 export interface CurrentLicense { expiresAt: Date | null; seatLimit: number; seatsUsed: number }
 export interface KeyOutcome { expiresAt: Date | null; perpetual: boolean; seatLimit: number; seatsUsed: number }
 
