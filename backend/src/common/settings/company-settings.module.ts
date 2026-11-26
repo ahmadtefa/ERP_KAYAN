@@ -42,14 +42,22 @@ export class CompanySettingsService {
 
   /// Reads the settings, creating the row with its defaults the first time.
   /// A company that has never opened the settings screen still has settings.
-  async get(companyId: string, client: Pick<Prisma.TransactionClient, 'companySetting'> = this.prisma): Promise<CompanySettings & { companyId: string }> {
-    // Create-if-missing must be one statement (INSERT ... ON CONFLICT): two
-    // first requests of a new company arriving together would otherwise both
-    // see no row, both insert, and one would fail with a unique violation
-    // (and, inside a transaction, abort it).
-    const row =
-      (await client.companySetting.findUnique({ where: { companyId } })) ??
-      (await client.companySetting.upsert({ where: { companyId }, update: {}, create: { companyId } }));
+  async get(companyId: string, client: Pick<Prisma.TransactionClient, 'companySetting' | '$executeRaw'> = this.prisma): Promise<CompanySettings & { companyId: string }> {
+    let row = await client.companySetting.findUnique({ where: { companyId } });
+    if (!row) {
+      // Create-if-missing must be one INSERT ... ON CONFLICT DO NOTHING: two
+      // first requests of a new company arriving together would otherwise both
+      // see no row and both insert, and one would fail with a unique violation
+      // (which, inside a transaction, also aborts it). The columns not named
+      // here take their database defaults, exactly as a Prisma create does.
+      await client.$executeRaw`
+        INSERT INTO company_settings ("companyId", "updatedAt")
+        VALUES (${companyId}::uuid, now())
+        ON CONFLICT ("companyId") DO NOTHING
+      `;
+      row = await client.companySetting.findUnique({ where: { companyId } });
+      if (!row) throw new Error('Company settings could not be created');
+    }
     return this.toResponse(row);
   }
 

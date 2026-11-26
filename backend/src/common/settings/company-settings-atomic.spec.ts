@@ -33,17 +33,20 @@ describe('company settings mandatory audit', () => {
 });
 
 describe('first read of a company with no settings row', () => {
-  it('creates the defaults with one upsert (safe when two first requests arrive together), never a bare create', async () => {
-    const created = { ...before };
-    const client = { companySetting: {
-      findUnique: jest.fn().mockResolvedValue(null),
-      upsert: jest.fn().mockResolvedValue(created),
-      create: jest.fn().mockRejectedValue(new Error('a bare create races: two first requests would collide')),
-    } };
+  it('creates the defaults with one INSERT ... ON CONFLICT DO NOTHING, never a bare create (two first requests together must not collide)', async () => {
+    const findUnique = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ ...before });
+    const executed: string[] = [];
+    const client = {
+      $executeRaw: jest.fn(async (strings: TemplateStringsArray) => { executed.push(strings.join('?')); return 1; }),
+      companySetting: { findUnique, create: jest.fn().mockRejectedValue(new Error('a bare create races')) },
+    };
     const service = new CompanySettingsService({} as any, {} as any);
     const result = await service.get('company', client as any);
     expect(result.companyId).toBe('company');
     expect(client.companySetting.create).not.toHaveBeenCalled();
-    expect(client.companySetting.upsert).toHaveBeenCalledWith({ where: { companyId: 'company' }, update: {}, create: { companyId: 'company' } });
+    expect(executed).toHaveLength(1);
+    expect(executed[0]).toMatch(/INSERT INTO company_settings/);
+    expect(executed[0]).toMatch(/ON CONFLICT \("companyId"\) DO NOTHING/);
+    expect(findUnique).toHaveBeenCalledTimes(2);
   });
 });
