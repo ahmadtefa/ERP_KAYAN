@@ -17,6 +17,7 @@ export const REPORT_READ_PERMISSION: Readonly<Record<string, string>> = {
   'account-ledger': 'reports.account-ledger.read',
   sales: 'reports.sales.read',
   purchases: 'reports.purchases.read',
+  'vat-return': 'reports.vat-return.read',
   expenses: 'reports.expenses.read',
   income: 'reports.income.read',
   payments: 'reports.payments.read',

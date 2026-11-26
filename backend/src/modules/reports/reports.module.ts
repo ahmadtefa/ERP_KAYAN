@@ -8,6 +8,7 @@ import { BranchReportScopeGuard } from '../../common/auth/branch-report-scope.gu
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import { OperationsReportsService } from './operations-reports.service';
+import { VatReturnService } from './vat-return.service';
 import { PartyReconciliationService } from './party-reconciliation.service';
 import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsController } from './reports.controller';
@@ -23,6 +24,7 @@ import { ReportsService } from './reports.service';
     FinancialStatementsService,
     AgingService,
     OperationsReportsService,
+    VatReturnService,
     PartyReconciliationService,
     ReconciliationCenterService,
   ],
@@ -33,6 +35,7 @@ import { ReportsService } from './reports.service';
     FinancialStatementsService,
     AgingService,
     OperationsReportsService,
+    VatReturnService,
     PartyReconciliationService,
   ],
 })

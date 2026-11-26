@@ -80,6 +80,7 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['reports.account-ledger.read', 'View account ledger report', 'عرض تقرير account ledger', 'reports'],
   ['reports.sales.read', 'View sales report', 'عرض تقرير sales', 'reports'],
   ['reports.purchases.read', 'View purchases report', 'عرض تقرير purchases', 'reports'],
+  ['reports.vat-return.read', 'View VAT return', 'عرض إقرار ضريبة القيمة المضافة', 'reports'],
   ['reports.expenses.read', 'View expenses report', 'عرض تقرير expenses', 'reports'],
   ['reports.income.read', 'View income report', 'عرض تقرير income', 'reports'],
   ['reports.payments.read', 'View payments report', 'عرض تقرير payments', 'reports'],

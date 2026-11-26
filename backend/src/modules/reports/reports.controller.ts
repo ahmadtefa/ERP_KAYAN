@@ -31,6 +31,7 @@ import {
   OperationsQueryDto,
   PeriodQueryDto,
 } from './dto/report-query.dto';
+import { VatReturnService } from './vat-return.service';
 import { OperationsReportsService } from './operations-reports.service';
 import { PartyReconciliationService } from './party-reconciliation.service';
 import { ReconciliationCenterService } from './reconciliation-center.service';
@@ -56,6 +57,7 @@ export class ReportsController {
     private readonly statements: FinancialStatementsService,
     private readonly aging: AgingService,
     private readonly operations: OperationsReportsService,
+    private readonly vatReturn: VatReturnService,
     private readonly budgets: BudgetsService,
     private readonly reconciliation: PartyReconciliationService,
     private readonly reconciliationCenter: ReconciliationCenterService,
@@ -228,6 +230,12 @@ export class ReportsController {
     return this.operations.sales(user.companyId, query, canReadCost(user)).then((result) =>
       redactPriceFields(result, { sale: canReadSalePrice(user), purchase: canReadPurchasePrice(user), cost: canReadCost(user) }, 'sale'),
     );
+  }
+
+  @Get('vat-return')
+  @RequirePermissions('reports.vat-return.read')
+  vatReturnReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.vatReturn.report(user.companyId, query);
   }
 
   @Get('purchases')

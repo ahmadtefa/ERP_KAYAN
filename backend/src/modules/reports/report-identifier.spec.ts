@@ -32,6 +32,7 @@ describe('report routes refuse malformed identifiers as a bad request', () => {
         {} as never,
         {} as never,
         {} as never,
+        {} as never,
       ),
     };
   }

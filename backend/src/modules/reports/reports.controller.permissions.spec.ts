@@ -10,6 +10,7 @@ describe('company-wide budget report access', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     budgetService as never,
     {} as never,
     {} as never,
