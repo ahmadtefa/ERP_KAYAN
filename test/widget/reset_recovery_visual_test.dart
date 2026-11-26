@@ -126,7 +126,7 @@ void main() {
 
       // The normal sign-in screen is back, and its password dialog opens.
       expect(find.byType(TextFormField), findsNWidgets(2));
-      final changeLabel = AppLocalizations.of(tester.element(find.byType(LoginScreen)))!.changePassword;
+      final changeLabel = AppLocalizations.of(tester.element(find.byType(LoginScreen))).changePassword;
       await tester.tap(find.widgetWithText(TextButton, changeLabel));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);

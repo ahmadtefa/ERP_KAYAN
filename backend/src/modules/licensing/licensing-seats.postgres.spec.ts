@@ -106,7 +106,7 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
   });
 
   it('a seat key then lets exactly the new capacity through concurrently', async () => {
-    await service.addSeats(key({ type: 'SEATS', seats: { mode: 'INCREASE', value: 2 } }));
+    await service.addSeats(key({ type: 'SEATS', machineId: null, term: null, seats: { mode: 'INCREASE', value: 2 } }));
     const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => reserve(`more-${i}`)));
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
     expect(await prisma.licenseSeatUsage.count()).toBe(5);
@@ -115,7 +115,7 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
   });
 
   it('the same idempotency key under concurrency takes at most one seat', async () => {
-    await service.addSeats(key({ type: 'SEATS', seats: { mode: 'INCREASE', value: 3 } }));
+    await service.addSeats(key({ type: 'SEATS', machineId: null, term: null, seats: { mode: 'INCREASE', value: 3 } }));
     const idem = `idem-${randomUUID()}`;
     const before = await prisma.licenseSeatUsage.count();
     const results = await Promise.allSettled(Array.from({ length: 5 }, () => reserve('same', { idempotencyKey: idem })));
@@ -139,7 +139,7 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     const N = 12;
     const used = await prisma.licenseSeatUsage.count();
     const limit = used + 1;
-    await service.addSeats(key({ type: 'SEATS', seats: { mode: 'CAP', value: limit } }));
+    await service.addSeats(key({ type: 'SEATS', machineId: null, term: null, seats: { mode: 'CAP', value: limit } }));
     let arrived = 0;
     let release!: () => void;
     const everyoneRead = new Promise<void>((resolve) => { release = resolve; });
