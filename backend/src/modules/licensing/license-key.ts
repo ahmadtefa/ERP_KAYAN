@@ -498,3 +498,115 @@ export function signPayload(payload: LicensePayload, privateKey: KeyObject): str
   const signature = nodeSign(null, Buffer.from(signedText, 'utf8'), privateKey);
   return `${signedText}.${signature.toString('base64url')}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Format 2 (KYN2): per-company keys. ADDITIVE and NOT used by the service yet:
+// `splitKey`/`verifyKey` above still read format 1 only, so an installed
+// product keeps refusing every KYN2 key as "not a KAYAN licence key" and the
+// service cannot mistake one for a KYN1 key. See
+// docs/licensing/PER-COMPANY-LICENCE-DESIGN.md.
+// ─────────────────────────────────────────────────────────────────────────
+
+export const LICENSE_KEY_PREFIX_V2 = 'KYN2';
+export type LicenseKeyTypeV2 = LicenseKeyType | 'COMPANY_ACTIVATION';
+const COMPANY_REF = /^[A-Za-z0-9_-]{8,64}$/;
+
+export interface LicensePayloadV2 extends Omit<LicensePayload, 'v' | 'type'> {
+  v: 2;
+  type: LicenseKeyTypeV2;
+  /** Vendor-chosen opaque company id. Carries no business data. */
+  companyRef: string;
+  /** Optional vendor-typed label shown at activation; not an identity proof. */
+  displayLabel: string | null;
+}
+
+export interface ParsedLicenseKeyV2 extends Omit<ParsedLicenseKey, 'payload'> {
+  payload: LicensePayloadV2;
+}
+
+export function readPayloadV2(raw: unknown): LicensePayloadV2 {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new LicenseKeyError('The key payload is not an object', 'MALFORMED');
+  }
+  const p = raw as Record<string, unknown>;
+  if (p.v !== 2) {
+    throw new LicenseKeyError(`This key was written in format ${String(p.v)}, not format 2`, 'UNSUPPORTED_VERSION');
+  }
+  if (typeof p.companyRef !== 'string' || !COMPANY_REF.test(p.companyRef)) {
+    throw new LicenseKeyError('companyRef is missing or malformed', 'BAD_FIELD');
+  }
+  let displayLabel: string | null = null;
+  if (p.displayLabel !== undefined && p.displayLabel !== null) {
+    if (typeof p.displayLabel !== 'string' || p.displayLabel.length > 80 || /[\u0000-\u001f]/.test(p.displayLabel)) {
+      throw new LicenseKeyError('displayLabel is malformed', 'BAD_FIELD');
+    }
+    displayLabel = p.displayLabel;
+  }
+  const isCompany = p.type === 'COMPANY_ACTIVATION';
+  // The shared field rules (machine, term, seats, state, dates) are the
+  // format 1 rules; a company activation follows the ACTIVATION rules.
+  const base = readPayload({ ...p, v: 1, type: isCompany ? 'ACTIVATION' : p.type });
+  return {
+    ...base,
+    v: 2,
+    type: isCompany ? 'COMPANY_ACTIVATION' : base.type,
+    companyRef: p.companyRef,
+    displayLabel,
+  };
+}
+
+export function splitKeyV2(key: string): {
+  payloadJson: string;
+  payload: LicensePayloadV2;
+  signedText: string;
+  signature: Buffer;
+} {
+  const text = String(key ?? '').replace(/\s+/g, '').trim();
+  if (!text) throw new LicenseKeyError('The key is empty', 'MALFORMED');
+  const parts = text.split('.');
+  if (parts.length !== 3 || parts[0] !== LICENSE_KEY_PREFIX_V2) {
+    throw new LicenseKeyError('This is not a KAYAN format 2 licence key (it should start with KYN2.)', 'MALFORMED');
+  }
+  let payloadJson: string;
+  let parsed: unknown;
+  try {
+    payloadJson = b64urlDecode(parts[1]).toString('utf8');
+    parsed = JSON.parse(payloadJson);
+  } catch {
+    throw new LicenseKeyError('The key payload is not readable', 'MALFORMED');
+  }
+  return {
+    payload: readPayloadV2(parsed),
+    payloadJson,
+    signedText: `${parts[0]}.${parts[1]}`,
+    signature: b64urlDecode(parts[2]),
+  };
+}
+
+export function verifyKeyV2(key: string, publicKey: KeyObject): ParsedLicenseKeyV2 {
+  const parts = splitKeyV2(key);
+  let valid = false;
+  try {
+    valid = verifySignature(null, Buffer.from(parts.signedText, 'utf8'), publicKey, parts.signature);
+  } catch {
+    valid = false;
+  }
+  if (!valid) {
+    throw new LicenseKeyError(
+      'The key signature does not match. It was not issued for this program, or it has been altered.',
+      'BAD_SIGNATURE',
+    );
+  }
+  return {
+    payload: parts.payload,
+    payloadJson: parts.payloadJson,
+    signature: parts.signature.toString('base64url'),
+    signedText: parts.signedText,
+  };
+}
+
+/** Test/generator helper; the API never calls it. */
+export function signPayloadV2(payload: LicensePayloadV2, privateKey: KeyObject): string {
+  const signedText = `${LICENSE_KEY_PREFIX_V2}.${b64urlEncode(JSON.stringify(payload))}`;
+  return `${signedText}.${nodeSign(null, Buffer.from(signedText, 'utf8'), privateKey).toString('base64url')}`;
+}
