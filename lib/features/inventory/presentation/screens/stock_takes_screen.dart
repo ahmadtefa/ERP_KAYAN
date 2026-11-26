@@ -254,8 +254,11 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
             title: Text(_arabic ? 'فتح جرد جديد' : 'Open a new stock take'),
             content: SizedBox(
               width: 560,
-              height: 440,
+              // A full count has nothing to list, so the dialog fits its
+              // contents; only the item picker of a partial count needs height.
+              height: scope == 'PARTIAL' ? 440 : null,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (blocked)
@@ -351,7 +354,7 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                             ),
                     )
                   else
-                    const Spacer(),
+                    const SizedBox(height: 4),
                   TextField(
                     controller: notesController,
                     enabled: !sending && !blocked,
