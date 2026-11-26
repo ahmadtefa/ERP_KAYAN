@@ -32,4 +32,4 @@ grep -o "Unique constraint refused a write: .*" "/tmp/load-api-${LABEL}.log" | s
 test "$RC" = 0
 test -f "/tmp/load-result-${LABEL}.json"
 echo "---- pool/errors in API log (counts) ----"
-grep -ciE "timeout|ECONNREFUSED|too many clients|deadlock|P2024|P2028" "/tmp/load-api-${LABEL}.log" || true
+echo "P2028 (transaction expired) in API log:"; grep -c "P2028" "/tmp/load-api-${LABEL}.log" || true

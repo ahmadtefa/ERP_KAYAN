@@ -19,7 +19,6 @@
  * LOAD_RESULT_FILE. It measures one machine; it does not predict another.
  */
 import pg from 'pg';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
 const API = process.argv[2] ?? process.env.APP_URL ?? 'http://127.0.0.1:3000/api/v1';
@@ -95,11 +94,19 @@ class Stats {
   }
 }
 
+let lastCpu = null;
 function serverSample() {
   if (!SERVER_PID) return null;
   try {
-    const out = execFileSync('ps', ['-o', '%cpu=,rss=', '-p', SERVER_PID]).toString().trim().split(/\s+/);
-    return { cpu: Number(out[0]), rssMb: Math.round(Number(out[1]) / 1024) };
+    const stat = fs.readFileSync(`/proc/${SERVER_PID}/stat`, 'utf8');
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const ticks = Number(f[11]) + Number(f[12]); // utime + stime, clock ticks (100/s)
+    const now = performance.now();
+    let cpu = null; // percent of ONE core since the previous sample
+    if (lastCpu) cpu = ((ticks - lastCpu.ticks) / 100) / ((now - lastCpu.now) / 1000) * 100;
+    lastCpu = { ticks, now };
+    const rss = Number(fs.readFileSync(`/proc/${SERVER_PID}/statm`, 'utf8').split(' ')[1]) * 4096 / 1048576;
+    return { cpu, rssMb: Math.round(rss) };
   } catch { return null; }
 }
 
@@ -107,6 +114,7 @@ async function startSampler() {
   const client = DATABASE_URL ? new pg.Client({ connectionString: DATABASE_URL, application_name: 'load-sampler' }) : null;
   if (client) await client.connect();
   const samples = [];
+  const waiters = new Map();
   let stop = false;
   const base = client ? (await client.query("select deadlocks, xact_commit, xact_rollback from pg_stat_database where datname=current_database()")).rows[0] : null;
   const loop = (async () => {
@@ -121,6 +129,9 @@ async function startSampler() {
             count(*) filter (where application_name not like 'load-%') as connections
             from pg_stat_activity where datname=current_database()`);
           Object.assign(s, r.rows[0]);
+          const w = await client.query(`select left(regexp_replace(query, '\\s+', ' ', 'g'), 110) as q, count(*)::int as n
+            from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and application_name not like 'load-%' group by 1`);
+          for (const row of w.rows) waiters.set(row.q, (waiters.get(row.q) ?? 0) + row.n);
         } catch { /* sampler must never disturb the run */ }
       }
       samples.push(s);
@@ -144,7 +155,8 @@ async function startSampler() {
       return {
         pgConnectionsMax: max(n('connections')), pgActiveMax: max(n('active')), pgActiveAvg: avg(n('active')),
         pgLockWaitersMax: max(n('lock_waiters')), pgIdleInTxMax: max(n('idle_in_tx')), pgDeadlocks: deadlocks,
-        serverCpuPctAvg: avg(cpu), serverCpuPctMax: max(cpu), serverRssMbMax: max(rss),
+        serverCpuPctOfOneCoreAvg: avg(cpu), serverCpuPctOfOneCoreMax: round(max(cpu)), serverRssMbMax: max(rss),
+        lockWaitStatements: [...waiters.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([q, n]) => ({ statement: q, waiterSamples: n })),
       };
     },
   };
