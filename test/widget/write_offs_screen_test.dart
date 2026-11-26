@@ -15,13 +15,14 @@ import 'test_harness.dart';
 /// total quantity that `findAll` adds. Note the lowercase kind and status:
 /// the service lowercases them before sending.
 class _WriteOffsApi extends ApiClient {
-  _WriteOffsApi({this.failList = false})
+  _WriteOffsApi({this.failList = false, this.signedBySelf = false})
     : super(
         AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
         FakeTokenStore(),
       );
 
   bool failList;
+  final bool signedBySelf;
   final posts = <String>[];
   final bodies = <Object?>[];
   final queries = <Map<String, dynamic>?>[];
@@ -110,7 +111,7 @@ class _WriteOffsApi extends ApiClient {
           'nameAr': 'المخزن الرئيسي',
         },
         'toWarehouse': null,
-        'createdById': 'u',
+        'createdById': signedBySelf ? 'u' : 'someone-else',
         'createdByName': 'me',
         'postedById': null,
         'postedByName': null,
@@ -323,6 +324,21 @@ void main() {
       find.descendant(of: tooltip, matching: find.byType(IconButton)),
     );
     expect(button.onPressed, isNull);
+  });
+
+  testWidgets('the person who raised a signed write-off cannot post it', (
+    tester,
+  ) async {
+    await pump(tester, _WriteOffsApi(signedBySelf: true));
+    final tooltip = find.byTooltip(
+      'You raised this document, so you cannot post it',
+    );
+    expect(tooltip, findsOneWidget);
+    final button = tester.widget<IconButton>(
+      find.descendant(of: tooltip, matching: find.byType(IconButton)),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.byTooltip('Post'), findsNothing);
   });
 
   testWidgets('a signed draft offers Post, an unsigned one does not', (

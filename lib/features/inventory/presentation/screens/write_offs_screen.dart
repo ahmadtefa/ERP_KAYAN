@@ -212,7 +212,19 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
       }
     }
 
-    if (canPost && _isApprovedDraft(row)) {
+    if (canPost && _isApprovedDraft(row) && raisedByMe) {
+      actions.add(
+        Tooltip(
+          message: _arabic
+              ? 'رفعت هذا المستند، فلا يمكنك ترحيله'
+              : 'You raised this document, so you cannot post it',
+          child: const IconButton(
+            icon: Icon(Icons.play_arrow_outlined),
+            onPressed: null,
+          ),
+        ),
+      );
+    } else if (canPost && _isApprovedDraft(row)) {
       actions.add(
         IconButton(
           tooltip: _arabic ? 'ترحيل' : 'Post',

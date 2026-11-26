@@ -1062,6 +1062,15 @@ export class StockDocumentsService {
         message: 'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
       });
     }
+    // Recording, approving and posting a loss are not the job of one person:
+    // the person who recorded it may not post it either.
+    if (initialDocument.kind === StockDocumentKind.WRITE_OFF &&
+        initialDocument.createdBy && initialDocument.createdBy === userId) {
+      throw new BadRequestException({
+        code: 'WRITE_OFF_SELF_POST',
+        message: 'The person who recorded a write-off cannot post it. / لا يجوز أن يرحّل المستخدم مستند الإعدام الذي أنشأه.',
+      });
+    }
     if (initialDocument.kind === StockDocumentKind.TRANSFER &&
         initialDocument.lines.some((line) => !line.quantity.greaterThan(0))) {
       throw new BadRequestException('Transfer quantities must be positive before posting');

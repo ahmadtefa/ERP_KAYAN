@@ -68,7 +68,7 @@ void main() {
   }
   group('stock document refusals use reviewed templates keyed by code, never the server body', () {
     const codes = <String>[
-      'WRITE_OFF_SELF_APPROVAL', 'WRITE_OFF_NOT_APPROVED',
+      'WRITE_OFF_SELF_APPROVAL', 'WRITE_OFF_SELF_POST', 'WRITE_OFF_NOT_APPROVED',
       'STOCK_DOC_APPROVED', 'STOCK_DOC_LINE_UNKNOWN', 'STOCK_DOC_LOCATIONS_EMPTY',
       'STOCK_DOC_LOCATION_INACTIVE', 'STOCK_DOC_LOCATION_INVALID', 'STOCK_DOC_LOCATION_REQUIRED',
       'STOCK_DOC_LOT_INVALID', 'STOCK_DOC_LOT_SHORT', 'STOCK_DOC_LOT_TRANSFER_ONLY',

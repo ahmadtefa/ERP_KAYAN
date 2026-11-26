@@ -82,6 +82,10 @@ class AppErrorMessageResolver {
       'لا يمكنك اعتماد مستند إعدام أنشأته أنت. يجب أن يعتمده شخص آخر لديه صلاحية الاعتماد. المستند محفوظ كما هو.',
       'You cannot approve a write-off you created yourself. Another person with approval permission must approve it. The document is unchanged.',
     ],
+    'WRITE_OFF_SELF_POST': [
+      'لا يمكنك ترحيل مستند إعدام أنشأته أنت. يجب أن يرحّله شخص آخر لديه صلاحية الترحيل. المستند محفوظ كما هو.',
+      'You cannot post a write-off you created yourself. Another person with posting permission must post it. The document is unchanged.',
+    ],
     'WRITE_OFF_NOT_APPROVED': [
       'لا يمكن ترحيل مستند الإعدام قبل اعتماده. يجب أن يعتمده أولًا شخص آخر غير من أنشأه، ثم يُرحَّل. المستند محفوظ كما هو.',
       'A write-off cannot be posted before it is approved. A person other than its creator must approve it first, then it can be posted. The document is unchanged.',
