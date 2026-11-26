@@ -170,6 +170,11 @@ jobs:
         run: |
           grep -E '^PASS\s+\S*licensing-seats\.postgres\.spec\.ts' /tmp/kayan-jest.log \
             || { echo '::error title=Licence seats::the PostgreSQL seat concurrency spec did not pass or did not run'; exit 1; }
+      - name: Prove the several-licence seat spec ran on PostgreSQL
+        if: always()
+        run: |
+          grep -E '^PASS\s+\S*licensing-seats\.multi\.postgres\.spec\.ts' /tmp/kayan-jest.log \
+            || { echo '::error title=Licence seats (several licences)::the PostgreSQL several-licence seat spec did not pass or did not run'; exit 1; }
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma

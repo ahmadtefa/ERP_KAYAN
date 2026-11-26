@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -119,6 +120,12 @@ export interface ReserveSeatInput {
   username: string;
   reason: 'SETUP_ADMIN' | 'USER_CREATE';
   idempotencyKey?: string | null;
+  /**
+   * The licence whose seat this is. Left out, the installation's one licence is
+   * used (today's behaviour). The per-company path passes the licence of the
+   * authenticated user's company; it is never read from a request.
+   */
+  licenseId?: string | null;
 }
 
 /** Differences below ten minutes are a clock drifting, not a rolled-back date. */
@@ -983,10 +990,14 @@ export class LicensingService implements OnModuleInit {
     });
     // Rows written before a licence existed (the migration's backfill and any
     // account created during first-run setup) now belong to this licence.
-    await tx.licenseSeatUsage.updateMany({
-      where: { licenseId: null },
-      data: { licenseId: payload.licenseId },
-    });
+    // Only the installation's first licence adopts them: a later company's
+    // activation must not take the seats that belong to the existing company.
+    if ((await this.installationCount(tx)) <= 1) {
+      await tx.licenseSeatUsage.updateMany({
+        where: { licenseId: null },
+        data: { licenseId: payload.licenseId },
+      });
+    }
     return {
       expiresAt,
       seatLimit: Math.max(seatLimit, used),
@@ -1157,11 +1168,24 @@ export class LicensingService implements OnModuleInit {
     // deserialize; `$executeRawUnsafe` runs the same statement and reports the
     // row count, which is all this needs. The lock is held until the caller's
     // transaction ends.
-    await tx.$executeRawUnsafe(
-      "SELECT pg_advisory_xact_lock(hashtext('kayan.license.seats'))",
-    );
+    // One lock per licence when the caller names one, so two companies never
+    // wait on each other; the single installation lock otherwise.
+    if (input.licenseId && !/^[A-Za-z0-9_.-]{1,128}$/.test(input.licenseId)) {
+      throw new BadRequestException('The licence identifier is not valid.');
+    }
+    const lockName = input.licenseId ? `kayan.license.seats.${input.licenseId}` : 'kayan.license.seats';
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('${lockName}'))`);
 
-    const row = await this.licenseRowIn(tx);
+    const row = input.licenseId
+      ? await tx.licenseInstallation.findFirst({ where: { licenseId: input.licenseId } })
+      : await this.licenseRowIn(tx);
+    if (input.licenseId && !row) {
+      throw new ForbiddenException({
+        detail: 'No licence is recorded for this company.',
+        code: 'LICENSE_NOT_FOUND_FOR_COMPANY',
+      });
+    }
+    const scope = await this.seatScope(tx, row);
     this.assertLicenseIdentity(row?.licenseId);
     if (this.isEnforced() && row && row.machineId !== this.machineId()) {
       throw new ForbiddenException({
@@ -1178,19 +1202,22 @@ export class LicensingService implements OnModuleInit {
         return {
           reserved: false,
           alreadyApplied: true,
-          used: await tx.licenseSeatUsage.count(),
+          used: await tx.licenseSeatUsage.count(scope.where ? { where: scope.where } : undefined),
           limit: row?.seatLimit ?? 0,
         };
       }
     }
 
     const limit = row?.seatLimit ?? 0;
-    let used = await tx.licenseSeatUsage.count();
+    let used = await tx.licenseSeatUsage.count(scope.where ? { where: scope.where } : undefined);
 
     // A restored backup can leave the database behind the file watermark.
     // The difference is written back as marker rows so every later count sees
     // the same number, and no seat is quietly handed back.
-    const watermark = this.store.current.maxSeatsUsed;
+    // The file watermark is the single licence's. With several licences it
+    // would inflate every company, so it applies only on the one-licence path;
+    // per-licence watermarks come with the per-company state.
+    const watermark = scope.multi ? 0 : this.store.current.maxSeatsUsed;
     if (watermark > used) {
       for (let index = used; index < watermark; index += 1) {
         await tx.licenseSeatUsage.create({
@@ -1229,7 +1256,7 @@ export class LicensingService implements OnModuleInit {
     // overcount, but never grants a seat. If the file cannot be written while
     // enforcing, throw so the database transaction rolls back too.
     try {
-      this.store.update((state) => {
+      if (!scope.multi) this.store.update((state) => {
         state.maxSeatsUsed = Math.max(state.maxSeatsUsed, used + 1);
         state.maxSeatLimit = Math.max(state.maxSeatLimit, limit);
       });
@@ -1244,6 +1271,37 @@ export class LicensingService implements OnModuleInit {
     }
     this.lastStatus = null;
     return { reserved: true, alreadyApplied: false, used: used + 1, limit };
+  }
+
+  /** How many licences this installation holds. Fakes without the call count as one. */
+  private async installationCount(db: unknown): Promise<number> {
+    const model = (db as { licenseInstallation?: { count?: () => Promise<number> } }).licenseInstallation;
+    return typeof model?.count === 'function' ? model.count() : 1;
+  }
+
+  /**
+   * Which seat rows belong to [row]. With one licence (today) every row counts,
+   * exactly as before. With several, a licence counts only its own rows, and
+   * the unowned legacy rows (no licence id) belong to the oldest licence only.
+   */
+  private async seatScope(
+    db: unknown,
+    row: LicenseRow | null,
+  ): Promise<{ multi: boolean; where?: Record<string, unknown> }> {
+    if (!row || (await this.installationCount(db)) <= 1) return { multi: false };
+    const oldest = await (db as PrismaLike).licenseInstallation.findFirst({ orderBy: { createdAt: 'asc' } });
+    const legacy = oldest?.licenseId === row.licenseId;
+    return {
+      multi: true,
+      where: legacy ? { OR: [{ licenseId: row.licenseId }, { licenseId: null }] } : { licenseId: row.licenseId },
+    };
+  }
+
+  /** Seats used by one licence (its own rows only when the installation holds several). */
+  async seatsUsedForLicense(licenseId: string): Promise<number> {
+    const row = await this.prisma.licenseInstallation.findFirst({ where: { licenseId } });
+    const scope = await this.seatScope(this.prisma, row as LicenseRow | null);
+    return this.prisma.licenseSeatUsage.count(scope.where ? { where: scope.where } : undefined);
   }
 
   private async seatsUsedInTx(tx: PrismaLike, _limit: number): Promise<number> {
@@ -1600,6 +1658,7 @@ type AppliedOutcome = {
 export type PrismaLike = {
   $executeRawUnsafe(query: string): Promise<number>;
   licenseInstallation: {
+    count?(): Promise<number>;
     create(args: unknown): Promise<unknown>;
     update(args: unknown): Promise<unknown>;
     updateMany(args: unknown): Promise<{ count: number }>;
@@ -1611,7 +1670,7 @@ export type PrismaLike = {
   };
   licenseSeatUsage: {
     create(args: unknown): Promise<unknown>;
-    count(): Promise<number>;
+    count(args?: unknown): Promise<number>;
     findUnique(args: unknown): Promise<unknown>;
     updateMany(args: unknown): Promise<unknown>;
   };
