@@ -11,8 +11,13 @@ import '../../features/auth/presentation/providers/auth_providers.dart';
 /// serves a company's own mark to its own people, so a plain network image,
 /// which cannot send the session, would be refused. Null when there is no
 /// mark or it cannot be read; the caller shows its fallback.
-final companyLogoBytesProvider =
-    FutureProvider.autoDispose.family<Uint8List?, String>((ref, url) async {
+///
+/// The key carries the signed-in user, so after a sign-out and a sign-in as
+/// someone from another company the mark is fetched again and an earlier
+/// person's bytes are never shown.
+final companyLogoBytesProvider = FutureProvider.autoDispose
+    .family<Uint8List?, ({String url, String userId})>((ref, key) async {
+  final url = key.url;
   if (url.isEmpty) return null;
   try {
     final response = await ref.read(apiClientProvider).raw.get<List<int>>(
@@ -49,7 +54,11 @@ class AuthorizedCompanyLogo extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final address = url;
     if (address == null || address.isEmpty) return fallback;
-    final bytes = ref.watch(companyLogoBytesProvider(address)).asData?.value;
+    final userId = ref.watch(currentUserProvider)?.id ?? '';
+    final bytes = ref
+        .watch(companyLogoBytesProvider((url: address, userId: userId)))
+        .asData
+        ?.value;
     if (bytes == null) return fallback;
     return Image.memory(
       bytes,

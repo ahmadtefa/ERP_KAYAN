@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:erp_kayan/features/quotations/presentation/document/quotation_document.dart';
+import 'package:erp_kayan/shared/widgets/authorized_company_logo.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:erp_kayan/features/quotations/presentation/widgets/quotation_document_view.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
@@ -260,6 +264,30 @@ void main() {
 
     expect(find.byType(Image), findsNothing);
     expect(find.text('ك'), findsNothing);
+  });
+
+  testWidgets('the letterhead draws the company mark fetched with the session', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 2200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final mark = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP4z8AARwzEcQCukw/x0F8jngAAAABJRU5ErkJggg==');
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          companyLogoBytesProvider.overrideWith((ref, key) async => mark),
+        ],
+        child: _host(QuotationDocumentView(
+          document: _document(),
+          logoUrl: 'http://127.0.0.1:3000/api/v1/companies/logo/company-a',
+        )),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final image = tester.widget<Image>(find.byType(Image));
+    expect((image.image as MemoryImage).bytes, mark);
+    expect(image.fit, BoxFit.contain);
   });
 
   testWidgets('writes a long description in full, without clipping', (
