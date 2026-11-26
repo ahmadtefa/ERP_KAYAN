@@ -58,6 +58,35 @@ Migration rules:
 5. Rollback gate: an old binary reading a `v:2` file already refuses it (`state.v !== 1` gives `UNREADABLE`, reported as `LICENSE_STATE_DAMAGED`). The new build never writes v2 until the migration was confirmed, so a plain downgrade before any second company exists can restore the v1 backup. After a second licence exists, a downgrade stays locked as damaged (fail closed), not licensed under the first row. Recovery is the preserved v1 file plus an authorised procedure, not silent data loss. This needs a test against the real old store code, not an assumption.
 6. Any mismatch between the database rows and the state entries (a row with no entry, an entry with no row, a company with two rows) stops with `LICENSE_STATE_ID_MISMATCH` and writes nothing.
 
+## 4b. Migration crash consistency, recovery and downgrade (DESIGN, needs review)
+
+The migration touches three things that cannot change in one transaction: the database (additive columns, link, marker), the protected state file, and its key file. The order and the recovery rules below make every interruption resolvable without losing a watermark or licensing the wrong company.
+
+State words (written to a small `license-migration.json` journal beside the state, HMAC-protected with the same secret, plus a `license_migration` row in the database):
+
+1. `PREPARED`: preconditions hold (state file readable and HMAC valid, key file present, exactly one licence row, exactly one company, no unbound watermarks). The v1 state file is copied byte for byte to `license-state.json.v1.bak` and the copy is verified by re-reading it and checking its HMAC inside the process. Nothing is printed. The key file is copied the same way (`state.key.v1.bak`, mode 0600); only SHA-256 digests of the two copies and the originals are logged, never contents.
+2. `DB_READY`: the additive database step is committed (nullable `companyId`/`companyRef` columns, backfill of the single row to the single company, unique indexes, marker row). The old code still works against this schema because the legacy accessor reads the same oldest row and the state is still v1.
+3. `STATE_WRITTEN`: the v2 state is written atomically (temp file, then rename) with a higher `sequence`. The v1 state is not edited.
+4. `COMMITTED`: journal and marker are set to committed; the legacy file stays as the backup.
+
+Recovery by observed state at start-up (each start inspects journal, database marker, state file version and the two backups):
+
+* Journal absent, state v1, no marker: normal old behaviour; migration may start.
+* `PREPARED` only, or `PREPARED` with the DB step half applied: the DB step is idempotent (add column if absent, backfill only when null, unique index if absent), so the start-up re-runs it. The state is still v1, so nothing can be mis-licensed. No watermark has changed.
+* `DB_READY`, state still v1: re-run step 3. If the v1 file no longer matches its verified backup digest, stop and enter authorised recovery (do not overwrite either).
+* State v2 written but journal not `COMMITTED` (crash between 3 and 4): verify the v2 HMAC and that its single entry equals the v1 backup's watermarks entry for entry (monotonic: each value greater or equal); if so, set `COMMITTED`; if not, stop in `LICENSE_STATE_DAMAGED` with both files preserved.
+* State v2 but no backup or digest mismatch: refuse to run licence-dependent features (fail closed) and keep every file.
+* Database marker says migrated but the state is v1: refuse. The new build never falls back to a v1 state once the marker is set, even if the v1 file is restored from the backup, because that could lower a watermark; it stays damaged until an authorised recovery reconciles the two.
+* A restored database snapshot older than the marker: the full restore path re-runs `reconcile()`, which compares marker, rows and state; a snapshot without the marker or with fewer companies than the state entries is refused as a mismatch (nothing is dropped from the state).
+
+Immutable binding: `companyRef` is write-once in the database (trigger-free: the service refuses an update, and a unique index prevents a second licence for the same company) and also stored in the matching protected-state entry. A restore, a replayed `keyId`, or a key for a different company cannot change either side; disagreement between the two stops with `LICENSE_STATE_ID_MISMATCH` and changes nothing. A restored company backup never contains the licence rows or links.
+
+Legacy keys after migration: `KYN1` keys keep verifying and applying, but only to the licence row that existed at migration (matched by `licenseId`). A `KYN1` key whose `licenseId` is not an existing row is refused once a second company exists; creating a company needs `COMPANY_ACTIVATION` in `KYN2`. After a second company is activated, no code path reads the v1 file or the oldest row as an authority.
+
+Downgrade: there is no down-migration and no data is dropped. The additive columns, rows and the v2 state remain. An old binary meets a v2 state and refuses it as damaged, so it licenses nothing and writes nothing; the second company's data stays in the database untouched. Returning to the new build restores service. Reverting to a v1 file by hand is only valid before a second company exists and only from the verified backup, as an authorised recovery.
+
+Tests required for this section (integration, not reasoning): a crash injected after each step (kill between steps 1 to 4 in a real file and real PostgreSQL) and the start-up recovery result; digest check of the backups without any secret in logs; the actual old store and service code (checked out from the pre-change commit) pointed at the v2 state and at the migrated database: it must lock as `LICENSE_STATE_DAMAGED` and perform no write; restore of a pre-migration snapshot after a second company exists; replay of a spent `keyId` after migration; `KYN1` key refused for an unknown licence once a second company exists; companyRef write-once.
+
 ## 5. Restore
 
 * Company backup: never carries or changes a licence link; restoring into a different company must not relink anything.
