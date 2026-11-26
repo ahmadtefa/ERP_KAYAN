@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # usage: load-run.sh LABEL POOL_MAX RATE_LIMIT_ENABLED   (run from backend/)
+# Re-run after the first-request company-settings race fix (concurrent first writes of a new company).
 set -euo pipefail
 LABEL="$1"; POOL="$2"; LIMITER="$3"
 DB="erp_kayan_load_${LABEL,,}"

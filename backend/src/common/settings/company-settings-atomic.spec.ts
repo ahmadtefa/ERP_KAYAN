@@ -31,3 +31,19 @@ describe('company settings mandatory audit', () => {
     await expect(service.update('company','actor',{managerName:'Synthetic manager'})).rejects.toThrow('synthetic audit failure');
   });
 });
+
+describe('first read of a company with no settings row', () => {
+  it('creates the defaults with one upsert (safe when two first requests arrive together), never a bare create', async () => {
+    const created = { ...before };
+    const client = { companySetting: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(created),
+      create: jest.fn().mockRejectedValue(new Error('a bare create races: two first requests would collide')),
+    } };
+    const service = new CompanySettingsService({} as any, {} as any);
+    const result = await service.get('company', client as any);
+    expect(result.companyId).toBe('company');
+    expect(client.companySetting.create).not.toHaveBeenCalled();
+    expect(client.companySetting.upsert).toHaveBeenCalledWith({ where: { companyId: 'company' }, update: {}, create: { companyId: 'company' } });
+  });
+});
