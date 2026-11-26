@@ -2,7 +2,7 @@
 # usage: load-run.sh LABEL POOL_MAX RATE_LIMIT_ENABLED   (run from backend/)
 set -euo pipefail
 LABEL="$1"; POOL="$2"; LIMITER="$3"
-DB="erp_kayan_load_${LABEL}"
+DB="erp_kayan_load_${LABEL,,}"
 export DATABASE_URL="postgresql://ci:ci@127.0.0.1:5432/${DB}?schema=public"
 psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" -c "CREATE DATABASE ${DB}"
 node scripts/apply-migrations.mjs > /dev/null
