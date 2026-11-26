@@ -255,7 +255,7 @@ describe('CompanyService', () => {
       expect(result).toEqual({
         nameEn: 'Kayan Co',
         nameAr: 'شركة كيان',
-        logoUrl: `/companies/logo/comp-1?v=${updatedAt.getTime()}`,
+        logoUrl: `/companies/logo?v=${updatedAt.getTime()}`,
       });
     });
   });

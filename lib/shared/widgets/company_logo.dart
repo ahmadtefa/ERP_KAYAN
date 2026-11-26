@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'authorized_company_logo.dart';
+
 /// Displays a server-provided company mark and falls back when it is absent.
 class CompanyLogo extends StatelessWidget {
   const CompanyLogo({super.key, required this.url, this.size = 42});
@@ -16,12 +18,11 @@ class CompanyLogo extends StatelessWidget {
         color: Theme.of(context).colorScheme.primary,
       );
     }
-    return Image.network(
-      url!,
+    return AuthorizedCompanyLogo(
+      url: url,
       width: size,
       height: size,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) => Icon(
+      fallback: Icon(
         Icons.account_balance,
         size: size,
         color: Theme.of(context).colorScheme.primary,

@@ -68,13 +68,20 @@ export class CompaniesController {
     return this.sendLogo(undefined, response);
   }
 
-  @Public()
+  /// A company's mark by id: signed-in members of that company only. Knowing
+  /// the id is not authorization, and another company's id answers 404 exactly
+  /// like an unknown one. (The unauthenticated route above serves only the
+  /// sole company's mark, the same as the pre-sign-in branding.)
   @Get('logo/:companyId')
   async tenantLogo(
+    @CurrentUser() user: AuthUser,
     @Param('companyId', ParseUUIDPipe) companyId: string,
     @Res() response: Response,
   ) {
-    return this.sendLogo(companyId, response);
+    if (user.companyId !== companyId) {
+      throw new NotFoundException('Company logo not found');
+    }
+    return this.sendLogo(companyId, response, true);
   }
 
   @Get('profile')
@@ -119,11 +126,19 @@ export class CompaniesController {
     return this.companies.getProfile(user.companyId);
   }
 
-  private async sendLogo(companyId: string | undefined, response: Response) {
+  private async sendLogo(
+    companyId: string | undefined,
+    response: Response,
+    privateToMember = false,
+  ) {
     const logo = await this.companies.getLogo(companyId);
     if (!logo) throw new NotFoundException('Company logo not found');
     response.setHeader('Content-Type', logo.mime);
-    response.setHeader('Cache-Control', 'public, max-age=300');
+    // A member's copy is never kept by a shared cache.
+    response.setHeader(
+      'Cache-Control',
+      privateToMember ? 'private, max-age=300' : 'public, max-age=300',
+    );
     response.end(logo.data);
   }
 }

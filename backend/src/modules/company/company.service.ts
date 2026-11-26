@@ -138,10 +138,13 @@ export class CompanyService {
     if (!company) {
       return { nameEn: 'KAYAN ERP', nameAr: 'نظام كيان', logoUrl: null };
     }
+    // Pre-sign-in: point at the unauthenticated sole-company route, never at
+    // the by-id route, which needs a signed-in member of that company.
+    const hasLogo = (company.logoData?.length ?? 0) > 0 || Boolean(company.logoPath);
     return {
       nameEn: company.nameEn,
       nameAr: company.nameAr,
-      logoUrl: this.logoUrl(company),
+      logoUrl: hasLogo ? `/companies/logo?v=${company.updatedAt.getTime()}` : null,
     };
   }
 

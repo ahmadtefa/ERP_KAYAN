@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../../../core/json/amount_format.dart';
+import '../../../../shared/widgets/authorized_company_logo.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../document/quotation_document.dart';
 
@@ -225,11 +226,10 @@ class _Sheet extends StatelessWidget {
     final company = document.company;
     final mark = logoUrl == null || logoUrl!.isEmpty
         ? const SizedBox.shrink()
-        : Image.network(
-            logoUrl!,
+        : AuthorizedCompanyLogo(
+            url: logoUrl,
             height: 42 * scale,
             fit: BoxFit.contain,
-            errorBuilder: (context, error, stack) => const SizedBox.shrink(),
           );
 
     // The company's name sits at the start of the line (the right in Arabic)

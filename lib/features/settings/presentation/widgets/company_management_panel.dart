@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../shared/widgets/authorized_company_logo.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -293,11 +294,11 @@ class _CompanyManagementPanelState
                             ? Image.memory(_logo!.bytes, fit: BoxFit.contain)
                             : (savedLogoUrl == null
                                   ? const Icon(Icons.business, size: 48)
-                                  : Image.network(
-                                      savedLogoUrl,
+                                  : AuthorizedCompanyLogo(
+                                      url: savedLogoUrl,
                                       key: ValueKey(savedLogoUrl),
                                       fit: BoxFit.contain,
-                                      errorBuilder: (_, _, _) =>
+                                      fallback:
                                           const Icon(Icons.business, size: 48),
                                     )),
                       ),

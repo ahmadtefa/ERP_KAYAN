@@ -1067,6 +1067,10 @@ class AppErrorMessageResolver {
         'لا يمكن تعطيل حساب مسؤول النظام.',
     'You cannot deactivate your own account': 'لا يمكنك تعطيل حسابك الخاص.',
     'That username is already taken': 'اسم المستخدم مستخدم بالفعل.',
+    'That username is already taken. Choose a different username.':
+        'اسم المستخدم مستخدم بالفعل. اختر اسم مستخدم آخر.',
+    'That email address is already used by another account. Enter a different email address, or leave it empty.':
+        'البريد الإلكتروني مستخدم في حساب آخر. أدخل بريدًا إلكترونيًا مختلفًا أو اتركه فارغًا.',
     'That username is reserved': 'اسم المستخدم محجوز.',
     'Invalid username or password': 'اسم المستخدم أو كلمة المرور غير صحيحة.',
     'Invalid or expired token': 'انتهت صلاحية الجلسة. سجّل الدخول مرة أخرى.',

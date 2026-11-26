@@ -12,6 +12,7 @@ import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/authorized_company_logo.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -570,12 +571,12 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
                   size: 28,
                 )
               : ClipOval(
-                  child: Image.network(
-                    url,
+                  child: AuthorizedCompanyLogo(
+                    url: url,
                     width: 56,
                     height: 56,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => Icon(
+                    fallback: Icon(
                       widget.hasLogo ? Icons.business : Icons.business_outlined,
                       size: 28,
                     ),

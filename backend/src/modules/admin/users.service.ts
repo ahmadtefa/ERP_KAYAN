@@ -23,6 +23,24 @@ import { permissionWarnings, warningsForSet } from '../../common/rbac/permission
 /// Who may be changed, and by whom.
 const SYSTEM_USERNAME = 'admin';
 
+/// A username and an email address are each unique across the whole
+/// installation (every company), so a clash can be with an account of another
+/// company. The message says what to do and never says whose account it is or
+/// which company it belongs to.
+export function uniqueAccountClash(error: unknown): ConflictException | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
+  const where = `${JSON.stringify(error.meta ?? {})} ${error.message}`.toLowerCase();
+  if (where.includes('email')) {
+    return new ConflictException(
+      'That email address is already used by another account. Enter a different email address, or leave it empty.',
+    );
+  }
+  if (where.includes('username')) {
+    return new ConflictException('That username is already taken. Choose a different username.');
+  }
+  return null;
+}
+
 type UserResponseRecord = Prisma.UserGetPayload<{
   include: {
     userRoles: {
@@ -130,7 +148,7 @@ export class UsersService {
       throw new ConflictException('That username is reserved');
     }
     const existing = await this.prisma.user.findUnique({ where: { username } });
-    if (existing) throw new ConflictException('That username is already taken');
+    if (existing) throw new ConflictException('That username is already taken. Choose a different username.');
 
     await this.assertRolesAssignable(
       companyId,
@@ -163,6 +181,8 @@ export class UsersService {
           isSuperAdmin: false,
           createdBy: actorId,
         },
+      }).catch((error: unknown) => {
+        throw uniqueAccountClash(error) ?? error;
       });
       // The licence seat is reserved inside the same transaction as the
       // account: a refusal rolls the account back, and a failure anywhere
@@ -292,6 +312,8 @@ export class UsersService {
           isActive: dto.isActive,
           updatedBy: actorId,
         },
+      }).catch((error: unknown) => {
+        throw uniqueAccountClash(error) ?? error;
       });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);

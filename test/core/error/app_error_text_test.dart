@@ -567,4 +567,19 @@ void main() {
       expect(text.hasBusinessMessage, isFalse);
     });
   });
+
+  test('an account email or username clash tells the person what to change, in Arabic', () {
+    const resolver = AppErrorMessageResolver(isArabic: true);
+    final email = resolver.resolve(const ApiFailure(
+      'That email address is already used by another account. Enter a different email address, or leave it empty.',
+      statusCode: 409,
+    ));
+    expect(email.businessMessage, contains('البريد الإلكتروني مستخدم'));
+    expect(email.businessMessage, contains('أدخل بريدًا إلكترونيًا مختلفًا'));
+    final username = resolver.resolve(const ApiFailure(
+      'That username is already taken. Choose a different username.',
+      statusCode: 409,
+    ));
+    expect(username.businessMessage, contains('اختر اسم مستخدم آخر'));
+  });
 }
