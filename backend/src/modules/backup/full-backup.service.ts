@@ -354,8 +354,12 @@ export class FullBackupService {
    */
   async createFull(
     userId: string | null,
+    // The reset begins maintenance mode itself, then takes this safety copy.
+    // Without this flag the copy was always refused ("maintenance mode") and
+    // the reset silently fell back to the weaker company JSON backup.
+    options: { duringMaintenance?: boolean } = {},
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
-    if (this.restoreInProgress || this.maintenance.isActive) {
+    if (this.restoreInProgress || (this.maintenance.isActive && !options.duringMaintenance)) {
       throw new ServiceUnavailableException('A restore is running or the database is in maintenance mode. The backup was not started.');
     }
     // Claim before the first await so a restore in this service instance cannot begin

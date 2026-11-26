@@ -242,7 +242,7 @@ export class ResetService {
 
       if (fullCapabilities?.available) {
         try {
-          const backup = await this.backups.createFull(user.userId);
+          const backup = await this.backups.createFull(user.userId, { duringMaintenance: true });
           const checked = await this.backups.verify(backup.file.name);
           verified = {
             name: backup.file.name,
