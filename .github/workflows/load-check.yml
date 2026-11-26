@@ -1,3 +1,4 @@
+# Load check: re-measured after the customer row lock was relaxed (FOR NO KEY UPDATE).
 name: KAYAN load and performance check (synthetic data)
 
 # Measures API speed and concurrent-user behaviour on a throwaway PostgreSQL

@@ -148,7 +148,21 @@ export class CustomerCreditService {
       select: { nameEn: true, paymentTermDays: true, paymentTermMethod: true, paymentTermConfig: true },
     });
     if (!customer) return null;
-    if (customer.paymentTermDays <= 0 && customer.paymentTermMethod === DEFAULT_PAYMENT_TERM_METHOD) return null;
+    const result = (overdueCount: number, overdue: Prisma.Decimal, penalty: Prisma.Decimal, oldestDue: string) => ({
+      customerId: invoice.customerId,
+      customerName: customer.nameEn,
+      branchId: invoice.branchId,
+      createdBy: invoice.createdBy,
+      invoiceUpdatedAt: invoice.updatedAt,
+      overdueCount,
+      overdue,
+      penalty,
+      oldestDue,
+    });
+    // A customer with no terms is never past a period: a real invoice that needs nothing, not a missing one.
+    if (customer.paymentTermDays <= 0 && customer.paymentTermMethod === DEFAULT_PAYMENT_TERM_METHOD) {
+      return result(0, new Prisma.Decimal(0), new Prisma.Decimal(0), '');
+    }
     const asOf = formatDate(invoice.invoiceDate);
     // dueDate is the first due share, so an invoice with no share due before
     // [asOf] cannot be overdue and is not read at all.
@@ -184,17 +198,7 @@ export class CustomerCreditService {
       if (!oldest || first < oldest) oldest = first;
       if (cfg?.penalty) penalty = penalty.plus(new Prisma.Decimal(penaltyMinor(late, first, asOf, cfg.penalty)).div(10 ** SCALE));
     }
-    return {
-      customerId: invoice.customerId,
-      customerName: customer.nameEn,
-      branchId: invoice.branchId,
-      createdBy: invoice.createdBy,
-      invoiceUpdatedAt: invoice.updatedAt,
-      overdueCount,
-      overdue,
-      penalty,
-      oldestDue: oldest ?? '',
-    };
+    return result(overdueCount, overdue, penalty, oldest ?? '');
   }
 
   /** One approval, for one draft invoice, with a written reason. */
