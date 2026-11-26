@@ -1,0 +1,73 @@
+# Per-company licensing: design for review
+
+Status: DESIGN ONLY. Nothing here is implemented, no live data, key or protected-state file is touched, and no private key is read. The user approved the direction (reviewed 2026-11-26, WhatsApp): a company is created only through a vendor-issued, company-specific authorization, the activation tool is updated together with the program, and existing activations keep working. The protected-state migration below still needs review before code.
+
+## 1. What exists today (verified in source)
+
+* One licence per installation. `licenseRow()` and `licenseRowIn()` in `licensing.service.ts` read the oldest `license_installations` row (`findFirst`). Used by status, activation, seat reservation, clock handling, reconcile and summary.
+* The protected state (`license-store.ts`) is one HMAC-authenticated file with one `licenseId` and installation-wide watermarks: `maxSeatLimit`, `maxSeatsUsed`, `licenseExpiresAt`, `perpetual`, `appliedKeys`, `clockState`, `clockSuspects`, `lastSeenAt`, `sequence`. `assertLicenseIdentity` refuses any row or key whose `licenseId` differs from it (`LICENSE_STATE_ID_MISMATCH`).
+* Keys are `KYN1.<payload>.<ed25519 signature>`, payload `v:1`. A payload carries `licenseId`, `type` (ACTIVATION, RENEWAL, SEATS, TRANSFER), `machineId`, `term`, `seats`. No company field. Anything but `v:1` and prefix `KYN1` is refused unread.
+* Full backups restore the database snapshot, then `reconcile()` repairs it from the protected state. Company backups exclude the licence tables.
+* Existing guards already fail closed: a state file whose format is not 1 is refused with `UNREADABLE`, which the service reports as `LICENSE_STATE_DAMAGED`.
+
+## 2. Target behaviour
+
+1. Every company has its own licence: its own `licenseId`, activation, term and seat limit.
+2. A company cannot be created without a vendor-issued key naming it. No customer role, including ADMIN, has a create-company path.
+3. A key for company A cannot be applied to company B, including on first use.
+4. The existing company and its existing v1 activation keep working unchanged.
+5. Login is routed by username (usernames are globally unique today) with no company chooser.
+
+## 3. Key format v2 (recommended)
+
+* New prefix `KYN2` and payload `v:2`. A different prefix means an old verifier refuses the key as "not a KAYAN licence key" and never misreads it. `KYN1` keys stay valid.
+* New key type `COMPANY_ACTIVATION`, plus a required `companyRef` field in every v2 key (`ACTIVATION`, `RENEWAL`, `SEATS`, `TRANSFER`, `COMPANY_ACTIVATION`).
+* `companyRef` is an opaque id the vendor chooses when issuing the first key for that company. It carries no business data (no name, tax number or anything from the books).
+* `COMPANY_ACTIVATION` creates the company and its licence in one atomic step on the machine named by `machineId`, with the key's term and seats. The customer's first administrator and company details are entered afterwards in the existing first-setup flow of that company.
+* RENEWAL, SEATS and TRANSFER keys in v2 are accepted only for the company whose stored `companyRef` equals the key's `companyRef`.
+* Replay: `keyId` stays unique per installation.
+* v1 keys keep their meaning and bind to the existing company only (the one whose licence row was migrated, see 4).
+* Request codes: `KYNREQ1` already carries the machine id and keeps working. No company data is needed in the request, because the vendor chooses `companyRef`.
+
+What a signed company identity buys: a key issued for one company cannot be entered for another even on first use, the vendor's intent is enforced by signature, and the licence register shows which company each licence was sold to. Cost: verifier change, updates to the Node CLI and GUI, the Windows C# tool and the Android tool, new golden vectors in the shared compatibility tests, and an operator step to pick or record `companyRef`.
+
+## 4. Database
+
+* `license_installations` gets a nullable unique `companyRef` and a unique `companyId` link to `companies`. The existing row is backfilled to the single existing company with `companyRef` empty. v1 keys keep working through the `licenseId` match. A v2 key for that company (for example its next renewal) binds the vendor's `companyRef` once, and only when its `licenseId` equals the existing row; after that every v2 key must match it.
+* `license_seat_usage` already has `licenseId`. Seat counts are per `licenseId`.
+* Replace the singleton accessor with `licenseRowFor(companyId)`. The guard resolves the company from the authenticated user, never from a request parameter. The guard, `status`, seat reservation, clock handling and `reconcile` all take a company.
+* Installation-level facts (machine id, enforcement mode, public key fingerprint, clock tamper state of the machine) stay installation-wide. Per-licence facts (expiry, seat limit, perpetual flag, seats used watermark) are per licence.
+* Company creation consumes no seat of another company. Seats are reserved against the user's company licence.
+
+## 4a. Protected state migration (DESIGN, needs review before code)
+
+Today the file holds one `licenseId`. Proposed `v:2` state:
+
+```
+v: 2
+installId, enforcement, publicKeyFingerprint, sequence,
+lastSeenAt, clockState, clockSuspects      (installation-wide)
+licenses: { [licenseId]: { maxSeatLimit, maxSeatsUsed, licenseExpiresAt, perpetual, appliedKeys } }
+```
+
+Migration rules:
+1. Migration runs once, in a code path that only starts after a verified backup of the v1 file and its key file (`license-state.json.v1.bak`, same HMAC, never overwritten). The v1 file is never edited in place.
+2. The v1 `licenseId` entry becomes the first `licenses` entry with the same watermarks. No watermark is lowered. `appliedKeys` is carried over in full.
+3. Writes stay atomic (temp file then rename) with a higher `sequence`; the HMAC covers the whole v2 state with the same secret.
+4. A v1 state with entitlement watermarks but no `licenseId` ("unbound") is not migrated; it keeps the existing refusal and goes to authorised recovery.
+5. Rollback gate: an old binary reading a `v:2` file already refuses it (`state.v !== 1` gives `UNREADABLE`, reported as `LICENSE_STATE_DAMAGED`). The new build never writes v2 until the migration was confirmed, so a plain downgrade before any second company exists can restore the v1 backup. After a second licence exists, a downgrade stays locked as damaged (fail closed), not licensed under the first row. Recovery is the preserved v1 file plus an authorised procedure, not silent data loss. This needs a test against the real old store code, not an assumption.
+6. Any mismatch between the database rows and the state entries (a row with no entry, an entry with no row, a company with two rows) stops with `LICENSE_STATE_ID_MISMATCH` and writes nothing.
+
+## 5. Restore
+
+* Company backup: never carries or changes a licence link; restoring into a different company must not relink anything.
+* Full backup: the snapshot's licence rows and links return as of the file date, then `reconcile()` applies the per-licence watermarks. A restored company-to-licence link that disagrees with the protected state is refused. On another machine the rows carry another `machineId`, so no licence works until each company is re-activated.
+
+## 6. Tests required before any claim
+
+Product (real PostgreSQL in CI): key for licence X works for company A and is refused for B; second company cannot start without a `COMPANY_ACTIVATION` key; key replay refused; A expired or suspended does not stop B; seat limits per company; renewals and seat keys touch only their company; v1 keys still bind to the existing company only; existing single-company install behaves identically after migration; username routing; no role can create a company (API, not only UI); restore cases above; state migration keeps every watermark; the old store code refuses the v2 file; downgrade after migration but before a second company restores the v1 backup.
+Generators: shared golden vectors for KYN2 across the product verifier, Node CLI, Windows C# tool and Android tool; v1 vectors unchanged; the register keeps `companyRef`.
+
+## 7. Not done and not claimed
+
+No key was issued, no private key read, no installed tool inspected, no signing performed, no live licence or state file touched. Compatibility with the user's already installed licence tool and register is unverified until that tool or its output is available. The generators in this repository are the source of truth for what is qualified.
