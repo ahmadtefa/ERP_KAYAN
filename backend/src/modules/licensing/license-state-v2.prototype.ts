@@ -10,6 +10,7 @@ import {
   renameSync, statSync, writeSync,
 } from 'node:fs';
 import { type KeyObject } from 'node:crypto';
+import { activationEnd, isPerpetual, renewalEnd } from './license-duration';
 import { verifyKeyV2, type LicensePayloadV2 } from './license-key';
 import { join } from 'node:path';
 
@@ -285,54 +286,77 @@ export function migrate(opts: {
   hook(opts.hook, 'AFTER_MARKER');
 }
 
-/** State-acceptance rules for a verified KYN2 key. Pure: returns the next
- *  state, never mutates. The caller has already verified the signature with
- *  verifyKeyV2 against the vendor public key; this function only applies the
- *  rules that depend on the state (replay, known licence ids, company
- *  binding, and which company a key may touch). */
+/** A legitimate business refusal (wrong licence, replay, seats below used...).
+ *  It is a clean result for the caller: nothing was written and the state is
+ *  not damaged. It is a different class from MigrationError, which means the
+ *  file or an invariant is broken. The codes are the service's own codes. */
+export class KeyRefusal extends Error {
+  constructor(message: string, readonly code: string) { super(message); }
+}
+
+/** What the caller read from the database row before applying (the service
+ *  reads them from licenseInstallation and the seat table). */
+export interface CurrentLicense { expiresAt: Date | null; seatLimit: number; seatsUsed: number }
+export interface KeyOutcome { expiresAt: Date | null; perpetual: boolean; seatLimit: number; seatsUsed: number }
+
+/** Pure state acceptance for a verified KYN2 key. The term and seat rules are
+ *  the service's own (renewalEnd, activationEnd, the SEATS below-used refusal),
+ *  imported, not rewritten: a renewal adds to a still-valid term, never
+ *  shortens it, a perpetual licence stays perpetual, and a CAP key may lower
+ *  the CURRENT limit down to the seats in use while the protected watermark
+ *  (highest ever granted) never falls. The state update after a successful
+ *  outcome is the service's post-commit rule, copied exactly. */
 export function applyKeyV2(
-  state: any, payload: LicensePayloadV2, ctx: { machineId: string; newCompanyId: string; now: Date },
-): any {
-  const refuse = (m: string): never => { throw new MigrationError(m, 'ABORTED'); };
+  state: any, payload: LicensePayloadV2,
+  ctx: { machineId: string; newCompanyId: string; now: Date; current?: CurrentLicense },
+): { next: any; outcome: KeyOutcome } {
+  const refuse = (m: string, code: string): never => { throw new KeyRefusal(m, code); };
   const next = JSON.parse(JSON.stringify(state));
   const entries = Object.entries<any>(next.licenses);
-  if (entries.some(([, e]) => e.appliedKeys.includes(payload.keyId))) refuse('this key was already used');
-  const months = (t: any) => {
-    if (!t) return { perpetual: false, at: null as string | null };
-    if (t.kind === 'PERPETUAL') return { perpetual: true, at: null };
-    const d = new Date(ctx.now); d.setUTCMonth(d.getUTCMonth() + t.months);
-    return { perpetual: false, at: d.toISOString() };
-  };
+  if (entries.some(([, e]) => e.appliedKeys.includes(payload.keyId))) refuse('this key was already used', 'LICENSE_KEY_ALREADY_USED');
+  let entry: any; let outcome: KeyOutcome;
   if (payload.type === 'COMPANY_ACTIVATION') {
-    if (payload.machineId !== ctx.machineId) refuse('the key is for another machine');
-    if (next.licenses[payload.licenseId] || payload.licenseId === next.legacyLicenseId) refuse('this licence id is already known');
-    if (entries.some(([, e]) => e.companyRef === payload.companyRef)) refuse('this company reference already exists');
-    const t = months(payload.term);
-    next.licenses[payload.licenseId] = {
+    if (payload.machineId !== ctx.machineId) refuse('the key is for another machine', 'LICENSE_KEY_WRONG_MACHINE');
+    if (next.licenses[payload.licenseId] || payload.licenseId === next.legacyLicenseId) refuse('this licence id is already known', 'LICENSE_ALREADY_ACTIVE');
+    if (entries.some(([, e]) => e.companyRef === payload.companyRef)) refuse('this company reference already exists', 'LICENSE_COMPANY_REF_EXISTS');
+    const expiresAt = activationEnd(payload.term!, ctx.now);
+    const limit = payload.seats && payload.seats.mode !== 'PRESERVE' ? payload.seats.value : 0;
+    outcome = { expiresAt, perpetual: isPerpetual(expiresAt), seatLimit: Math.max(limit, 0), seatsUsed: 0 };
+    entry = next.licenses[payload.licenseId] = {
       companyId: ctx.newCompanyId, companyRef: payload.companyRef, origin: 'V2', setup: 'AWAITING_FIRST_ADMIN',
-      suspended: false, maxSeatLimit: payload.seats?.value ?? 0, maxSeatsUsed: 0,
-      licenseExpiresAt: t.at, perpetual: t.perpetual, appliedKeys: [payload.keyId],
+      suspended: false, maxSeatLimit: 0, maxSeatsUsed: 0, licenseExpiresAt: null, perpetual: false, appliedKeys: [],
     };
-    return next;
+  } else {
+    entry = next.licenses[payload.licenseId];
+    if (!entry) refuse('this key is for a licence this installation does not have', 'LICENSE_KEY_WRONG_LICENSE');
+    if (entry.companyRef === null) {
+      // First v2 key of the migrated legacy licence: binds its companyRef, once.
+      if (payload.licenseId !== next.legacyLicenseId) refuse('company reference missing', 'LICENSE_KEY_WRONG_LICENSE');
+      if (entries.some(([, e]) => e.companyRef === payload.companyRef)) refuse('this company reference already exists', 'LICENSE_COMPANY_REF_EXISTS');
+      entry.companyRef = payload.companyRef;
+    } else if (entry.companyRef !== payload.companyRef) refuse('the key is for another company', 'LICENSE_KEY_WRONG_LICENSE');
+    const cur = ctx.current;
+    if (!cur) refuse('the current licence row is required', 'LICENSE_NOT_INSTALLED');
+    if (payload.type === 'RENEWAL') {
+      const expiresAt = payload.term!.kind === 'PERPETUAL' ? null : renewalEnd(cur!.expiresAt, payload.term!.months, ctx.now);
+      outcome = { expiresAt, perpetual: isPerpetual(expiresAt), seatLimit: cur!.seatLimit, seatsUsed: cur!.seatsUsed };
+    } else if (payload.type === 'SEATS') {
+      const g = payload.seats!;
+      const limit = g.mode === 'INCREASE' ? cur!.seatLimit + g.value : g.value;
+      if (limit < cur!.seatsUsed) refuse(`this key would set the seat limit to ${limit}, but ${cur!.seatsUsed} are in use`, 'LICENSE_SEATS_BELOW_USED');
+      outcome = { expiresAt: cur!.expiresAt, perpetual: isPerpetual(cur!.expiresAt), seatLimit: limit, seatsUsed: cur!.seatsUsed };
+    } else return refuse('this key type is not applied to a company yet (transfer semantics are not defined)', 'LICENSE_KEY_WRONG_TYPE');
   }
-  const entry = next.licenses[payload.licenseId];
-  if (!entry) refuse('this key is for a licence this installation does not have');
-  if (entry.companyRef === null) {
-    // First v2 key of the migrated legacy licence: binds its companyRef, once.
-    if (payload.licenseId !== next.legacyLicenseId) refuse('company reference missing');
-    if (entries.some(([, e]) => e.companyRef === payload.companyRef)) refuse('this company reference already exists');
-    entry.companyRef = payload.companyRef;
-  } else if (entry.companyRef !== payload.companyRef) refuse('the key is for another company');
-  if (payload.type === 'RENEWAL') {
-    const t = months(payload.term); entry.licenseExpiresAt = t.at; entry.perpetual = t.perpetual;
-  } else if (payload.type === 'SEATS') {
-    const v = payload.seats?.value ?? 0;
-    const limit = payload.seats?.mode === 'INCREASE' ? entry.maxSeatLimit + v : v;
-    if (limit < entry.maxSeatsUsed) refuse('the seat limit would be below the seats in use');
-    entry.maxSeatLimit = limit;
-  } else refuse('this key type is not applied to a company yet (transfer semantics are not defined)');
+  // The service's post-commit watermark rule (applyKey), unchanged.
   entry.appliedKeys.push(payload.keyId);
-  return next;
+  entry.maxSeatsUsed = Math.max(entry.maxSeatsUsed, outcome.seatsUsed);
+  entry.maxSeatLimit = Math.max(entry.maxSeatLimit, outcome.seatLimit);
+  if (outcome.perpetual) { entry.perpetual = true; entry.licenseExpiresAt = null; }
+  else if (outcome.expiresAt) {
+    const prev = entry.licenseExpiresAt ? new Date(entry.licenseExpiresAt) : null;
+    if (!prev || outcome.expiresAt > prev) entry.licenseExpiresAt = outcome.expiresAt.toISOString();
+  }
+  return { next, outcome };
 }
 
 /** First-admin provisioning for a company in AWAITING_FIRST_ADMIN. The

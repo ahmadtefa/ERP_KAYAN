@@ -6,7 +6,7 @@ import { LicenseStore } from './license-store';
 import { generateKeyPairSync } from 'node:crypto';
 import { signPayloadV2, type LicensePayloadV2 } from './license-key';
 import {
-  Marker, MarkerStore, MigrationError, Step, applyKeyV2, assertInvariants, canonical, mac,
+  Marker, MarkerStore, MigrationError, Step, KeyRefusal, applyKeyV2, assertInvariants, canonical, mac,
   migrate, provisionFirstAdmin, resolveAuthority, updateV2,
 } from './license-state-v2.prototype';
 
@@ -297,7 +297,8 @@ describe('review items 5-6: key rules and first-admin with the real verifier', (
     issuedAt: '2026-11-26T00:00:00.000Z', term: { kind: 'MONTHS', months: 12 }, seats: { mode: 'CAP', value: 5 },
     companyRef: `company-ref-${n}00`, displayLabel: null, state: null, note: null, ...over,
   });
-  const ctx = { machineId: MACHINE, newCompanyId: 'company-2', now: new Date('2026-11-26T00:00:00Z') };
+  const ctx = { machineId: MACHINE, newCompanyId: 'company-2', now: new Date('2026-11-26T00:00:00Z'), current: { expiresAt: new Date('2027-01-01T00:00:00Z'), seatLimit: 5, seatsUsed: 3 } };
+  const ap = (st: any, p: LicensePayloadV2, c: any = ctx) => applyKeyV2(st, p, c).next;
   const stateOf = () => readDoc().state;
 
   it('companyRef rule: only 8-64 letters, digits, dash and underscore reach the state', () => {
@@ -310,48 +311,95 @@ describe('review items 5-6: key rules and first-admin with the real verifier', (
   describe('state rules (applyKeyV2)', () => {
     beforeEach(() => { seedV1(false); run(); });
     it('COMPANY_ACTIVATION adds an AWAITING_FIRST_ADMIN entry with the key spent', () => {
-      const next = applyKeyV2(stateOf(), company(2), ctx);
+      const next = ap(stateOf(), company(2), ctx);
       const e = next.licenses['lic-co-2-0000-0000'];
       expect(e.setup).toBe('AWAITING_FIRST_ADMIN'); expect(e.appliedKeys).toEqual([keyId(2)]); expect(e.maxSeatsUsed).toBe(0);
       assertInvariants({ ...next, sequence: 5 });
     });
     it('refused: a licenseId already known (legacy or another company), a keyId replay, a duplicate companyRef, wrong machine', () => {
-      expect(() => applyKeyV2(stateOf(), company(2, { licenseId: 'lic-1' }), ctx)).toThrow(/already known/);
-      const once = applyKeyV2(stateOf(), company(2), ctx);
-      expect(() => applyKeyV2(once, company(3, { licenseId: 'lic-co-2-0000-0000' }), ctx)).toThrow(/already known/);
-      expect(() => applyKeyV2(once, company(2, { licenseId: 'lic-other-0000-0000' }), ctx)).toThrow(/already used/);
-      expect(() => applyKeyV2(once, company(3, { companyRef: 'company-ref-200' }), ctx)).toThrow(/reference already exists/);
-      expect(() => applyKeyV2(stateOf(), company(4, { machineId: 'ZZZZ-ZZZZ-ZZZZ-ZZZZ' }), ctx)).toThrow(/another machine/);
+      expect(() => ap(stateOf(), company(2, { licenseId: 'lic-1' }), ctx)).toThrow(/already known/);
+      const once = ap(stateOf(), company(2), ctx);
+      expect(() => ap(once, company(3, { licenseId: 'lic-co-2-0000-0000' }), ctx)).toThrow(/already known/);
+      expect(() => ap(once, company(2, { licenseId: 'lic-other-0000-0000' }), ctx)).toThrow(/already used/);
+      expect(() => ap(once, company(3, { companyRef: 'company-ref-200' }), ctx)).toThrow(/reference already exists/);
+      expect(() => ap(stateOf(), company(4, { machineId: 'ZZZZ-ZZZZ-ZZZZ-ZZZZ' }), ctx)).toThrow(/another machine/);
     });
     it('a RENEWAL or SEATS key for company A is refused for B, and for an unknown licence', () => {
-      const withB = applyKeyV2(stateOf(), company(2), ctx);
+      const withB = ap(stateOf(), company(2), ctx);
       const renewalForA = company(5, { type: 'RENEWAL', licenseId: 'lic-co-2-0000-0000', machineId: null, seats: null, companyRef: 'company-ref-300' });
-      expect(() => applyKeyV2(withB, renewalForA, ctx)).toThrow(/another company/);
-      expect(() => applyKeyV2(withB, company(6, { type: 'SEATS', licenseId: 'lic-nope-0000-0000', machineId: null, term: null }), ctx)).toThrow(/does not have/);
-      const ok = applyKeyV2(withB, company(7, { type: 'SEATS', licenseId: 'lic-co-2-0000-0000', machineId: null, term: null, companyRef: 'company-ref-200', seats: { mode: 'INCREASE', value: 2 } }), ctx);
+      expect(() => ap(withB, renewalForA, ctx)).toThrow(/another company/);
+      expect(() => ap(withB, company(6, { type: 'SEATS', licenseId: 'lic-nope-0000-0000', machineId: null, term: null }), ctx)).toThrow(/does not have/);
+      const ok = ap(withB, company(7, { type: 'SEATS', licenseId: 'lic-co-2-0000-0000', machineId: null, term: null, companyRef: 'company-ref-200', seats: { mode: 'INCREASE', value: 2 } }), ctx);
       expect(ok.licenses['lic-co-2-0000-0000'].maxSeatLimit).toBe(7);
       expect(ok.licenses['lic-1'].maxSeatLimit).toBe(5);       // the other company is untouched
     });
     it('the legacy licence binds its companyRef once; a different ref later is refused; a taken ref is refused', () => {
       const bind = (ref: string, n: number) => company(n, { type: 'RENEWAL', licenseId: 'lic-1', machineId: null, seats: null, companyRef: ref });
-      const bound = applyKeyV2(stateOf(), bind('legacy-ref-0001', 8), ctx);
+      const bound = ap(stateOf(), bind('legacy-ref-0001', 8), ctx);
       expect(bound.licenses['lic-1'].companyRef).toBe('legacy-ref-0001');
-      expect(() => applyKeyV2(bound, bind('legacy-ref-0002', 9), ctx)).toThrow(/another company/);
-      const withB = applyKeyV2(stateOf(), company(2), ctx);
-      expect(() => applyKeyV2(withB, bind('company-ref-200', 10), ctx)).toThrow(/reference already exists/);
+      expect(() => ap(bound, bind('legacy-ref-0002', 9), ctx)).toThrow(/another company/);
+      const withB = ap(stateOf(), company(2), ctx);
+      expect(() => ap(withB, bind('company-ref-200', 10), ctx)).toThrow(/reference already exists/);
     });
     it('a TRANSFER is not applied to a company (semantics undefined, refused, not guessed)', () => {
-      expect(() => applyKeyV2(stateOf(), company(11, { type: 'TRANSFER', licenseId: 'lic-1', machineId: MACHINE, companyRef: 'legacy-ref-0001' }), ctx)).toThrow(/transfer semantics/);
+      expect(() => ap(stateOf(), company(11, { type: 'TRANSFER', licenseId: 'lic-1', machineId: MACHINE, companyRef: 'legacy-ref-0001' }), ctx)).toThrow(/transfer semantics/);
     });
+  describe('v1 renewal and seat semantics are reproduced, not reinvented', () => {
+    const renew = (months: number | 'P', extra: any = {}) => company(20 + (typeof months === 'number' ? months : 99), {
+      type: 'RENEWAL', licenseId: 'lic-1', machineId: null, seats: null, companyRef: 'legacy-ref-0001',
+      term: months === 'P' ? { kind: 'PERPETUAL' } : { kind: 'MONTHS', months }, ...extra,
+    });
+    const bound = () => ap(stateOf(), renew(1));          // binds the legacy ref once
+    it('renewal of a still-valid term ADDS to the current end (never shortens)', () => {
+      const r = applyKeyV2(stateOf(), renew(1), ctx);
+      expect(r.outcome.expiresAt!.toISOString()).toBe('2027-02-01T00:00:00.000Z');
+      expect(r.next.licenses['lic-1'].licenseExpiresAt).toBe('2027-02-01T00:00:00.000Z');
+    });
+    it('an expired term restarts from now, and a short renewal never lowers the protected expiry', () => {
+      const expired = { ...ctx, current: { ...ctx.current, expiresAt: new Date('2026-01-01T00:00:00Z') } };
+      const st = stateOf();                                         // watermark 2027-01-01
+      const r = applyKeyV2(st, renew(1), expired);
+      expect(r.outcome.expiresAt!.toISOString()).toBe('2026-12-26T00:00:00.000Z');   // DB row restarts from now
+      expect(r.next.licenses['lic-1'].licenseExpiresAt).toBe('2027-01-01T00:00:00.000Z'); // watermark kept
+    });
+    it('a perpetual licence stays perpetual on a month renewal; a perpetual key makes a term perpetual', () => {
+      const perp = { ...ctx, current: { ...ctx.current, expiresAt: null } };
+      expect(applyKeyV2(stateOf(), renew(1), perp).outcome.expiresAt).toBeNull();
+      const r = applyKeyV2(stateOf(), renew('P'), ctx);
+      expect(r.next.licenses['lic-1'].perpetual).toBe(true);
+      expect(r.next.licenses['lic-1'].licenseExpiresAt).toBeNull();
+    });
+    it('a SEATS CAP key lowers the CURRENT limit down to the seats in use, the highest-granted watermark stays', () => {
+      const cap = (v: number, n: number) => company(n, { type: 'SEATS', licenseId: 'lic-1', machineId: null, term: null, companyRef: 'legacy-ref-0001', seats: { mode: 'CAP', value: v } });
+      const r = applyKeyV2(stateOf(), cap(3, 30), ctx);                // limit 5 -> 3, used 3
+      expect(r.outcome.seatLimit).toBe(3);
+      expect(r.next.licenses['lic-1'].maxSeatLimit).toBe(5);
+      expect(() => applyKeyV2(stateOf(), cap(2, 31), ctx)).toThrow(KeyRefusal);   // below used
+      try { applyKeyV2(stateOf(), cap(2, 31), ctx); } catch (e: any) { expect(e.code).toBe('LICENSE_SEATS_BELOW_USED'); }
+    });
+    it('a business refusal writes nothing and is not a damaged-state failure', () => {
+      const before = readFileSync(path(), 'utf8');
+      const st = stateOf();
+      const snapshot = JSON.stringify(st);
+      let err: any;
+      try { applyKeyV2(st, company(40, { type: 'SEATS', licenseId: 'lic-nope-0000-0000', machineId: null, term: null }), ctx); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(KeyRefusal);
+      expect(err).not.toBeInstanceOf(MigrationError);
+      expect(err.code).toBe('LICENSE_KEY_WRONG_LICENSE');
+      expect(JSON.stringify(st)).toBe(snapshot);                       // input untouched
+      expect(readFileSync(path(), 'utf8')).toBe(before);               // nothing written
+      void bound;
+    });
+  });
     it('the machine id used here is a hard-coded shape (or TEST_MACHINE_ID), not read from a real machine', () => {
-      expect(MACHINE).toMatch(/^[A-Z0-9-]+$/);
+   expect(MACHINE).toMatch(/^[A-Z0-9-]+$/);
     });
   });
   describe('first admin (real Ed25519 verification, crash ordering)', () => {
     let admins: number;
     const setup = () => {
       seedV1(false); run();
-      const next = applyKeyV2(stateOf(), company(2), ctx);
+      const next = ap(stateOf(), company(2));
       updateV2(dir, secretBuf, marker, (s) => { s.licenses['lic-co-2-0000-0000'] = next.licenses['lic-co-2-0000-0000']; });
       admins = 0;
     };
@@ -412,13 +460,11 @@ describe('review items 5-6: key rules and first-admin with the real verifier', (
 });
 
 describe('refusal kinds stay distinct', () => {
-  it('a business refusal (key rules) is ABORTED, an invariant failure is DAMAGED', () => {
+  it('an invariant failure is MigrationError DAMAGED; a key-rule refusal is KeyRefusal (see the renewal/seat block above)', () => {
     seedV1(false); run();
-    const st = readDoc().state;
-    let business: any; let damaged: any;
-    try { applyKeyV2(st, { v: 2, keyId: 'k1', type: 'RENEWAL', licenseId: 'nope', machineId: null, issuedAt: '2026-11-26T00:00:00.000Z', term: null, seats: null, companyRef: 'company-ref-000', displayLabel: null, state: null, note: null } as any, { machineId: 'x', newCompanyId: 'c', now: new Date() }); } catch (e) { business = e; }
+    let damaged: any;
     try { updateV2(dir, secretBuf, marker, (x) => { x.licenses['lic-1'].appliedKeys = []; }); } catch (e) { damaged = e; }
-    expect(business.code).toBe('ABORTED');
+    expect(damaged).toBeInstanceOf(MigrationError);
     expect(damaged.code).toBe('DAMAGED');
   });
 });
