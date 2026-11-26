@@ -1,0 +1,59 @@
+{
+  "codes": {
+    "seat1": "OK",
+    "seat2": "OK",
+    "seat3": "LICENSE_SEATS_EXHAUSTED",
+    "replay": "LICENSE_KEY_ALREADY_USED",
+    "renewForOther": "LICENSE_KEY_WRONG_LICENSE",
+    "wrongMachineStatus": "WRONG_MACHINE",
+    "transfer": "OK",
+    "clockForward": "OK",
+    "clockBack": "OK",
+    "reconcile": "OK",
+    "statusAfter": "SUSPENDED"
+  },
+  "state": {
+    "v": 1,
+    "lastSeenAt": "2026-05-10T09:00:00.000Z",
+    "maxSeatsUsed": 3,
+    "maxSeatLimit": 5,
+    "appliedKeys": [
+      "key_activation-1",
+      "key_transfer-1"
+    ],
+    "licenseId": "lic_aaaa-bbbb",
+    "licenseExpiresAt": "2027-05-01T09:00:00.000Z",
+    "perpetual": false,
+    "clockState": "TAMPERED",
+    "clockSuspects": [
+      "2026-04-01T09:00:00.000Z"
+    ],
+    "enforcement": null,
+    "sequence": 12
+  },
+  "db": {
+    "installations": [
+      {
+        "licenseId": "lic_aaaa-bbbb",
+        "machineId": "KM-AAAA-BBBB-CCCC",
+        "customerRef": null,
+        "issuedAt": "2026-05-01T00:00:00.000Z",
+        "startsAt": "2026-05-01T00:00:00.000Z",
+        "expiresAt": "2027-05-01T09:00:00.000Z",
+        "seatLimit": 5,
+        "status": "SUSPENDED",
+        "lastKeyId": "key_transfer-1",
+        "lastSeenAt": "2026-05-01T09:00:00.000Z",
+        "clockState": "TAMPERED",
+        "clockNote": "The system date (2026-04-01T09:00:00.000Z) is 936 hour(s) earlier than the last time this program was seen running (2026-05-10T09:00:00.000Z)."
+      }
+    ],
+    "seats": 3,
+    "events": [
+      "ACTIVATION",
+      "TRANSFER",
+      "CLOCK_TAMPERED",
+      "RESTORED_FROM_WATERMARK"
+    ]
+  }
+}

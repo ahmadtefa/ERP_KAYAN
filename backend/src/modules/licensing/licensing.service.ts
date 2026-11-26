@@ -280,9 +280,14 @@ export class LicensingService implements OnModuleInit {
       });
     }
     if ((LICENSE_V2_BUILD as boolean) === true) {
-      // The v2 adapter is not wired yet. A build that sets the gate without it
-      // must refuse, never silently run the v1 store on possibly v2 state.
-      throw new ServiceUnavailableException({ code: 'LICENSE_STATE_DAMAGED', detail: 'The per-company licence store is not available in this build.' });
+      // The per-company licence store is not implemented in this build. Refuse
+      // explicitly and keep enforcing; never fall through to the v1 store on
+      // state that may be v2. This is "feature unavailable", not file damage.
+      this.enforcement = 'enforce';
+      throw new ServiceUnavailableException({
+        code: 'LICENSE_V2_UNAVAILABLE',
+        detail: 'The per-company licence feature is not available in this build.',
+      });
     }
     try {
       this.store = this.trustStore ?? new LicenseStore(this.directory);

@@ -410,3 +410,15 @@ describe('review items 5-6: key rules and first-admin with the real verifier', (
     });
   });
 });
+
+describe('refusal kinds stay distinct', () => {
+  it('a business refusal (key rules) is ABORTED, an invariant failure is DAMAGED', () => {
+    seedV1(false); run();
+    const st = readDoc().state;
+    let business: any; let damaged: any;
+    try { applyKeyV2(st, { v: 2, keyId: 'k1', type: 'RENEWAL', licenseId: 'nope', machineId: null, issuedAt: '2026-11-26T00:00:00.000Z', term: null, seats: null, companyRef: 'company-ref-000', displayLabel: null, state: null, note: null } as any, { machineId: 'x', newCompanyId: 'c', now: new Date() }); } catch (e) { business = e; }
+    try { updateV2(dir, secretBuf, marker, (x) => { x.licenses['lic-1'].appliedKeys = []; }); } catch (e) { damaged = e; }
+    expect(business.code).toBe('ABORTED');
+    expect(damaged.code).toBe('DAMAGED');
+  });
+});
