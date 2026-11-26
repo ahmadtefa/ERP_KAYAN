@@ -6,6 +6,8 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isClusterWorker } from '../cluster/cluster-config';
+import { RateReplyMessage, RateRequestMessage } from '../cluster/rate-window-store';
 
 /// A fixed-window request counter, kept in memory.
 ///
@@ -36,6 +38,39 @@ export class RateLimitGuard implements CanActivate {
   private readonly counters = new Map<string, WindowEntry>();
   private lastPrune = Date.now();
 
+  /// With several workers the counts live in the supervising process, so one
+  /// address or user is counted once however many workers serve it.
+  private readonly remote = isClusterWorker();
+  private nextRemoteId = 1;
+  private readonly pendingRemote = new Map<number, (r: RateReplyMessage) => void>();
+  private remoteListening = false;
+
+  private remoteHit(key: string, limit: number, windowMs: number): Promise<RateReplyMessage> {
+    if (!this.remoteListening) {
+      this.remoteListening = true;
+      process.on('message', (m: RateReplyMessage) => {
+        if (!m || m.kroot !== 'kayan-rate') return;
+        const done = this.pendingRemote.get(m.id);
+        if (done) {
+          this.pendingRemote.delete(m.id);
+          done(m);
+        }
+      });
+    }
+    return new Promise((resolve) => {
+      const id = this.nextRemoteId++;
+      // If the supervisor does not answer, fail open for this request rather
+      // than stall every request; the single-process limits still apply.
+      const timer = setTimeout(() => {
+        this.pendingRemote.delete(id);
+        resolve({ kroot: 'kayan-rate', id, allowed: true, count: 0, resetAt: Date.now() + windowMs });
+      }, 2000);
+      this.pendingRemote.set(id, (r) => { clearTimeout(timer); resolve(r); });
+      const msg: RateRequestMessage = { kroot: 'kayan-rate', id, op: 'hit', key, limit, windowMs };
+      process.send?.(msg);
+    });
+  }
+
   /// Routes that get the tight allowance, because guessing is cheap there.
   private static readonly sensitiveRoutes = [
     '/auth/login',
@@ -43,7 +78,7 @@ export class RateLimitGuard implements CanActivate {
     '/auth/change-password',
   ];
 
-  canActivate(context: ExecutionContext): boolean {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     if (!this.enabled) return true;
 
     const request = context.switchToHttp().getRequest<{
@@ -74,6 +109,16 @@ export class RateLimitGuard implements CanActivate {
     const key = `${sensitive ? 'auth' : 'api'}:${address}`;
     const now = Date.now();
 
+    if (this.remote) {
+      return this.remoteHit(key, limit, windowMs).then((r) => {
+        if (!r.allowed) {
+          return this.reject(response, Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000)), sensitive);
+        }
+        if (!sensitive) request.rateReservation = { key, entry: { count: r.count, resetAt: r.resetAt }, refunded: false };
+        return true;
+      });
+    }
+
     this.prune(now);
 
     const entry = this.counters.get(key);
@@ -99,6 +144,11 @@ export class RateLimitGuard implements CanActivate {
   refund(reservation: RateReservation | undefined): void {
     if (!reservation || reservation.refunded) return;
     reservation.refunded = true;
+    if (this.remote) {
+      const msg: RateRequestMessage = { kroot: 'kayan-rate', id: 0, op: 'refund', key: reservation.key, resetAt: reservation.entry.resetAt };
+      process.send?.(msg);
+      return;
+    }
     const live = this.counters.get(reservation.key) === reservation.entry;
     if (live && reservation.entry.resetAt > Date.now() && reservation.entry.count > 0) {
       reservation.entry.count -= 1;
@@ -107,10 +157,15 @@ export class RateLimitGuard implements CanActivate {
 
   /// Counts one request against a verified user's own window (same limits as
   /// the address window) and refuses it past the limit.
-  countUser(key: string, response: Parameters<RateLimitGuard['reject']>[0]): void {
+  countUser(key: string, response: Parameters<RateLimitGuard['reject']>[0]): void | Promise<void> {
     if (!this.enabled) return;
     const limit = this.config.get<number>('RATE_LIMIT_MAX', 300);
     const windowMs = this.config.get<number>('RATE_LIMIT_WINDOW_MS', 60_000);
+    if (this.remote) {
+      return this.remoteHit(key, limit, windowMs).then((r) => {
+        if (!r.allowed) this.reject(response, Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000)), false);
+      });
+    }
     const now = Date.now();
     this.prune(now);
     const entry = this.counters.get(key);
@@ -192,7 +247,7 @@ export class RateLimitGuard implements CanActivate {
 export class VerifiedUserRateLimitGuard implements CanActivate {
   constructor(private readonly limiter: RateLimitGuard) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
       user?: { id?: string; sub?: string; userId?: string; companyId?: string };
       rateReservation?: RateReservation;
@@ -202,7 +257,7 @@ export class VerifiedUserRateLimitGuard implements CanActivate {
     if (!user || !userId || !user.companyId) return true;
     this.limiter.refund(request.rateReservation);
     const response = context.switchToHttp().getResponse<Parameters<RateLimitGuard['reject']>[0]>();
-    this.limiter.countUser(`user:${user.companyId}:${userId}`, response);
-    return true;
+    const counted = this.limiter.countUser(`user:${user.companyId}:${userId}`, response);
+    return counted ? counted.then(() => true) : true;
   }
 }

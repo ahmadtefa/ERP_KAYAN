@@ -22,6 +22,12 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
 
     const isClosedTransaction = exception instanceof ClosedDatabaseTransactionError;
+    // A transaction that waited too long for a lock or a connection (Prisma
+    // P2028 / P2024) was rolled back in full: nothing was saved. It is a busy
+    // server, not a bug, and the person is told to try again.
+    const isBusy =
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      (exception.code === 'P2028' || exception.code === 'P2024');
     const isUniqueConstraint =
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2002';
@@ -54,7 +60,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
           ? Number((exception as { statusCode?: unknown }).statusCode)
           : 0;
     const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
-    const status = isClosedTransaction ? HttpStatus.SERVICE_UNAVAILABLE : isUniqueConstraint
+    const status = isClosedTransaction || isBusy ? HttpStatus.SERVICE_UNAVAILABLE : isUniqueConstraint
       ? HttpStatus.CONFLICT
       : isVoucherClaimTrigger
         ? HttpStatus.CONFLICT
@@ -74,6 +80,11 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     if (isClosedTransaction) {
       detail = 'The operation took too long and was rolled back. Reload the document to check its state before trying again.';
       extra = { code: 'TRANSACTION_ROLLED_BACK' };
+    } else if (isBusy) {
+      detail = 'The server is busy and this operation was cancelled. Nothing was saved. Try again in a moment.';
+      extra = { code: 'SERVER_BUSY' };
+      response.setHeader('Retry-After', '2');
+      this.logger.warn(`Operation cancelled while waiting for the database (Prisma ${(exception as Prisma.PrismaClientKnownRequestError).code})`);
     } else if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
       // Name the constraint (never the values) so an operator can tell which

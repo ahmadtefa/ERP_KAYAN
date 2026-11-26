@@ -1,4 +1,7 @@
+import cluster from 'node:cluster';
 import { existsSync } from 'node:fs';
+import { workerCount } from './common/cluster/cluster-config';
+import { runPrimary } from './common/cluster/primary';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
@@ -160,4 +163,10 @@ async function bootstrap() {
       `TLS ${tls ? 'terminated by the configured proxy' : 'not terminated at this process'}`,
   );
 }
-void bootstrap();
+// With KAYAN_WORKERS above 1 this process only supervises the workers; every
+// worker (and the single-process default) runs the application itself.
+if (workerCount() > 1 && cluster.isPrimary) {
+  runPrimary();
+} else {
+  void bootstrap();
+}

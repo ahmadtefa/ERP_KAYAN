@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# usage: load-run.sh LABEL POOL_MAX RATE_LIMIT_ENABLED   (run from backend/)
+# usage: load-run.sh LABEL POOL_MAX RATE_LIMIT_ENABLED [WORKERS]   (run from backend/)
 # Re-run after the first-request company-settings race fix v2 (raw INSERT ... ON CONFLICT DO NOTHING).
 set -euo pipefail
-LABEL="$1"; POOL="$2"; LIMITER="$3"
+LABEL="$1"; POOL="$2"; LIMITER="$3"; WORKERS="${4:-1}"
 DB="erp_kayan_load_${LABEL,,}"
 export DATABASE_URL="postgresql://ci:ci@127.0.0.1:5432/${DB}?schema=public"
 psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" -c "CREATE DATABASE ${DB}"
@@ -10,6 +10,7 @@ node scripts/apply-migrations.mjs > /dev/null
 npx ts-node prisma/seed.ts > /dev/null
 export RATE_LIMIT_ENABLED="$LIMITER"
 if [ -n "$POOL" ]; then export PG_POOL_MAX="$POOL"; fi
+export KAYAN_WORKERS="$WORKERS"
 START=$(date +%s.%N)
 node dist/src/main.js > "/tmp/load-api-${LABEL}.log" 2>&1 &
 API_PID=$!
@@ -18,11 +19,12 @@ for i in $(seq 1 120); do
   if curl -fsS http://127.0.0.1:3000/api/v1/health 2>/dev/null | grep -q '"database":"up"'; then break; fi
   sleep 0.25
 done
+if [ "$WORKERS" != "1" ]; then sleep 5; fi
 READY=$(date +%s.%N)
-echo "run ${LABEL}: API start-to-healthy $(echo "$READY - $START" | bc) s (pool max: ${POOL:-default 10}, limiter enabled: ${LIMITER})"
+echo "run ${LABEL}: API start-to-healthy $(echo "$READY - $START" | bc) s (pool max: ${POOL:-default 10}, workers: ${WORKERS}, limiter enabled: ${LIMITER})"
 export SERVER_PID="$API_PID"
 export ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345
-export LOAD_LABEL="run ${LABEL}: pool=${POOL:-10}" LOAD_RESULT_FILE="/tmp/load-result-${LABEL}.json"
+export LOAD_LABEL="run ${LABEL}: pool=${POOL:-10} workers=${WORKERS}" LOAD_RESULT_FILE="/tmp/load-result-${LABEL}.json"
 set +e
 node scripts/load-check.mjs http://127.0.0.1:3000/api/v1 | tee "/tmp/load-out-${LABEL}.txt" | grep -v '^{'
 RC=${PIPESTATUS[0]}

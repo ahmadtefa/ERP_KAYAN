@@ -28,6 +28,26 @@ describe('ProblemDetailsFilter', () => {
     expect(response.json).toHaveBeenLastCalledWith(expect.objectContaining({detail:'Unexpected server error'}));
   });
 
+  it('maps a transaction that waited too long (P2028, P2024) to a clear 503 that says nothing was saved', () => {
+    for (const code of ['P2028', 'P2024']) {
+      const response = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn() };
+      const host = { switchToHttp: () => ({ getResponse: () => response }) } as any;
+      const error = new Prisma.PrismaClientKnownRequestError('Transaction API error: private text', { code, clientVersion: 'x' });
+      new ProblemDetailsFilter().catch(error, host);
+      expect(response.status).toHaveBeenLastCalledWith(503);
+      expect(response.setHeader).toHaveBeenCalledWith('Retry-After', '2');
+      const body = response.json.mock.calls[0][0];
+      expect(body.code).toBe('SERVER_BUSY');
+      expect(body.detail).toContain('Nothing was saved');
+      expect(JSON.stringify(body)).not.toContain('private text');
+    }
+    // other database errors stay the generic 500
+    const response = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn() };
+    const host = { switchToHttp: () => ({ getResponse: () => response }) } as any;
+    new ProblemDetailsFilter().catch(new Prisma.PrismaClientKnownRequestError('x', { code: 'P2025', clientVersion: 'x' }), host);
+    expect(response.status).toHaveBeenLastCalledWith(500);
+  });
+
   it('keeps safe field and action details in the compatible error contract', () => {
     const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const host = { switchToHttp: () => ({ getResponse: () => response }) } as any;

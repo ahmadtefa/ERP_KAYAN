@@ -426,6 +426,13 @@ class AppErrorMessageResolver {
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
       }
 
+      if (error is ApiFailure && error.statusCode == 503 && error.code == 'SERVER_BUSY') {
+        return AppErrorText(reason: AppErrorReason.server, severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+            ? 'الخادم مشغول الآن فأُلغيت العملية ولم يُحفظ شيء. انتظر لحظة ثم أعد المحاولة.'
+            : 'The server is busy, so the operation was cancelled and nothing was saved. Wait a moment and try again.');
+      }
+
       if (error is ApiFailure && error.statusCode == 400 &&
           error.code == 'STOCK_DOC_TRANSFER_LOT_REQUIRED') {
         return AppErrorText(

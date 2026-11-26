@@ -246,12 +246,20 @@ export class CustomerCreditService {
     });
     if (!invoice || invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) return null;
     // Two invoices for one customer posted together must see each other: the
-    // customer row is the lock that makes them take turns.
-    const rows = lock
+    // customer row is the lock that makes them take turns. That only matters
+    // when there is a limit to protect, so the row is read without a lock
+    // first and locked only for a customer who has a limit. Customers with no
+    // limit (the usual case) no longer queue behind each other at posting.
+    let rows = lock
       ? await tx.$queryRaw<Array<{ creditLimit: Prisma.Decimal; nameEn: string }>>(Prisma.sql`
           SELECT "creditLimit", "nameEn" FROM customers
-           WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`)
+           WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid`)
       : [];
+    if (lock && rows[0] && new Prisma.Decimal(rows[0].creditLimit).greaterThan(0)) {
+      rows = await tx.$queryRaw<Array<{ creditLimit: Prisma.Decimal; nameEn: string }>>(Prisma.sql`
+        SELECT "creditLimit", "nameEn" FROM customers
+         WHERE id = ${invoice.customerId}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`);
+    }
     const row = rows[0];
     if (!row) return null;
     const creditLimit = new Prisma.Decimal(row.creditLimit);

@@ -80,10 +80,18 @@ jobs:
         env:
           PGPASSWORD: ci
         run: bash ../scripts/load-run.sh B 40 false
+      - name: "Run C: 4 API workers (KAYAN_WORKERS=4), default per-worker pools, rate limiter off"
+        env:
+          PGPASSWORD: ci
+        run: bash ../scripts/load-run.sh C "" false 4
       - name: "Probe: the built-in per-address rate limiter at its default (limiter ON)"
         env:
           PGPASSWORD: ci
-        run: bash ../scripts/load-limiter-probe.sh
+        run: bash ../scripts/load-limiter-probe.sh 1
+      - name: "Probe: the same limiter with 4 workers (shared counters: still 300 per minute per address)"
+        env:
+          PGPASSWORD: ci
+        run: bash ../scripts/load-limiter-probe.sh 4
       - name: Upload result files (synthetic data only)
         if: always()
         uses: actions/upload-artifact@v4

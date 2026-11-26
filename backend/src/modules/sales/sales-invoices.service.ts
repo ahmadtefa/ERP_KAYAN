@@ -341,16 +341,18 @@ export class SalesInvoicesService {
     // person's stock permission default to showing no balance.
     await this.assertStockCovers(tx, companyId, branchId, dto.warehouseId, lines, (options.stockCheck ?? { mayReadStock: false }).mayReadStock);
 
+      // Everything that can be read is read before the number is taken, so
+      // the counter row is locked for as short a time as possible.
+      const terms = dto.dueDate
+        ? { dueDate: new Date(dto.dueDate), dueSchedule: null }
+        : await this.dueFromTerms(companyId, dto.customerId, dto.invoiceDate, dto.deliveryDate ?? null, tx);
+
       const invoiceNumber = await this.numbers.next(
         tx,
         companyId,
         'SALES_INVOICE',
         'SI',
       );
-
-      const terms = dto.dueDate
-        ? { dueDate: new Date(dto.dueDate), dueSchedule: null }
-        : await this.dueFromTerms(companyId, dto.customerId, dto.invoiceDate, dto.deliveryDate ?? null, tx);
 
       return tx.salesInvoice.create({
         data: {

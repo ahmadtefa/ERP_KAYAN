@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Shows what the default per-address limiter does to one office address (limiter ON).
 set -euo pipefail
+# usage: load-limiter-probe.sh [WORKERS]  (default 1)
+export KAYAN_WORKERS="${1:-1}"
 DB=erp_kayan_load_probe
 export DATABASE_URL="postgresql://ci:ci@127.0.0.1:5432/${DB}?schema=public"
 psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" -c "CREATE DATABASE ${DB}"
 node scripts/apply-migrations.mjs > /dev/null
 npx ts-node prisma/seed.ts > /dev/null
 export RATE_LIMIT_ENABLED=true
-node dist/src/main.js > /tmp/load-api-probe.log 2>&1 &
+node dist/src/main.js > /tmp/load-api-probe-w${KAYAN_WORKERS}.log 2>&1 &
 API_PID=$!
 trap 'kill $API_PID 2>/dev/null || true' EXIT
 for i in $(seq 1 120); do curl -fsS http://127.0.0.1:3000/api/v1/health 2>/dev/null | grep -q '"database":"up"' && break; sleep 0.25; done
+if [ "$KAYAN_WORKERS" != "1" ]; then sleep 5; fi
+echo "limiter probe with KAYAN_WORKERS=$KAYAN_WORKERS"
 node --input-type=module -e '
 const API="http://127.0.0.1:3000/api/v1";
 const login=async(u,p)=>fetch(API+"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})});

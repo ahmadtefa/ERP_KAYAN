@@ -95,18 +95,38 @@ class Stats {
 }
 
 let lastCpu = null;
+// The server process and, when it runs several workers, all of its direct
+// children: CPU and memory are summed, so "percent of one core" can pass 100.
+function serverPids() {
+  const pids = [SERVER_PID];
+  for (const d of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(d) || d === SERVER_PID) continue;
+    try {
+      const stat = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
+      const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (f[1] === SERVER_PID) pids.push(d);
+    } catch { /* process ended */ }
+  }
+  return pids;
+}
 function serverSample() {
   if (!SERVER_PID) return null;
   try {
-    const stat = fs.readFileSync(`/proc/${SERVER_PID}/stat`, 'utf8');
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const ticks = Number(f[11]) + Number(f[12]); // utime + stime, clock ticks (100/s)
+    let ticks = 0, rss = 0;
+    const pids = serverPids();
+    for (const pid of pids) {
+      try {
+        const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        ticks += Number(f[11]) + Number(f[12]); // utime + stime, clock ticks (100/s)
+        rss += Number(fs.readFileSync(`/proc/${pid}/statm`, 'utf8').split(' ')[1]) * 4096 / 1048576;
+      } catch { /* worker restarted mid-sample */ }
+    }
     const now = performance.now();
     let cpu = null; // percent of ONE core since the previous sample
     if (lastCpu) cpu = ((ticks - lastCpu.ticks) / 100) / ((now - lastCpu.now) / 1000) * 100;
     lastCpu = { ticks, now };
-    const rss = Number(fs.readFileSync(`/proc/${SERVER_PID}/statm`, 'utf8').split(' ')[1]) * 4096 / 1048576;
-    return { cpu, rssMb: Math.round(rss) };
+    return { cpu, rssMb: Math.round(rss), processes: pids.length };
   } catch { return null; }
 }
 

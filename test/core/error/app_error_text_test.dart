@@ -28,6 +28,19 @@ void main() {
     expect(resolver.resolve(const ApiFailure('synthetic raw',statusCode:503)).businessMessage,isNull);
   });
 
+  test('busy server (SERVER_BUSY) says nothing was saved and to retry, in both languages', () {
+    const failure = ApiFailure('synthetic raw', statusCode: 503, code: 'SERVER_BUSY');
+    final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure);
+    final en = const AppErrorMessageResolver(isArabic: false).resolve(failure);
+    expect(ar.businessMessage, contains('لم يُحفظ شيء'));
+    expect(ar.businessMessage, contains('أعد المحاولة'));
+    expect(en.businessMessage, contains('nothing was saved'));
+    expect(en.businessMessage, contains('try again'));
+    expect(en.businessMessage, isNot(contains('synthetic raw')));
+    // a 503 without the code stays unexplained, as before
+    expect(const AppErrorMessageResolver(isArabic: false).resolve(const ApiFailure('x', statusCode: 503)).businessMessage, isNull);
+  });
+
   test(
     'sales posting stock shortfall remains actionable in both languages',
     () {

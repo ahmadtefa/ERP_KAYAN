@@ -23,20 +23,26 @@ export class DocumentNumberService {
     key: string,
     prefix: string,
   ): Promise<string> {
-    await tx.$executeRaw`
-      INSERT INTO document_sequences ("companyId", key, prefix, "nextValue", "updatedAt")
-      VALUES (${companyId}::uuid, ${key}, ${prefix}, 1, now())
-      ON CONFLICT ("companyId", key) DO NOTHING
-    `;
-
-    // The UPDATE locks the row until the transaction commits, which is what
-    // makes concurrent allocation safe.
-    const rows = await tx.$queryRaw<Array<{ nextValue: number; prefix: string }>>`
+    // The counter row nearly always exists, so take the number first and
+    // create the row only when there was none. Creating it up front (as this
+    // used to) made every request wait behind the one that held the row.
+    const take = () => tx.$queryRaw<Array<{ nextValue: number; prefix: string }>>`
       UPDATE document_sequences
          SET "nextValue" = "nextValue" + 1, "updatedAt" = now()
        WHERE "companyId" = ${companyId}::uuid AND key = ${key}
       RETURNING "nextValue", prefix
     `;
+    // The UPDATE locks the row until the transaction commits, which is what
+    // makes concurrent allocation safe.
+    let rows = await take();
+    if (rows.length === 0) {
+      await tx.$executeRaw`
+        INSERT INTO document_sequences ("companyId", key, prefix, "nextValue", "updatedAt")
+        VALUES (${companyId}::uuid, ${key}, ${prefix}, 1, now())
+        ON CONFLICT ("companyId", key) DO NOTHING
+      `;
+      rows = await take();
+    }
 
     const row = rows[0];
     const allocated = row.nextValue - 1;
