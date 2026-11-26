@@ -100,6 +100,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
         <div>
           <label for="licence-term">مدة الترخيص — term</label>
           <select id="licence-term">
+            <option value="15d">15 يوم — 15 days</option>
             <option value="1m">شهر — 1 month</option>
             <option value="6m">6 أشهر — 6 months</option>
             <option value="1y" selected>سنة — 1 year</option>
@@ -107,6 +108,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
             <option value="3y">3 سنوات — 3 years</option>
             <option value="P">دائم — perpetual</option>
           </select>
+          <input id="licence-term-months" type="number" min="1" max="1200" step="1" dir="ltr" placeholder="عدد الشهور بحرية — custom months (optional)">
         </div>
       </div>
       <div class="actions">
@@ -144,6 +146,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
       <div id="termwrap">
         <label>المدة — duration</label>
         <select id="term">
+          <option value="15d">15 يوم — 15 days</option>
           <option value="1m">شهر — 1 month</option>
           <option value="3m">3 أشهر — 3 months</option>
           <option value="6m">6 أشهر — 6 months</option>
@@ -152,6 +155,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
           <option value="3y">3 سنوات — 3 years</option>
           <option value="P">دائم — perpetual</option>
         </select>
+        <input id="term-months" type="number" min="1" max="1200" step="1" dir="ltr" placeholder="عدد الشهور بحرية — custom months (optional)">
       </div>
       <div id="seatswrap">
         <label>حد المستخدمين — seat limit</label>
@@ -263,7 +267,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     var bits = [licence.licenseId];
     if (licence.ref) bits.push(licence.ref);
     bits.push(licence.seats + ' seats');
-    bits.push(licence.term === null ? 'perpetual' : licence.term + 'm');
+    bits.push(licence.term === null ? 'perpetual' : (licence.termDays ? licence.termDays + 'd' : licence.term + 'm'));
     return bits.join(' — ');
   }
 
@@ -318,7 +322,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     if (!licence) return;
     $('seats').value = licence.seats;
     $('used').value = licence.seatsUsed;
-    $('term').value = licence.term === null ? 'P' : (licence.term % 12 === 0 ? (licence.term / 12) + 'y' : licence.term + 'm');
+    $('term').value = licence.term === null ? 'P' : licence.termDays ? licence.termDays + 'd' : (licence.term % 12 === 0 ? (licence.term / 12) + 'y' : licence.term + 'm');
   }
 
   function syncType() {
@@ -383,7 +387,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
       html += '<div style="margin-top:14px"><strong><code>' + esc(licence.licenseId) + '</code></strong> ' +
         '<span class="badge">' + esc(licence.status) + '</span> ' +
         '<span class="badge">' + esc(licence.seats) + ' seats / used ' + esc(licence.seatsUsed) + '</span> ' +
-        '<span class="badge">' + esc(licence.term === null ? 'perpetual' : licence.term + ' months') + '</span> ' +
+        '<span class="badge">' + esc(licence.term === null ? 'perpetual' : (licence.termDays ? licence.termDays + ' days' : licence.term + ' months')) + '</span> ' +
         '<div class="note">' + esc(licence.ref || '(no note)') + ' · machine ' + esc(licence.machineId || '—') +
         ' · expires ' + esc(licence.expiresAt || 'never') + '</div>';
       if (keys.length) {
@@ -428,7 +432,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     };
     var type = body.type;
     if (type === 'ACTIVATION') body.seats = Number($('seats').value);
-    if (type !== 'SEATS' && type !== 'TRANSFER') body.term = $('term').value;
+    if (type !== 'SEATS' && type !== 'TRANSFER') body.term = $('term-months').value.trim() ? $('term-months').value.trim() + 'm' : $('term').value;
     if (type === 'SEATS') {
       var capText = $('cap').value.trim();
       if (capText) body.cap = Number(capText); else body.increase = Number($('increase').value);
@@ -454,7 +458,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
       ref: $('licence-ref').value.trim(),
       company: $('licence-company').checked,
       seats: seats,
-      term: $('licence-term').value
+      term: $('licence-term-months').value.trim() ? $('licence-term-months').value.trim() + 'm' : $('licence-term').value
     }).then(function (payload) {
       return refresh().then(function () {
         if (payload.licence && payload.licence.licenseId) {

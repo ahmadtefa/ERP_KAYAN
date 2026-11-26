@@ -8,6 +8,20 @@ import {
 
 const utc = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
+describe('a day-counted term (15 days)', () => {
+  it('ends exactly 15 days after activation, across a month end', () => {
+    expect(activationEnd({ kind: 'DAYS', days: 15 }, utc('2026-02-20'))!.toISOString()).toBe('2026-03-07T00:00:00.000Z');
+  });
+  it('a renewal adds the days to a date still in the future, else starts now', () => {
+    expect(renewalEnd(utc('2026-06-10'), { kind: 'DAYS', days: 15 }, utc('2026-06-01'))!.toISOString()).toBe('2026-06-25T00:00:00.000Z');
+    expect(renewalEnd(utc('2026-05-01'), { kind: 'DAYS', days: 15 }, utc('2026-06-01'))!.toISOString()).toBe('2026-06-16T00:00:00.000Z');
+  });
+  it('month terms are unchanged', () => {
+    expect(activationEnd({ kind: 'MONTHS', months: 1 }, utc('2026-01-31'))!.toISOString()).toBe('2026-02-28T00:00:00.000Z');
+    expect(renewalEnd(utc('2026-06-10'), 3, utc('2026-06-01'))!.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+  });
+});
+
 describe('licence terms are counted in calendar months', () => {
   it('adds months without drifting through thirty-day blocks', () => {
     expect(addCalendarMonths(utc('2026-01-15'), 1).toISOString()).toBe(

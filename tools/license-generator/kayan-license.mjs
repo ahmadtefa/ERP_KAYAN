@@ -68,6 +68,7 @@ const KEY_PREFIX_V2 = 'KYN2';
 const REQUEST_PREFIX = 'KYNREQ1';
 const REGISTER_VERSION = 1;
 const MAX_TERM_MONTHS = 1200;
+const MAX_TERM_DAYS = 366;
 
 const TYPES = ['ACTIVATION', 'RENEWAL', 'SEATS', 'TRANSFER'];
 const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,95}$/;
@@ -288,17 +289,25 @@ function parseArgs(argv) {
 /** `1m`, `6m`, `1y`, `2y`, `3y`, `p`/`perpetual`. Calendar months, no 30-day blocks. */
 function parseTerm(text) {
   if (text === undefined || text === true) {
-    refuse('A term is required: 1m, 6m, 1y, 2y, 3y, or P for perpetual.');
+    refuse('A term is required: 15d, 1m, 6m, 1y, 2y, 3y, or P for perpetual.');
   }
   const value = String(text).trim().toLowerCase();
   if (value === 'p' || value === 'perpetual' || value === 'دائم') {
     return { kind: 'PERPETUAL' };
   }
+  const dayMatch = /^(\d{1,3})\s*(d|day|days|يوم|أيام)$/.exec(value);
+  if (dayMatch) {
+    const days = Number(dayMatch[1]);
+    if (days < 1 || days > MAX_TERM_DAYS) {
+      refuse(`A day term must be between 1 and ${MAX_TERM_DAYS} days.`);
+    }
+    return { kind: 'DAYS', days };
+  }
   const match = /^(\d{1,4})\s*(m|month|months|months?|شهر|أشهر|y|year|years|سنة|سنوات)$/.exec(
     value,
   );
   if (!match) {
-    refuse(`I do not understand the term "${text}". Use 1m, 6m, 1y, 2y, or P.`);
+    refuse(`I do not understand the term "${text}". Use 15d, 1m, 6m, 1y, 2y, or P.`);
   }
   const amount = Number(match[1]);
   const unit = match[2];
@@ -311,8 +320,34 @@ function parseTerm(text) {
   return { kind: 'MONTHS', months };
 }
 
+/** Register value: months, null for perpetual, 0 for a day-counted term (see termDaysOf). */
 function termMonths(term) {
-  return term.kind === 'PERPETUAL' ? null : term.months;
+  if (term.kind === 'PERPETUAL') return null;
+  return term.kind === 'DAYS' ? 0 : term.months;
+}
+
+function termDaysOf(term) {
+  return term.kind === 'DAYS' ? term.days : null;
+}
+
+/** End date of a term from a start date. */
+function addTermTo(from, term) {
+  return term.kind === 'DAYS'
+    ? new Date(from.getTime() + term.days * 86_400_000)
+    : addMonths(from, term.months);
+}
+
+/** Sets the register's term fields; termDays exists only on day-counted licences. */
+function setLicenceTerm(licence, term) {
+  licence.term = termMonths(term);
+  if (term.kind === 'DAYS') licence.termDays = term.days;
+  else delete licence.termDays;
+}
+
+function termLabel(months, days) {
+  if (months === null || months === undefined) return 'perpetual';
+  if (days) return `${days} day(s)`;
+  return `${months} month(s)`;
 }
 
 /** Calendar months, clamped at month end: 31 Jan + 1 month is 28/29 Feb. */
@@ -329,6 +364,7 @@ function addMonths(from, months) {
 
 function describeTerm(term) {
   if (term.kind === 'PERPETUAL') return 'دائم / perpetual';
+  if (term.kind === 'DAYS') return `${term.days} يوم / ${term.days} day(s)`;
   const months = term.months;
   if (months % 12 === 0) return `${months / 12} سنة / ${months / 12} year(s)`;
   return `${months} شهر / ${months} month(s)`;
@@ -400,9 +436,9 @@ function parseRequestCode(code) {
 
 /** The term a licence was registered with, as the key format spells it. */
 function licenceTerm(licence) {
-  return licence.term === null || licence.term === undefined
-    ? { kind: 'PERPETUAL' }
-    : { kind: 'MONTHS', months: licence.term };
+  if (licence.term === null || licence.term === undefined) return { kind: 'PERPETUAL' };
+  if (licence.termDays) return { kind: 'DAYS', days: licence.termDays };
+  return { kind: 'MONTHS', months: licence.term };
 }
 
 function requireLicence(register, id) {
@@ -433,6 +469,7 @@ function recordKey(register, licence, entry) {
     ...(entry.payload.v === 2 ? { format: 2, companyRef: entry.payload.companyRef } : {}),
     machineId: entry.payload.machineId ?? null,
     term: entry.payload.term ? termMonths(entry.payload.term) : null,
+    ...(entry.payload.term?.kind === 'DAYS' ? { termDays: entry.payload.term.days } : {}),
     seats: entry.payload.seats ?? null,
     issuedAt: entry.payload.issuedAt,
     status: 'issued',
@@ -545,6 +582,7 @@ function createLicence(input) {
     seats,
     seatsUsed: 0,
     term: termMonths(term),
+    ...(term.kind === 'DAYS' ? { termDays: term.days } : {}),
     machineId: null,
     startsAt: null,
     expiresAt: null,
@@ -692,8 +730,8 @@ function issueKey(input) {
       licence.status = 'active';
       licence.startsAt = licence.startsAt ?? issuedAt;
       if (term.kind !== 'PERPETUAL') {
-        licence.expiresAt = addMonths(new Date(), term.months).toISOString();
-        licence.term = term.months;
+        licence.expiresAt = addTermTo(new Date(), term).toISOString();
+        setLicenceTerm(licence, term);
       } else {
         licence.expiresAt = null;
         licence.term = null;
@@ -720,8 +758,8 @@ function issueKey(input) {
         const now = new Date();
         const current = licence.expiresAt ? new Date(licence.expiresAt) : null;
         const from = current && current.getTime() > now.getTime() ? current : now;
-        licence.expiresAt = addMonths(from, term.months).toISOString();
-        licence.term = term.months;
+        licence.expiresAt = addTermTo(from, term).toISOString();
+        setLicenceTerm(licence, term);
       }
       licence.status = 'active';
     }
@@ -940,16 +978,14 @@ ${licence.licenseId}  [${licence.status}]
   ref     : ${licence.ref ?? '-'}
   machine : ${licence.machineId ?? '-'}
   seats   : ${licence.seats} (used ${licence.seatsUsed})
-  term    : ${licence.term === null ? 'perpetual' : `${licence.term} month(s)`}
+  term    : ${termLabel(licence.term, licence.termDays)}
   expires : ${licence.expiresAt ?? 'never'}
   issued  : ${keys.length} key(s)`);
     for (const key of keys) {
       const detail =
         key.type === 'SEATS'
           ? `${key.seats?.mode} ${key.seats?.value}`
-          : key.term === null
-            ? 'perpetual'
-            : `${key.term} month(s)`;
+          : termLabel(key.term, key.termDays);
       console.log(
         `    ${key.status.padEnd(10)} ${key.type.padEnd(10)} ${detail.padEnd(16)} ${key.issuedAt.slice(0, 10)}  ${key.keyId}`,
       );
@@ -1084,7 +1120,7 @@ type      : ${payload.type}
 licence   : ${payload.licenseId}
 key id    : ${payload.keyId}
 machine   : ${payload.machineId ?? '-'}
-term      : ${payload.term ? `${payload.term.kind} ${payload.term.months ?? ''}`.trim() : '-'}
+term      : ${payload.term ? `${payload.term.kind} ${payload.term.months ?? payload.term.days ?? ''}`.trim() : '-'}
 seats     : ${payload.seats ? `${payload.seats.mode} ${payload.seats.value}` : '-'}
 issued    : ${payload.issuedAt}`);
 }

@@ -1019,7 +1019,7 @@ export class LicensingService implements OnModuleInit {
       // in the sense that it replaces the end date, and it is explicit.
       expiresAt = null;
     } else {
-      expiresAt = renewalEnd(existing.expiresAt, term.months, now);
+      expiresAt = renewalEnd(existing.expiresAt, term, now);
     }
     const changed = await tx.licenseInstallation.updateMany({
       where: { licenseId: existing.licenseId, machineId: existing.machineId,

@@ -247,6 +247,7 @@ class _IssueTabState extends State<IssueTab> {
 
   static const List<MapEntry<String, String>> _terms = [
     MapEntry('', 'كما في الترخيص — as the licence'),
+    MapEntry('15d', '15 يوم — 15 days'),
     MapEntry('1m', 'شهر — 1 month'),
     MapEntry('3m', '3 أشهر — 3 months'),
     MapEntry('6m', '6 أشهر — 6 months'),
@@ -263,6 +264,7 @@ class _IssueTabState extends State<IssueTab> {
   final _cap = TextEditingController();
   final _used = TextEditingController();
   final _note = TextEditingController();
+  final _termMonths = TextEditingController();
 
   String _type = 'ACTIVATION';
   String? _licenceId;
@@ -284,7 +286,7 @@ class _IssueTabState extends State<IssueTab> {
 
   @override
   void dispose() {
-    for (final controller in [_request, _machine, _seats, _increase, _cap, _used, _note]) {
+    for (final controller in [_request, _machine, _seats, _increase, _cap, _used, _note, _termMonths]) {
       controller.dispose();
     }
     super.dispose();
@@ -314,7 +316,7 @@ class _IssueTabState extends State<IssueTab> {
           licenceId: licenceId,
           machineId: _machine.text,
           request: _request.text,
-          term: _term,
+          term: _termMonths.text.trim().isEmpty ? _term : '${_termMonths.text.trim()}m',
           seats: _type == 'ACTIVATION' ? _seats.text : null,
           increase: _type == 'SEATS' && _seatModeIncrease ? _increase.text : null,
           cap: _type == 'SEATS' && !_seatModeIncrease ? _cap.text : null,
@@ -429,6 +431,15 @@ class _IssueTabState extends State<IssueTab> {
                       DropdownMenuItem(value: entry.key, child: Text(entry.value)),
                   ],
                   onChanged: (value) => setState(() => _term = value ?? ''),
+                ),
+              if (_type == 'ACTIVATION' || _type == 'RENEWAL')
+                TextField(
+                  controller: _termMonths,
+                  keyboardType: TextInputType.number,
+                  textDirection: TextDirection.ltr,
+                  decoration: const InputDecoration(
+                    labelText: 'عدد الشهور بحرية (اختياري) — custom months (optional)',
+                  ),
                 ),
               if (_type == 'ACTIVATION') ...[
                 const SizedBox(height: 12),
@@ -646,12 +657,14 @@ class _RegisterTabState extends State<RegisterTab> {
   final _ref = TextEditingController();
   final _seats = TextEditingController(text: '5');
   String _term = '1y';
+  final _termMonths = TextEditingController();
   bool _company = false;
 
   @override
   void dispose() {
     _ref.dispose();
     _seats.dispose();
+    _termMonths.dispose();
     super.dispose();
   }
 
@@ -660,7 +673,7 @@ class _RegisterTabState extends State<RegisterTab> {
       () => widget.state.generator.createLicence(
         ref: _ref.text,
         seats: _seats.text,
-        term: _term,
+        term: _termMonths.text.trim().isEmpty ? _term : '${_termMonths.text.trim()}m',
         company: _company,
       ),
     );
@@ -703,6 +716,7 @@ class _RegisterTabState extends State<RegisterTab> {
                 isExpanded: true,
                 value: _term,
                 items: const [
+                  DropdownMenuItem(value: '15d', child: Text('15 يوم — 15 days')),
                   DropdownMenuItem(value: '1m', child: Text('شهر — 1 month')),
                   DropdownMenuItem(value: '6m', child: Text('6 أشهر — 6 months')),
                   DropdownMenuItem(value: '1y', child: Text('سنة — 1 year')),
@@ -711,6 +725,14 @@ class _RegisterTabState extends State<RegisterTab> {
                   DropdownMenuItem(value: 'P', child: Text('دائم — perpetual')),
                 ],
                 onChanged: (value) => setState(() => _term = value ?? '1y'),
+              ),
+              TextField(
+                controller: _termMonths,
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(
+                  labelText: 'عدد الشهور بحرية (اختياري) — custom months (optional)',
+                ),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -772,7 +794,7 @@ class _LicenceCard extends StatelessWidget {
         title: Text(licence.ref ?? licence.licenseId, style: const TextStyle(fontSize: 15)),
         subtitle: Text(
           '${licence.seats} مقعد · مستخدم ${licence.seatsUsed} · '
-          '${licence.term == null ? 'دائم' : '${licence.term} شهر'} · '
+          '${licence.term == null ? 'دائم' : (licence.termDays != null ? '${licence.termDays} يوم' : '${licence.term} شهر')} · '
           '${licence.expiresAt?.substring(0, 10) ?? 'بلا انتهاء'}',
           style: const TextStyle(fontSize: 11.5),
         ),

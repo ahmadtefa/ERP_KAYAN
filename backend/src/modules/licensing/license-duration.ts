@@ -67,7 +67,7 @@ export function isPerpetual(
  */
 export function renewalEnd(
   currentExpiresAt: Date | null,
-  months: number,
+  term: number | { kind: 'MONTHS'; months: number } | { kind: 'DAYS'; days: number },
   appliedAt: Date,
 ): Date | null {
   if (isPerpetual(currentExpiresAt)) return null;
@@ -75,16 +75,26 @@ export function renewalEnd(
     currentExpiresAt.getTime() > appliedAt.getTime()
       ? currentExpiresAt
       : appliedAt;
-  return addCalendarMonths(base, months);
+  return addTerm(base, term);
 }
 
 /** The end of a term bought at activation. */
 export function activationEnd(
-  term: { kind: 'MONTHS'; months: number } | { kind: 'PERPETUAL' },
+  term: { kind: 'MONTHS'; months: number } | { kind: 'DAYS'; days: number } | { kind: 'PERPETUAL' },
   startsAt: Date,
 ): Date | null {
   if (term.kind === 'PERPETUAL') return null;
-  return addCalendarMonths(startsAt, term.months);
+  return addTerm(startsAt, term);
+}
+
+/** Adds a month count (a plain number is months) or a day-counted term. */
+function addTerm(
+  base: Date,
+  term: number | { kind: 'MONTHS'; months: number } | { kind: 'DAYS'; days: number },
+): Date {
+  if (typeof term === 'number') return addCalendarMonths(base, term);
+  if (term.kind === 'DAYS') return new Date(base.getTime() + term.days * 86_400_000);
+  return addCalendarMonths(base, term.months);
 }
 
 export interface TermDescription {

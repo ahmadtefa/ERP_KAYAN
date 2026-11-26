@@ -15,9 +15,12 @@ import 'keys.dart';
 import 'register.dart';
 
 const int maxTermMonths = 1200;
+const int maxTermDays = 366;
 const List<String> keyTypes = ['ACTIVATION', 'RENEWAL', 'SEATS', 'TRANSFER'];
 
 final RegExp machineIdPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._:-]{7,95}$');
+
+final RegExp _dayTermPattern = RegExp(r'^(\d{1,3})\s*(d|day|days|يوم|أيام)$');
 
 final RegExp _termPattern = RegExp(
   r'^(\d{1,4})\s*(m|month|months|month|شهر|أشهر|y|year|years|سنة|سنوات)$',
@@ -25,23 +28,42 @@ final RegExp _termPattern = RegExp(
 
 /// A licence term: calendar months, or perpetual.
 class Term {
-  const Term.months(this.months) : kind = 'MONTHS';
+  const Term.months(this.months)
+      : kind = 'MONTHS',
+        days = null;
+  const Term.days(this.days)
+      : kind = 'DAYS',
+        months = null;
   const Term.perpetual()
       : kind = 'PERPETUAL',
-        months = null;
+        months = null,
+        days = null;
 
   final String kind;
   final int? months;
+  final int? days;
+
+  /// The register's `term` value: months, 0 for a day term, null for perpetual.
+  int? get registerTerm => isPerpetual ? null : (months ?? 0);
+  int? get registerTermDays => days;
+
+  /// End of the term from a start instant.
+  DateTime endFrom(DateTime from) => kind == 'DAYS'
+      ? from.toUtc().add(Duration(days: days!))
+      : addMonths(from, months!);
 
   bool get isPerpetual => kind == 'PERPETUAL';
 
   Map<String, dynamic> toJson() => isPerpetual
       ? <String, dynamic>{'kind': 'PERPETUAL'}
-      : <String, dynamic>{'kind': 'MONTHS', 'months': months};
+      : kind == 'DAYS'
+          ? <String, dynamic>{'kind': 'DAYS', 'days': days}
+          : <String, dynamic>{'kind': 'MONTHS', 'months': months};
 
   /// `describeTerm` — the same bilingual wording the Windows window prints.
   String describe() {
     if (isPerpetual) return 'دائم / perpetual';
+    if (kind == 'DAYS') return '$days يوم / $days day(s)';
     final value = months!;
     if (value % 12 == 0) {
       return '${value ~/ 12} سنة / ${value ~/ 12} year(s)';
@@ -54,15 +76,23 @@ class Term {
 Term parseTerm(String? text) {
   final raw = text?.trim() ?? '';
   if (raw.isEmpty) {
-    refuse('A term is required: 1m, 6m, 1y, 2y, 3y, or P for perpetual.');
+    refuse('A term is required: 15d, 1m, 6m, 1y, 2y, 3y, or P for perpetual.');
   }
   final value = raw.toLowerCase();
   if (value == 'p' || value == 'perpetual' || value == 'دائم') {
     return const Term.perpetual();
   }
+  final dayMatch = _dayTermPattern.firstMatch(value);
+  if (dayMatch != null) {
+    final days = int.parse(dayMatch.group(1)!);
+    if (days < 1 || days > maxTermDays) {
+      refuse('A day term must be between 1 and $maxTermDays days.');
+    }
+    return Term.days(days);
+  }
   final match = _termPattern.firstMatch(value);
   if (match == null) {
-    refuse('I do not understand the term "$text". Use 1m, 6m, 1y, 2y, or P.');
+    refuse('I do not understand the term "$text". Use 15d, 1m, 6m, 1y, 2y, or P.');
   }
   final amount = int.parse(match.group(1)!);
   final unit = match.group(2)!;
@@ -203,7 +233,8 @@ class LicenceGenerator {
       ref: ref == null || ref.isEmpty ? null : ref,
       seats: seatLimit,
       seatsUsed: 0,
-      term: parsed.months,
+      term: parsed.registerTerm,
+      termDays: parsed.registerTermDays,
       machineId: null,
       startsAt: null,
       expiresAt: null,
@@ -223,7 +254,7 @@ class LicenceGenerator {
       'action': 'licence.create',
       'licenseId': licence.licenseId,
       'seats': seatLimit,
-      'term': parsed.months,
+      'term': parsed.registerTerm,
       'result': 'registered',
     });
     return (licence: licence, term: parsed);
@@ -341,11 +372,13 @@ class LicenceGenerator {
         licence.status = 'active';
         licence.startsAt ??= issuedAt;
         if (!chosenTerm.isPerpetual) {
-          licence.expiresAt = iso(addMonths(folder.now(), chosenTerm.months!));
-          licence.term = chosenTerm.months;
+          licence.expiresAt = iso(chosenTerm.endFrom(folder.now()));
+          licence.term = chosenTerm.registerTerm;
+          licence.termDays = chosenTerm.registerTermDays;
         } else {
           licence.expiresAt = null;
           licence.term = null;
+          licence.termDays = null;
         }
         _markSuperseded(register, licence.licenseId, 'ACTIVATION');
       }
@@ -365,12 +398,14 @@ class LicenceGenerator {
         if (chosenTerm.isPerpetual) {
           licence.expiresAt = null;
           licence.term = null;
+          licence.termDays = null;
         } else {
           final now = folder.now();
           final current = parseIso(licence.expiresAt);
           final from = current != null && current.isAfter(now) ? current : now;
-          licence.expiresAt = iso(addMonths(from, chosenTerm.months!));
-          licence.term = chosenTerm.months;
+          licence.expiresAt = iso(chosenTerm.endFrom(from));
+          licence.term = chosenTerm.registerTerm;
+          licence.termDays = chosenTerm.registerTermDays;
         }
         licence.status = 'active';
       }
@@ -621,7 +656,12 @@ class LicenceGenerator {
       format: payload['v'] == 2 ? 2 : null,
       companyRef: payload['v'] == 2 ? payload['companyRef'] as String? : null,
       machineId: payload['machineId'] as String?,
-      term: (payload['term'] as Map?)?['months'] as int?,
+      term: payload['term'] == null
+          ? null
+          : ((payload['term'] as Map)['kind'] == 'DAYS'
+              ? 0
+              : (payload['term'] as Map)['months'] as int?),
+      termDays: (payload['term'] as Map?)?['days'] as int?,
       seats: (payload['seats'] as Map?)?.cast<String, dynamic>(),
       issuedAt: payload['issuedAt'] as String,
       status: 'issued',
@@ -634,7 +674,9 @@ class LicenceGenerator {
 
   Term _licenceTerm(Licence licence) => licence.term == null
       ? const Term.perpetual()
-      : Term.months(licence.term!);
+      : (licence.termDays != null
+          ? Term.days(licence.termDays!)
+          : Term.months(licence.term!));
 
   String? _note(String? text) {
     if (text == null) return null;

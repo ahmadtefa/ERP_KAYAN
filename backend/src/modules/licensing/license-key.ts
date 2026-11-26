@@ -42,6 +42,8 @@ export const LICENSE_KEY_TYPES: readonly LicenseKeyType[] = [
 
 export type LicenseTerm =
   | { kind: 'MONTHS'; months: number }
+  /** A short term counted in whole days (a 15-day trial). Additive: format 1 keys with MONTHS or PERPETUAL are unchanged. */
+  | { kind: 'DAYS'; days: number }
   | { kind: 'PERPETUAL' };
 
 /** How a seat key changes the limit. The meaning is written into the key, so
@@ -126,12 +128,15 @@ function assertUuidLike(value: unknown, field: string): string {
   return value;
 }
 
+/** A day-counted term is for trials and short extensions, not a way around months. */
+const MAX_TERM_DAYS = 366;
+
 function assertTerm(value: unknown): LicenseTerm | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object') {
     throw new LicenseKeyError('term is malformed', 'BAD_FIELD');
   }
-  const term = value as { kind?: unknown; months?: unknown };
+  const term = value as { kind?: unknown; months?: unknown; days?: unknown };
   if (term.kind === 'PERPETUAL') return { kind: 'PERPETUAL' };
   if (term.kind === 'MONTHS') {
     const months = Number(term.months);
@@ -139,6 +144,13 @@ function assertTerm(value: unknown): LicenseTerm | null {
       throw new LicenseKeyError('term months must be 1..1200', 'BAD_FIELD');
     }
     return { kind: 'MONTHS', months };
+  }
+  if (term.kind === 'DAYS') {
+    const days = Number(term.days);
+    if (!Number.isInteger(days) || days < 1 || days > MAX_TERM_DAYS) {
+      throw new LicenseKeyError(`term days must be 1..${MAX_TERM_DAYS}`, 'BAD_FIELD');
+    }
+    return { kind: 'DAYS', days };
   }
   throw new LicenseKeyError('term kind is unknown', 'BAD_FIELD');
 }

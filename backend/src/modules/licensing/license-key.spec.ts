@@ -197,6 +197,13 @@ describe('key types are exclusive', () => {
     ).toThrow(/1\.\.1200/);
   });
 
+  it('reads a 15-day term and refuses an out-of-range day count', () => {
+    expect(readPayload({ ...base(), term: { kind: 'DAYS', days: 15 } }).term).toEqual({ kind: 'DAYS', days: 15 });
+    for (const days of [0, 367, 1.5]) {
+      expect(() => readPayload({ ...base(), term: { kind: 'DAYS', days } })).toThrow(/1\.\.366/);
+    }
+  });
+
   it('reads a perpetual term without inventing a date', () => {
     const parsed = readPayload({ ...base(), term: { kind: 'PERPETUAL' } });
     expect(parsed.term).toEqual({ kind: 'PERPETUAL' });

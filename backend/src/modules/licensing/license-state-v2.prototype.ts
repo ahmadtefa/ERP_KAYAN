@@ -342,7 +342,7 @@ export function applyKeyV2(
     const cur = ctx.current;
     if (!cur) refuse('the current licence row is required', 'LICENSE_NOT_INSTALLED');
     if (payload.type === 'RENEWAL') {
-      const expiresAt = payload.term!.kind === 'PERPETUAL' ? null : renewalEnd(cur!.expiresAt, payload.term!.months, ctx.now);
+      const expiresAt = payload.term!.kind === 'PERPETUAL' ? null : renewalEnd(cur!.expiresAt, payload.term!, ctx.now);
       outcome = { expiresAt, perpetual: isPerpetual(expiresAt), seatLimit: cur!.seatLimit, seatsUsed: cur!.seatsUsed };
     } else if (payload.type === 'SEATS') {
       const g = payload.seats!;

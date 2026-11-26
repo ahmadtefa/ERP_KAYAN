@@ -61,6 +61,7 @@ class Licence {
     required this.updatedAt,
     this.companyRef,
     this.companyLabel,
+    this.termDays,
   });
 
   factory Licence.fromJson(Map<String, dynamic> json) => Licence(
@@ -77,6 +78,7 @@ class Licence {
         updatedAt: json['updatedAt'] as String? ?? '',
         companyRef: json['companyRef'] as String?,
         companyLabel: json['companyLabel'] as String?,
+        termDays: (json['termDays'] as num?)?.toInt(),
       );
 
   String licenseId;
@@ -86,6 +88,9 @@ class Licence {
 
   /// Months, or null for perpetual — the same convention as the register.
   int? term;
+
+  /// Set only on a day-counted licence (then `term` is 0); absent otherwise.
+  int? termDays;
   String? machineId;
   String? startsAt;
   String? expiresAt;
@@ -112,6 +117,7 @@ class Licence {
         'updatedAt': updatedAt,
         if (companyRef != null) 'companyRef': companyRef,
         if (companyLabel != null) 'companyLabel': companyLabel,
+        if (termDays != null) 'termDays': termDays,
       };
 }
 
@@ -123,6 +129,7 @@ class IssuedKey {
     required this.type,
     required this.machineId,
     required this.term,
+    this.termDays,
     required this.seats,
     required this.issuedAt,
     required this.status,
@@ -142,6 +149,7 @@ class IssuedKey {
         type: json['type'] as String,
         machineId: json['machineId'] as String?,
         term: (json['term'] as num?)?.toInt(),
+        termDays: (json['termDays'] as num?)?.toInt(),
         seats: json['seats'] == null
             ? null
             : Map<String, dynamic>.from(json['seats'] as Map),
@@ -162,6 +170,7 @@ class IssuedKey {
   String type;
   String? machineId;
   int? term;
+  int? termDays;
   Map<String, dynamic>? seats;
   String issuedAt;
   String status;
@@ -184,6 +193,7 @@ class IssuedKey {
         if (companyRef != null) 'companyRef': companyRef,
         'machineId': machineId,
         'term': term,
+        if (termDays != null) 'termDays': termDays,
         'seats': seats,
         'issuedAt': issuedAt,
         'status': status,

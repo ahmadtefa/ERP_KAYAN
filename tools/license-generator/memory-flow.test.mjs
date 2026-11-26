@@ -66,6 +66,23 @@ test('register, select ID, issue and verify using an in-memory synthetic Ed25519
   assert.equal(api.verifyKey(changed).valid, false);
 });
 
+test('a 15-day term and a free month count issue keys with the matching term', () => {
+  const api = generator.guiApi();
+  const { licence } = api.createLicence({ ref: 'short', seats: 2, term: '15d' });
+  const result = api.issueKey({ type: 'activation', licenceId: licence.licenseId, machineId: 'KM-SYNTHETIC-DAYS' });
+  const checked = api.verifyKey(result.key);
+  assert.equal(checked.valid, true);
+  assert.deepEqual(checked.payload.term, { kind: 'DAYS', days: 15 });
+  const stored = api.state().licences.find(entry => entry.licenseId === licence.licenseId);
+  assert.equal(stored.termDays, 15);
+  const days = (new Date(stored.expiresAt) - new Date(stored.startsAt)) / 86400000;
+  assert.ok(days > 14.99 && days < 15.01);
+  const seven = api.createLicence({ ref: 'seven', seats: 2, term: '7m' }).licence;
+  const k = api.issueKey({ type: 'activation', licenceId: seven.licenseId, machineId: 'KM-SYNTHETIC-SEVEN' });
+  assert.deepEqual(api.verifyKey(k.key).payload.term, { kind: 'MONTHS', months: 7 });
+  assert.throws(() => api.createLicence({ ref: 'bad', seats: 2, term: '400d' }), /day term/i);
+});
+
 test('company licence issues format 2 keys bound to its companyRef; other licences stay format 1', () => {
   const api = generator.guiApi();
   const legacy = api.createLicence({ ref: 'synthetic-legacy', seats: 2, term: '1y' }).licence;

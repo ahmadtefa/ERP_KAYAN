@@ -200,6 +200,27 @@ void main() {
       expect((issued.payload['machineId'] as String), 'KM-REQ1-AAAA-BBBB-CCCC');
     });
 
+    test('a 15-day term ends 15 days after activation', () async {
+      final licence = await aLicence(term: '15d');
+      now = DateTime.parse('2026-02-20T09:00:00.000Z');
+      final issued = await generator.issueKey(
+        type: 'ACTIVATION',
+        licenceId: licence.licenseId,
+        machineId: 'KM-AAAA-1111-BBBB-2222',
+      );
+      expect(issued.payload['term'], {'kind': 'DAYS', 'days': 15});
+      final register = await folder.loadRegister(await folder.readSigningKey());
+      final saved = register.licences[licence.licenseId]!;
+      expect(saved.termDays, 15);
+      expect(saved.expiresAt, '2026-03-07T09:00:00.000Z');
+    });
+
+    test('a day term outside 1..366 is refused', () {
+      expect(() => parseTerm('0d'), throwsA(anything));
+      expect(() => parseTerm('367d'), throwsA(anything));
+      expect(parseTerm('7m').months, 7);
+    });
+
     test('the perpetual term keeps its meaning through an activation', () async {
       final licence = await aLicence(term: 'P');
       final issued = await generator.issueKey(
