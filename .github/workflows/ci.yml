@@ -770,3 +770,45 @@ jobs:
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
         run: flutter build linux --release
+
+  # The Android key generator is an independent Dart implementation of the
+  # same key format. Nothing ran its tests before. Everything here is
+  # synthetic: the signing seed is fixed test data written by
+  # tool/make_goldens.mjs, no real key exists in CI, and nothing is published.
+  android-key-generator:
+    name: Android key generator (analyze, test against the Node generator)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Only the product's key format code is compiled (it imports nothing but
+      # node:crypto), so the vectors are checked by the code the customer runs.
+      - name: Compile the product key format code
+        working-directory: backend
+        run: |
+          npm ci --ignore-scripts
+          npx tsc src/modules/licensing/license-key.ts --outDir dist/src/modules/licensing-out --module commonjs --target es2022 --skipLibCheck --esModuleInterop
+          mkdir -p dist/src/modules/licensing
+          cp dist/src/modules/licensing-out/license-key.js dist/src/modules/licensing/license-key.js
+      - name: Generate the golden vectors with the Node generator (synthetic key)
+        working-directory: tools/license-generator/android-app
+        run: node tool/make_goldens.mjs
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Install Flutter dependencies
+        working-directory: tools/license-generator/android-app
+        run: flutter pub get
+      - name: Analyze
+        working-directory: tools/license-generator/android-app
+        run: flutter analyze
+      - name: Test
+        working-directory: tools/license-generator/android-app
+        run: flutter test --reporter expanded

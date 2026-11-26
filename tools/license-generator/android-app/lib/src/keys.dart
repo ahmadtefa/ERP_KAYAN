@@ -15,6 +15,9 @@ import 'der.dart';
 
 /// `KYN1` and `KYNREQ1` — from `license-key.ts`, never changed here.
 const String keyPrefix = 'KYN1';
+
+/// Format 2: keys for a licence registered as a per-company licence.
+const String keyPrefixV2 = 'KYN2';
 const String requestPrefix = 'KYNREQ1';
 
 /// The tool's version, the same string the Windows tool writes into audit.log.
@@ -55,6 +58,14 @@ String randomHex8() {
 String newLicenceId() => 'lic_${randomHex8()}';
 
 String newKeyId() => 'key_${randomHex8()}';
+
+/// A vendor-chosen opaque company reference: `cmp-` and 12 random bytes as
+/// base64url (16 characters), the shape `kayan-license.mjs` writes.
+String newCompanyRef() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(12, (_) => random.nextInt(256));
+  return 'cmp-${b64url(bytes)}';
+}
 
 /// The operator's signing key: 32 bytes of seed, and everything derived from
 /// them. The seed is never printed, logged or copied anywhere but the key file.

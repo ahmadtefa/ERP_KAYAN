@@ -646,6 +646,7 @@ class _RegisterTabState extends State<RegisterTab> {
   final _ref = TextEditingController();
   final _seats = TextEditingController(text: '5');
   String _term = '1y';
+  bool _company = false;
 
   @override
   void dispose() {
@@ -660,6 +661,7 @@ class _RegisterTabState extends State<RegisterTab> {
         ref: _ref.text,
         seats: _seats.text,
         term: _term,
+        company: _company,
       ),
     );
     if (!mounted) return;
@@ -709,6 +711,13 @@ class _RegisterTabState extends State<RegisterTab> {
                   DropdownMenuItem(value: 'P', child: Text('دائم — perpetual')),
                 ],
                 onChanged: (value) => setState(() => _term = value ?? '1y'),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _company,
+                onChanged: (value) => setState(() => _company = value),
+                title: const Text('شركة جديدة داخل البرنامج — new company (format 2 keys)'),
+                subtitle: const Text('اتركه مغلقًا للشركة الحالية.'),
               ),
               const SizedBox(height: 12),
               FilledButton.icon(

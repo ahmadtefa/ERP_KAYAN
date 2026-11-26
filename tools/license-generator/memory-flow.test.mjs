@@ -70,7 +70,7 @@ test('company licence issues format 2 keys bound to its companyRef; other licenc
   const api = generator.guiApi();
   const legacy = api.createLicence({ ref: 'synthetic-legacy', seats: 2, term: '1y' }).licence;
   const company = api.createLicence({ ref: 'synthetic-company', seats: 4, term: '1y', company: true, label: 'Synthetic Co' }).licence;
-  assert.equal(legacy.companyRef, null);
+  assert.equal(legacy.companyRef, undefined);
   assert.match(company.companyRef, /^cmp-[A-Za-z0-9_-]{16}$/);
   const old = api.issueKey({ type: 'activation', licenceId: legacy.licenseId, machineId: 'KM-SYNTHETIC-DEVICE' });
   assert.ok(old.key.startsWith('KYN1.'));

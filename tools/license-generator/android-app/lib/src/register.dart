@@ -59,6 +59,8 @@ class Licence {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.companyRef,
+    this.companyLabel,
   });
 
   factory Licence.fromJson(Map<String, dynamic> json) => Licence(
@@ -73,6 +75,8 @@ class Licence {
         status: json['status'] as String? ?? 'registered',
         createdAt: json['createdAt'] as String? ?? '',
         updatedAt: json['updatedAt'] as String? ?? '',
+        companyRef: json['companyRef'] as String?,
+        companyLabel: json['companyLabel'] as String?,
       );
 
   String licenseId;
@@ -89,6 +93,11 @@ class Licence {
   String createdAt;
   String updatedAt;
 
+  /// Set only on a per-company licence; absent otherwise so every other
+  /// register entry keeps exactly the bytes it had.
+  String? companyRef;
+  String? companyLabel;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'licenseId': licenseId,
         'ref': ref,
@@ -101,6 +110,8 @@ class Licence {
         'status': status,
         'createdAt': createdAt,
         'updatedAt': updatedAt,
+        if (companyRef != null) 'companyRef': companyRef,
+        if (companyLabel != null) 'companyLabel': companyLabel,
       };
 }
 
@@ -121,6 +132,8 @@ class IssuedKey {
     this.supersededAt,
     this.revokedAt,
     this.reason,
+    this.format,
+    this.companyRef,
   });
 
   factory IssuedKey.fromJson(Map<String, dynamic> json) => IssuedKey(
@@ -140,6 +153,8 @@ class IssuedKey {
         supersededAt: json['supersededAt'] as String?,
         revokedAt: json['revokedAt'] as String?,
         reason: json['reason'] as String?,
+        format: (json['format'] as num?)?.toInt(),
+        companyRef: json['companyRef'] as String?,
       );
 
   String keyId;
@@ -157,10 +172,16 @@ class IssuedKey {
   String? revokedAt;
   String? reason;
 
+  /// 2 for a per-company (KYN2) key; absent for format 1.
+  int? format;
+  String? companyRef;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'keyId': keyId,
         'licenseId': licenseId,
         'type': type,
+        if (format != null) 'format': format,
+        if (companyRef != null) 'companyRef': companyRef,
         'machineId': machineId,
         'term': term,
         'seats': seats,

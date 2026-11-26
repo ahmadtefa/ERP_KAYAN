@@ -95,6 +95,10 @@ void main() {
         .where((step) => step['action'] == 'createLicence')
         .map((step) => step['licenseId'] as String)
         .toList();
+    final companyRefs = steps
+        .where((step) => step['action'] == 'createLicence' && step['companyRef'] != null)
+        .map((step) => step['companyRef'] as String)
+        .toList();
     final keyIds = steps
         .where((step) => step['action'] == 'issueKey')
         .map((step) => step['keyId'] as String)
@@ -106,6 +110,7 @@ void main() {
       folder,
       nextLicenceId: () => licenceIds.removeAt(0),
       nextKeyId: () => keyIds.removeAt(0),
+      nextCompanyRef: () => companyRefs.removeAt(0),
     );
 
     for (final step in steps) {
@@ -118,8 +123,11 @@ void main() {
             ref: input['ref'] as String?,
             seats: input['seats'],
             term: input['term'] as String?,
+            company: input['company'] == true,
+            label: input['label'] as String?,
           );
           expect(result.licence.licenseId, step['licenseId'], reason: label);
+          expect(result.licence.companyRef, step['companyRef'], reason: label);
         case 'issueKey':
           final result = await generator.issueKey(
             type: input['type'] as String,
@@ -169,6 +177,7 @@ void main() {
     // without producing a key, the queues would still hold it.
     expect(licenceIds, isEmpty);
     expect(keyIds, isEmpty);
+    expect(companyRefs, isEmpty);
   });
 
   test('the register the Windows tool wrote opens here and re-seals identically', () async {
@@ -185,8 +194,8 @@ void main() {
     final folder = MemoryKeyFolder(home.path, syntheticKey);
     final key = await folder.readSigningKey();
     final register = await folder.loadRegister(key);
-    expect(register.licences, hasLength(2));
-    expect(register.keys, hasLength(9));
+    expect(register.licences, hasLength((golden['licences'] as Map).length));
+    expect(register.keys, hasLength((golden['keys'] as List).length));
 
     await folder.saveRegister(key, register);
     expect(File(p.join(home.path, 'register.json')).readAsStringSync(), golden['registerText']);

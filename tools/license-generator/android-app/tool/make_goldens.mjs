@@ -85,6 +85,20 @@ issue('perpetual activation', { type: 'ACTIVATION', licenceId: L2, machineId: 'K
 issue('perpetual cap 6', { type: 'SEATS', licenceId: L2, cap: 6 });
 issue('seats +2', { type: 'SEATS', licenceId: L1, increase: 2 });
 
+// A per-company licence: its companyRef is random, so the step records it and
+// the Dart replay is given the same value.
+at('2028-01-15T12:00:00.000Z');
+const third = gen.createLicence({ ref: 'Golden Co', seats: 4, term: '1y', company: true, label: 'Golden Co' });
+steps.push({ label: 'company licence', action: 'createLicence', clock: clockNow(), licenseId: third.licence.licenseId,
+  companyRef: third.licence.companyRef,
+  input: { ref: 'Golden Co', seats: 4, term: '1y', company: true, label: 'Golden Co' } });
+const L3 = third.licence.licenseId;
+issue('company activation', { type: 'ACTIVATION', licenceId: L3, machineId: 'KM-COMP-1111-2222-3333' });
+issue('company renewal', { type: 'RENEWAL', licenceId: L3, term: '6m' });
+issue('company seats', { type: 'SEATS', licenceId: L3, increase: 2 });
+// A second activation for the same licence supersedes the first unused one.
+issue('company activation again', { type: 'ACTIVATION', licenceId: L3, machineId: 'KM-COMP-4444-5555-6666' });
+
 // A key the customer applied, and one the operator withdrew.
 tick();
 const seatKey = steps.find((s) => s.label === 'seats +2');
@@ -161,7 +175,8 @@ console.log(`steps ${steps.length}, keys ${register.keys.length}, register ${reg
 console.log('fingerprint', golden.keyPair.fingerprint, 'mac', registerMac);
 let bad = 0;
 for (const step of steps.filter((s) => s.key)) {
-  const parsed = product.verifyKey(step.key, pub);
+  const isV2 = step.key.startsWith('KYN2.');
+  const parsed = isV2 ? product.verifyKeyV2(step.key, pub) : product.verifyKey(step.key, pub);
   if (!parsed?.payload) { bad += 1; console.error('REJECTED', step.label); }
 }
 console.log(bad === 0 ? 'the product accepts every key in this file' : `${bad} keys were rejected`);

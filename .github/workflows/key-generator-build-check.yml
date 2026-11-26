@@ -1,0 +1,63 @@
+name: Key Generator build check (Windows x64, no signing)
+
+# Builds the operator tool exactly as tools/license-generator/sea/build.mjs
+# does (Node SEA server + native WinForms/WebView2 window) and checks only what
+# needs no key: the executables exist, the bundled service starts and reports its
+# version and help, and the package carries no private-key material.
+# It never creates, reads or uses a signing key, signs nothing, and publishes
+# nothing. It does not replace the legacy key-generator.yml, which stays
+# prohibited because it creates a throwaway signing key.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: key-generator-build-check-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build native KAYAN-Key-Generator.exe (no signing)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the build-time packaging tools
+        working-directory: tools/license-generator/sea
+        run: npm ci
+      - name: Source tests (synthetic in-memory key only)
+        run: node --test tools/license-generator/memory-flow.test.mjs
+      - name: Package KAYAN-Key-Generator.exe
+        working-directory: tools/license-generator/sea
+        run: node build.mjs --target win32-x64 --out "$env:GITHUB_WORKSPACE\dist\key-generator"
+      - name: Check the package without any key
+        shell: pwsh
+        run: |
+          $folder = 'dist\key-generator'
+          foreach ($name in 'KAYAN-Key-Generator.exe', 'KAYAN-Key-Generator-Server.exe', 'BUILD-INFO.txt') {
+            if (-not (Test-Path -LiteralPath (Join-Path $folder $name))) { throw "missing $name" }
+          }
+          $server = Join-Path $folder 'KAYAN-Key-Generator-Server.exe'
+          $version = & $server version
+          Write-Host "server version line: $version"
+          if ($version -notmatch '^kayan-license \d') { throw 'the bundled service did not report its version' }
+          $help = (& $server help) -join "`n"
+          if ($help -notmatch 'verify') { throw 'the bundled service did not print its help' }
+          foreach ($file in Get-ChildItem -Recurse -File $folder) {
+            if ($file.Extension -in '.pem', '.key') { throw "unexpected key file $($file.Name)" }
+          }
+          Get-ChildItem $folder | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) | Write-Host }
+      - name: Keep the build information
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-Key-Generator-build-check
+          path: dist/key-generator/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 14

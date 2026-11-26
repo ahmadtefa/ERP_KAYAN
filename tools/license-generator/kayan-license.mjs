@@ -430,8 +430,7 @@ function recordKey(register, licence, entry) {
     licenseId: entry.payload.licenseId,
     // The register keeps the logical type (a COMPANY_ACTIVATION is an ACTIVATION here).
     type: entry.logicalType ?? entry.payload.type,
-    format: entry.payload.v === 2 ? 2 : 1,
-    companyRef: entry.payload.companyRef ?? null,
+    ...(entry.payload.v === 2 ? { format: 2, companyRef: entry.payload.companyRef } : {}),
     machineId: entry.payload.machineId ?? null,
     term: entry.payload.term ? termMonths(entry.payload.term) : null,
     seats: entry.payload.seats ?? null,
@@ -547,15 +546,19 @@ function createLicence(input) {
     seatsUsed: 0,
     term: termMonths(term),
     machineId: null,
-    // Per-company licence: a vendor-chosen opaque reference, no business data.
-    companyRef: input.company ? `cmp-${randomBytes(12).toString('base64url')}` : null,
-    companyLabel: input.company && input.label ? String(input.label).slice(0, 80) : null,
     startsAt: null,
     expiresAt: null,
     status: 'registered',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  if (input.company) {
+    // Per-company licence: a vendor-chosen opaque reference, no business data.
+    // Fields exist only on company licences, so every other register entry
+    // keeps exactly the bytes it had before.
+    licence.companyRef = `cmp-${randomBytes(12).toString('base64url')}`;
+    if (input.label) licence.companyLabel = String(input.label).slice(0, 80);
+  }
   register.licences[licence.licenseId] = licence;
   saveRegister(privateKey, register);
   audit({
@@ -843,8 +846,9 @@ function previewOf(payload) {
     state: payload.state ?? null,
     issuedAt: payload.issuedAt,
     note: payload.note ?? null,
-    companyRef: payload.companyRef ?? null,
-    displayLabel: payload.displayLabel ?? null,
+    ...(payload.v === 2
+      ? { companyRef: payload.companyRef, displayLabel: payload.displayLabel ?? null }
+      : {}),
   };
 }
 

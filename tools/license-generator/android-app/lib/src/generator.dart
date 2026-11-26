@@ -173,12 +173,15 @@ class LicenceGenerator {
     this.folder, {
     String Function()? nextLicenceId,
     String Function()? nextKeyId,
+    String Function()? nextCompanyRef,
   })  : _nextLicenceId = nextLicenceId ?? newLicenceId,
-        _nextKeyId = nextKeyId ?? newKeyId;
+        _nextKeyId = nextKeyId ?? newKeyId,
+        _nextCompanyRef = nextCompanyRef ?? newCompanyRef;
 
   final KeyFolder folder;
   final String Function() _nextLicenceId;
   final String Function() _nextKeyId;
+  final String Function() _nextCompanyRef;
 
   // ────────────────────────────────────────────────────────────── licences
 
@@ -187,6 +190,8 @@ class LicenceGenerator {
     String? ref,
     Object? seats,
     String? term,
+    bool company = false,
+    String? label,
   }) async {
     final key = await folder.readSigningKey();
     final register = await folder.loadRegister(key);
@@ -206,6 +211,12 @@ class LicenceGenerator {
       createdAt: now,
       updatedAt: now,
     );
+    if (company) {
+      licence.companyRef = _nextCompanyRef();
+      if (label != null && label.isNotEmpty) {
+        licence.companyLabel = label.length > 80 ? label.substring(0, 80) : label;
+      }
+    }
     register.licences[licence.licenseId] = licence;
     await folder.saveRegister(key, register);
     await folder.audit({
@@ -300,7 +311,7 @@ class LicenceGenerator {
     };
     final noteText = _note(note);
 
-    late final Map<String, dynamic> payload;
+    late Map<String, dynamic> payload;
     if (kind == 'ACTIVATION') {
       final machine = _resolveMachine(machineId, request);
       final chosenTerm = term == null || term.trim().isEmpty
@@ -439,6 +450,18 @@ class LicenceGenerator {
       }
     }
 
+    if (licence.companyRef != null) {
+      // Per-company licence: a format 2 payload bound to the company reference.
+      // Existing fields keep their position; the two new ones are appended.
+      payload = <String, dynamic>{
+        ...payload,
+        'v': 2,
+        'type': kind == 'ACTIVATION' ? 'COMPANY_ACTIVATION' : kind,
+        'companyRef': licence.companyRef,
+        'displayLabel': licence.companyLabel,
+      };
+    }
+
     if (dryRun) {
       return IssueResult(
         key: null,
@@ -455,7 +478,7 @@ class LicenceGenerator {
       refuse('The key did not verify after signing; refusing to issue it.');
     }
 
-    _recordKey(register, licence, payload, key);
+    _recordKey(register, licence, payload, key, kind);
     await folder.saveRegister(signingKey, register);
     await folder.audit({
       'action': 'issue',
@@ -588,11 +611,15 @@ class LicenceGenerator {
     Licence licence,
     Map<String, dynamic> payload,
     String key,
+    String logicalType,
   ) {
     register.keys.add(IssuedKey(
       keyId: payload['keyId'] as String,
       licenseId: payload['licenseId'] as String,
-      type: payload['type'] as String,
+      // The register keeps the logical type (a COMPANY_ACTIVATION is an ACTIVATION).
+      type: logicalType,
+      format: payload['v'] == 2 ? 2 : null,
+      companyRef: payload['v'] == 2 ? payload['companyRef'] as String? : null,
       machineId: payload['machineId'] as String?,
       term: (payload['term'] as Map?)?['months'] as int?,
       seats: (payload['seats'] as Map?)?.cast<String, dynamic>(),
@@ -711,12 +738,15 @@ Map<String, dynamic> previewOf(Map<String, dynamic> payload) => <String, dynamic
       'state': payload['state'],
       'issuedAt': payload['issuedAt'],
       'note': payload['note'],
+      if (payload['v'] == 2) 'companyRef': payload['companyRef'],
+      if (payload['v'] == 2) 'displayLabel': payload['displayLabel'],
     };
 
 /// `KYN1.<payload>.<signature>` over exactly the payload text built above.
 Future<String> signPayload(Map<String, dynamic> payload, SigningKey key) async {
   final json = payloadJson(payload);
-  final signedText = '$keyPrefix.${b64url(utf8.encode(json))}';
+  final prefix = payload['v'] == 2 ? keyPrefixV2 : keyPrefix;
+  final signedText = '$prefix.${b64url(utf8.encode(json))}';
   final signature = await key.sign(utf8.encode(signedText));
   return '$signedText.${b64url(signature)}';
 }
@@ -728,8 +758,8 @@ Future<({Map<String, dynamic> payload, bool valid})> readPayload(
 ) async {
   final text = keyText.replaceAll(RegExp(r'\s+'), '').trim();
   final parts = text.split('.');
-  if (parts.length != 3 || parts[0] != keyPrefix) {
-    refuse('That is not a KAYAN key (it should start with KYN1.).');
+  if (parts.length != 3 || (parts[0] != keyPrefix && parts[0] != keyPrefixV2)) {
+    refuse('That is not a KAYAN key (it should start with KYN1. or KYN2.).');
   }
   final Map<String, dynamic> payload;
   try {
