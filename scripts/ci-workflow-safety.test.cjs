@@ -44,6 +44,10 @@ const reviewed = [
   // Reviewed 2026-11-25: backend spec files only, disposable PostgreSQL 14 service,
   // contents:read, no secrets, no environment, no signing, install, release or deploy.
   'kayan-noskip-backend.yml',
+  // Reviewed 2026-11-26: manual dispatch only, contents:read, no secrets, no environment,
+  // no signing, install, release or deploy. Starts the API against a throwaway PostgreSQL 17
+  // service with synthetic data on a hosted runner and measures speed and concurrency.
+  'load-check.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
 for (const name of reviewed) {
