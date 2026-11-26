@@ -4,6 +4,7 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/write_offs_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:erp_kayan/shared/widgets/searchable_select_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +23,7 @@ class _WriteOffsApi extends ApiClient {
 
   bool failList;
   final posts = <String>[];
+  final bodies = <Object?>[];
   final queries = <Map<String, dynamic>?>[];
 
   @override
@@ -29,6 +31,22 @@ class _WriteOffsApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    if (path == '/inventory/warehouses') {
+      return [
+        {'id': 'wh-1', 'code': 'MAIN', 'nameEn': 'Main store', 'isActive': true},
+      ];
+    }
+    if (path == '/inventory/items') {
+      return [
+        {
+          'id': 'it-1',
+          'code': 'P100',
+          'nameEn': 'Solar panel',
+          'isActive': true,
+          'isStockTracked': true,
+        },
+      ];
+    }
     queries.add(query);
     if (failList) throw StateError('WRITEOFF_LIST_FAILED');
     return [
@@ -152,6 +170,7 @@ class _WriteOffsApi extends ApiClient {
     String? idempotencyKey,
   }) async {
     posts.add(path);
+    bodies.add(body);
     return const {};
   }
 }
@@ -201,6 +220,54 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('a user who may adjust stock can raise a write-off draft', (
+    tester,
+  ) async {
+    final api = _WriteOffsApi();
+    await pump(
+      tester,
+      api,
+      permissions: const ['inventory.stock.read', 'inventory.stock.adjust'],
+    );
+    await tester.tap(find.text('New write-off').first);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Warehouse'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MAIN - Main store').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(SearchableSelectField));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('P100 - Solar panel').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Quantity to write off'),
+      '4',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Reason'),
+      'Broken in transit',
+    );
+    await tester.tap(find.text('Save as draft'));
+    await tester.pumpAndSettle();
+    expect(api.posts, ['/inventory/stock-documents']);
+    final body = api.bodies.single! as Map;
+    expect(body['kind'], 'WRITE_OFF');
+    expect(body['toWarehouseId'], 'wh-1');
+    expect(body['reason'], 'Broken in transit');
+    // The quantity leaves stock, so it is sent negative.
+    expect((body['lines'] as List).single, {'itemId': 'it-1', 'quantity': '-4'});
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('without the adjust grant there is no New write-off button', (
+    tester,
+  ) async {
+    await pump(tester, _WriteOffsApi());
+    expect(find.text('New write-off'), findsNothing);
+  });
 
   testWidgets('asks the server for write-offs only, not every stock document', (
     tester,

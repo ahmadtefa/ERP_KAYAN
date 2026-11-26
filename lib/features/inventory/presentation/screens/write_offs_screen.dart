@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';
@@ -90,6 +93,9 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     final user = ref.watch(currentUserProvider);
     final canApprove = user?.can('inventory.writeoff.approve') ?? false;
     final canPost = user?.can('inventory.writeoff.post') ?? false;
+    // The server's create route is guarded by the stock-adjust grant, and it
+    // refuses a warehouse the caller may not issue from.
+    final canCreate = user?.can('inventory.stock.adjust') ?? false;
 
     return ModuleScaffold(
       title: _arabic ? 'الإعدام' : 'Write-offs',
@@ -97,6 +103,12 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
       trailing: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          if (canCreate)
+            FilledButton.icon(
+              onPressed: _create,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(_arabic ? 'إعدام جديد' : 'New write-off'),
+            ),
           SearchField(
             hint: _arabic ? 'بحث في الإعدام' : 'Search write-offs',
             onChanged: (value) => setState(() => _query = value.trim()),
@@ -113,8 +125,12 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
         onRetry: () => ref.read(writeOffsProvider.notifier).reload(),
         isEmpty: (rows) => _visible(rows).isEmpty,
         emptyMessage: _arabic
-            ? 'لا توجد عمليات إعدام.'
-            : 'No write-offs.',
+            ? (canCreate
+                  ? 'لا توجد عمليات إعدام. اضغط «إعدام جديد» لتسجيل واحدة.'
+                  : 'لا توجد عمليات إعدام.')
+            : (canCreate
+                  ? 'No write-offs yet. Use "New write-off" to record one.'
+                  : 'No write-offs.'),
         data: (rows) => RecordsTable(
           rows: _visible(rows),
           columns: [
@@ -221,6 +237,130 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     );
     if (!confirmed || !mounted) return;
     await _send('/inventory/stock-documents/${text(row, 'id')}/write-off/approve');
+  }
+
+  String? _lastBody;
+  String _lastKey = '';
+
+  /// Raises a write-off draft: one item, a quantity that leaves stock, and the
+  /// reason an approver and an auditor will read. It is only a draft: somebody
+  /// else approves it and it is posted afterwards, as the list explains.
+  Future<void> _create() async {
+    final api = ref.read(apiClientProvider);
+    List<Json> warehouses;
+    List<Json> items;
+    try {
+      warehouses = await api.getList('/inventory/warehouses');
+      items = await api.getList('/inventory/items', query: {'pageSize': 200, 'page': 1});
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    String name(Json r) => _arabic
+        ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
+        : text(r, 'nameEn', fallback: text(r, 'nameAr'));
+    final warehouseOptions = [
+      for (final w in warehouses)
+        if (w['isActive'] != false && w['deletedAt'] == null)
+          FieldOption(text(w, 'id'), '${text(w, 'code')} - ${name(w)}'),
+    ];
+    final itemOptions = [
+      for (final i in items)
+        if (i['isActive'] != false && i['isStockTracked'] != false)
+          FieldOption(text(i, 'id'), '${text(i, 'code')} - ${name(i)}'),
+    ];
+    if (warehouseOptions.isEmpty || itemOptions.isEmpty) {
+      showMessage(
+        context,
+        _arabic
+            ? 'لا يوجد مخزن أو صنف مخزني متاح لتسجيل إعدام.'
+            : 'There is no warehouse or stock item available for a write-off.',
+        error: true,
+      );
+      return;
+    }
+    final saved = await showFormSheet(
+      context,
+      title: _arabic ? 'إعدام جديد' : 'New write-off',
+      submitLabel: _arabic ? 'حفظ كمسودة' : 'Save as draft',
+      fields: [
+        FieldSpec(
+          'warehouseId',
+          _arabic ? 'المخزن' : 'Warehouse',
+          kind: FieldKind.select,
+          required: true,
+          options: warehouseOptions,
+        ),
+        FieldSpec(
+          'itemId',
+          _arabic ? 'الصنف' : 'Item',
+          kind: FieldKind.select,
+          required: true,
+          searchable: true,
+          options: itemOptions,
+        ),
+        FieldSpec(
+          'quantity',
+          _arabic ? 'الكمية المعدومة' : 'Quantity to write off',
+          kind: FieldKind.decimal,
+          required: true,
+          validator: (value) {
+            final n = double.tryParse(value.trim());
+            if (n == null || n <= 0) {
+              return _arabic
+                  ? 'اكتب كمية أكبر من صفر.'
+                  : 'Enter a quantity above zero.';
+            }
+            return null;
+          },
+          helper: _arabic
+              ? 'اكتب الكمية موجبة؛ تخرج من المخزن عند الترحيل.'
+              : 'Enter a positive quantity; it leaves stock when posted.',
+        ),
+        FieldSpec(
+          'reason',
+          _arabic ? 'السبب' : 'Reason',
+          required: true,
+          kind: FieldKind.multiline,
+          maxLines: 3,
+          maxLength: 500,
+        ),
+      ],
+      onSubmit: (values) async {
+        final quantity = text(values, 'quantity').trim();
+        final body = <String, dynamic>{
+          'kind': 'WRITE_OFF',
+          'documentDate': DateTime.now().toIso8601String().substring(0, 10),
+          'toWarehouseId': text(values, 'warehouseId'),
+          'reason': text(values, 'reason').trim(),
+          'lines': [
+            {'itemId': text(values, 'itemId'), 'quantity': '-$quantity'},
+          ],
+        };
+        // The same body keeps the same key, so a retry after an uncertain
+        // answer cannot raise a second loss; a changed body gets a new key.
+        final encoded = jsonEncode(body);
+        if (encoded != _lastBody) {
+          _lastBody = encoded;
+          _lastKey = 'writeoff-${DateTime.now().microsecondsSinceEpoch}';
+        }
+        await api.post(
+          '/inventory/stock-documents',
+          body: body,
+          idempotencyKey: _lastKey,
+        );
+      },
+    );
+    if (saved != null && mounted) {
+      showMessage(
+        context,
+        _arabic
+            ? 'تم حفظ الإعدام كمسودة. يعتمده شخص آخر ثم يُرحَّل.'
+            : 'The write-off was saved as a draft. Someone else approves it, then it is posted.',
+      );
+      ref.invalidate(writeOffsProvider);
+    }
   }
 
   Future<void> _post(Json row) async {
