@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kayan/features/cheques/presentation/cheques_screen.dart';
+import 'package:erp_kayan/features/cheques/presentation/cheques_screen.dart';
 
 void main() {
   test('received cheque life cycle offers only the allowed steps', () {
