@@ -1,4 +1,4 @@
-import { companyClosesSignIn } from '../../common/auth/company-sign-in';
+import { companyClosesSignIn, resetResumeAllowsSetupSignIn } from '../../common/auth/company-sign-in';
 import {
   BadRequestException,
   Injectable,
@@ -65,7 +65,10 @@ export class AuthService {
     // username exists would let an attacker enumerate accounts.
     const invalid = new UnauthorizedException('Invalid username or password');
 
-    const companyClosed = user !== null && (await companyClosesSignIn(this.prisma, user.company));
+    const companyClosed =
+      user !== null &&
+      companyClosesSignIn(user.company) &&
+      !(await resetResumeAllowsSetupSignIn(this.prisma, user, user.company));
     if (!user || user.deletedAt !== null || !user.isActive || companyClosed) {
       this.logger.warn(
         `Sign-in refused for "${username}": ${
@@ -341,7 +344,7 @@ export class AuthService {
     if (
       user.deletedAt !== null ||
       !user.isActive ||
-      (await companyClosesSignIn(this.prisma, user.company))
+      companyClosesSignIn(user.company)
     ) {
       await this.prisma.refreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },

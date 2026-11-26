@@ -184,7 +184,7 @@ export class JwtAuthGuard implements CanActivate {
       !principal.isActive ||
       principal.deletedAt !== null ||
       principal.companyId !== payload.companyId ||
-      (await companyClosesSignIn(this.prisma, principal.company)) ||
+      companyClosesSignIn(principal.company) ||
       principal.tokenVersion !== (payload.tokenVersion ?? 0)
     ) {
       throw new UnauthorizedException('Account is inactive or unavailable');

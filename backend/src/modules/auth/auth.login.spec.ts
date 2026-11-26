@@ -48,6 +48,7 @@ function build(overrides: Record<string, unknown> = {}) {
       count: jest.fn().mockResolvedValue(5),
     },
     company: { count: jest.fn().mockResolvedValue(1) },
+    auditLog: { findFirst: jest.fn().mockResolvedValue(null) },
     userBranch: { findMany: jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]) },
     refreshToken: { create: jest.fn().mockResolvedValue({}) },
   };
@@ -137,12 +138,62 @@ describe('POST /auth/login outcomes', () => {
     }
   });
 
-  it('lets the one preserved administrator of a reset installation sign in to finish setup', async () => {
-    jest.mocked(argon2.verify).mockResolvedValue(true);
-    const { service, prisma } = build({ company: { isActive: true, deletedAt: new Date() } });
-    (prisma.user.count as jest.Mock).mockResolvedValue(1);
-    (prisma.company.count as jest.Mock).mockResolvedValue(0);
-    await expect(service.login('admin', 'correct-password')).resolves.toBeDefined();
+  describe('reset-resume sign-in (setup only)', () => {
+    const retired = () => ({ isActive: true, deletedAt: new Date() });
+    function sole(company: { isActive: boolean; deletedAt: Date | null }, resetUserId: string | null) {
+      const built = build({ company });
+      (built.prisma.user.count as jest.Mock).mockResolvedValue(1);
+      (built.prisma.company.count as jest.Mock).mockResolvedValue(0);
+      (built.prisma.auditLog.findFirst as jest.Mock).mockResolvedValue(
+        resetUserId === null ? null : { userId: resetUserId },
+      );
+      return built;
+    }
+
+    it('lets the one administrator named by the RESET audit entry sign in to finish setup', async () => {
+      jest.mocked(argon2.verify).mockResolvedValue(true);
+      const { service, prisma } = sole(retired(), 'user-1');
+      await expect(service.login('admin', 'correct-password')).resolves.toBeDefined();
+      expect(prisma.auditLog.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { companyId: 'company-1', action: 'RESET', entity: 'company_data' } }),
+      );
+    });
+
+    it('keeps a sole retired company closed when there was no reset', async () => {
+      jest.mocked(argon2.verify).mockResolvedValue(true);
+      const { service } = sole(retired(), null);
+      await expect(service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
+    });
+
+    it('keeps a sole retired company closed when the reset named someone else', async () => {
+      jest.mocked(argon2.verify).mockResolvedValue(true);
+      const { service } = sole(retired(), 'someone-else');
+      await expect(service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
+    });
+
+    it('never lets a suspended sole company in, even with a RESET entry', async () => {
+      jest.mocked(argon2.verify).mockResolvedValue(true);
+      const { service } = sole({ isActive: false, deletedAt: new Date() }, 'user-1');
+      await expect(service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
+      const live = sole({ isActive: false, deletedAt: null }, 'user-1');
+      await expect(live.service.login('admin', 'correct-password')).rejects.toMatchObject({ status: 401 });
+    });
+
+    it('does not let the reset administrator refresh a session', async () => {
+      const { service, prisma, userRow } = sole(retired(), 'user-1');
+      const updateMany = jest.fn();
+      (prisma as unknown as { refreshToken: Record<string, unknown> }).refreshToken = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'rt-3',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: userRow,
+        }),
+        updateMany,
+      };
+      await expect(service.refresh('live-token')).rejects.toMatchObject({ status: 401 });
+      expect(updateMany).toHaveBeenCalled();
+    });
   });
 
   it('refuses a refresh for a suspended company and revokes its sessions', async () => {
