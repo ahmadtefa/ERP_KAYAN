@@ -108,6 +108,8 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
 
   it('licence A adopts the unowned rows; licences B and C start empty and count only their own', async () => {
     await service.activate(key({ licenseId: 'lic_A-0001', seats: { mode: 'CAP', value: 2 } }));
+    // "Oldest" is by createdAt; activation stamps the real clock, so pin A as oldest.
+    await prisma.licenseInstallation.update({ where: { licenseId: 'lic_A-0001' }, data: { createdAt: new Date(now.getTime() - 86_400_000) } });
     await addLicence('lic_B-0001', 1, 5);
     await addLicence('lic_C-0001', 2, 10);
     expect(await service.seatsUsedForLicense('lic_A-0001')).toBe(2);
