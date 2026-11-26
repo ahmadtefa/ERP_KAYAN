@@ -2,9 +2,19 @@ name: KAYAN load and performance check (synthetic data)
 
 # Measures API speed and concurrent-user behaviour on a throwaway PostgreSQL
 # with synthetic data. One standard GitHub runner; not production, not exposed.
-# Numbers describe this runner only. Dispatch only.
+# Numbers describe this runner only. A workflow that exists only on a feature
+# branch cannot be dispatched, so it also runs on a push to this branch that
+# touches the load files themselves (paths filter below), and nothing else.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - instinct/six-fixes-on-arena-98e79137
+    paths:
+      - .github/workflows/load-check.yml
+      - scripts/load-run.sh
+      - scripts/load-limiter-probe.sh
+      - backend/scripts/load-check.mjs
 
 permissions:
   contents: read
