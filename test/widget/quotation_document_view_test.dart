@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:erp_kayan/features/quotations/presentation/document/quotation_document.dart';
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/shared/widgets/authorized_company_logo.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:erp_kayan/features/quotations/presentation/widgets/quotation_document_view.dart';
@@ -274,6 +275,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          currentUserProvider.overrideWithValue(null),
           companyLogoBytesProvider.overrideWith((ref, key) async => mark),
         ],
         child: _host(QuotationDocumentView(
