@@ -8,8 +8,7 @@
  * refused, creates and downloads a database archive, checks its gated
  * database-only restore and licence-reconciliation semantics, exports and
  * prints a report, downloads an import template and
- * imports it, and then (only when told the database is disposable) resets the
- * company and sets it up again.
+ * imports it.
  *
  *   node scripts/api-check.mjs [apiBaseUrl]
  *
@@ -17,7 +16,6 @@
  *   APP_URL               where the API is (default http://127.0.0.1:3000/api/v1)
  *   ADMIN_USERNAME        sign-in name           (default: admin)
  *   ADMIN_PASSWORD        sign-in secret         (default: Admin@12345)
- *   KAYAN_E2E_ALLOW_RESET set to 1 to run the destructive reset section.
  *                         Only ever do that against a throwaway database.
  *
  * Exit code 0 means every check passed. Each check prints PASS/FAIL with
@@ -26,7 +24,6 @@
 const API = process.argv[2] ?? process.env.APP_URL ?? 'http://127.0.0.1:3000/api/v1';
 const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 const PASSWORD = process.env.ADMIN_PASSWORD ?? 'Admin@12345';
-const ALLOW_RESET = process.env.KAYAN_E2E_ALLOW_RESET === '1';
 
 const results = [];
 
@@ -526,127 +523,6 @@ async function main() {
     (stillEmpty.data?.items?.length ?? -1) === 0,
     `${stillEmpty.data?.items?.length ?? -1} customer(s)`,
   );
-
-  // ──────────────────────────────────────────────── 7. the company reset
-  const preview = await call('/admin/reset');
-  check(
-    'the reset screen can ask what a reset would remove',
-    preview.status === 200 && typeof preview.data?.counts === 'object',
-    Object.entries(preview.data?.counts ?? {})
-      .map(([key, value]) => `${key}=${value}`)
-      .join(' '),
-  );
-
-  const wrongPassword = await call('/admin/reset', {
-    method: 'POST',
-    json: { password: 'definitely not the password', confirmation: 'RESET' },
-  });
-  check('a reset with the wrong password is refused', wrongPassword.status === 401, `status ${wrongPassword.status}`);
-
-  const wrongWord = await call('/admin/reset', {
-    method: 'POST',
-    json: { password: PASSWORD, confirmation: 'reset' },
-  });
-  check('a reset without the typed confirmation is refused', wrongWord.status === 400, `status ${wrongWord.status}`);
-
-  if (!ALLOW_RESET) {
-    console.log(
-      '\nSKIP  the destructive reset (set KAYAN_E2E_ALLOW_RESET=1 against a throwaway database)',
-    );
-  } else {
-    // Something has to be there for the reset to have removed. An account is
-    // the smallest thing the reset clears that a screen shows afterwards.
-    const made = await call('/accounting/chart-of-accounts', {
-      method: 'POST',
-      json: {
-        code: '9001',
-        nameEn: 'Reset check account',
-        nameAr: 'حساب فحص إعادة الضبط',
-        type: 'ASSET',
-        isPostable: true,
-      },
-    });
-    check(
-      'something exists for the reset to remove',
-      made.status === 201,
-      `status ${made.status} ${made.data?.code ?? ''}`,
-    );
-
-    const before = await call('/accounting/chart-of-accounts');
-    const beforeCount = before.data?.items?.length ?? -1;
-    const reset = await call('/admin/reset', {
-      method: 'POST',
-      json: { password: PASSWORD, confirmation: 'RESET' },
-    });
-    check(
-      'the reset clears the company and keeps a verified backup',
-      reset.status === 200 && reset.data?.reset === true,
-      `${reset.data?.backupFile ?? ''} (${reset.data?.backupEntries ?? 0} objects)`,
-    );
-
-    // The two checks that look at the wiped company run after the setup
-    // below brings it back and this script signs in again: between the
-    // reset and the setup there is no signed-in user to read them with.
-    const status = await call('/setup/status', { noAuth: true });
-    check(
-      'the program asks to be set up again',
-      status.status === 200 && status.data?.needsSetup === true,
-      JSON.stringify(status.data),
-    );
-
-    const setup = await call('/setup/initial', {
-      method: 'POST',
-      noAuth: true,
-      json: {
-        companyCode: 'KAYAN',
-        companyNameEn: 'Kayan Company',
-        companyNameAr: 'شركة كيان',
-        adminUsername: USERNAME,
-        adminPassword: PASSWORD,
-      },
-    });
-    check(
-      'the first-run setup can be completed again',
-      setup.status === 201 || setup.status === 200,
-      `${setup.data?.companyCode ?? ''} ${setup.data?.adminUsername ?? ''} (status ${setup.status})`,
-    );
-
-    const signedInAgain = await call('/auth/login', {
-      method: 'POST',
-      noAuth: true,
-      json: { username: USERNAME, password: PASSWORD },
-    });
-    check(
-      'the administrator can sign in after the reset and setup',
-      Boolean(signedInAgain.data?.accessToken),
-      `status ${signedInAgain.status}`,
-    );
-    // Everything after this point acts as the NEW administrator: the token
-    // from before the reset names a user and company that no longer exist.
-    token = signedInAgain.data?.accessToken ?? token;
-
-    const accounts = await call('/accounting/chart-of-accounts');
-    const itemsAfter = accounts.data?.items ?? [];
-    check(
-      'the company holds no operational data afterwards',
-      accounts.status === 200 &&
-        !itemsAfter.some((account) => account.code === '9001'),
-      `${beforeCount} accounts before the reset; account 9001 ${
-        itemsAfter.some((account) => account.code === '9001')
-          ? 'still there'
-          : 'gone'
-      } (${itemsAfter.length} seeded defaults after setup)`,
-    );
-
-    const audit = await call('/admin/audit-logs?pageSize=50');
-    const entries = audit.data?.items ?? [];
-    check(
-      'the reset is in the audit trail, and the password is not',
-      entries.some((entry) => entry.action === 'RESET') &&
-        !JSON.stringify(entries).includes(PASSWORD),
-      `${entries.length} entries`,
-    );
-  }
 
   // ─────────────────────────────────────────────────────── reaching it from
   // Another machine on the network. The program runs on one desk and is

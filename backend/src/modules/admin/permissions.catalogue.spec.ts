@@ -31,7 +31,8 @@ describe('permission catalogue', () => {
     expect(codes.has('reports.export')).toBe(true);
     expect(codes.has('reports.print')).toBe(true);
     expect(codes.has('admin.backup.restore')).toBe(true);
-    expect(codes.has('admin.reset')).toBe(true);
+    // The company reset was removed with its permission.
+    expect(codes.has('admin.reset')).toBe(false);
     // Reading opening balances is its own operation, separate from managing them.
     expect(codes.has('accounting.openingbalances.read')).toBe(true);
     expect(codes.has('sales.price.read')).toBe(true);

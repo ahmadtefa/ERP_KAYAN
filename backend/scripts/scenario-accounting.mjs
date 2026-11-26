@@ -34,9 +34,7 @@
  *      fixture (start the API with KAYAN_FULL_RESTORE_ENABLED=0), while the
  *      explicit database archive is still
  *      reachable by hand and says what it leaves out
- *  17. verify the portable company JSON backup round-trips, and when explicitly
- *      enabled for an ephemeral database, verify the guarded reset, its
- *      verified safety backup, and first-run setup status afterward
+ *  17. verify the portable company JSON backup round-trips
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
@@ -1573,266 +1571,23 @@ async function main() {
     skip('backup and restore', `pg_dump is not available here: ${capabilities.data?.reason ?? 'unknown reason'}`);
   }
 
-  // This operation is intentionally disabled unless CI (or an operator using
-  // a dedicated disposable database) opts in explicitly. Never let a routine
-  // scenario run reset a real or developer database by accident.
-  if (process.env.ENABLE_DISPOSABLE_RESET === 'true') {
-    // Section 14 logged this run's session out on purpose, and the fresh token
-    // it takes afterwards is only issued inside the backup/restore block above.
-    // When that block is skipped - which happens wherever pg_dump is absent -
-    // the token in hand is the one that was just logged out, so every request
-    // below answered 401 and the reset checks failed for a reason that had
-    // nothing to do with reset. Sign in again rather than inherit that state.
-    const resetLogin = await api('/auth/login', {
-      method: 'POST', noAuth: true,
+  // Section 14 logged this run's session out on purpose. Sign in again so the
+  // sections below hold a live administrator token.
+  {
+    const again = await api('/auth/login', {
+      method: 'POST',
       json: { username: USERNAME, password: PASSWORD },
+      noAuth: true,
     });
     check(
-      'the operator can sign in again before exercising reset',
-      resetLogin.status === 201 && Boolean(resetLogin.data?.accessToken),
-      `status ${resetLogin.status}`,
+      'the operator can sign in again before the remaining sections',
+      again.status === 201 && Boolean(again.data?.accessToken),
+      `status ${again.status}`,
     );
-    if (resetLogin.data?.accessToken) {
-      token = resetLogin.data.accessToken;
-      refreshToken = resetLogin.data.refreshToken ?? refreshToken;
+    if (again.data?.accessToken) {
+      token = again.data.accessToken;
+      refreshToken = again.data.refreshToken ?? refreshToken;
     }
-    const setupBeforeReset = await api('/setup/status', { noAuth: true });
-    check(
-      'reset scenario is running against a fully set-up disposable database',
-      setupBeforeReset.status === 200 && setupBeforeReset.data?.needsSetup === false &&
-        Number(setupBeforeReset.data?.companyCount) === 1,
-      `status ${setupBeforeReset.status}, setup ${setupBeforeReset.data?.needsSetup}, companies ${setupBeforeReset.data?.companyCount}`,
-    );
-
-    const resetPreview = await api('/admin/reset');
-    check(
-      'reset preview names the active company and requires the exact confirmation word',
-      resetPreview.status === 200 && resetPreview.data?.confirmationWord === 'RESET' &&
-        Boolean(resetPreview.data?.companyCode) &&
-        Number(resetPreview.data?.counts?.accounts) > 0,
-      `status ${resetPreview.status}, company ${resetPreview.data?.companyCode}, word ${resetPreview.data?.confirmationWord}`,
-    );
-
-    const wrongPassword = await api('/admin/reset', {
-      method: 'POST',
-      json: { password: `${PASSWORD}-wrong`, confirmation: 'RESET' },
-    });
-    check(
-      'reset refuses an incorrect administrator password without changing the company',
-      wrongPassword.status === 401,
-      `status ${wrongPassword.status}`,
-    );
-    const wrongConfirmation = await api('/admin/reset', {
-      method: 'POST',
-      json: { password: PASSWORD, confirmation: 'not-reset' },
-    });
-    check(
-      'reset refuses a missing exact confirmation word without changing the company',
-      wrongConfirmation.status === 400,
-      `status ${wrongConfirmation.status}`,
-    );
-
-    const reset = await api('/admin/reset', {
-      method: 'POST',
-      json: { password: PASSWORD, confirmation: 'RESET' },
-    });
-    check(
-      'live reset verifies a non-empty safety backup before deleting business data',
-      reset.status === 200 && reset.data?.reset === true &&
-        Boolean(reset.data?.backupFile) && Number(reset.data?.backupBytes) > 0 &&
-        Number(reset.data?.backupEntries) > 0,
-      `status ${reset.status}, backup ${reset.data?.backupFile}, ${reset.data?.backupBytes ?? 0} bytes / ${reset.data?.backupEntries ?? 0} entries`,
-    );
-    check(
-      'live reset reports that first-run setup is required again',
-      reset.data?.needsSetup === true && Number(reset.data?.deleted?.accounts) > 0 &&
-        Number(reset.data?.deleted?.branches) > 0,
-      `needsSetup ${reset.data?.needsSetup}, deleted accounts ${reset.data?.deleted?.accounts ?? 0}, branches ${reset.data?.deleted?.branches ?? 0}`,
-    );
-    const staleAccess = await api('/auth/me');
-    check(
-      'reset invalidates the access token that triggered it',
-      staleAccess.status === 401,
-      `status ${staleAccess.status}`,
-    );
-
-    const setupAfterReset = await api('/setup/status', { noAuth: true });
-    const healthAfterReset = await api('/health', { noAuth: true });
-    // The reset retires the company, keeping its row so setup can be completed
-    // against it, and keeps the administrator. The settings screen promises
-    // exactly this: "the program will ask to be set up again". It is setup,
-    // not recovery - recovery is for a company that is still live but has lost
-    // every account able to sign in.
-    check(
-      'setup after reset reopens first-run setup while the administrator is kept',
-      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === true &&
-        setupAfterReset.data?.recoveryRequired === false &&
-        Number(setupAfterReset.data?.companyCount) === 0 && setupAfterReset.data?.hasUsers === true,
-      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, recovery ${setupAfterReset.data?.recoveryRequired}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
-    );
-    check(
-      'the API and PostgreSQL stay healthy after reset',
-      healthAfterReset.status === 200 && healthAfterReset.data?.status === 'ok' &&
-        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.needsSetup === true,
-      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, setup ${healthAfterReset.data?.needsSetup}`,
-    );
-    const administratorAfterReset = await api('/auth/login', {
-      method: 'POST',
-      json: { username: USERNAME, password: PASSWORD },
-      noAuth: true,
-    });
-    check(
-      'the preserved administrator can sign in again to complete first-run setup',
-      administratorAfterReset.status === 201 && Boolean(administratorAfterReset.data?.accessToken),
-      `status ${administratorAfterReset.status}`,
-    );
-
-    const setupBody = {
-      companyCode: reset.data?.companyCode,
-      companyNameEn: 'KAYAN CI after reset',
-      companyNameAr: 'كيان بعد إعادة الضبط',
-      facilityKind: 'HEADQUARTERS',
-      unitCode: 'MAIN',
-      unitNameEn: 'Head Office',
-      unitNameAr: 'المركز الرئيسي',
-      adminUsername: USERNAME,
-      adminPassword: PASSWORD,
-      adminFullNameEn: 'CI Administrator',
-      adminFullNameAr: 'مدير الاختبار',
-      seedChartOfAccounts: true,
-    };
-    // The setup route is public. After a reset it must not be usable by a
-    // stranger: wrong password, wrong username, and the kept account's token
-    // must not reach any business API while the company is retired.
-    const strangerSetup = await api('/setup/initial', {
-      method: 'POST',
-      noAuth: true,
-      noRetry: true,
-      json: { ...setupBody, adminPassword: 'Stranger-Chosen-Password-77' },
-    });
-    const wrongNameSetup = await api('/setup/initial', {
-      method: 'POST',
-      noAuth: true,
-      noRetry: true,
-      json: { ...setupBody, adminUsername: 'stranger-admin' },
-    });
-    check(
-      'public setup after a reset refuses a caller who does not know the kept account password or name',
-      strangerSetup.status === 409 && wrongNameSetup.status === 409,
-      `wrong password ${strangerSetup.status}, wrong username ${wrongNameSetup.status}`,
-    );
-    const businessAfterReset = await api('/accounting/settings', {
-      headers: { Authorization: `Bearer ${administratorAfterReset.data?.accessToken}` },
-    });
-    const refreshAfterReset = await api('/auth/refresh', {
-      method: 'POST',
-      noAuth: true,
-      json: { refreshToken: administratorAfterReset.data?.refreshToken },
-    });
-    check(
-      'the kept administrator token opens no business API and cannot refresh before setup is completed',
-      businessAfterReset.status === 401 && refreshAfterReset.status === 401,
-      `business ${businessAfterReset.status}, refresh ${refreshAfterReset.status}`,
-    );
-    const resetAudit = new pg.Client({ connectionString: DATABASE_URL });
-    await resetAudit.connect();
-    try {
-      const rows = await resetAudit.query(
-        `SELECT count(*)::int AS n FROM audit_logs WHERE action = 'RESET' AND entity = 'company_data' AND "userId" IS NOT NULL`,
-      );
-      check(
-        'the RESET audit entry naming the kept administrator survived the reset',
-        rows.rows[0].n >= 1,
-        `RESET entries naming a user: ${rows.rows[0].n}`,
-      );
-    } finally {
-      await resetAudit.end();
-    }
-    const completedSetup = await api('/setup/initial', {
-      method: 'POST',
-      noAuth: true,
-      json: setupBody,
-    });
-    // Setup completes against the retired company row rather than adding a
-    // second company: one installation holds one active company, and the
-    // request's own company code and names win over the retired ones.
-    check(
-      'the preserved administrator can finish first-run setup on the reset company',
-      completedSetup.status < 300 &&
-        completedSetup.data?.companyId === reset.data?.companyId &&
-        completedSetup.data?.companyCode === reset.data?.companyCode,
-      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode ?? '-'}, administrator ${completedSetup.data?.adminUsername ?? '-'}`,
-    );
-
-    const setupAfterCompletion = await api('/setup/status', { noAuth: true });
-    const healthAfterCompletion = await api('/health', { noAuth: true });
-    check(
-      'completed first-run setup closes the setup flow and restores a healthy ready state',
-      setupAfterCompletion.status === 200 && setupAfterCompletion.data?.needsSetup === false &&
-        Number(setupAfterCompletion.data?.companyCount) === 1 &&
-        healthAfterCompletion.status === 200 && healthAfterCompletion.data?.status === 'ok' &&
-        healthAfterCompletion.data?.database === 'up' && healthAfterCompletion.data?.needsSetup === false,
-      `setup ${setupAfterCompletion.data?.needsSetup}, companies ${setupAfterCompletion.data?.companyCount}, health ${healthAfterCompletion.data?.status}, database ${healthAfterCompletion.data?.database}`,
-    );
-
-    // The normal self-service password screen works for the recovered account,
-    // and a refused change leaves the credentials as they were.
-    const TEMP_PASSWORD = 'CI-only-Temp-Password-98765';
-    const refusedChange = await api('/auth/change-password', {
-      method: 'POST',
-      noAuth: true,
-      json: { username: USERNAME, currentPassword: 'Not-The-Password-12345', newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
-    });
-    const stillOld = await api('/auth/login', { method: 'POST', json: { username: USERNAME, password: PASSWORD }, noAuth: true });
-    const changedOnce = await api('/auth/change-password', {
-      method: 'POST',
-      noAuth: true,
-      json: { username: USERNAME, currentPassword: PASSWORD, newPassword: TEMP_PASSWORD, confirmPassword: TEMP_PASSWORD },
-    });
-    const changedBack = await api('/auth/change-password', {
-      method: 'POST',
-      noAuth: true,
-      json: { username: USERNAME, currentPassword: TEMP_PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD },
-    });
-    check(
-      'after recovery the normal password change works, and a refused change leaves the credentials unchanged',
-      refusedChange.status >= 400 && stillOld.status === 201 && changedOnce.status < 300 && changedBack.status < 300,
-      `refused ${refusedChange.status}, old password still works ${stillOld.status}, change ${changedOnce.status}, change back ${changedBack.status}`,
-    );
-
-    const administratorAfterSetup = await api('/auth/login', {
-      method: 'POST',
-      json: { username: USERNAME, password: PASSWORD },
-      noAuth: true,
-    });
-    check(
-      'the administrator can sign in with the credentials confirmed by first-run setup',
-      administratorAfterSetup.status === 201 && Boolean(administratorAfterSetup.data?.accessToken),
-      `status ${administratorAfterSetup.status}`,
-    );
-
-    // Everything from here acts as the administrator setup just confirmed.
-    // The reset revoked the token this run started with, and so did the new
-    // account row, so the old one must not be reused.
-    token = administratorAfterSetup.data?.accessToken ?? token;
-
-    // Setup leaves a fresh company on its own defaults, and a new company
-    // charges no VAT until an operator says what its rate is. The reset threw
-    // away the 14% this run set at the start, so it has to be set again before
-    // any figure below is read - otherwise every later total is quietly
-    // computed at zero and every assertion about it fails for one reason.
-    const policyAfterSetup = await api('/accounting/settings', {
-      method: 'PATCH',
-      json: { taxRate: TAX, allowNegativeStock: false },
-    });
-    check(
-      'the company policy is set again on the company that setup recreated',
-      // Decimal(9,4) comes back as "14.0000", not "14": compare the number.
-      policyAfterSetup.status === 200 && Number(policyAfterSetup.data?.taxRate) === Number(TAX),
-      `status ${policyAfterSetup.status}, tax ${policyAfterSetup.data?.taxRate}`,
-    );
-  } else {
-    skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
   }
 
   // ─────────────────────── 19. the server defends itself against a flood
@@ -1858,9 +1613,8 @@ async function main() {
   const floodStamp = Date.now().toString(36);
   const floodUsername = `scenario_flood_${floodStamp}`;
   const floodPassword = 'Scenario-Flood-Password-12345';
-  // A token of its own: the live-reset section above recreates the company,
-  // and the session carried in from before it is not guaranteed to still be
-  // the administrator of the company that now exists.
+  // A token of its own: an earlier section logged the carried session out, so
+  // it is not guaranteed to still be valid.
   const adminForFlood = await api('/auth/login', {
     method: 'POST',
     json: { username: USERNAME, password: PASSWORD },

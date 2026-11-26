@@ -12,7 +12,6 @@ import '../../../auth/presentation/widgets/user_photo.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
-import '../widgets/reset_data_card.dart';
 import '../widgets/document_settings_card.dart';
 import '../widgets/text_scale_card.dart';
 import '../widgets/appearance_card.dart';
@@ -180,10 +179,6 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
         ],
-        const SizedBox(height: 16),
-        // Only an administrator sees this, and only when there is something
-        // to reset. Everything about it is enforced again on the server.
-        const ResetDataCard(),
         const SizedBox(height: 16),
         Card(
           child: Column(

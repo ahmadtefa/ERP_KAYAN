@@ -175,11 +175,6 @@ jobs:
         run: |
           grep -E '^PASS\s+\S*licensing-seats\.multi\.postgres\.spec\.ts' /tmp/kayan-jest.log \
             || { echo '::error title=Licence seats (several licences)::the PostgreSQL several-licence seat spec did not pass or did not run'; exit 1; }
-      - name: Prove the reset, setup, restore spec ran on PostgreSQL
-        if: always()
-        run: |
-          grep -E '^PASS\s+\S*reset-setup-restore\.postgres\.spec\.ts' /tmp/kayan-jest.log \
-            || { echo '::error title=Reset setup restore::the PostgreSQL reset, setup, restore spec did not pass or did not run'; exit 1; }
       - name: Build API
         run: npm run build
       # `prisma migrate deploy` cannot run this project's migrations: Prisma
@@ -336,9 +331,8 @@ jobs:
           # the modern 2/4/6/8 digit chart, which the item, import and backup
           # checks above rely on, so these scenarios run against LEGACY-seeded
           # databases behind a second API on port 3001. Each one gets a fresh
-          # copy of one migrated, LEGACY-seeded template, because accounting and
-          # api-check reset the company and a company set up again after a reset
-          # gets the modern chart. Nothing about the scenarios is weakened and
+          # copy of one migrated, LEGACY-seeded template, so every scenario starts from the same
+          # LEGACY-seeded state. Nothing about the scenarios is weakened and
           # the modern database is not touched by them.
           echo "Preparing the migrated LEGACY-chart template database for the legacy-coded scenarios..."
           export PGPASSWORD=ci
@@ -373,7 +367,7 @@ jobs:
           }
           fresh_legacy
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
-          if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 DATABASE_URL="$LEGACY_DATABASE_URL" python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs "$LEGACY_API"; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 DATABASE_URL="$LEGACY_DATABASE_URL" python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs "$LEGACY_API"; then
             echo "::group::API logs after accounting scenario failure"
             cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"
@@ -382,7 +376,7 @@ jobs:
 
           fresh_legacy
           echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs "$LEGACY_API"; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/api-check.mjs "$LEGACY_API"; then
             echo "::group::API logs after api-check failure"
             cat /tmp/kayan-api-legacy.log
             echo "::endgroup::"

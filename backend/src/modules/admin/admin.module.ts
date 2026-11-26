@@ -5,8 +5,6 @@ import { BackupModule } from '../backup/backup.module';
 import { AuthModule } from '../auth/auth.module';
 import { AuditLogsController } from './audit-logs.controller';
 import { AuditLogsService } from './audit-logs.service';
-import { ResetController } from './reset.controller';
-import { ResetService } from './reset.service';
 import { RoleCatalogueBootstrap } from './role-catalogue.bootstrap';
 import { RolesController } from './roles.controller';
 import { RolesService } from './roles.service';
@@ -14,23 +12,20 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 /// Users, roles and permissions — the answer to "who may do what" —
-/// plus a read-only window onto the audit trail, plus the one button that
-/// puts a company back to its first day.
+/// plus a read-only window onto the audit trail.
 @Module({
   imports: [AuditModule, BackupModule, AuthModule],
   controllers: [
     UsersController,
     RolesController,
     AuditLogsController,
-    ResetController,
   ],
   providers: [
     UsersService,
     RolesService,
     AuditLogsService,
-    ResetService,
     RoleCatalogueBootstrap,
   ],
-  exports: [UsersService, RolesService, ResetService, RoleCatalogueBootstrap],
+  exports: [UsersService, RolesService, RoleCatalogueBootstrap],
 })
 export class AdminModule {}

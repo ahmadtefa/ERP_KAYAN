@@ -1575,7 +1575,7 @@ export class NotificationsService {
             // Sign-in/sign-out and who-may-do-what changes (roles, permissions,
             // users) are NOT alerts here: the administration screen owns them.
             // Only operations that alter the company itself are raised.
-            in: ['admin.backup.restore', 'admin.reset'],
+            in: ['admin.backup.restore'],
           },
         },
         select: {

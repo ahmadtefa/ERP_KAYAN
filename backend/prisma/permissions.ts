@@ -153,7 +153,6 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['inventory.reports.audit-trail.read', 'View inventory audit trail report', 'عرض تقرير المخزون audit trail', 'inventory'],
   ['inventory.reports.print', 'Print inventory reports', 'طباعة تقارير المخزون', 'inventory'],
   ['admin.backup.restore', 'Restore backups', 'استعادة النسخ الاحتياطية', 'admin'],
-  ['admin.reset', 'Reset company data', 'تصفير بيانات الشركة', 'admin'],
   ['admin.users.password', 'Reset other users passwords', 'إعادة تعيين كلمات مرور المستخدمين', 'admin'],
 
   ['accounting.periods.read', 'View fiscal periods', 'عرض الفترات المالية', 'accounting'],

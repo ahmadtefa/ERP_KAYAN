@@ -49,12 +49,6 @@ export const PERMISSION_WARNING_RULES: readonly PermissionWarningRule[] = [
     messageAr: 'يستطيع استبدال بيانات الشركة بملف نسخة احتياطية.',
   },
   {
-    match: 'admin.reset',
-    severity: 'CRITICAL',
-    messageEn: 'Can erase the company data and start over.',
-    messageAr: 'يستطيع محو بيانات الشركة والبدء من جديد.',
-  },
-  {
     match: 'admin.users.password',
     severity: 'WARNING',
     messageEn: 'Can set another user’s password and sign in as them.',
