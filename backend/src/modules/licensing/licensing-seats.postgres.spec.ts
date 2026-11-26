@@ -129,30 +129,58 @@ const run = process.env.KAYAN_COMPANY_ISOLATION_PG === '1' || /(_specs?|_test)$/
     expect(await prisma.licenseSeatUsage.count()).toBe(before + 1);
   });
 
-  // Mutation check, run on every CI: the same race with the advisory-lock
-  // statement turned into a no-op MUST overshoot the limit at least once.
-  // If it never does, the races above are not discriminating and prove nothing
-  // about the lock.
+  // Mutation check, last and disposable. The same race with the advisory-lock
+  // statement turned into a no-op, plus TEST-ONLY synchronisation: every
+  // unlocked transaction waits, after reading the seat count, until all of
+  // them have read it. Without the lock they then all insert, so the limit is
+  // exceeded by construction, not by timing. (The locked tests above have no
+  // barrier; it would deadlock there, since the lock serialises them.)
   it('discriminates: without the advisory lock the same race exceeds the limit', async () => {
-    const noLock = (tx: any) => new Proxy(tx, {
-      get(target, prop) {
-        if (prop === '$executeRawUnsafe') {
-          return (sql: string, ...rest: unknown[]) =>
-            /advisory_xact_lock/.test(sql) ? Promise.resolve(0) : target.$executeRawUnsafe(sql, ...rest);
-        }
-        const v = target[prop];
-        return typeof v === 'function' ? v.bind(target) : v;
-      },
-    });
-    let overshoot = false;
-    for (let round = 0; round < 8 && !overshoot; round += 1) {
-      const used = await prisma.licenseSeatUsage.count();
-      await service.addSeats(key({ type: 'SEATS', seats: { mode: 'CAP', value: Math.max(used + 1, 1) } }));
-      const limit = used + 1;
-      await Promise.allSettled(Array.from({ length: 12 }, (_, i) =>
-        prisma.$transaction((tx) => service.reserveSeat(noLock(tx) as any, { userId: randomUUID(), username: `nolock-${round}-${i}`, reason: 'USER_CREATE' } as any))));
-      overshoot = (await prisma.licenseSeatUsage.count()) > limit;
-    }
-    expect(overshoot).toBe(true);
+    const N = 12;
+    const used = await prisma.licenseSeatUsage.count();
+    const limit = used + 1;
+    await service.addSeats(key({ type: 'SEATS', seats: { mode: 'CAP', value: limit } }));
+    let arrived = 0;
+    let release!: () => void;
+    const everyoneRead = new Promise<void>((resolve) => { release = resolve; });
+    const safety = setTimeout(release, 8_000);                // never hang CI
+    const noLock = (tx: any) => {
+      let counted = false;
+      return new Proxy(tx, {
+        get(target, prop) {
+          if (prop === '$executeRawUnsafe') {
+            return (sql: string, ...rest: unknown[]) =>
+              /advisory_xact_lock/.test(sql) ? Promise.resolve(0) : target.$executeRawUnsafe(sql, ...rest);
+          }
+          if (prop === 'licenseSeatUsage') {
+            const d = target.licenseSeatUsage;
+            return new Proxy(d, {
+              get(dt, dp) {
+                if (dp === 'count') {
+                  return async (...a: unknown[]) => {
+                    const r = await dt.count(...a);
+                    if (!counted) { counted = true; arrived += 1; if (arrived === N) release(); await everyoneRead; }
+                    return r;
+                  };
+                }
+                const v = dt[dp];
+                return typeof v === 'function' ? v.bind(dt) : v;
+              },
+            });
+          }
+          const v = target[prop];
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+      });
+    };
+    const results = await Promise.allSettled(Array.from({ length: N }, (_, i) =>
+      prisma.$transaction((tx) => service.reserveSeat(noLock(tx) as any, { userId: randomUUID(), username: `nolock-${i}`, reason: 'USER_CREATE' } as any), { timeout: 20_000, maxWait: 20_000 })));
+    clearTimeout(safety);
+    const total = await prisma.licenseSeatUsage.count();
+    const reserved = results.filter((r) => r.status === 'fulfilled' && (r as any).value.reserved).length;
+    // eslint-disable-next-line no-console
+    console.log(`mutation (no lock, barrier): limit=${limit} arrived=${arrived}/${N} reserved=${reserved} rows=${total} overshoot=${total - limit}`);
+    expect(arrived).toBe(N);                                  // the barrier really held them all
+    expect(total).toBeGreaterThan(limit);
   });
 });
