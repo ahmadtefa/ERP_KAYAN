@@ -1,0 +1,40 @@
+{
+  "state": {
+    "v": 1,
+    "lastSeenAt": "2026-05-03T09:00:00.000Z",
+    "maxSeatsUsed": 0,
+    "maxSeatLimit": 10,
+    "appliedKeys": [
+      "key_activation-1",
+      "key_renewal-1",
+      "key_seats-1"
+    ],
+    "licenseId": "lic_aaaa-bbbb",
+    "licenseExpiresAt": "2028-05-01T09:00:00.000Z",
+    "perpetual": false,
+    "clockState": "OK",
+    "clockSuspects": [],
+    "enforcement": null,
+    "sequence": 11
+  },
+  "topLevelKeys": [
+    "mac",
+    "state"
+  ],
+  "stateKeys": [
+    "appliedKeys",
+    "clockState",
+    "clockSuspects",
+    "enforcement",
+    "installId",
+    "lastSeenAt",
+    "licenseExpiresAt",
+    "licenseId",
+    "maxSeatLimit",
+    "maxSeatsUsed",
+    "perpetual",
+    "publicKeyFingerprint",
+    "sequence",
+    "v"
+  ]
+}

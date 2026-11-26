@@ -253,6 +253,8 @@ describe('review item 4: invariants on every update and start', () => {
     ['applied key removed', (s: any) => { s.licenses['lic-1'].appliedKeys = ['k1']; }],
     ['applied keys reordered', (s: any) => { s.licenses['lic-1'].appliedKeys = ['k2', 'k1']; }],
     ['applied key duplicated', (s: any) => { s.licenses['lic-1'].appliedKeys = ['k1', 'k2', 'k1']; }],
+    ['seat limit lowered', (s: any) => { s.licenses['lic-1'].maxSeatLimit = 1; }],
+    ['expiry shortened', (s: any) => { s.licenses['lic-1'].licenseExpiresAt = '2026-02-01T00:00:00.000Z'; }],
     ['seat watermark lowered', (s: any) => { s.licenses['lic-1'].maxSeatsUsed = 1; }],
     ['licence removed', (s: any) => { s.licenses = {}; }],
     ['origin changed', (s: any) => { s.licenses['lic-1'].origin = 'V2'; }],

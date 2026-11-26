@@ -170,6 +170,11 @@ export function assertTransition(prev: any, next: any): void {
     if (b.origin !== a.origin) bad('origin');
     if (b.appliedKeys.length < a.appliedKeys.length || a.appliedKeys.some((k: string, i: number) => b.appliedKeys[i] !== k)) bad('appliedKeys is append-only');
     if (b.maxSeatsUsed < a.maxSeatsUsed) bad('seat watermark must not fall');
+    // v1 semantics, kept per licence: the limit is the highest ever granted,
+    // the expiry is the furthest ever granted, perpetual never reverts.
+    if (b.maxSeatLimit < a.maxSeatLimit) bad('seat limit is the highest ever granted and must not fall');
+    if (a.licenseExpiresAt && (!b.licenseExpiresAt || Date.parse(b.licenseExpiresAt) < Date.parse(a.licenseExpiresAt)) && !b.perpetual) bad('expiry is the furthest ever granted and must not fall');
+    if (a.perpetual && !b.perpetual) bad('perpetual is one-way');
     if (a.setup === 'ACTIVE' && b.setup !== 'ACTIVE') bad('setup is one-way');
   }
 }

@@ -37,6 +37,7 @@ import {
   LicenseStore,
 } from './license-store';
 import { PublicLicenseKeyring } from './license-keyring';
+import { LICENSE_V2_BUILD } from './license-v2-gate';
 
 /**
  * The offline licence, as the program enforces it.
@@ -277,6 +278,11 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_STATE_DAMAGED',
         detail: 'Licence state recovery is incomplete. Preserve the damaged file and restore a current trusted backup from this installation before retrying.',
       });
+    }
+    if ((LICENSE_V2_BUILD as boolean) === true) {
+      // The v2 adapter is not wired yet. A build that sets the gate without it
+      // must refuse, never silently run the v1 store on possibly v2 state.
+      throw new ServiceUnavailableException({ code: 'LICENSE_STATE_DAMAGED', detail: 'The per-company licence store is not available in this build.' });
     }
     try {
       this.store = this.trustStore ?? new LicenseStore(this.directory);
