@@ -254,9 +254,8 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
             title: Text(_arabic ? 'فتح جرد جديد' : 'Open a new stock take'),
             content: SizedBox(
               width: 560,
-              // A full count has nothing to list, so the dialog fits its
-              // contents; only the item picker of a partial count needs height.
-              height: scope == 'PARTIAL' ? 440 : null,
+              // The dialog always fits its contents. The item picker of a
+              // partial count grows with the list and scrolls past 260 px.
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -320,16 +319,21 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
                   ),
                   const SizedBox(height: 8),
                   if (scope == 'PARTIAL')
-                    Expanded(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 260),
                       child: items.isEmpty
-                          ? Center(
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
                               child: Text(
                                 _arabic
                                     ? 'تعذر تحميل الأصناف.'
                                     : 'No items could be loaded.',
                               ),
+                            ),
                             )
                           : ListView.builder(
+                              shrinkWrap: true,
                               itemCount: items.length,
                               itemBuilder: (context, index) {
                                 final item = items[index];
