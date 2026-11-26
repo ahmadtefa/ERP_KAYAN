@@ -110,7 +110,7 @@ const vmReady =
 
     it('the default is kept per company', async () => {
       const OTHER_CO = '99999999-9999-4999-8999-999999999999';
-      await run(`INSERT INTO companies(id,code,"nameEn","nameAr","updatedAt") VALUES ('${OTHER_CO}','CO2','Other','أخرى',now())`);
+      await run(`INSERT INTO companies(id,code,"nameEn","nameAr","updatedAt","deletedAt") VALUES ('${OTHER_CO}','CO2','Other','أخرى',now(),now())`);
       expect((await parties.termDefaults(OTHER_CO)).paymentTermMethod).toBe('FROM_INVOICE_DATE');
       const c: any = await parties.create(OTHER_CO, MGR, 'customer', { code: 'O1', nameEn: 'O1' });
       expect(c.paymentTermMethod).toBe('FROM_INVOICE_DATE');
@@ -211,7 +211,8 @@ const vmReady =
       await run(`UPDATE sales_invoices SET "createdBy"='${CREATOR}' WHERE id='${id(4)}'`);
       await expect(credit.approvePeriod(COMPANY, MGR, id(4), 'x')).rejects.toThrow(/reason/);
       await expect(credit.approvePeriod(COMPANY, CREATOR, id(4), 'my own exception')).rejects.toThrow(/cannot approve/);
-      await expect(credit.approvePeriod(COMPANY, MGR, id(6), 'not needed')).rejects.toThrow(/does not need/);
+      await inv(id(11), 'P-N2', 100, 'DRAFT', PLAIN);
+      await expect(credit.approvePeriod(COMPANY, MGR, id(11), 'not needed')).rejects.toThrow(/does not need/);
       await credit.approvePeriod(COMPANY, MGR, id(4), 'Customer promised to pay on Sunday');
       expect(audited.some((a) => a.action === 'PAYMENT_TERM_OVERRIDE' && a.userId === MGR && a.entityId === id(4))).toBe(true);
       await post(id(4));

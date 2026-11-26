@@ -1,5 +1,4 @@
 import '../../../core/json/json_utils.dart';
-import '../../../shared/widgets/field_option.dart';
 import '../../../shared/widgets/form_sheet.dart';
 
 /// The customer card's payment terms: twelve ways to count the days, a free
