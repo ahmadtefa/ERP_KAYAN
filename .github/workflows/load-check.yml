@@ -1,0 +1,85 @@
+name: KAYAN load and performance check (synthetic data)
+
+# Measures API speed and concurrent-user behaviour on a throwaway PostgreSQL
+# with synthetic data. One standard GitHub runner; not production, not exposed.
+# Numbers describe this runner only. Dispatch only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  load:
+    name: Load check (API + PostgreSQL 17, synthetic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: 3000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: node scripts/patch-adapter-pg-name-type.mjs
+      - run: npx prisma generate
+      - run: npm run build
+      - name: Runner facts
+        run: |
+          echo "cpus: $(nproc)"; free -m | head -2; node --version
+          PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d postgres -tAc 'show max_connections' | sed 's/^/pg max_connections: /'
+          PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d postgres -tAc 'select version()'
+
+      # One run per database pool setting. Every run starts from a fresh database.
+      - name: "Run A: default pool (PG_POOL_MAX unset = 10), rate limiter off"
+        env:
+          PGPASSWORD: ci
+        run: bash ../scripts/load-run.sh A "" false
+      - name: "Run B: PG_POOL_MAX=40, rate limiter off"
+        env:
+          PGPASSWORD: ci
+        run: bash ../scripts/load-run.sh B 40 false
+      - name: "Probe: the built-in per-address rate limiter at its default (limiter ON)"
+        env:
+          PGPASSWORD: ci
+        run: bash ../scripts/load-limiter-probe.sh
+      - name: Upload result files (synthetic data only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-results
+          path: |
+            /tmp/load-result-*.json
+            /tmp/load-api-*.log
+          if-no-files-found: warn
