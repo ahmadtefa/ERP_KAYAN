@@ -1,6 +1,6 @@
 # Per-company licensing: design for review
 
-Status: DESIGN, revision 2 (after engineering review). Prototype tests are isolated and not enabled in the product. Nothing here is implemented, no live data, key or protected-state file is touched, and no private key is read. The user approved the direction (reviewed 2026-11-26, WhatsApp): a company is created only through a vendor-issued, company-specific authorization, the activation tool is updated together with the program, and existing activations keep working. The protected-state migration below still needs review before code.
+Status: DESIGN, revision 4 (after two engineering reviews). Prototype tests are isolated and not enabled in the product. Nothing here is implemented in the product, no live data, key or protected-state file is touched, and no private key is read. The direction (vendor-only company creation) is recorded in the project's user-decision log, not in this file; this file is not evidence of approval. Enabling any of this still needs the evidence listed in section 6.
 
 ## 1. What exists today (verified in source)
 
@@ -39,7 +39,7 @@ What a signed company identity buys: a key issued for one company cannot be ente
 * Installation-level facts (machine id, enforcement mode, public key fingerprint, clock tamper state of the machine) stay installation-wide. Per-licence facts (expiry, seat limit, perpetual flag, seats used watermark) are per licence.
 * Company creation consumes no seat of another company. Seats are reserved against the user's company licence.
 
-## 4a. Protected state v2 (DESIGN, revision 2)
+## 4a. Protected state v2 (DESIGN, revision 4)
 
 ```
 v: 2
@@ -53,7 +53,7 @@ licenses: { [licenseId]: {
 ```
 `companyId` and `legacyLicenseId` are write-once. `companyRef` is write-once once set (null only for the migrated legacy entry until its first v2 key binds it). The database row carries the same three values; any disagreement between row and entry stops with `LICENSE_STATE_ID_MISMATCH` and writes nothing.
 
-## 4b. Migration state machine, locking and durability (DESIGN, revision 2)
+## 4b. Migration state machine, locking and durability (DESIGN, revision 4)
 
 Two different things were mixed before. They are now separate:
 
@@ -66,7 +66,7 @@ Precedence at every start, evaluated in this order, first match wins:
 3. Marker absent, journal says `prepared`/`schema-ready`, state v1: resume at the next idempotent step.
 4. Nothing: legacy behaviour, migration may start.
 
-Exclusion: the migration takes (a) a PostgreSQL advisory lock for the whole run, and (b) an exclusive lock file `license-migration.lock` beside the state (O_EXCL, holds pid and start time, stale only when the pid is gone and an operator or the run's own recovery clears it). The v1 loader cannot learn new fields, so the migration requires the application to be stopped. This is enforced: the running service holds a PostgreSQL advisory lock for as long as it is up, and the migration aborts if it cannot take that lock. Old and new processes therefore cannot both write v1 after the backup.
+Exclusion: the migration takes an exclusive lock file `license-migration.lock` beside the state (O_EXCL, holds pid and start time, stale only when the pid is gone and an operator or the run's own recovery clears it). A PostgreSQL advisory lock is at most a best-effort extra: this service uses transaction-scoped advisory locks on pooled Prisma connections, a session lock on a pooled connection is unreliable, and an old binary takes none, so no lock binds a running old service (see 4f). The real exclusion is operational: the installer or service manager stops the licensed service and verifies it is stopped before migration. That service-stop and old-binary qualification is enablement evidence, not something this prototype proves.
 
 Durability: write the temp file, `fsync` the file, rename, then `fsync` the directory; same for the backups and journal. Atomic rename alone is not relied on. A crash test must kill between each of these calls.
 
@@ -118,3 +118,13 @@ Generators: shared golden vectors for KYN2 across the product verifier, Node CLI
 ## 7. Not done and not claimed
 
 No key was issued, no private key read, no installed tool inspected, no signing performed, no live licence or state file touched. Compatibility with the user's already installed licence tool and register is unverified until that tool or its output is available. The generators in this repository are the source of truth for what is qualified.
+
+
+## 8. Revision 4 corrections (review items and source findings)
+* Backups are written temp, fsync, explicit 0600, atomic rename; the digest file is written after the backup; a backup without a digest is completed only when it equals the current source. Crash points are tested inside the copy and between copy and digest.
+* COMMIT_PENDING re-runs the idempotent schema step before committing. A restored database older than the file re-creates its schema; one newer than the file is refused by the marker floor.
+* Invariants are checked on every start and every update: write-once companyId, legacyLicenseId and companyRef; append-only unique appliedKeys; non-decreasing watermarks; no licence removed; setup one-way; sequence +1. The marker genesis digest is audit only. No chain-of-descent claim is made.
+* First admin: the capability is the signed key text, verified with the real verifier, machine, type, companyRef and the spent keyId. Order: verify, create the admin in the DB (its own uniqueness is the second lock), flip the state to ACTIVE. Retry after a crash between the two only flips.
+* Key rules (pure state acceptance): known licenseId refused, companyRef unique and bound once, keyId replay refused, a RENEWAL or SEATS key only applies to the entry whose licenseId and companyRef match, TRANSFER refused until its per-company meaning is defined. The machine id in the key spec tests is a hard-coded shape (or TEST_MACHINE_ID), not read from a real machine.
+* Claim limit: the HMAC stops accidental and casual edits. It does not stop an attacker with file access who can re-sign. This is not tamper-proof licensing.
+* Open before integration into the service (source review): seat counts and watermarks per licence with a per-company rule for null licenseId rows; no oldest-row fallback when v2 is on (licenseRow must throw with more than one row); authenticated company passed to the guard and status; company activation must create the licence entry together with the spent key, crash tested between the two updates; installation-wide clock refusal for every licence; the v2 switch is a build-time constant, not an environment variable.
