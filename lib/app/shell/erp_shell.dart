@@ -65,6 +65,79 @@ class _NavItem {
 /// "Accounting" heading.
 enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
 
+
+/// Sub-headings inside an open section. Inventory has fourteen entries and
+/// accounting ten, which is too long to scan as one flat list, so entries are
+/// gathered under short headings. Pure rename and regroup: every route stays,
+/// and an entry with no sub-group simply sits first without a heading.
+const _subHeadings = <_NavGroup, List<(String, String)>>{
+  _NavGroup.inventory: [
+    ('الأصناف والأرصدة', 'Items and balances'),
+    ('المستودعات والمواقع', 'Warehouses and locations'),
+    ('حركة المخزون', 'Stock movements'),
+    ('الصلاحية والتنبيهات والتقارير', 'Expiry, alerts and reports'),
+  ],
+  _NavGroup.accounting: [
+    ('النقدية والشيكات', 'Cash and cheques'),
+    ('القيود والفترات', 'Entries and periods'),
+    ('الأصول والتكاليف والموازنات', 'Assets, costs and budgets'),
+    ('دليل الحسابات والضرائب', 'Accounts and tax'),
+  ],
+};
+
+int? _subIndexOf(String path) {
+  if (path == AppRoutes.items || path == AppRoutes.stock || path == AppRoutes.serials || path == AppRoutes.batches) return 0;
+  if (path == AppRoutes.warehouses || path == AppRoutes.storageLocations || path == AppRoutes.warehouseAccess) return 1;
+  if (path == AppRoutes.stockDocuments || path == AppRoutes.stockTransfers || path == AppRoutes.stockTakes || path == AppRoutes.writeOffs) return 2;
+  if (path == AppRoutes.expiryAlerts || path == AppRoutes.itemThresholds || path == AppRoutes.inventoryReports) return 3;
+  if (path == AppRoutes.cash || path == AppRoutes.cheques) return 0;
+  if (path == AppRoutes.journalEntries || path == AppRoutes.fiscalPeriods || path == AppRoutes.openingBalances) return 1;
+  if (path == AppRoutes.fixedAssets || path == AppRoutes.costCenters || path == AppRoutes.budgets) return 2;
+  if (path == AppRoutes.chartOfAccounts || path == AppRoutes.withholding) return 3;
+  return null;
+}
+
+/// The items of [group] in sub-group order (stable inside each sub-group),
+/// each paired with the heading to print before it, or null.
+List<(_NavItem, String?)> _itemsWithHeadings(_NavGroup group, List<_NavItem> items, bool arabic) {
+  final headings = _subHeadings[group];
+  if (headings == null) return [for (final i in items) (i, null)];
+  final indexed = [for (var n = 0; n < items.length; n++) (items[n], _subIndexOf(items[n].path) ?? -1, n)];
+  indexed.sort((a, b) => a.$2 != b.$2 ? a.$2.compareTo(b.$2) : a.$3.compareTo(b.$3));
+  int? last;
+  final out = <(_NavItem, String?)>[];
+  for (final e in indexed) {
+    String? heading;
+    if (e.$2 != last && e.$2 >= 0 && e.$2 < headings.length) {
+      heading = arabic ? headings[e.$2].$1 : headings[e.$2].$2;
+    }
+    last = e.$2;
+    out.add((e.$1, heading));
+  }
+  return out;
+}
+
+class _SubHeading extends StatelessWidget {
+  const _SubHeading(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 10, 14, 2),
+      child: Text(
+        label,
+        key: ValueKey('nav-sub-$label'),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: _sidebarMuted(context),
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
 /// Which section is open. Exactly one, or none - the menu is an accordion, not
 /// a tree that happens to have headings. Opening a section closes the previous
 /// one, and nothing is open on first paint, so the operator sees the eight
@@ -490,7 +563,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
       _NavItem(
         AppRoutes.stock,
         Icons.inventory_2_outlined,
-        l10n.stock,
+        // Not l10n.stock: the section above is already called "المخزون", and
+        // an item with the same name as its own heading reads as a mistake.
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أرصدة المخزون' : 'Stock balances',
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
@@ -568,7 +643,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.expiryAlerts,
         Icons.event_busy_outlined,
         Localizations.localeOf(context).languageCode == 'ar'
-            ? 'تنبيهات الصلاحية'
+            ? 'تنبيهات انتهاء الصلاحية'
             : 'Expiry alerts',
         permissions: const ['inventory.batches.read'],
         group: _NavGroup.inventory,
@@ -600,8 +675,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.writeOffs,
         Icons.delete_forever_outlined,
         Localizations.localeOf(context).languageCode == 'ar'
-            ? 'الإعدام'
-            : 'Write-offs',
+            ? 'إعدام المخزون التالف'
+            : 'Stock write-offs',
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
@@ -619,7 +694,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.warehouseAccess,
         Icons.key_outlined,
         Localizations.localeOf(context).languageCode == 'ar'
-            ? 'صلاحيات المستودعات'
+            ? 'من يدخل أي مستودع'
             : 'Warehouse access',
         permissions: const ['inventory.warehouse.access.read'],
         group: _NavGroup.inventory,
@@ -832,12 +907,14 @@ class _Sidebar extends StatelessWidget {
                         expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final e in _itemsWithHeadings(group, groups[group]!, arabic)) ...[
+                        if (e.$2 != null && extended) _SubHeading(e.$2!),
                         _NavEntry(
-                          item: item,
-                          selected: item.path == selectedPath,
+                          item: e.$1,
+                          selected: e.$1.path == selectedPath,
                           extended: extended,
                         ),
+                      ],
                     ],
                 ],
               ),
@@ -1733,12 +1810,14 @@ class _ModuleDrawer extends StatelessWidget {
                         expanded: collapsed.isOpen(group),
                         onToggle: () => onToggle(group),
                       ),
-                      if (collapsed.isOpen(group)) for (final item in groups[group]!)
+                      if (collapsed.isOpen(group)) for (final e in _itemsWithHeadings(group, groups[group]!, arabic)) ...[
+                        if (e.$2 != null) _SubHeading(e.$2!),
                         _NavEntry(
-                          item: item,
-                          selected: _belongsTo(item.path, current),
+                          item: e.$1,
+                          selected: _belongsTo(e.$1.path, current),
                           extended: true,
                         ),
+                      ],
                     ],
                 ],
               ),

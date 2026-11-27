@@ -83,7 +83,7 @@ void main() {
           routes: [
             GoRoute(
               path: AppRoutes.dashboard,
-              builder: (c, s) => ErpShell(currentPath: AppRoutes.dashboard, child: const Text('Dashboard')),
+              builder: (c, s) => ErpShell(currentPath: AppRoutes.dashboard, child: const Text('لوحة التحكم')),
             ),
           ],
         );

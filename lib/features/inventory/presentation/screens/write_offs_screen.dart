@@ -98,7 +98,7 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
     final canCreate = user?.can('inventory.writeoff.create') ?? false;
 
     return ModuleScaffold(
-      title: _arabic ? 'الإعدام' : 'Write-offs',
+      title: _arabic ? 'إعدام المخزون التالف' : 'Stock write-offs',
       eyebrow: _arabic ? 'المخزون' : 'Inventory',
       trailing: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,

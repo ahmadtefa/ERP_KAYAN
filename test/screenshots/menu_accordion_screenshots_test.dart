@@ -317,6 +317,41 @@ void main() {
     await _shoot(tester, 'menu_sales_open_ar');
   });
 
+  testWidgets('inventory and accounting entries sit under short headings, none removed', (tester) async {
+    await _pumpShell(tester);
+
+    await _tapGroup(tester, 'nav-group-inventory');
+    for (final heading in const [
+      'الأصناف والأرصدة',
+      'المستودعات والمواقع',
+      'حركة المخزون',
+      'الصلاحية والتنبيهات والتقارير',
+    ]) {
+      expect(_inMenu(heading), findsOneWidget, reason: 'inventory heading "$heading"');
+    }
+    for (final item in const [
+      'الأصناف', 'أرصدة المخزون', 'الأرقام التسلسلية والضمان', 'الدفعات',
+      'المستودعات', 'مواقع التخزين', 'من يدخل أي مستودع',
+      'مستندات المخزون', 'التحويلات المخزنية', 'الجرد', 'إعدام المخزون التالف',
+      'تنبيهات انتهاء الصلاحية', 'حدود الأصناف', 'تقارير المخزون',
+    ]) {
+      expect(_inMenu(item), findsOneWidget, reason: 'inventory entry "$item"');
+    }
+    // the only "المخزون" left is the section heading itself
+    expect(_inMenu('المخزون'), findsOneWidget);
+
+    await _tapGroup(tester, 'nav-group-accounting');
+    for (final heading in const [
+      'النقدية والشيكات',
+      'القيود والفترات',
+      'الأصول والتكاليف والموازنات',
+      'دليل الحسابات والضرائب',
+    ]) {
+      expect(_inMenu(heading), findsOneWidget, reason: 'accounting heading "$heading"');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('tapping the open section closes it again', (tester) async {
     await _pumpShell(tester);
 

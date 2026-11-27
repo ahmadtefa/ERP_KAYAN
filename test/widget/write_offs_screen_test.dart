@@ -428,7 +428,7 @@ void main() {
 
   testWidgets('Arabic names the screen and mirrors', (tester) async {
     await pump(tester, _WriteOffsApi(), locale: const Locale('ar'));
-    expect(find.text('الإعدام'), findsOneWidget);
+    expect(find.text('إعدام المخزون التالف'), findsOneWidget);
     expect(find.text('المخزن الرئيسي'), findsWidgets);
     expect(
       Directionality.of(tester.element(find.text('المخزن الرئيسي').first)),

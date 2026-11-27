@@ -17,11 +17,18 @@ const termMethodCodes = <String>[
   'EARLY_DISCOUNT',
   'COD_ADVANCE',
   'INSTALLMENTS',
-  'DAY_WINDOWS',
   'MILESTONES',
-  'LATE_PENALTY',
+  'DAY_WINDOWS',
   'WEEKLY_CUTOFF',
+  'LATE_PENALTY',
 ];
+
+/// The heading printed above the first method of each group in the dropdown.
+const _methodGroupHeadings = <String, List<String>>{
+  'FROM_INVOICE_DATE': ['مدة سداد بعد الفاتورة', 'Pay a number of days after the invoice'],
+  'COD_ADVANCE': ['الدفع عند الاستلام أو على دفعات', 'Cash on delivery, or paid in parts'],
+  'DAY_WINDOWS': ['مواعيد ثابتة وغرامات', 'Fixed dates and penalties'],
+};
 
 const _methodLabels = <String, List<String>>{
   'FROM_INVOICE_DATE': ['من تاريخ الفاتورة', 'From the invoice date'],
@@ -156,7 +163,11 @@ List<FieldSpec> customerTermFields({required bool isArabic}) {
       t('طريقة احتساب مدة السداد', 'How the payment period is counted'),
       kind: FieldKind.select,
       required: true,
-      options: [for (final c in termMethodCodes) FieldOption(c, termMethodLabel(c, isArabic: isArabic))],
+      options: [for (final c in termMethodCodes) FieldOption(
+          c,
+          termMethodLabel(c, isArabic: isArabic),
+          heading: _methodGroupHeadings[c]?[isArabic ? 0 : 1],
+        )],
       helper: t('الطريقة الأخيرة المستخدمة تظهر تلقائيًا للعميل الجديد، ويمكنك تغييرها.',
           'The method you used last is offered for the next new customer. You can change it.'),
     ),

@@ -20,6 +20,17 @@ void main() {
     });
   });
 
+  group('the method list is grouped, none of the twelve removed', () {
+    test('three headings, each above the right first method', () {
+      final method = customerTermFields(isArabic: false).firstWhere((f) => f.key == 'paymentTermMethod');
+      final headed = {for (final o in method.options) if (o.heading != null) o.value: o.heading};
+      expect(headed.keys.toList(), ['FROM_INVOICE_DATE', 'COD_ADVANCE', 'DAY_WINDOWS']);
+      expect(method.options.map((o) => o.value).toSet(), termMethodCodes.toSet());
+      final ar = customerTermFields(isArabic: true).firstWhere((f) => f.key == 'paymentTermMethod');
+      expect(ar.options.where((o) => o.heading != null), hasLength(3));
+    });
+  });
+
   group('installments and stages text', () {
     test('reads advance plus balance', () {
       final r = parseShares('30, 0\n70, 45', named: false, isArabic: false);

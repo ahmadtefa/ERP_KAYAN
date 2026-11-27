@@ -604,11 +604,25 @@ class _FormSheetState extends State<_FormSheet> {
                   ? field.options
                   : (field.optionsBy[_selections[field.dependsOn]] ??
                         const <FieldOption>[]))
-                DropdownMenuItem(
-                  value: option.value,
-                  enabled: option.enabled,
-                  child: Text(option.label),
-                ),
+                ...[
+                  if (option.heading != null)
+                    DropdownMenuItem<String>(
+                      key: ValueKey('option-heading-${option.heading}'),
+                      enabled: false,
+                      child: Text(
+                        option.heading!,
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  DropdownMenuItem<String>(
+                    value: option.value,
+                    enabled: option.enabled,
+                    child: Text(option.label),
+                  ),
+                ],
             ],
             validator: (value) {
               final serverError = _fieldErrors[field.key];
