@@ -23,6 +23,17 @@ const termMethodCodes = <String>[
   'WEEKLY_CUTOFF',
 ];
 
+/// The six methods the user approved. The other six stay in the code and in the
+/// server, but the form does not offer them unless a customer already has one.
+const approvedTermMethodCodes = <String>[
+  'FROM_INVOICE_DATE',
+  'FROM_MONTH_END',
+  'FROM_NEXT_MONTH_START',
+  'FROM_DELIVERY_DATE',
+  'FIXED_DAY_NEXT_MONTH',
+  'EARLY_DISCOUNT',
+];
+
 const _methodLabels = <String, List<String>>{
   'FROM_INVOICE_DATE': ['من تاريخ الفاتورة', 'From the invoice date'],
   'FROM_MONTH_END': ['من نهاية شهر الفاتورة', 'From the end of the invoice month'],
@@ -147,7 +158,11 @@ String _clean(Object? n) {
 Set<String> _only(String code) => {code};
 
 /// The form fields for a customer's payment terms. [isArabic] picks the text.
-List<FieldSpec> customerTermFields({required bool isArabic}) {
+///
+/// [storedMethod] is the method the customer already has. If it is not one of
+/// the approved six it stays selectable, so editing that customer never
+/// silently changes it.
+List<FieldSpec> customerTermFields({required bool isArabic, String? storedMethod}) {
   String t(String ar, String en) => isArabic ? ar : en;
   const m = 'paymentTermMethod';
   return [
@@ -156,7 +171,13 @@ List<FieldSpec> customerTermFields({required bool isArabic}) {
       t('طريقة احتساب مدة السداد', 'How the payment period is counted'),
       kind: FieldKind.select,
       required: true,
-      options: [for (final c in termMethodCodes) FieldOption(c, termMethodLabel(c, isArabic: isArabic))],
+      options: [
+        for (final c in [
+          ...approvedTermMethodCodes,
+          if (storedMethod != null && termMethodCodes.contains(storedMethod) && !approvedTermMethodCodes.contains(storedMethod)) storedMethod,
+        ])
+          FieldOption(c, termMethodLabel(c, isArabic: isArabic)),
+      ],
       helper: t('الطريقة الأخيرة المستخدمة تظهر تلقائيًا للعميل الجديد، ويمكنك تغييرها.',
           'The method you used last is offered for the next new customer. You can change it.'),
     ),
@@ -224,7 +245,10 @@ List<FieldSpec> customerTermFields({required bool isArabic}) {
 /// Starting values for the form: the customer's stored terms, or for a new
 /// customer the method the company chose last.
 Json termInitialFrom(Json? customer, {String? defaultMethod}) {
-  final method = customer?['paymentTermMethod']?.toString() ?? defaultMethod ?? 'FROM_INVOICE_DATE';
+  final stored = customer?['paymentTermMethod']?.toString();
+  // A remembered default that is not an approved method is not offered again.
+  final fallback = defaultMethod != null && approvedTermMethodCodes.contains(defaultMethod) ? defaultMethod : 'FROM_INVOICE_DATE';
+  final method = stored ?? fallback;
   final out = <String, dynamic>{
     'paymentTermMethod': termMethodCodes.contains(method) ? method : 'FROM_INVOICE_DATE',
     'paymentTermDays': customer?['paymentTermDays'] ?? 0,
