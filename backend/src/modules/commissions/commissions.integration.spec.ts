@@ -1,6 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
+import { CostCentersService } from '../accounting/cost-centers.service';
+import { DocumentNumberService } from '../accounting/document-number.service';
+import { FiscalPeriodsService } from '../accounting/fiscal-periods.service';
+import { PostingService } from '../accounting/posting.service';
 import { CommissionsService } from './commissions.service';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -13,6 +17,11 @@ const CN1 = 'd0000000-0000-4000-8000-000000000023';
 const DRAFT = 'd0000000-0000-4000-8000-000000000024';
 const DEBIT = 'd0000000-0000-4000-8000-000000000025';
 const CN_ORPHAN = 'd0000000-0000-4000-8000-000000000026';
+const ACC_EXP = 'a0000000-0000-4000-8000-000000000001';
+const ACC_CASH = 'a0000000-0000-4000-8000-000000000002';
+const ACC_REV = 'a0000000-0000-4000-8000-000000000003';
+const ACC_OFF = 'a0000000-0000-4000-8000-000000000004';
+const ACCOUNTS = { expenseAccountId: ACC_EXP, fundingAccountId: ACC_CASH };
 
 jest.setTimeout(120_000);
 const vmReady =
@@ -43,7 +52,17 @@ const vmReady =
     await doc(DEBIT, 'DN-1', '2026-03-22', 'POSTED', 'DEBIT_NOTE', 100, 0, INV1);
     await doc(CN_ORPHAN, 'CN-2', '2026-03-26', 'POSTED', 'CREDIT_NOTE', 50, 0, INV2);
     const audit: never = { record: async () => {}, recordRequired: async () => {} } as never;
-    svc = new CommissionsService(prisma as never, audit);
+    await run(`INSERT INTO accounts(id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES
+      ('${ACC_EXP}','${COMPANY}','5301','Sales commission','عمولات المبيعات','EXPENSE',true,true,now()),
+      ('${ACC_CASH}','${COMPANY}','1101','Cash','الصندوق','ASSET',true,true,now()),
+      ('${ACC_REV}','${COMPANY}','4101','Revenue','إيراد','REVENUE',true,true,now()),
+      ('${ACC_OFF}','${COMPANY}','5302','Inactive expense','مصروف متوقف','EXPENSE',true,false,now())`);
+    const posting = new PostingService(
+      new DocumentNumberService(),
+      new FiscalPeriodsService(prisma as never, audit as never),
+      new CostCentersService(prisma as never, audit as never),
+    );
+    svc = new CommissionsService(prisma as never, audit, posting);
   });
   afterAll(async () => { await prisma.$disconnect(); });
 
@@ -96,23 +115,45 @@ const vmReady =
   });
 
   it('pays a period net of returns, only once, and locks the paid entries', async () => {
-    await expect(svc.payout(COMPANY, USER, { repId: rep, from: '2026-04-01', to: '2026-04-30' })).rejects.toMatchObject({ response: { field: 'from' } });
-    await expect(svc.payout(COMPANY, USER, { repId: rep, from: '2026-03-31', to: '2026-03-01' })).rejects.toMatchObject({ response: { field: 'from' } });
-    const p = await svc.payout(COMPANY, USER, { repId: rep, from: '2026-03-01', to: '2026-03-31', note: 'March' });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-04-01', to: '2026-04-30' })).rejects.toMatchObject({ response: { field: 'from' } });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-03-31', to: '2026-03-01' })).rejects.toMatchObject({ response: { field: 'from' } });
+    const p = await svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-03-01', to: '2026-03-31', note: 'March' });
     expect(p).toMatchObject({ amount: '72.50', entries: 3 });
-    await expect(svc.payout(COMPANY, USER, { repId: rep, from: '2026-03-01', to: '2026-03-31' })).rejects.toMatchObject({ response: { field: 'from' } });
+    const lines = await prisma.$queryRawUnsafe(`SELECT l."accountId", l.debit::text AS debit, l.credit::text AS credit, e.status::text AS status, e."sourceType", e."sourceId"
+      FROM journal_lines l JOIN journal_entries e ON e.id = l."journalEntryId" WHERE e.id = '${p.journalEntryId}' ORDER BY l.debit DESC`);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ accountId: ACC_EXP, debit: '72.5000', status: 'POSTED', sourceType: 'COMMISSION_PAYOUT', sourceId: p.id });
+    expect(lines[1]).toMatchObject({ accountId: ACC_CASH, credit: '72.5000' });
+    const [link] = await prisma.$queryRawUnsafe(`SELECT "journalEntryId" FROM commission_payouts WHERE id = '${p.id}'`);
+    expect(link.journalEntryId).toBe(p.journalEntryId);
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-03-01', to: '2026-03-31' })).rejects.toMatchObject({ response: { field: 'from' } });
     const e = await svc.listEntries(COMPANY, { repId: rep, status: 'PAID' });
     expect(e.items).toHaveLength(3);
     await expect(svc.removeEntry(COMPANY, USER, e.items[0].id)).rejects.toMatchObject({ response: { code: 'COMMISSION_PAID' } });
     expect((await svc.listPayouts(COMPANY)).items).toHaveLength(1);
   });
 
+  it('refuses a payout with a wrong or missing account and writes nothing', async () => {
+    await doc('d0000000-0000-4000-8000-000000000041', 'SI-10', '2026-06-02', 'POSTED', 'INVOICE', 1000, 0);
+    await svc.assign(COMPANY, USER, { salesInvoiceId: 'd0000000-0000-4000-8000-000000000041', repId: rep });
+    const base = { repId: rep, from: '2026-06-01', to: '2026-06-30' };
+    const before = (await prisma.$queryRawUnsafe(`SELECT count(*)::int AS n FROM journal_entries`))[0].n;
+    await expect(svc.payout(COMPANY, USER, BRANCH, base)).rejects.toMatchObject({ response: { code: 'COMMISSION_ACCOUNT_REQUIRED' } });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...base, expenseAccountId: ACC_EXP, fundingAccountId: ACC_EXP })).rejects.toMatchObject({ response: { code: 'COMMISSION_ACCOUNT_SAME' } });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...base, expenseAccountId: ACC_REV, fundingAccountId: ACC_CASH })).rejects.toMatchObject({ response: { code: 'COMMISSION_ACCOUNT_INVALID', field: 'expenseAccountId' } });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...base, expenseAccountId: ACC_OFF, fundingAccountId: ACC_CASH })).rejects.toMatchObject({ response: { code: 'COMMISSION_ACCOUNT_INVALID' } });
+    await expect(svc.payout(COMPANY, USER, BRANCH, { ...base, expenseAccountId: ACC_EXP, fundingAccountId: ACC_REV })).rejects.toMatchObject({ response: { code: 'COMMISSION_ACCOUNT_INVALID', field: 'fundingAccountId' } });
+    await expect(svc.payout(COMPANY, USER, null, { ...base, ...ACCOUNTS })).rejects.toMatchObject({ response: { code: 'USER_NO_BRANCH' } });
+    expect((await prisma.$queryRawUnsafe(`SELECT count(*)::int AS n FROM journal_entries`))[0].n).toBe(before);
+    expect((await svc.listEntries(COMPANY, { repId: rep, status: 'ACCRUED' })).items.some((e: { documentDate: string }) => e.documentDate.startsWith('2026-06'))).toBe(true);
+  });
+
   it('two payouts at the same moment pay each entry once', async () => {
     await doc('d0000000-0000-4000-8000-000000000031', 'SI-9', '2026-05-02', 'POSTED', 'INVOICE', 1000, 0);
     await svc.assign(COMPANY, USER, { salesInvoiceId: 'd0000000-0000-4000-8000-000000000031', repId: rep });
     const results = await Promise.allSettled([
-      svc.payout(COMPANY, USER, { repId: rep, from: '2026-05-01', to: '2026-05-31' }),
-      svc.payout(COMPANY, USER, { repId: rep, from: '2026-05-01', to: '2026-05-31' }),
+      svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-05-01', to: '2026-05-31' }),
+      svc.payout(COMPANY, USER, BRANCH, { ...ACCOUNTS, repId: rep, from: '2026-05-01', to: '2026-05-31' }),
     ]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const [{ n }] = await prisma.$queryRawUnsafe(`SELECT count(*)::int AS n FROM commission_payouts WHERE "fromDate" = '2026-05-01'`);

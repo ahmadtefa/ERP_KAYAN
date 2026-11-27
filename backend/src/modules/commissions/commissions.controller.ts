@@ -58,7 +58,7 @@ export class CommissionsController {
 
   @Post('payouts')
   @RequirePermissions('commissions.manage')
-  pay(@CurrentUser() user: AuthUser, @Body() body: { repId?: string; from?: string; to?: string; note?: string }) {
-    return this.commissions.payout(user.companyId, user.userId, body ?? {});
+  pay(@CurrentUser() user: AuthUser, @Body() body: { repId?: string; from?: string; to?: string; note?: string; expenseAccountId?: string; fundingAccountId?: string }) {
+    return this.commissions.payout(user.companyId, user.userId, user.branchId, body ?? {});
   }
 }

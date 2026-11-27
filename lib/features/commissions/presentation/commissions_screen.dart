@@ -401,6 +401,19 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
       return;
     }
     if (!mounted) return;
+    List<Json> accounts;
+    try {
+      accounts = await ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    List<FieldOption> accountOptions(Set<String> types) => [
+          for (final a in accounts)
+            if (flag(a, 'isPostable') && flag(a, 'isActive') && types.contains(text(a, 'type')))
+              FieldOption(text(a, 'id'), '${text(a, 'code')} — ${_arabic ? text(a, 'nameAr') : text(a, 'nameEn')}'),
+        ];
     final entries = ref.read(commissionEntriesProvider).value ?? const <Json>[];
     final saved = await showFormSheet(
       context,
@@ -415,9 +428,13 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
           kind: FieldKind.date,
           required: true,
           helper: _arabic
-              ? 'تُصرف كل العمولات المستحقة في الفترة، بعد خصم المرتجعات. المستحق الآن: ${piastersText(unpaidNetPiasters(entries))}. الصرف الفعلي بسند صرف عادي.'
-              : 'Pays every due commission in the period, net of returns. Due now: ${piastersText(unpaidNetPiasters(entries))}. The cash itself goes out through an ordinary payment voucher.',
+              ? 'تُصرف كل العمولات المستحقة في الفترة، بعد خصم المرتجعات. المستحق الآن: ${piastersText(unpaidNetPiasters(entries))}. يُسجَّل قيد يومية تلقائيًا بتاريخ اليوم.'
+              : 'Pays every due commission in the period, net of returns. Due now: ${piastersText(unpaidNetPiasters(entries))}. A journal entry is posted automatically, dated today.',
         ),
+        FieldSpec('expenseAccountId', _arabic ? 'حساب مصروف العمولات (مدين)' : 'Commission expense account (debit)',
+            kind: FieldKind.select, required: true, options: accountOptions({'EXPENSE'})),
+        FieldSpec('fundingAccountId', _arabic ? 'حساب الصرف: صندوق أو بنك أو دائنون (دائن)' : 'Paid from: cash, bank or payable (credit)',
+            kind: FieldKind.select, required: true, options: accountOptions({'ASSET', 'LIABILITY'})),
         FieldSpec('note', _arabic ? 'ملاحظة' : 'Note', maxLength: 240),
       ],
       onSubmit: (values) async {
@@ -425,6 +442,8 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
           'repId': text(values, 'repId'),
           'from': text(values, 'from'),
           'to': text(values, 'to'),
+          'expenseAccountId': text(values, 'expenseAccountId'),
+          'fundingAccountId': text(values, 'fundingAccountId'),
           if (text(values, 'note').trim().isNotEmpty) 'note': text(values, 'note').trim(),
         });
       },

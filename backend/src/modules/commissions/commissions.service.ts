@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PostingService } from '../accounting/posting.service';
 import { CommissionError, commissionPiasters, invoiceBasis, money, parseRate, payoutTotal, rateToPercent } from './commission-rules';
 
 function fail(field: string, message: string, code = 'VALIDATION'): never {
@@ -32,6 +33,7 @@ export class CommissionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly posting: PostingService,
   ) {}
 
   private repView(r: Rep) {
@@ -192,14 +194,34 @@ export class CommissionsService {
     };
   }
 
-  /** Pays every unpaid entry of one rep dated in the range, sales net of returns. The cash leaves through an ordinary payment voucher. */
-  async payout(companyId: string, userId: string, input: { repId?: string; from?: string; to?: string; note?: string }) {
+  /**
+   * Pays every unpaid entry of one rep dated in the range, sales net of returns,
+   * and posts the journal entry in the same transaction: the commission expense
+   * is debited and the account the money comes from (cash, bank or a payable) is
+   * credited. A payout without its entry, or an entry without its payout, is a
+   * ledger nobody can reconcile.
+   */
+  async payout(companyId: string, userId: string, branchId: string | null | undefined, input: { repId?: string; from?: string; to?: string; note?: string; expenseAccountId?: string; fundingAccountId?: string }) {
+    if (!branchId) fail('branchId', 'The signed-in user is not assigned to a branch', 'USER_NO_BRANCH');
     if (!input.repId) fail('repId', 'Choose the rep');
     const from = dateOf('from', input.from);
     const to = dateOf('to', input.to);
     if (from > to) fail('from', 'The start date is after the end date');
     const note = input.note?.trim() ? input.note.trim().slice(0, 240) : null;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!input.expenseAccountId || !uuid.test(input.expenseAccountId)) fail('expenseAccountId', 'Choose the commission expense account', 'COMMISSION_ACCOUNT_REQUIRED');
+    if (!input.fundingAccountId || !uuid.test(input.fundingAccountId)) fail('fundingAccountId', 'Choose the account the commission is paid from', 'COMMISSION_ACCOUNT_REQUIRED');
+    if (input.expenseAccountId === input.fundingAccountId) fail('fundingAccountId', 'The two accounts must be different', 'COMMISSION_ACCOUNT_SAME');
+    const expenseAccountId = input.expenseAccountId;
+    const fundingAccountId = input.fundingAccountId;
     const out = await this.prisma.$transaction(async (tx) => {
+      const accounts = await tx.$queryRaw<{ id: string; type: string; code: string; nameEn: string; isPostable: boolean; isActive: boolean }[]>(Prisma.sql`
+        SELECT id, type::text AS type, code, "nameEn", "isPostable", "isActive" FROM accounts
+         WHERE "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL AND id IN (${expenseAccountId}::uuid, ${fundingAccountId}::uuid)`);
+      const expense = accounts.find((a) => a.id === expenseAccountId);
+      const funding = accounts.find((a) => a.id === fundingAccountId);
+      if (!expense || expense.type !== 'EXPENSE' || !expense.isPostable || !expense.isActive) fail('expenseAccountId', 'The expense account must be an active, postable expense account', 'COMMISSION_ACCOUNT_INVALID');
+      if (!funding || !['ASSET', 'LIABILITY'].includes(funding.type) || !funding.isPostable || !funding.isActive) fail('fundingAccountId', 'The paying account must be an active, postable cash, bank or payable account', 'COMMISSION_ACCOUNT_INVALID');
       const [rep] = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM sales_reps WHERE id = ${String(input.repId)}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`);
       if (!rep) fail('repId', 'That rep does not exist');
       const rows = await tx.$queryRaw<{ id: string; amount: Prisma.Decimal }[]>(Prisma.sql`
@@ -212,7 +234,21 @@ export class CommissionsService {
         VALUES (${payoutId}::uuid, ${companyId}::uuid, ${rep.id}::uuid, ${from}::date, ${to}::date, ${money(total)}::numeric, ${rows.length}, ${note}, ${userId}::uuid)`);
       await tx.$executeRaw(Prisma.sql`
         UPDATE commission_entries SET status = 'PAID', "payoutId" = ${payoutId}::uuid WHERE id IN (${Prisma.join(rows.map((r) => Prisma.sql`${r.id}::uuid`))})`);
-      return { id: payoutId, amount: money(total), entries: rows.length };
+      const sourceNumber = `COMM-${payoutId.slice(0, 8).toUpperCase()}`;
+      const posted = await this.posting.post(tx, {
+        companyId, branchId, userId,
+        entryDate: new Date(),
+        description: `Sales commission payout ${from} to ${to}`,
+        sourceType: 'COMMISSION_PAYOUT',
+        sourceId: payoutId,
+        sourceNumber,
+        lines: [
+          { accountId: expenseAccountId, debit: money(total), description: 'Sales commission' },
+          { accountId: fundingAccountId, credit: money(total), description: 'Sales commission' },
+        ],
+      });
+      await tx.$executeRaw(Prisma.sql`UPDATE commission_payouts SET "journalEntryId" = ${posted.id}::uuid WHERE id = ${payoutId}::uuid`);
+      return { id: payoutId, amount: money(total), entries: rows.length, journalEntryId: posted.id, entryNumber: posted.entryNumber };
     });
     await this.audit.record({ companyId, userId, action: 'COMMISSION_PAYOUT', entity: 'commission_payouts', entityId: out.id, after: { ...out, repId: input.repId, from, to } });
     return out;

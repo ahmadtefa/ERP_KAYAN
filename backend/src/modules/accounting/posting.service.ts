@@ -41,6 +41,7 @@ export interface PostingRequest {
     | 'FIXED_ASSET'
     | 'ASSET_DEPRECIATION'
     | 'ASSET_DISPOSAL'
+    | 'COMMISSION_PAYOUT'
     /// A lot written off or destroyed: the value leaves stock for the
     /// inventory-difference account, with the reason on the entry.
     | 'INVENTORY_WRITE_OFF'

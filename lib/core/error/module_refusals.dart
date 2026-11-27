@@ -207,6 +207,18 @@ const Map<String, List<String>> moduleRefusals = {
     'رمز العملة غير صحيح. اكتب ثلاثة أحرف مثل EGP أو USD.',
     'The currency code is not valid. Enter three letters such as EGP or USD.',
   ],
+  'COMMISSION_ACCOUNT_REQUIRED': [
+    'اختر حساب مصروف العمولات وحساب الصرف (صندوق أو بنك أو دائنون) ثم أعد المحاولة. لم يُسجَّل صرف.',
+    'Choose the commission expense account and the account it is paid from (cash, bank or payable), then try again. No payout was recorded.',
+  ],
+  'COMMISSION_ACCOUNT_SAME': [
+    'حساب المصروف وحساب الصرف يجب أن يكونا مختلفين. اختر حسابًا آخر لأحدهما. لم يُسجَّل صرف.',
+    'The expense account and the paying account must be different. Choose another account for one of them. No payout was recorded.',
+  ],
+  'COMMISSION_ACCOUNT_INVALID': [
+    'أحد الحسابين غير صالح للقيد: المصروف يجب أن يكون حساب مصروفات، والصرف حساب صندوق أو بنك أو دائنين، وكلاهما فعّال وقابل للترحيل. اختر حسابًا صحيحًا. لم يُسجَّل صرف.',
+    'One of the two accounts cannot take this entry: the expense must be an expense account, the paying account a cash, bank or payable account, and both active and postable. Choose a valid account. No payout was recorded.',
+  ],
 };
 
 /// Arabic names of the inputs these refusals point at, for the generic
@@ -227,6 +239,8 @@ const Map<String, String> moduleFieldLabelsAr = {
   'intervalMonths': 'الفاصل بين الأقساط',
   'firstDue': 'تاريخ أول قسط',
   'rateId': 'نسبة الضريبة',
+  'expenseAccountId': 'حساب مصروف العمولات',
+  'fundingAccountId': 'حساب الصرف',
   'direction': 'الاتجاه',
   'note': 'السبب',
   'status': 'الحالة',
