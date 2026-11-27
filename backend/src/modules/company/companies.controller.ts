@@ -108,7 +108,7 @@ export class CompaniesController {
     @UploadedFile() file: UploadedLogo | undefined,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('لم يتم اختيار ملف للشعار / No logo file was uploaded.');
+      throw new BadRequestException({ code: 'LOGO_FILE_MISSING', message: 'لم يتم اختيار ملف للشعار / No logo file was uploaded.' });
     }
     return this.companies.setLogo(
       user.companyId,

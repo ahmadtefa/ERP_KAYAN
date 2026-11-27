@@ -76,9 +76,7 @@ export class PrintSettingsService {
     entries: Array<{ documentType: string; showSalePrice: boolean; showCost: boolean; showPurchasePrice?: boolean }>,
   ): Promise<PrintSettingsResponse> {
     if (!Array.isArray(entries) || entries.length === 0) {
-      throw new BadRequestException(
-        'لا توجد إعدادات للحفظ. / There are no settings to save.',
-      );
+      throw new BadRequestException({ code: 'PRINT_NO_SETTINGS', message: 'لا توجد إعدادات للحفظ. / There are no settings to save.' });
     }
     if (entries.length > PRINT_TYPES.length + 1) {
       throw new BadRequestException({ code: 'PRINT_SETTINGS_TOO_MANY', message: 'Too many print settings in one request' });
@@ -87,19 +85,15 @@ export class PrintSettingsService {
     for (const entry of entries) {
       const type = String(entry?.documentType ?? '').trim();
       if (type !== DEFAULT_PRINT_TYPE && !isPrintType(type)) {
-        throw new BadRequestException(
-          `نوع طباعة غير معروف: ${type} / Unknown print type: ${type}`,
-        );
+        throw new BadRequestException({ code: 'PRINT_UNKNOWN_TYPE', message: `نوع طباعة غير معروف: ${type} / Unknown print type: ${type}` });
       }
       if (seen.has(type)) {
         throw new BadRequestException({ code: 'PRINT_SETTINGS_DUPLICATE', message: `Duplicate print type: ${type}` });
       }
       seen.add(type);
       if (typeof entry.showSalePrice !== 'boolean' || typeof entry.showCost !== 'boolean') {
-        throw new BadRequestException(
-          `إعداد غير صالح للنوع ${type}: يجب أن تكون القيم true أو false. / ` +
-            `Invalid setting for ${type}: both values must be true or false.`,
-        );
+        throw new BadRequestException({ code: 'PRINT_SETTING_INVALID', message: `إعداد غير صالح للنوع ${type}: يجب أن تكون القيم true أو false. / ` +
+            `Invalid setting for ${type}: both values must be true or false.` });
       }
     }
 

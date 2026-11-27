@@ -67,7 +67,7 @@ export class UsersController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     if (!branchesWithinScope(branchReadScope(user), dto.branchIds)) {
-      throw new ForbiddenException('You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.');
+      throw new ForbiddenException({ code: 'BRANCH_ASSIGN_OUTSIDE', message: 'You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.' });
     }
     return this.users.create(
       user.companyId,
@@ -86,7 +86,7 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     if (!branchesWithinScope(branchReadScope(user), dto.branchIds)) {
-      throw new ForbiddenException('You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.');
+      throw new ForbiddenException({ code: 'BRANCH_ASSIGN_OUTSIDE', message: 'You can only assign branches you are assigned to. / لا يمكنك إسناد فروع خارج فروعك.' });
     }
     return this.users.update(
       user.companyId,

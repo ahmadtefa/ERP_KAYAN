@@ -61,9 +61,7 @@ export class InventoryReportsController {
   ) {
     this.assertPriceWritePermissions(user, body);
     if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
-      throw new ForbiddenException(
-        'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
-      );
+      throw new ForbiddenException({ code: 'BARCODE_PERMISSION', message: 'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage' });
     }
     return this.service.addUnit(
       user.companyId,
@@ -84,9 +82,7 @@ export class InventoryReportsController {
   ) {
     this.assertPriceWritePermissions(user, body);
     if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
-      throw new ForbiddenException(
-        'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
-      );
+      throw new ForbiddenException({ code: 'BARCODE_PERMISSION', message: 'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage' });
     }
     return this.service.updateUnit(
       user.companyId,
@@ -170,15 +166,11 @@ export class InventoryReportsController {
   private assertPriceWritePermissions(user: AuthUser, body: Record<string, unknown>) {
     if (body.salePrice !== undefined && !user.isSuperAdmin &&
         !user.permissions.includes('inventory.items.saleprice.manage')) {
-      throw new ForbiddenException(
-        'ليس لديك صلاحية إدخال أو تعديل سعر البيع. / Missing permission: inventory.items.saleprice.manage',
-      );
+      throw new ForbiddenException({ code: 'SALE_PRICE_PERMISSION', message: 'ليس لديك صلاحية إدخال أو تعديل سعر البيع. / Missing permission: inventory.items.saleprice.manage' });
     }
     if (body.purchasePrice !== undefined && !user.isSuperAdmin &&
         !user.permissions.includes('inventory.items.purchaseprice.manage')) {
-      throw new ForbiddenException(
-        'ليس لديك صلاحية إدخال أو تعديل سعر الشراء. / Missing permission: inventory.items.purchaseprice.manage',
-      );
+      throw new ForbiddenException({ code: 'PURCHASE_PRICE_PERMISSION', message: 'ليس لديك صلاحية إدخال أو تعديل سعر الشراء. / Missing permission: inventory.items.purchaseprice.manage' });
     }
   }
 

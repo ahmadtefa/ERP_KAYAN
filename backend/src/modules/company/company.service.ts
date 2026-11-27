@@ -757,31 +757,25 @@ export function validateLogo(
   const normalised = (mime ?? '').split(';')[0].trim().toLowerCase();
   const spec = LOGO_TYPES[normalised];
   if (!spec) {
-    throw new BadRequestException(
-      'يجب أن يكون الشعار صورة PNG أو JPEG أو WebP / The logo must be PNG, JPEG or WebP.',
-    );
+    throw new BadRequestException({ code: 'LOGO_FORMAT', message: 'يجب أن يكون الشعار صورة PNG أو JPEG أو WebP / The logo must be PNG, JPEG or WebP.' });
   }
   if (data.length === 0) {
-    throw new BadRequestException('ملف الشعار فارغ / The logo file is empty.');
+    throw new BadRequestException({ code: 'LOGO_EMPTY', message: 'ملف الشعار فارغ / The logo file is empty.' });
   }
   if (data.length > maxBytes) {
-    throw new BadRequestException(
-      `حجم الشعار يتجاوز ${Math.round(maxBytes / 1024 / 1024)} ميجابايت / The logo exceeds ${Math.round(maxBytes / 1024 / 1024)} MB.`,
-    );
+    throw new BadRequestException({ code: 'LOGO_TOO_BIG', message: `حجم الشعار يتجاوز ${Math.round(maxBytes / 1024 / 1024)} ميجابايت / The logo exceeds ${Math.round(maxBytes / 1024 / 1024)} MB.` });
   }
   const matches = spec.magic.some((signature) =>
     signature.every((byte, index) => data[index] === byte),
   );
   if (!matches) {
-    throw new BadRequestException(
-      'محتوى الملف لا يطابق نوع الصورة. اختر ملف PNG أو JPEG أو WebP حقيقيًا / The file content does not match its image type.',
-    );
+    throw new BadRequestException({ code: 'LOGO_CONTENT_MISMATCH', message: 'محتوى الملف لا يطابق نوع الصورة. اختر ملف PNG أو JPEG أو WebP حقيقيًا / The file content does not match its image type.' });
   }
   if (normalised === 'image/webp') {
     // RIFF container: bytes 8-11 must read WEBP.
     const tag = data.subarray(8, 12).toString('latin1');
     if (tag !== 'WEBP') {
-      throw new BadRequestException('ملف WebP غير صالح / The file is not a valid WebP image.');
+      throw new BadRequestException({ code: 'LOGO_WEBP_INVALID', message: 'ملف WebP غير صالح / The file is not a valid WebP image.' });
     }
   }
   // Prisma's Bytes column wants a Uint8Array; same bytes, right type.
@@ -833,9 +827,7 @@ export async function normalizeLogo(
       limitInputPixels: LOGO_MAX_PIXELS,
     }).metadata();
   } catch {
-    throw new BadRequestException(
-      'تعذّر فتح الصورة. اختر ملف PNG أو JPEG أو WebP سليمًا / The image could not be decoded.',
-    );
+    throw new BadRequestException({ code: 'LOGO_DECODE', message: 'تعذّر فتح الصورة. اختر ملف PNG أو JPEG أو WebP سليمًا / The image could not be decoded.' });
   }
 
   const width = metadata.width ?? 0;
@@ -844,9 +836,7 @@ export async function normalizeLogo(
     width < 32 || height < 32 || width * height > LOGO_MAX_PIXELS ||
     (metadata.pages ?? 1) > 1
   ) {
-    throw new BadRequestException(
-      'يجب أن تكون أبعاد الشعار ٣٢ × ٣٢ بكسل على الأقل، وألا تتجاوز الصورة المتحركة ١٦ مليون بكسل / Use a non-animated image of at least 32 × 32 pixels and no more than 16 megapixels.',
-    );
+    throw new BadRequestException({ code: 'LOGO_DIMENSIONS', message: 'يجب أن تكون أبعاد الشعار ٣٢ × ٣٢ بكسل على الأقل، وألا تتجاوز الصورة المتحركة ١٦ مليون بكسل / Use a non-animated image of at least 32 × 32 pixels and no more than 16 megapixels.' });
   }
 
   for (const [bound, quality] of [
@@ -869,13 +859,9 @@ export async function normalizeLogo(
         return { data: Uint8Array.from(encoded), mime: 'image/webp' };
       }
     } catch {
-      throw new BadRequestException(
-        'تعذّر ضغط الشعار. اختر صورة صالحة وحاول مرة أخرى / The logo could not be resized.',
-      );
+      throw new BadRequestException({ code: 'LOGO_RESIZE', message: 'تعذّر ضغط الشعار. اختر صورة صالحة وحاول مرة أخرى / The logo could not be resized.' });
     }
   }
 
-  throw new BadRequestException(
-    'تعذّر ضغط الشعار إلى الحجم المسموح. اختر صورة أصغر / The logo remains too large after compression; choose a smaller image.',
-  );
+  throw new BadRequestException({ code: 'LOGO_STILL_BIG', message: 'تعذّر ضغط الشعار إلى الحجم المسموح. اختر صورة أصغر / The logo remains too large after compression; choose a smaller image.' });
 }

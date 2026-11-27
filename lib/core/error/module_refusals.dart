@@ -6,6 +6,7 @@ import 'backup_refusals.dart';
 import 'company_import_report_refusals.dart';
 import 'guard_settings_refusals.dart';
 import 'lot_location_refusals.dart';
+import 'upload_permission_refusals.dart';
 import 'inventory_access_refusals.dart';
 import 'inventory_refusals.dart';
 import 'cash_refusals.dart';
@@ -32,6 +33,7 @@ const Map<String, List<String>> moduleRefusals = {
   ...inventoryAccessRefusals,
   ...guardSettingsRefusals,
   ...lotLocationRefusals,
+  ...uploadPermissionRefusals,
   ...cashRefusals,
   ...purchaseRefusals,
   ...salesRefusals,

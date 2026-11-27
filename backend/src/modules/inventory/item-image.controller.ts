@@ -59,7 +59,7 @@ export class ItemImageController {
     @UploadedFile() file?: Upload,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No image file was uploaded / لم يتم إرسال صورة.');
+      throw new BadRequestException({ code: 'ITEM_IMAGE_MISSING', message: 'No image file was uploaded / لم يتم إرسال صورة.' });
     }
     // A storekeeper restricted to one shelf must not write into the catalogue
     // of another, and the class contract promises the check on every route.
@@ -97,9 +97,7 @@ export class ItemImageController {
     if (grants === null) return;
     const mightView = grants.some((grant) => may(user, grant.warehouseId, 'view'));
     if (!mightView) {
-      throw new BadRequestException(
-        'لا تملك صلاحية عرض أصناف أي مستودع / You may not view the catalogue of any warehouse.',
-      );
+      throw new BadRequestException({ code: 'CATALOGUE_VIEW_DENIED', message: 'لا تملك صلاحية عرض أصناف أي مستودع / You may not view the catalogue of any warehouse.' });
     }
   }
 }
@@ -122,9 +120,7 @@ export class ItemPictureIndexController {
   async withPicture(@CurrentUser() user: AuthUser, @Query('itemIds') itemIds?: string) {
     const grants = grantsOf(user);
     if (grants !== null && !grants.some((grant) => may(user, grant.warehouseId, 'view'))) {
-      throw new BadRequestException(
-        'لا تملك صلاحية عرض أصناف أي مستودع / You may not view the catalogue of any warehouse.',
-      );
+      throw new BadRequestException({ code: 'CATALOGUE_VIEW_DENIED', message: 'لا تملك صلاحية عرض أصناف أي مستودع / You may not view the catalogue of any warehouse.' });
     }
     const ids = String(itemIds ?? '')
       .split(',')

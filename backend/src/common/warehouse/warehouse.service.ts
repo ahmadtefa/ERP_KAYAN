@@ -101,9 +101,7 @@ export class WarehouseService {
   private assertInScope(scope: WarehouseScope, branchId: string) {
     if (scope === null) return;
     if (!scope.includes(branchId)) {
-      throw new ForbiddenException(
-        'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.',
-      );
+      throw new ForbiddenException({ code: 'LOT_WAREHOUSE_OTHER_BRANCH', message: 'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.' });
     }
   }
 
@@ -801,26 +799,20 @@ export function scopedBranchId(
   if (scope === null) return requested ?? undefined;
   if (requested) {
     if (!scope.includes(requested)) {
-      throw new ForbiddenException(
-        'This branch is outside your assignment. / هذا الفرع خارج نطاق صلاحيتك.',
-      );
+      throw new ForbiddenException({ code: 'BRANCH_OUTSIDE_ASSIGNMENT', message: 'This branch is outside your assignment. / هذا الفرع خارج نطاق صلاحيتك.' });
     }
     return requested;
   }
   if (scope.length === 1) return scope[0];
   if (scope.length === 0) {
-    throw new ForbiddenException(
-      'No branch is assigned to this account. / لا يوجد فرع مسند لهذا الحساب.',
-    );
+    throw new ForbiddenException({ code: 'NO_BRANCH_ASSIGNED', message: 'No branch is assigned to this account. / لا يوجد فرع مسند لهذا الحساب.' });
   }
   // Several assigned branches and none chosen: open on the account's own home
   // branch, exactly as the inventory reports do, instead of failing a screen
   // that has no branch picker. A different branch is still one explicit
   // `branchId` away, and that id is still checked against the assignment.
   if (user.branchId && scope.includes(user.branchId)) return user.branchId;
-  throw new BadRequestException(
-    'Select one of your assigned branches. / اختر أحد الفروع المسندة إليك.',
-  );
+  throw new BadRequestException({ code: 'BRANCH_SELECT_ASSIGNED', message: 'Select one of your assigned branches. / اختر أحد الفروع المسندة إليك.' });
 }
 
 /** Which warehouses the caller may read; `undefined` means all of them. */

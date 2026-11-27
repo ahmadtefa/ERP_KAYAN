@@ -63,7 +63,7 @@ export class ItemImageService {
   /// the caller's company before anything is written.
   async set(companyId: string, userId: string, itemId: string, data: Buffer, mime: string) {
     if (!Buffer.isBuffer(data) || data.length === 0) {
-      throw new NotFoundException('No image was uploaded / لم يتم إرسال صورة.');
+      throw new NotFoundException({ code: 'ITEM_IMAGE_MISSING', message: 'No image was uploaded / لم يتم إرسال صورة.' });
     }
     // Validate and re-encode before opening the transaction: decoding is the
     // expensive part and must not hold a row lock.

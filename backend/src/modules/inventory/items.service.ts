@@ -1076,9 +1076,7 @@ export class ItemsService {
         ),
       ];
       if (repointed.length > 0) {
-        throw new ForbiddenException(
-          'ليس لديك صلاحية تعديل أكواد باركود الوحدات. / Missing permission: inventory.barcodes.manage',
-        );
+        throw new ForbiddenException({ code: 'BARCODE_PERMISSION', message: 'ليس لديك صلاحية تعديل أكواد باركود الوحدات. / Missing permission: inventory.barcodes.manage' });
       }
     }
 

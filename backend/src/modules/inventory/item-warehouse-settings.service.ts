@@ -144,14 +144,10 @@ export class ItemWarehouseSettingsService {
       }
     }
     if (max.greaterThan(0) && max.lessThan(min)) {
-      throw new BadRequestException(
-        'الحد الأقصى أقل من الحد الأدنى. / The maximum is below the minimum.',
-      );
+      throw new BadRequestException({ code: 'ITEM_WH_MAX_BELOW_MIN', message: 'الحد الأقصى أقل من الحد الأدنى. / The maximum is below the minimum.' });
     }
     if (max.greaterThan(0) && reorder.greaterThan(max)) {
-      throw new BadRequestException(
-        'نقطة إعادة الطلب أعلى من الحد الأقصى. / The reorder point is above the maximum.',
-      );
+      throw new BadRequestException({ code: 'ITEM_WH_REORDER_ABOVE_MAX', message: 'نقطة إعادة الطلب أعلى من الحد الأقصى. / The reorder point is above the maximum.' });
     }
 
     const data = {

@@ -455,9 +455,7 @@ export class JournalEntriesService {
         data,
       });
       if (claimed.count !== 1) {
-        throw new ConflictException(
-          'تغيرت حالة القيد بواسطة عملية أخرى. حدّث البيانات قبل المحاولة مجددًا. / Journal status changed; refresh before retrying.',
-        );
+        throw new ConflictException({ code: 'JOURNAL_STATUS_CHANGED', message: 'تغيرت حالة القيد بواسطة عملية أخرى. حدّث البيانات قبل المحاولة مجددًا. / Journal status changed; refresh before retrying.' });
       }
       const updated = await tx.journalEntry.findUniqueOrThrow({
         where: { id: entry.id },
