@@ -125,8 +125,8 @@ class AppErrorMessageResolver {
       'The chosen lot holds less than the quantity needed. Lower the quantity or split it over other lots. The correction was not saved and the draft is unchanged.',
     ],
     'STOCK_DOC_LOT_TRANSFER_ONLY': [
-      'اختيار الدفعة وتقسيم الكمية متاحان لمستند التحويل فقط.',
-      'Choosing a lot and splitting the quantity are available on a transfer document only.',
+      'اختيار الدفعة وتقسيم الكمية متاحان لمستند التحويل فقط، وهذا المستند من نوع آخر. أزل اختيار الدفعة أو التقسيم ثم احفظ. بياناتك محفوظة.',
+      'Choosing a lot and splitting the quantity are available on a transfer document only, and this document is of another type. Remove the lot choice or the split and save. Your data is kept.',
     ],
     'STOCK_DOC_NOT_DRAFT': [
       'لا يمكن تعديل مواقع مستند تم ترحيله. استخدم العكس ثم أنشئ مستندًا جديدًا.',
@@ -195,8 +195,8 @@ class AppErrorMessageResolver {
       'The split does not add up to the issued quantity. Adjust the rows so they match. Your data is kept.',
     ],
     'ISSUE_LOCATION_AMBIGUOUS': [
-      'أرسل موقعًا واحدًا أو توزيعًا على مواقع، وليس الاثنين.',
-      'Send either one location or a split over locations, not both.',
+      'تم إرسال موقع واحد وتوزيع على مواقع معًا، ولا يصح الاثنان. اختر أحدهما ثم أعد المحاولة. لم يتغير شيء.',
+      'One location and a split over locations were sent together, which is not allowed. Choose one of them and try again. Nothing changed.',
     ],
     'ISSUE_LOCATION_REQUIRED': [
       'الصنف مخزَّن على أكثر من موقع. اختر الموقع أو عدة مواقع بالكميات ثم اصرف مرة أخرى. بياناتك محفوظة.',
