@@ -132,7 +132,7 @@ export class MasterDataBackupService {
   ): Promise<MasterDataArchive> {
     const rows = await this.readRows(this.prisma, kind, companyId, permissions);
     if (rows.length > MAX_RECORDS) {
-      throw new BadRequestException('This master list is too large for a single backup.');
+      throw new BadRequestException({ code: 'MD_TOO_LARGE', message: 'This master list is too large for a single backup.' });
     }
     return {
       format: MASTER_DATA_BACKUP_FORMAT,
@@ -174,20 +174,16 @@ export class MasterDataBackupService {
   ) {
     const archive = this.validateArchive(kind, companyId, input, permissions);
     if (typeof previewFingerprint !== 'string' || previewFingerprint.length !== 64) {
-      throw new BadRequestException('Preview the backup before restoring it.');
+      throw new BadRequestException({ code: 'MD_PREVIEW_FIRST', message: 'Preview the backup before restoring it.' });
     }
 
     return this.prisma.$transaction(async (tx) => {
       const plan = await this.plan(tx, archive);
       if (plan.fingerprint !== previewFingerprint) {
-        throw new ConflictException(
-          'The backup or destination data changed after preview. Preview it again before restoring.',
-        );
+        throw new ConflictException({ code: 'MD_CHANGED_AFTER_PREVIEW', message: 'The backup or destination data changed after preview. Preview it again before restoring.' });
       }
       if (plan.conflicts.length) {
-        throw new ConflictException(
-          `Restore stopped without changes: ${plan.conflicts.length} records conflict with deleted records.`,
-        );
+        throw new ConflictException({ code: 'MD_CONFLICTS', message: `Restore stopped without changes: ${plan.conflicts.length} records conflict with deleted records.` });
       }
 
       for (const row of plan.create) {
@@ -232,56 +228,56 @@ export class MasterDataBackupService {
     permissions: MasterDataPermissions,
   ): MasterDataArchive {
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      throw new BadRequestException('The selected file is not a KAYAN master-data backup.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'The selected file is not a KAYAN master-data backup.' });
     }
     const archive = input as Partial<MasterDataArchive>;
     if (archive.format !== MASTER_DATA_BACKUP_FORMAT || archive.version !== MASTER_DATA_BACKUP_VERSION) {
-      throw new BadRequestException('Unsupported master-data backup format or version.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'Unsupported master-data backup format or version.' });
     }
     if (archive.kind !== kind) {
-      throw new BadRequestException(`This is a ${String(archive.kind)} backup, not a ${kind} backup.`);
+      throw new BadRequestException({ code: 'MD_WRONG_KIND', message: `This is a ${String(archive.kind)} backup, not a ${kind} backup.` });
     }
     if (archive.companyId !== companyId) {
-      throw new BadRequestException('This backup belongs to a different company. Nothing was changed.');
+      throw new BadRequestException({ code: 'MD_OTHER_COMPANY', message: 'This backup belongs to a different company. Nothing was changed.' });
     }
     const allowedTopLevel = new Set([
       'format', 'version', 'kind', 'companyId', 'createdAt', 'recordCount', 'records',
     ]);
     if (Object.keys(archive).some((key) => !allowedTopLevel.has(key))) {
-      throw new BadRequestException('The backup contains unsupported top-level fields.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'The backup contains unsupported top-level fields.' });
     }
     if (typeof archive.createdAt !== 'string' || !Number.isFinite(Date.parse(archive.createdAt))) {
-      throw new BadRequestException('The backup creation date is invalid.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'The backup creation date is invalid.' });
     }
     if (!Array.isArray(archive.records) || archive.records.length > MAX_RECORDS ||
         !Number.isInteger(archive.recordCount) || archive.recordCount !== archive.records.length) {
-      throw new BadRequestException('The backup record count is invalid or exceeds the safety limit.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'The backup record count is invalid or exceeds the safety limit.' });
     }
     const bytes = Buffer.byteLength(JSON.stringify(input), 'utf8');
     if (bytes > MAX_ARCHIVE_BYTES) {
-      throw new BadRequestException('The master-data backup exceeds the 5 MB restore limit.');
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: 'The master-data backup exceeds the 5 MB restore limit.' });
     }
 
     const fields = this.restorableFields(kind, permissions);
     const seen = new Set<string>();
     for (const [index, record] of archive.records.entries()) {
       if (!record || typeof record !== 'object' || Array.isArray(record)) {
-        throw new BadRequestException(`Record ${index + 1} is not an object.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index + 1} is not an object.` });
       }
       const row = record as Record<string, unknown>;
       const unknown = Object.keys(row).filter((key) => key !== 'code' && !fields.includes(key));
       if (unknown.length) {
         if (unknown.some((field) => field === 'salePrice' && !permissions.manageSalePrice)) {
-          throw new ForbiddenException('This backup contains sale prices you are not allowed to restore.');
+          throw new ForbiddenException({ code: 'MD_PRICES_NOT_ALLOWED', message: 'This backup contains sale prices you are not allowed to restore.' });
         }
         if (unknown.some((field) => field === 'purchasePrice' && !permissions.managePurchasePrice)) {
-          throw new ForbiddenException('This backup contains purchase prices you are not allowed to restore.');
+          throw new ForbiddenException({ code: 'MD_PRICES_NOT_ALLOWED', message: 'This backup contains purchase prices you are not allowed to restore.' });
         }
-        throw new BadRequestException(`Record ${index + 1} contains unsupported fields.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index + 1} contains unsupported fields.` });
       }
       const code = row.code;
       if (typeof code !== 'string' || !code.trim() || code !== code.trim() || code.length > 40) {
-        throw new BadRequestException(`Record ${index + 1} has an invalid code.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index + 1} has an invalid code.` });
       }
       if (seen.has(code)) throw new BadRequestException(`Code "${code}" appears more than once in the backup.`);
       seen.add(code);
@@ -291,7 +287,7 @@ export class MasterDataBackupService {
       }
       if (typeof row.nameEn !== 'string' || !row.nameEn.trim() ||
           typeof row.nameAr !== 'string' || !row.nameAr.trim()) {
-        throw new BadRequestException(`Record ${index + 1} must include both Arabic and English names.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index + 1} must include both Arabic and English names.` });
       }
     }
     return archive as MasterDataArchive;
@@ -300,7 +296,7 @@ export class MasterDataBackupService {
   private validateValue(index: number, key: string, value: unknown): void {
     if (value === null && NULLABLE_FIELDS.has(key)) return;
     if (BOOLEAN_FIELDS.has(key)) {
-      if (typeof value !== 'boolean') throw new BadRequestException(`Record ${index}: ${key} must be true or false.`);
+      if (typeof value !== 'boolean') throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index}: ${key} must be true or false.` });
       return;
     }
     if (DECIMAL_FIELDS.has(key)) {
@@ -308,21 +304,21 @@ export class MasterDataBackupService {
         ? /^\d{1,5}(?:\.\d{1,4})?$/
         : DECIMAL_PATTERN;
       if (typeof value !== 'string' || !pattern.test(value)) {
-        throw new BadRequestException(`Record ${index}: ${key} must be a non-negative decimal string.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index}: ${key} must be a non-negative decimal string.` });
       }
       if (key === 'taxRate' && new Prisma.Decimal(value).greaterThan(100)) {
-        throw new BadRequestException(`Record ${index}: taxRate must not exceed 100.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index}: taxRate must not exceed 100.` });
       }
       return;
     }
     if (INTEGER_FIELDS.has(key)) {
       if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 3650) {
-        throw new BadRequestException(`Record ${index}: ${key} must be an integer from 0 to 3650.`);
+        throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index}: ${key} must be an integer from 0 to 3650.` });
       }
       return;
     }
     if (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH) {
-      throw new BadRequestException(`Record ${index}: ${key} must be text no longer than ${MAX_TEXT_LENGTH} characters.`);
+      throw new BadRequestException({ code: 'MD_FILE_INVALID', message: `Record ${index}: ${key} must be text no longer than ${MAX_TEXT_LENGTH} characters.` });
     }
   }
 

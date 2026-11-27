@@ -176,9 +176,7 @@ export class BackupController {
     try {
       return JSON.parse(file.buffer.toString('utf8')) as BackupFile;
     } catch {
-      throw new BadRequestException(
-        'The file is not readable as a JSON company backup. It may be incomplete or invalid JSON.',
-      );
+      throw new BadRequestException({ code: 'BACKUP_NOT_JSON', message: 'The file is not readable as a JSON company backup. It may be incomplete or invalid JSON.' });
     }
   }
 }

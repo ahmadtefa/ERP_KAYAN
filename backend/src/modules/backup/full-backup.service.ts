@@ -532,7 +532,7 @@ export class FullBackupService {
   async read(name: string): Promise<{ data: Buffer; name: string }> {
     const path = this.safePath(name);
     if (!existsSync(path)) {
-      throw new NotFoundException(`No backup file named "${name}" on this server`);
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `No backup file named "${name}" on this server` });
     }
     try {
       return { data: await readFile(path), name };
@@ -554,9 +554,7 @@ export class FullBackupService {
     const path = this.safePath(name);
     const info = await stat(path).catch(() => null);
     if (!info || !info.isFile() || info.size === 0) {
-      throw new NotFoundException(
-        `The backup file "${name}" is not on this server, or it is empty.`,
-      );
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `The backup file "${name}" is not on this server, or it is empty.` });
     }
 
     const head = Buffer.alloc(5);
@@ -641,25 +639,19 @@ export class FullBackupService {
     try {
       listing = await runCapture(pgRestore, ['--list', stagingPath], 120_000);
     } catch (error) {
-      throw new BadRequestException(
-        `The file "${label}" is not a PostgreSQL archive pg_restore can read ` +
+      throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: `The file "${label}" is not a PostgreSQL archive pg_restore can read ` +
           `(${safeBackupFailure(error)}). It may be damaged, or made by a ` +
-          'different PostgreSQL version. The current data was not touched.',
-      );
+          'different PostgreSQL version. The current data was not touched.' });
     }
     const toc = tocCounts(listing);
     if (toc.entries === 0) {
-      throw new BadRequestException(
-        `The file "${label}" holds no database objects, so it cannot be ` +
-          'restored. The current data was not touched.',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: `The file "${label}" holds no database objects, so it cannot be ` +
+          'restored. The current data was not touched.' });
     }
     try {
       await this.readArchiveContent(pgRestore, stagingPath);
     } catch {
-      throw new BadRequestException(
-        'The backup archive contains data that pg_restore could not read. The current database was not changed.',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: 'The backup archive contains data that pg_restore could not read. The current database was not changed.' });
     }
     return toc;
   }
@@ -719,7 +711,7 @@ export class FullBackupService {
   async remove(name: string, userId: string | null): Promise<void> {
     const path = this.safePath(name);
     if (!existsSync(path)) {
-      throw new NotFoundException(`No backup file named "${name}" on this server`);
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `No backup file named "${name}" on this server` });
     }
     await this.assertDeletionSafe(name);
     try {
@@ -747,9 +739,7 @@ export class FullBackupService {
    */
   async restore(options: RestoreOptions, userId: string, authority?: AuthUser) {
     if (!options.confirm) {
-      throw new BadRequestException(
-        'A full restore replaces the whole database. Send confirm=true to say you understand that.',
-      );
+      throw new BadRequestException({ code: 'FULL_RESTORE_CONFIRM', message: 'A full restore replaces the whole database. Send confirm=true to say you understand that.' });
     }
     if (this.maintenance.isActive || this.restoreInProgress) {
       throw new ServiceUnavailableException(
@@ -760,7 +750,7 @@ export class FullBackupService {
       throw new ServiceUnavailableException('A backup is running. The restore was not started.');
     }
     if (!options.uploaded?.buffer?.length && !options.fileName) {
-      throw new BadRequestException('Choose a backup file to restore: either upload one or name one on this server.');
+      throw new BadRequestException({ code: 'FULL_RESTORE_CHOOSE_FILE', message: 'Choose a backup file to restore: either upload one or name one on this server.' });
     }
     // Claim synchronously, before the first await: another request in this
     // process must not clear this restore's maintenance flag or staging file.
@@ -803,9 +793,7 @@ export class FullBackupService {
       buffer = read.data;
       label = read.name;
     } else {
-      throw new BadRequestException(
-        'Choose a backup file to restore: either upload one or name one on this server.',
-      );
+      throw new BadRequestException({ code: 'FULL_RESTORE_CHOOSE_FILE', message: 'Choose a backup file to restore: either upload one or name one on this server.' });
     }
     this.assertCustomDump(buffer, label);
 
@@ -915,18 +903,16 @@ export class FullBackupService {
           );
         }
         if (rehearsalFailed) {
-          throw new BadRequestException(
-            'This file did not restore cleanly into a test database, so the ' +
+          throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: 'This file did not restore cleanly into a test database, so the ' +
               'current data was not touched. It may be damaged, or made by a ' +
-              `different PostgreSQL version. Diagnostic: ${safeBackupFailure(rehearsalFailure)}.`,
-          );
+              `different PostgreSQL version. Diagnostic: ${safeBackupFailure(rehearsalFailure)}.` });
         }
       }
 
       // Another operation may have entered maintenance while this archive was
       // being rehearsed. Never replace its maintenance ownership or database.
       if (this.maintenance.isActive) {
-        throw new ConflictException('Another maintenance operation started during restore rehearsal. The database was not changed.');
+        throw new ConflictException({ code: 'FULL_RESTORE_BUSY', message: 'Another maintenance operation started during restore rehearsal. The database was not changed.' });
       }
       // Block new HTTP requests and drain admitted handlers before the safety snapshot.
       this.maintenance.begin(
@@ -1345,15 +1331,13 @@ export class FullBackupService {
   /// by older builds into the working directory remain reachable.
   private safePath(name: string): string {
     if (!NAME_PATTERN.test(name)) {
-      throw new BadRequestException(
-        'That is not a backup file name. Choose one from the list.',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_NAME_INVALID', message: 'That is not a backup file name. Choose one from the list.' });
     }
     for (const folder of this.backupDirs()) {
       const dir = resolve(folder);
       const path = resolve(dir, name);
       if (!path.startsWith(dir + sep)) {
-        throw new BadRequestException('That file is outside the backup folder.');
+        throw new BadRequestException({ code: 'FULL_BACKUP_NAME_INVALID', message: 'That file is outside the backup folder.' });
       }
       if (existsSync(path)) return path;
     }
@@ -1403,7 +1387,7 @@ export class FullBackupService {
 
   private assertCustomDump(buffer: Buffer, label: string): void {
     if (buffer.length === 0) {
-      throw new BadRequestException('The backup file is empty.');
+      throw new BadRequestException({ code: 'FULL_BACKUP_EMPTY', message: 'The backup file is empty.' });
     }
     if (buffer.length > MAX_UPLOAD_BYTES) {
       throw new BadRequestException({ code: 'BACKUP_TOO_LARGE', message: 'The backup file is larger than 2 GB.' });

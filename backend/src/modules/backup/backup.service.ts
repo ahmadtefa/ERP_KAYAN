@@ -393,7 +393,7 @@ export class BackupService {
     const company = await client.company.findUnique({
       where: { id: companyId },
     });
-    if (!company) throw new BadRequestException('Company not found');
+    if (!company) throw new BadRequestException({ code: 'BACKUP_COMPANY_MISSING', message: 'Company not found' });
 
     const logo = company.logoData?.length
       ? { data: company.logoData, mime: company.logoMime ?? 'image/png' }
@@ -474,11 +474,11 @@ export class BackupService {
         try {
           parsed = JSON.parse(data.toString('utf8')) as BackupFile;
         } catch {
-          throw new BadRequestException('The packaged demo company backup is not valid JSON.');
+          throw new BadRequestException({ code: 'BACKUP_DEMO_UNAVAILABLE', message: 'The packaged demo company backup is not valid JSON.' });
         }
         this.validate(parsed);
         if (parsed.companyCode !== 'DEMO') {
-          throw new BadRequestException('The packaged demo company backup has the wrong identity.');
+          throw new BadRequestException({ code: 'BACKUP_DEMO_UNAVAILABLE', message: 'The packaged demo company backup has the wrong identity.' });
         }
         return data;
       } catch (error) {
@@ -486,7 +486,7 @@ export class BackupService {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }
-    throw new NotFoundException('The demo company backup is not included in this installation.');
+    throw new NotFoundException({ code: 'BACKUP_DEMO_UNAVAILABLE', message: 'The demo company backup is not included in this installation.' });
   }
 
   private delegate(
@@ -664,9 +664,7 @@ export class BackupService {
       where: { id: requesterCompanyId },
     });
     if (!company) {
-      throw new BadRequestException(
-        'The company in this backup does not exist here. Restore it on the installation it came from.',
-      );
+      throw new BadRequestException({ code: 'BACKUP_OTHER_COMPANY', message: 'The company in this backup does not exist here. Restore it on the installation it came from.' });
     }
     const previousLogoPath = company.logoPath;
 
@@ -676,9 +674,7 @@ export class BackupService {
       file.companyCode === 'DEMO';
 
     if (!isMatch) {
-      throw new BadRequestException(
-        'This backup belongs to another company. Sign in to that company and restore it there.',
-      );
+      throw new BadRequestException({ code: 'BACKUP_OTHER_COMPANY', message: 'This backup belongs to another company. Sign in to that company and restore it there.' });
     }
 
     const actor = options.actorUserId &&
@@ -709,14 +705,10 @@ export class BackupService {
           .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
           .map(([model]) => model);
         if (missingTablesWithLiveData.length > 0) {
-          throw new BadRequestException(
-            `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.`,
-          );
+          throw new BadRequestException({ code: 'BACKUP_MISSING_TABLES', message: `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.` });
         }
         if (hasData && !options.replace) {
-          throw new BadRequestException(
-            `This company already holds data (${describe(existing)}). Confirm that you want to replace it to restore over it.`,
-          );
+          throw new BadRequestException({ code: 'BACKUP_WOULD_REPLACE', message: `This company already holds data (${describe(existing)}). Confirm that you want to replace it to restore over it.` });
         }
         safetyBackup = await this.writeSafetyBackup(requesterCompanyId, tx);
 
@@ -920,37 +912,29 @@ export class BackupService {
 
   private validate(file: BackupFile): void {
     if (!file || typeof file !== 'object' || file.format !== BACKUP_FORMAT) {
-      throw new BadRequestException(
-        'This file is not a KAYAN backup. Choose a file that was downloaded from the backup screen.',
-      );
+      throw new BadRequestException({ code: 'BACKUP_NOT_KAYAN', message: 'This file is not a KAYAN backup. Choose a file that was downloaded from the backup screen.' });
     }
     if (
       !Number.isInteger(file.version) ||
       file.version < 1 ||
       file.version > BACKUP_VERSION
     ) {
-      throw new BadRequestException(
-        `This backup was written by a newer version of the program (format ${file.version}). Update the program first.`,
-      );
+      throw new BadRequestException({ code: 'BACKUP_NEWER_VERSION', message: `This backup was written by a newer version of the program (format ${file.version}). Update the program first.` });
     }
     if (!file.tables || typeof file.tables !== 'object' || Array.isArray(file.tables)) {
-      throw new BadRequestException('The backup file has no tables in it.');
+      throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup file has no tables in it.' });
     }
     const supportedTables = new Set(TABLES.map((spec) => spec.model));
     for (const [name, rows] of Object.entries(file.tables)) {
       if (!Array.isArray(rows)) {
-        throw new BadRequestException(`The backup table "${name}" must contain a list of rows.`);
+        throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: `The backup table "${name}" must contain a list of rows.` });
       }
       if (!supportedTables.has(name) && rows.length > 0) {
-        throw new BadRequestException(
-          `The backup contains data for unsupported table "${name}". Use a matching program version; nothing was changed.`,
-        );
+        throw new BadRequestException({ code: 'BACKUP_TABLE_UNSUPPORTED', message: `The backup contains data for unsupported table "${name}". Use a matching program version; nothing was changed.` });
       }
       for (const [index, row] of rows.entries()) {
         if (!isRow(row)) {
-          throw new BadRequestException(
-            `The backup row ${index + 1} in table "${name}" must be a JSON object; nothing was changed.`,
-          );
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: `The backup row ${index + 1} in table "${name}" must be a JSON object; nothing was changed.` });
         }
       }
     }
@@ -960,23 +944,23 @@ export class BackupService {
     // omit counts or zero-valued entries, but every declared count must agree.
     if (file.counts !== undefined) {
       if (!file.counts || typeof file.counts !== 'object' || Array.isArray(file.counts)) {
-        throw new BadRequestException('The backup row counts are invalid; nothing was changed.');
+        throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup row counts are invalid; nothing was changed.' });
       }
       for (const [name, count] of Object.entries(file.counts)) {
         if (!Number.isSafeInteger(count) || count < 0 ||
             !Array.isArray(file.tables[name]) || file.tables[name].length !== count) {
-          throw new BadRequestException(`The backup row count for "${name}" does not match its data; nothing was changed.`);
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: `The backup row count for "${name}" does not match its data; nothing was changed.` });
         }
       }
     }
     if (!file.companyId || !file.companyCode || !file.createdAt) {
-      throw new BadRequestException('The backup is missing its company identity or creation date.');
+      throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup is missing its company identity or creation date.' });
     }
 
     if (file.companyProfile !== undefined) {
       const profile = file.companyProfile;
       if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
-        throw new BadRequestException('The backup company profile is invalid.');
+        throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company profile is invalid.' });
       }
       if (
         typeof profile.nameEn !== 'string' || !profile.nameEn.trim() ||
@@ -984,7 +968,7 @@ export class BackupService {
         typeof profile.currency !== 'string' || !/^[A-Z]{3}$/.test(profile.currency) ||
         typeof profile.timezone !== 'string' || !profile.timezone.trim()
       ) {
-        throw new BadRequestException('The backup company profile is missing its required fields.');
+        throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company profile is missing its required fields.' });
       }
       for (const field of [
         'taxId', 'commercialRegistration', 'addressEn', 'addressAr',
@@ -992,7 +976,7 @@ export class BackupService {
       ] as const) {
         const value = profile[field];
         if (value !== null && typeof value !== 'string') {
-          throw new BadRequestException(`The backup company profile field "${field}" is invalid.`);
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: `The backup company profile field "${field}" is invalid.` });
         }
       }
 
@@ -1002,11 +986,11 @@ export class BackupService {
           profile.logoBase64.length > Math.ceil(LOGO_MAX_BYTES * 4 / 3) + 4 ||
           !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(profile.logoBase64)
         ) {
-          throw new BadRequestException('The backup company logo is not valid base64.');
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company logo is not valid base64.' });
         }
         const data = Buffer.from(profile.logoBase64, 'base64');
         if (data.toString('base64') !== profile.logoBase64) {
-          throw new BadRequestException('The backup company logo is not valid base64.');
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company logo is not valid base64.' });
         }
         const logo = validateLogo(data, profile.logoMime ?? '');
         const dimensions = logoDimensions(data, logo.mime);
@@ -1014,10 +998,10 @@ export class BackupService {
           !dimensions || dimensions.width < 32 || dimensions.height < 32 ||
           dimensions.width > 2048 || dimensions.height > 2048
         ) {
-          throw new BadRequestException('The backup company logo must be between 32px and 2048px.');
+          throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company logo must be between 32px and 2048px.' });
         }
       } else if (profile.logoMime !== null) {
-        throw new BadRequestException('The backup company logo type is inconsistent.');
+        throw new BadRequestException({ code: 'BACKUP_FILE_INVALID', message: 'The backup company logo type is inconsistent.' });
       }
     }
   }
@@ -1202,10 +1186,8 @@ export class BackupService {
       }
 
       if (missingLegacyCodes.length > 0) {
-        throw new BadRequestException(
-          'This older backup does not include permission codes, and its permission IDs do not match this installation. ' +
-            'Restore it on the original installation or create a new company JSON backup with a version that stores permission codes. Nothing was changed.',
-        );
+        throw new BadRequestException({ code: 'BACKUP_OLD_PERMISSIONS', message: 'This older backup does not include permission codes, and its permission IDs do not match this installation. ' +
+            'Restore it on the original installation or create a new company JSON backup with a version that stores permission codes. Nothing was changed.' });
       }
       prepared = remapped;
     }
