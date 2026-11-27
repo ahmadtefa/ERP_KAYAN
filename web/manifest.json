@@ -1,11 +1,11 @@
 {
-    "name": "KAYAN ERP",
-    "short_name": "KAYAN",
+    "name": "Al-Marwa ERP",
+    "short_name": "Al-Marwa",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F5F7FA",
     "theme_color": "#176B72",
-    "description": "KAYAN ERP - cross-platform enterprise resource planning client",
+    "description": "Al-Marwa ERP - cross-platform enterprise resource planning client",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
