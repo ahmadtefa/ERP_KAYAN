@@ -89,6 +89,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['serials.manage', 'Register, sell, return and scrap serial numbers', 'تسجيل وبيع وإرجاع وإعدام الأرقام التسلسلية', 'inventory'],
   ['commissions.read', 'View sales reps and commissions', 'عرض مندوبي المبيعات والعمولات', 'sales'],
   ['commissions.manage', 'Manage sales reps, assign commissions and pay them out', 'إدارة المندوبين وتسجيل العمولات وصرفها', 'sales'],
+  ['installments.read', 'View customer installment plans', 'عرض خطط تقسيط العملاء', 'sales'],
+  ['installments.manage', 'Create and change customer installment plans', 'إنشاء وتعديل خطط تقسيط العملاء', 'sales'],
   ['reports.vat-return.read', 'View VAT return', 'عرض إقرار ضريبة القيمة المضافة', 'reports'],
   ['reports.expenses.read', 'View expenses report', 'عرض تقرير expenses', 'reports'],
   ['reports.income.read', 'View income report', 'عرض تقرير income', 'reports'],
