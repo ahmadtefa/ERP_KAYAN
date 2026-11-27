@@ -225,9 +225,7 @@ export class BankReconciliationService {
           data: { reconciledAt: new Date(), reconciliationId: reconciliation.id },
         });
         if (claimed.count !== lockedVouchers.length) {
-          throw new BadRequestException(
-            'One or more vouchers were already matched by another reconciliation',
-          );
+          throw new BadRequestException({ code: 'RECON_VOUCHER_TAKEN', message: 'One or more vouchers were already matched by another reconciliation' });
         }
       }
 
@@ -269,25 +267,19 @@ export class BankReconciliationService {
     cashAccountId: string,
   ): void {
     if (vouchers.length !== requestedIds.length) {
-      throw new BadRequestException('One or more vouchers do not exist in this company');
+      throw new BadRequestException({ code: 'RECON_VOUCHER_MISSING', message: 'One or more vouchers do not exist in this company' });
     }
     const wrongAccount = vouchers.filter((voucher) => voucher.cashAccountId !== cashAccountId);
     if (wrongAccount.length > 0) {
-      throw new BadRequestException(
-        `Voucher ${wrongAccount[0].voucherNumber} belongs to another cash account`,
-      );
+      throw new BadRequestException({ code: 'RECON_VOUCHER_OTHER_ACCOUNT', message: `Voucher ${wrongAccount[0].voucherNumber} belongs to another cash account` });
     }
     const notPosted = vouchers.filter((voucher) => voucher.status !== 'POSTED');
     if (notPosted.length > 0) {
-      throw new BadRequestException(
-        `Voucher ${notPosted[0].voucherNumber} is not posted, so it cannot appear on a bank statement match`,
-      );
+      throw new BadRequestException({ code: 'RECON_VOUCHER_NOT_POSTED', message: `Voucher ${notPosted[0].voucherNumber} is not posted, so it cannot appear on a bank statement match` });
     }
     const alreadyMatched = vouchers.filter((voucher) => voucher.reconciliationId);
     if (alreadyMatched.length > 0) {
-      throw new BadRequestException(
-        `Voucher ${alreadyMatched[0].voucherNumber} is already matched to another reconciliation`,
-      );
+      throw new BadRequestException({ code: 'RECON_VOUCHER_TAKEN', message: `Voucher ${alreadyMatched[0].voucherNumber} is already matched to another reconciliation` });
     }
   }
 

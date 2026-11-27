@@ -66,7 +66,7 @@ export class CashVouchersService {
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(CashVoucherKind).includes(kind as CashVoucherKind)) {
-        throw new BadRequestException(`Unknown voucher kind: ${query.kind}`);
+        throw new BadRequestException({ code: 'VOUCHER_KIND_UNKNOWN', message: `Unknown voucher kind: ${query.kind}` });
       }
       where.kind = kind as CashVoucherKind;
     }
@@ -191,7 +191,7 @@ export class CashVouchersService {
 
     const kind = String(dto.kind ?? '').toUpperCase() as CashVoucherKind;
     if (!Object.values(CashVoucherKind).includes(kind)) {
-      throw new BadRequestException('kind must be RECEIPT or PAYMENT');
+      throw new BadRequestException({ code: 'VOUCHER_KIND_UNKNOWN', message: 'kind must be RECEIPT or PAYMENT' });
     }
 
     const amount = this.positive(dto.amount, 'amount');
@@ -209,14 +209,12 @@ export class CashVouchersService {
         where: { id: costCenterId, companyId, deletedAt: null },
         select: { id: true, isActive: true, code: true },
       });
-      if (!center) throw new BadRequestException('The cost center does not exist');
+      if (!center) throw new BadRequestException({ code: 'VOUCHER_COST_CENTER_MISSING', message: 'The cost center does not exist' });
       if (!center.isActive) {
         throw new BadRequestException(`Cost center ${center.code} is inactive`);
       }
       if (!party.counterAccountId) {
-        throw new BadRequestException(
-          'A cost center can only be recorded on a voucher that names a counter account',
-        );
+        throw new BadRequestException({ code: 'VOUCHER_COST_CENTER_NEEDS_COUNTER', message: 'A cost center can only be recorded on a voucher that names a counter account' });
       }
     }
 
@@ -226,15 +224,11 @@ export class CashVouchersService {
       new Prisma.Decimal(0),
     );
     if (allocationTotal.greaterThan(amount)) {
-      throw new BadRequestException(
-        `The allocations (${allocationTotal.toFixed(MONEY_SCALE)}) are more than the voucher ` +
-          `(${amount.toFixed(MONEY_SCALE)}). A voucher cannot pay more than it carries.`,
-      );
+      throw new BadRequestException({ code: 'VOUCHER_ALLOC_TOO_BIG', message: `The allocations (${allocationTotal.toFixed(MONEY_SCALE)}) are more than the voucher ` +
+          `(${amount.toFixed(MONEY_SCALE)}). A voucher cannot pay more than it carries.` });
     }
     if (allocations.length > 0 && !party.customerId && !party.supplierId) {
-      throw new BadRequestException(
-        'A voucher can only be allocated against invoices when it names a customer or a supplier',
-      );
+      throw new BadRequestException({ code: 'VOUCHER_ALLOC_NEEDS_PARTY', message: 'A voucher can only be allocated against invoices when it names a customer or a supplier' });
     }
     if (allocations.length > 0) {
       await this.validateAllocations(companyId, kind, cashAccount.currency, party, allocations);
@@ -352,9 +346,7 @@ export class CashVouchersService {
     });
     if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
     if (voucher.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft voucher can be posted (current status: ${voucher.status})`,
-      );
+      throw new BadRequestException({ code: 'VOUCHER_NOT_DRAFT', message: `Only a draft voucher can be posted (current status: ${voucher.status})` });
     }
     if (!voucher.cashAccount.isActive) {
       throw new BadRequestException({ code: 'CASH_ACCOUNT_INACTIVE', message: 'That cash account is inactive' });
@@ -374,9 +366,7 @@ export class CashVouchersService {
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException(
-          'This voucher has just been posted by someone else. Reload it to see the current state.',
-        );
+        throw new BadRequestException({ code: 'VOUCHER_POSTED_ELSEWHERE', message: 'This voucher has just been posted by someone else. Reload it to see the current state.' });
       }
 
       // ---- allocations: what the money settled
@@ -385,7 +375,7 @@ export class CashVouchersService {
         // A draft written before create() learned to check this could still
         // name both invoices (or neither); refuse to settle it either way.
         if (Boolean(allocation.salesInvoiceId) === Boolean(allocation.purchaseInvoiceId)) {
-          throw new BadRequestException('Each allocation must name exactly one invoice');
+          throw new BadRequestException({ code: 'VOUCHER_ALLOC_ONE_INVOICE', message: 'Each allocation must name exactly one invoice' });
         }
         if (allocation.salesInvoiceId) {
           if (voucher.kind !== CashVoucherKind.RECEIPT) {
@@ -403,28 +393,20 @@ export class CashVouchersService {
               status: true,
             },
           });
-          if (!invoice) throw new BadRequestException('An allocation references a missing sales invoice');
+          if (!invoice) throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing sales invoice' });
           if (invoice.status !== InvoiceStatus.POSTED) {
-            throw new BadRequestException(
-              `Sales invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_NOT_POSTED', message: `Sales invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid` });
           }
           if (invoice.customerId !== voucher.customerId) {
-            throw new BadRequestException(
-              `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer` });
           }
           if (invoice.currency !== voucher.currency) {
-            throw new BadRequestException(
-              `Sales invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_CURRENCY', message: `Sales invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}` });
           }
           const due = invoice.totalAmount.minus(invoice.paidAmount);
           if (allocation.amount.greaterThan(due)) {
-            throw new BadRequestException(
-              `Sales invoice ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
-                `${allocation.amount.toFixed(MONEY_SCALE)} was allocated to it.`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OVERPAID', message: `Sales invoice ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
+                `${allocation.amount.toFixed(MONEY_SCALE)} was allocated to it.` });
           }
           await tx.salesInvoice.update({
             where: { id: invoice.id },
@@ -447,28 +429,20 @@ export class CashVouchersService {
               status: true,
             },
           });
-          if (!invoice) throw new BadRequestException('An allocation references a missing purchase invoice');
+          if (!invoice) throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing purchase invoice' });
           if (invoice.status !== InvoiceStatus.POSTED) {
-            throw new BadRequestException(
-              `Purchase invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_NOT_POSTED', message: `Purchase invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid` });
           }
           if (invoice.supplierId !== voucher.supplierId) {
-            throw new BadRequestException(
-              `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier` });
           }
           if (invoice.currency !== voucher.currency) {
-            throw new BadRequestException(
-              `Purchase invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_CURRENCY', message: `Purchase invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}` });
           }
           const due = invoice.totalAmount.minus(invoice.paidAmount);
           if (allocation.amount.greaterThan(due)) {
-            throw new BadRequestException(
-              `Purchase invoice ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
-                `${allocation.amount.toFixed(MONEY_SCALE)} was allocated to it.`,
-            );
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OVERPAID', message: `Purchase invoice ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
+                `${allocation.amount.toFixed(MONEY_SCALE)} was allocated to it.` });
           }
           await tx.purchaseInvoice.update({
             where: { id: invoice.id },
@@ -515,9 +489,7 @@ export class CashVouchersService {
             costCenterId: voucher.costCenterId ?? null,
           });
         } else {
-          throw new BadRequestException(
-            'Give the voucher a customer, a supplier or a counter account: the money has to come from somewhere.',
-          );
+          throw new BadRequestException({ code: 'VOUCHER_NEEDS_COUNTERPART', message: 'Give the voucher a customer, a supplier or a counter account: the money has to come from somewhere.' });
         }
       }
 
@@ -801,7 +773,7 @@ export class CashVouchersService {
       const sales = Boolean(allocation.salesInvoiceId);
       const purchase = Boolean(allocation.purchaseInvoiceId);
       if (sales === purchase) {
-        throw new BadRequestException('Each allocation must name exactly one invoice');
+        throw new BadRequestException({ code: 'VOUCHER_ALLOC_ONE_INVOICE', message: 'Each allocation must name exactly one invoice' });
       }
       if (sales && kind !== CashVoucherKind.RECEIPT) {
         throw new BadRequestException({ code: 'SETTLE_SALES_NEEDS_RECEIPT', message: 'A sales invoice can only be settled by a receipt' });
@@ -832,14 +804,12 @@ export class CashVouchersService {
       const byId = new Map(invoices.map((invoice) => [invoice.id, invoice]));
       for (const id of salesIds) {
         if (!byId.has(id)) {
-          throw new BadRequestException('An allocation references a missing sales invoice');
+          throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing sales invoice' });
         }
       }
       for (const invoice of invoices) {
         if (invoice.customerId !== party.customerId) {
-          throw new BadRequestException(
-            `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer`,
-          );
+          throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer` });
         }
         this.assertAllocatable(invoice, 'Sales invoice', currency);
       }
@@ -872,14 +842,12 @@ export class CashVouchersService {
       const byId = new Map(invoices.map((invoice) => [invoice.id, invoice]));
       for (const id of purchaseIds) {
         if (!byId.has(id)) {
-          throw new BadRequestException('An allocation references a missing purchase invoice');
+          throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing purchase invoice' });
         }
       }
       for (const invoice of invoices) {
         if (invoice.supplierId !== party.supplierId) {
-          throw new BadRequestException(
-            `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier`,
-          );
+          throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier` });
         }
         this.assertAllocatable(invoice, 'Purchase invoice', currency);
       }
@@ -902,14 +870,10 @@ export class CashVouchersService {
     currency: string,
   ): void {
     if (invoice.status === InvoiceStatus.REVERSED) {
-      throw new BadRequestException(
-        `${label} ${invoice.invoiceNumber} has been reversed, so it cannot be paid`,
-      );
+      throw new BadRequestException({ code: 'VOUCHER_INVOICE_REVERSED', message: `${label} ${invoice.invoiceNumber} has been reversed, so it cannot be paid` });
     }
     if (invoice.currency !== currency) {
-      throw new BadRequestException(
-        `${label} ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${currency}`,
-      );
+      throw new BadRequestException({ code: 'VOUCHER_INVOICE_CURRENCY', message: `${label} ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${currency}` });
     }
   }
 
@@ -936,10 +900,8 @@ export class CashVouchersService {
       };
       const due = invoice.totalAmount.minus(invoice.paidAmount);
       if (total.greaterThan(due)) {
-        throw new BadRequestException(
-          `${label} ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
-            `${total.toFixed(MONEY_SCALE)} was allocated to it.`,
-        );
+        throw new BadRequestException({ code: 'VOUCHER_INVOICE_OVERPAID', message: `${label} ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
+            `${total.toFixed(MONEY_SCALE)} was allocated to it.` });
       }
     }
   }
@@ -949,7 +911,7 @@ export class CashVouchersService {
     // did not name a box used to be recorded against the first one. Money
     // must always say which box it moved through.
     if (typeof id !== 'string' || id.trim().length === 0) {
-      throw new BadRequestException('Choose the cash account the money moved through');
+      throw new BadRequestException({ code: 'VOUCHER_CASH_ACCOUNT_REQUIRED', message: 'Choose the cash account the money moved through' });
     }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -993,7 +955,7 @@ export class CashVouchersService {
 
     const parties = [dto.customerId, dto.supplierId].filter(Boolean).length;
     if (parties > 1) {
-      throw new BadRequestException('A voucher is against a customer or a supplier, not both');
+      throw new BadRequestException({ code: 'VOUCHER_PARTY_BOTH', message: 'A voucher is against a customer or a supplier, not both' });
     }
 
     return {

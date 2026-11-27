@@ -93,17 +93,15 @@ export class CashTransfersService {
       throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     if (dto.fromCashAccountId === dto.toCashAccountId) {
-      throw new BadRequestException('A transfer needs two different accounts');
+      throw new BadRequestException({ code: 'TRANSFER_SAME_ACCOUNT', message: 'A transfer needs two different accounts' });
     }
 
     const amount = this.positive(dto.amount);
     const from = await this.requireAccount(companyId, dto.fromCashAccountId, 'from');
     const to = await this.requireAccount(companyId, dto.toCashAccountId, 'to');
     if (from.currency !== to.currency) {
-      throw new BadRequestException(
-        `The two accounts use different currencies (${from.currency} and ${to.currency}). ` +
-          'A transfer between currencies needs an exchange rate and is not supported yet.',
-      );
+      throw new BadRequestException({ code: 'TRANSFER_CURRENCY_MISMATCH', message: `The two accounts use different currencies (${from.currency} and ${to.currency}). ` +
+          'A transfer between currencies needs an exchange rate and is not supported yet.' });
     }
     const date = this.date(dto.transferDate);
 
@@ -190,9 +188,7 @@ export class CashTransfersService {
     });
     if (!transfer) throw new NotFoundException({ code: 'TRANSFER_NOT_FOUND', message: 'Transfer not found' });
     if (transfer.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft transfer can be posted (current status: ${transfer.status})`,
-      );
+      throw new BadRequestException({ code: 'TRANSFER_NOT_DRAFT', message: `Only a draft transfer can be posted (current status: ${transfer.status})` });
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
@@ -299,14 +295,14 @@ export class CashTransfersService {
     // malformed transfer into a movement of money between two boxes the user
     // never chose.
     if (typeof id !== 'string' || id.trim().length === 0) {
-      throw new BadRequestException(`The ${side} cash account is required`);
+      throw new BadRequestException({ code: 'TRANSFER_ACCOUNT_REQUIRED', message: `The ${side} cash account is required` });
     }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, isActive: true, code: true, nameAr: true, nameEn: true },
     });
-    if (!cashAccount) throw new BadRequestException(`The ${side} cash account does not exist`);
-    if (!cashAccount.isActive) throw new BadRequestException(`The ${side} cash account is inactive`);
+    if (!cashAccount) throw new BadRequestException({ code: 'TRANSFER_ACCOUNT_MISSING', message: `The ${side} cash account does not exist` });
+    if (!cashAccount.isActive) throw new BadRequestException({ code: 'TRANSFER_ACCOUNT_INACTIVE', message: `The ${side} cash account is inactive` });
     return cashAccount;
   }
 

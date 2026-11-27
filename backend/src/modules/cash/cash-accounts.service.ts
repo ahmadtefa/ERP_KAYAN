@@ -37,7 +37,7 @@ export class CashAccountsService {
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(CashAccountKind).includes(kind as CashAccountKind)) {
-        throw new BadRequestException(`Unknown kind: ${query.kind}`);
+        throw new BadRequestException({ code: 'CASH_KIND_UNKNOWN', message: `Unknown kind: ${query.kind}` });
       }
       where.kind = kind as CashAccountKind;
     }
@@ -70,13 +70,13 @@ export class CashAccountsService {
     const code = this.text(dto.code, 'code');
     const enteredEn = String(dto.nameEn ?? '').trim();
     const enteredAr = String(dto.nameAr ?? '').trim();
-    if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English name');
+    if (!enteredEn && !enteredAr) throw new BadRequestException({ code: 'CASH_NAME_REQUIRED', message: 'Provide an Arabic or English name' });
     const nameEn = enteredEn || enteredAr;
     const nameAr = enteredAr || enteredEn;
     const accountId = this.text(dto.accountId, 'accountId');
     const kind = String(dto.kind ?? 'CASH').toUpperCase() as CashAccountKind;
     if (!Object.values(CashAccountKind).includes(kind)) {
-      throw new BadRequestException('kind must be CASH or BANK');
+      throw new BadRequestException({ code: 'CASH_KIND_UNKNOWN', message: 'kind must be CASH or BANK' });
     }
 
     const existing = await this.prisma.cashAccount.findFirst({
@@ -152,7 +152,7 @@ export class CashAccountsService {
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
       const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
-      if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English name');
+      if (!enteredEn && !enteredAr) throw new BadRequestException({ code: 'CASH_NAME_REQUIRED', message: 'Provide an Arabic or English name' });
       dto.nameEn = enteredEn || enteredAr;
       dto.nameAr = enteredAr || enteredEn;
     }
@@ -170,9 +170,7 @@ export class CashAccountsService {
         where: { cashAccountId: id, status: { in: ['POSTED', 'REVERSED'] } },
       });
       if (movements > 0) {
-        throw new BadRequestException(
-          'This cash account already has posted movements, so its ledger account cannot be changed. Create a new cash account instead.',
-        );
+        throw new BadRequestException({ code: 'CASH_LEDGER_LOCKED', message: 'This cash account already has posted movements, so its ledger account cannot be changed. Create a new cash account instead.' });
       }
       data.account = { connect: { id: String(dto.accountId) } };
     }
