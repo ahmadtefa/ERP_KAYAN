@@ -345,3 +345,43 @@ const Map<String, String> moduleFieldLabelsAr = {
   'note': 'السبب',
   'status': 'الحالة',
 };
+
+/// One reviewed sentence per kind of field refusal. The code says what is wrong
+/// with the value; the field name says where. Nothing from the server body is
+/// shown.
+class FieldRefusal {
+  const FieldRefusal(this._ar, this._en);
+  final String _ar;
+  final String _en;
+
+  String arabic(String? label) => label == null
+      ? _ar.replaceAll('الحقل «{f}»', 'هذا الحقل').replaceAll('«{f}»', 'هذا الحقل')
+      : _ar.replaceAll('{f}', label);
+
+  String english(String field) => _en.replaceAll('{f}', field);
+}
+
+const Map<String, FieldRefusal> _fieldRefusals = {
+  'FIELD_REQUIRED': FieldRefusal(
+    'الحقل «{f}» مطلوب. اكتب قيمته ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The field "{f}" is required. Fill it in and try again. Nothing was saved.',
+  ),
+  'FIELD_POSITIVE': FieldRefusal(
+    'القيمة في «{f}» يجب أن تكون أكبر من صفر. اكتب رقمًا موجبًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The value in "{f}" must be above zero. Enter a positive number and try again. Nothing was saved.',
+  ),
+  'FIELD_NOT_NEGATIVE': FieldRefusal(
+    'القيمة في «{f}» لا يجوز أن تكون سالبة. اكتب صفرًا أو رقمًا موجبًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The value in "{f}" cannot be negative. Enter zero or a positive number and try again. Nothing was saved.',
+  ),
+  'FIELD_BAD_DATE': FieldRefusal(
+    'التاريخ في «{f}» غير صحيح. اختر تاريخًا من المنتقي أو اكتبه بصيغة سنة-شهر-يوم ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The date in "{f}" is not valid. Pick a date or type it as year-month-day and try again. Nothing was saved.',
+  ),
+  'FIELD_BAD_NUMBER': FieldRefusal(
+    'القيمة في «{f}» ليست رقمًا صحيحًا. اكتب أرقامًا فقط (مثل 150 أو 12.5) ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The value in "{f}" is not a valid number. Enter digits only (for example 150 or 12.5) and try again. Nothing was saved.',
+  ),
+};
+
+FieldRefusal? fieldRefusal(String? code) => code == null ? null : _fieldRefusals[code];

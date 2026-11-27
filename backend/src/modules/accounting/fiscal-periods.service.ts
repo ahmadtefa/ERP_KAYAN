@@ -231,7 +231,7 @@ export class FiscalPeriodsService {
   private date(value: string, field: string): Date {
     const parsed = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
     if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException(`${field} is not a valid date`);
+      throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     }
     return parsed;
   }

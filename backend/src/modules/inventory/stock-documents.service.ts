@@ -758,7 +758,7 @@ export class StockDocumentsService {
       lines: StockDocumentLineInput[] }, mayReadCost = true) {
     if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
-    if (!identity) throw new BadRequestException('idempotencyKey is required');
+    if (!identity) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'idempotencyKey is required', field: 'idempotencyKey' });
     if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 0) {
       throw new BadRequestException('expectedVersion must be a non-negative integer');
     }
@@ -2572,7 +2572,7 @@ export class StockDocumentsService {
     const day = String(value).slice(0, 10);
     const parsed = new Date(`${day}T00:00:00.000Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) {
-      throw new BadRequestException(`${field} is not a valid date`);
+      throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     }
     return parsed;
   }

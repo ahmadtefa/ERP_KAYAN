@@ -128,7 +128,7 @@ export class BankReconciliationService {
     },
   ) {
     if (typeof dto.cashAccountId !== 'string' || dto.cashAccountId.trim().length === 0) {
-      throw new BadRequestException('cashAccountId is required');
+      throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'cashAccountId is required', field: 'cashAccountId' });
     }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id: dto.cashAccountId, companyId, deletedAt: null },
@@ -147,7 +147,7 @@ export class BankReconciliationService {
     try {
       statementBalance = new Prisma.Decimal(String(dto.statementBalance)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException('statementBalance is not a valid amount');
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: 'statementBalance is not a valid amount', field: 'statementBalance' });
     }
 
     const bookRows = await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
@@ -293,7 +293,7 @@ export class BankReconciliationService {
 
   private date(value: string, field: string): Date {
     const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) throw new BadRequestException(`${field} is not a valid date`);
+    if (Number.isNaN(parsed.getTime())) throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     return parsed;
   }
 

@@ -438,6 +438,16 @@ class AppErrorMessageResolver {
             businessMessage: refusal[isArabic ? 0 : 1],
           );
         }
+        final fieldKind = error.statusCode == 400 && error.errorField != null ? fieldRefusal(error.code) : null;
+        if (fieldKind != null) {
+          final fieldName = error.errorField!;
+          final arLabel = moduleFieldLabelsAr[fieldName] ?? _fieldLabelsAr[fieldName];
+          return AppErrorText(
+            reason: AppErrorReason.invalidInput,
+            severity: AppErrorSeverity.error,
+            businessMessage: isArabic ? fieldKind.arabic(arLabel) : fieldKind.english(fieldName),
+          );
+        }
         final field = error.errorField;
         if (error.statusCode == 400 && error.code == 'VALIDATION' && field != null) {
           final label = isArabic ? (moduleFieldLabelsAr[field] ?? _fieldLabelsAr[field]) : field;

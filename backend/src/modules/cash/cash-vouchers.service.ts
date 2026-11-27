@@ -1008,17 +1008,17 @@ export class CashVouchersService {
     try {
       decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException(`${field} is not a valid amount`);
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${field} is not a valid amount`, field });
     }
     if (decimal.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(`${field} must be greater than zero`);
+      throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
     }
     return decimal;
   }
 
   private date(value: string, field: string): Date {
     const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) throw new BadRequestException(`${field} is not a valid date`);
+    if (Number.isNaN(parsed.getTime())) throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     return parsed;
   }
 

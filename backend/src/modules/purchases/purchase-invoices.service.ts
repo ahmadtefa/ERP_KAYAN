@@ -502,7 +502,7 @@ export class PurchaseInvoicesService {
     if (!before?.purchaseOrderId) throw new BadRequestException('Invoice is not linked to an order');
     const orderId = before.purchaseOrderId;
     if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
-      throw new BadRequestException('expectedUpdatedAt is required');
+      throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'expectedUpdatedAt is required', field: 'expectedUpdatedAt' });
     }
     const expectedUpdatedAt = dto.expectedUpdatedAt;
     await this.prisma.$transaction(async (tx) => {
@@ -1498,14 +1498,14 @@ export class PurchaseInvoicesService {
   private positive(value: string, field: string): Prisma.Decimal {
     const d = this.decimal(value, field);
     if (d.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(`${field} must be greater than zero`);
+      throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
     }
     return d;
   }
 
   private nonNegative(value: string, field: string): Prisma.Decimal {
     const d = this.decimal(value, field);
-    if (d.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+    if (d.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     return d;
   }
 

@@ -61,6 +61,24 @@ void main() {
     }
   });
 
+  test('field refusals say what is wrong with the value and where, in both languages, never from the server text', () {
+    for (final code in ['FIELD_REQUIRED', 'FIELD_POSITIVE', 'FIELD_NOT_NEGATIVE', 'FIELD_BAD_DATE', 'FIELD_BAD_NUMBER']) {
+      final failure = ApiFailure('synthetic raw $code', statusCode: 400, code: code, errorField: 'repId');
+      final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
+      final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;
+      expect(ar, contains('المندوب'), reason: code);
+      expect(en, contains('"repId"'), reason: code);
+      expect(ar, isNot(contains('{f}')));
+      expect(en, isNot(contains('{f}')));
+      expect(ar, isNot(contains('synthetic raw')));
+      expect(en, isNot(contains('synthetic raw')));
+      final unknown = const AppErrorMessageResolver(isArabic: true).resolve(ApiFailure('x', statusCode: 400, code: code, errorField: 'zzzUnknown')).businessMessage!;
+      expect(unknown, contains('هذا الحقل'), reason: code);
+      expect(unknown, isNot(contains('{f}')));
+      expect(unknown, isNot(contains('«هذا الحقل»')));
+    }
+  });
+
   test('a plain validation refusal names the field, in Arabic with its label', () {
     final failure = ApiFailure('synthetic raw', statusCode: 400, code: 'VALIDATION', errorField: 'repId');
     final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;

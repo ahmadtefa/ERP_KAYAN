@@ -87,7 +87,7 @@ export class ItemsService {
   /// screen never has to guess.
   async findByBarcode(companyId: string, code: string, mayReadCost = true) {
     const barcode = String(code ?? '').trim();
-    if (!barcode) throw new BadRequestException('barcode is required');
+    if (!barcode) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'barcode is required', field: 'barcode' });
 
     const item = await this.prisma.item.findFirst({
       where: { companyId, barcode, deletedAt: null },
@@ -345,7 +345,7 @@ export class ItemsService {
   ) {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
-    if (!code) throw new BadRequestException('code is required');
+    if (!code) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'code is required', field: 'code' });
     // A single language is sufficient. Keep both stored names populated for
     // existing consumers that still expect non-null strings.
     const nameEn = String(dto.nameEn ?? '').trim();
@@ -414,7 +414,7 @@ export class ItemsService {
         );
       }
       if (!openingQuantity.greaterThan(0)) {
-        throw new BadRequestException('openingQuantity must be greater than zero');
+        throw new BadRequestException({ code: 'FIELD_POSITIVE', message: 'openingQuantity must be greater than zero', field: 'openingQuantity' });
       }
       if (!branchId) {
         throw new BadRequestException(
@@ -844,10 +844,10 @@ export class ItemsService {
     }
     try {
       const d = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
-      if (d.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+      if (d.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
       return d;
     } catch {
-      throw new BadRequestException(`${field} is not a valid amount`);
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${field} is not a valid amount`, field });
     }
   }
 
@@ -857,7 +857,7 @@ export class ItemsService {
     }
     try {
       const d = new Prisma.Decimal(String(value)).toDecimalPlaces(RATE_SCALE);
-      if (d.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+      if (d.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
       if (d.greaterThan(100)) throw new BadRequestException(`${field} cannot exceed 100`);
       return d;
     } catch {

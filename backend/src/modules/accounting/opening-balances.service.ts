@@ -973,18 +973,18 @@ export class OpeningBalancesService {
       if (!decimal.isFinite() || decimal.greaterThanOrEqualTo('1000000000000000')) {
         throw new BadRequestException(`${field} is outside the supported range`);
       }
-      if (decimal.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+      if (decimal.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
       return decimal;
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException(`${field} is not a valid amount`);
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${field} is not a valid amount`, field });
     }
   }
 
   private date(value: string): Date {
     const parsed = new Date(`${value}T00:00:00.000Z`);
     if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
-      throw new BadRequestException('asOfDate is not a valid date');
+      throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: 'asOfDate is not a valid date', field: 'asOfDate' });
     }
     return parsed;
   }

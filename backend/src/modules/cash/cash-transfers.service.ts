@@ -315,17 +315,17 @@ export class CashTransfersService {
     try {
       decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException('amount is not a valid amount');
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: 'amount is not a valid amount', field: 'amount' });
     }
     if (decimal.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('amount must be greater than zero');
+      throw new BadRequestException({ code: 'FIELD_POSITIVE', message: 'amount must be greater than zero', field: 'amount' });
     }
     return decimal;
   }
 
   private date(value: string): Date {
     const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) throw new BadRequestException('transferDate is not a valid date');
+    if (Number.isNaN(parsed.getTime())) throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: 'transferDate is not a valid date', field: 'transferDate' });
     return parsed;
   }
 

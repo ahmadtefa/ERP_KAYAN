@@ -140,7 +140,7 @@ export class InventoryReportsService {
     const data: Record<string, unknown> = {};
     if (dto.unit !== undefined) {
       const name = String(dto.unit ?? '').trim();
-      if (!name) throw new BadRequestException('unit is required');
+      if (!name) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'unit is required', field: 'unit' });
       if (isBase && name !== item.unit) {
         throw new BadRequestException(
           'The base unit of an item cannot be renamed; add the new name as another unit instead.',
@@ -481,7 +481,7 @@ export class InventoryReportsService {
     if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const unit = String(dto.unit ?? '').trim();
-    if (!unit) throw new BadRequestException('unit is required');
+    if (!unit) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'unit is required', field: 'unit' });
 
     const factor = this.parseFactor(dto.factor);
     if (unit === item.unit && !factor.equals(1)) {

@@ -293,7 +293,7 @@ export class CostCentersService {
 
   private text(value: unknown, field: string): string {
     const text = String(value ?? '').trim();
-    if (!text) throw new BadRequestException(`${field} is required`);
+    if (!text) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: `${field} is required`, field });
     return text;
   }
 
@@ -325,7 +325,7 @@ export class CostCentersService {
       if (value === null || value === '') return null;
       const date = new Date(String(value));
       if (Number.isNaN(date.getTime())) {
-        throw new BadRequestException(`${field} is not a valid date`);
+        throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
       }
       return new Date(date.toISOString().slice(0, 10));
     };

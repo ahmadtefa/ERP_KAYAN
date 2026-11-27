@@ -334,7 +334,7 @@ export class CashAccountsService {
 
   private text(value: unknown, field: string): string {
     const text = String(value ?? '').trim();
-    if (!text) throw new BadRequestException(`${field} is required`);
+    if (!text) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: `${field} is required`, field });
     return text;
   }
 

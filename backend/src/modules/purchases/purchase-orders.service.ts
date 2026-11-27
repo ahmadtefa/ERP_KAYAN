@@ -286,7 +286,7 @@ export class PurchaseOrdersService {
     dto: Record<string, unknown>, approved: boolean) {
     if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const identity = orderCreationIdentity({ ...dto, orderId: id });
-    if (!identity) throw new BadRequestException('idempotencyKey is required');
+    if (!identity) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'idempotencyKey is required', field: 'idempotencyKey' });
     const operation = approved ? 'p-amend' : 'p-edit';
     await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -314,7 +314,7 @@ export class PurchaseOrdersService {
         throw new BadRequestException(approved ? 'Only approved or partially fulfilled orders can be amended' : 'Only draft orders can be edited');
       }
       if (typeof dto.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(dto.expectedUpdatedAt))) {
-        throw new BadRequestException('expectedUpdatedAt is required');
+        throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'expectedUpdatedAt is required', field: 'expectedUpdatedAt' });
       }
       if (new Date(dto.expectedUpdatedAt).getTime() !== order.updatedAt.getTime()) {
         throw new ConflictException({ code: 'ORDER_EDIT_STALE', detail: 'The order changed since it was opened; refresh before editing' });
@@ -718,7 +718,7 @@ export class PurchaseOrdersService {
 
   private positive(value: unknown, field: string): Prisma.Decimal {
     const decimal = this.nonNegative(value, field);
-    if (decimal.isZero()) throw new BadRequestException(`${field} must be greater than zero`);
+    if (decimal.isZero()) throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
     return decimal;
   }
 
@@ -729,7 +729,7 @@ export class PurchaseOrdersService {
     } catch {
       throw new BadRequestException(`${field} is not a valid number`);
     }
-    if (decimal.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+    if (decimal.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     return decimal.toDecimalPlaces(MONEY_SCALE);
   }
 
@@ -742,7 +742,7 @@ export class PurchaseOrdersService {
 
   private text(value: unknown, field: string): string {
     const text = String(value ?? '').trim();
-    if (!text) throw new BadRequestException(`${field} is required`);
+    if (!text) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: `${field} is required`, field });
     return text;
   }
 }

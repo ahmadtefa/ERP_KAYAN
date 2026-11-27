@@ -505,7 +505,7 @@ export class BudgetsService {
     requireActive: boolean,
   ): Promise<string> {
     const id = String(value ?? '').trim();
-    if (!id) throw new BadRequestException('costCenterId is required');
+    if (!id) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'costCenterId is required', field: 'costCenterId' });
     const center = await this.prisma.costCenter.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true, code: true, isActive: true },
@@ -525,7 +525,7 @@ export class BudgetsService {
 
   private async account(companyId: string, value: unknown): Promise<string> {
     const id = String(value ?? '').trim();
-    if (!id) throw new BadRequestException('accountId is required');
+    if (!id) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'accountId is required', field: 'accountId' });
     const account = await this.prisma.account.findFirst({
       where: { id, companyId, deletedAt: null },
       select: {
@@ -597,7 +597,7 @@ export class BudgetsService {
 
   private money(value: unknown): Prisma.Decimal {
     const text = String(value ?? '').trim();
-    if (!text) throw new BadRequestException('amount is required');
+    if (!text) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'amount is required', field: 'amount' });
     if (!MONEY_PATTERN.test(text)) {
       throw new BadRequestException(
         'amount must be a positive number with at most four decimal places',
@@ -605,7 +605,7 @@ export class BudgetsService {
     }
     const amount = new Prisma.Decimal(text);
     if (amount.isNegative()) {
-      throw new BadRequestException('amount cannot be negative');
+      throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: 'amount cannot be negative', field: 'amount' });
     }
     return amount;
   }

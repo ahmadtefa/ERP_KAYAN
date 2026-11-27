@@ -2093,7 +2093,7 @@ export class ReturnsService {
   /// of being handed to Prisma, where `undefined` means "match anything".
   private requiredId(value: unknown, field: string): string {
     const id = typeof value === 'string' ? value.trim() : '';
-    if (!id) throw new BadRequestException(`${field} is required`);
+    if (!id) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: `${field} is required`, field });
     return id;
   }
 
@@ -2162,7 +2162,7 @@ export class ReturnsService {
       throw new BadRequestException(`${field} is not a valid number`);
     }
     if (decimal.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(`${field} must be greater than zero`);
+      throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
     }
     return decimal;
   }
@@ -2175,14 +2175,14 @@ export class ReturnsService {
       throw new BadRequestException(`${field} is not a valid number`);
     }
     if (decimal.isNegative()) {
-      throw new BadRequestException(`${field} cannot be negative`);
+      throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     }
     return decimal;
   }
 
   private date(value: string, field: string): Date {
     const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) throw new BadRequestException(`${field} is not a valid date`);
+    if (Number.isNaN(parsed.getTime())) throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     return parsed;
   }
 

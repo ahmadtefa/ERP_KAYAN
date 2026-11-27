@@ -1317,10 +1317,10 @@ export class QuotationsService {
 
   private date(value: string, field: string): Date {
     if (!DATE_ONLY.test(value.slice(0, 10))) {
-      throw new BadRequestException(`${field} must be a date`);
+      throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} must be a date`, field });
     }
     const date = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(date.getTime())) throw new BadRequestException(`${field} is not a valid date`);
+    if (Number.isNaN(date.getTime())) throw new BadRequestException({ code: 'FIELD_BAD_DATE', message: `${field} is not a valid date`, field });
     return date;
   }
 
@@ -1330,19 +1330,19 @@ export class QuotationsService {
       if (!number.isFinite()) throw new Error('non-finite decimal');
       return number;
     } catch {
-      throw new BadRequestException(`${field} must be a number`);
+      throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${field} must be a number`, field });
     }
   }
 
   private positive(value: string, field: string): Prisma.Decimal {
     const number = this.decimal(value, field).toDecimalPlaces(MONEY_SCALE);
-    if (number.lessThanOrEqualTo(0)) throw new BadRequestException(`${field} must be greater than zero`);
+    if (number.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
     return number;
   }
 
   private nonNegative(value: string, field: string): Prisma.Decimal {
     const number = this.decimal(value, field);
-    if (number.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+    if (number.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     return number.toDecimalPlaces(MONEY_SCALE);
   }
 

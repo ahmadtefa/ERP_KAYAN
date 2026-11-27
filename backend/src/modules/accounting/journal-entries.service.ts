@@ -727,7 +727,7 @@ export class JournalEntriesService {
     }
 
     if (debit.isNegative() || credit.isNegative()) {
-      throw new BadRequestException('Amounts cannot be negative');
+      throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: 'Amounts cannot be negative', field: 'Amounts' });
     }
     if (debit.isZero() && credit.isZero()) {
       throw new BadRequestException(
