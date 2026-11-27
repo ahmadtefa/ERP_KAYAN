@@ -360,7 +360,7 @@ export class FullBackupService {
     options: { duringMaintenance?: boolean } = {},
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
     if (this.restoreInProgress || (this.maintenance.isActive && !options.duringMaintenance)) {
-      throw new ServiceUnavailableException('A restore is running or the database is in maintenance mode. The backup was not started.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_CREATE_FULL_E048', message: 'A restore is running or the database is in maintenance mode. The backup was not started.' });
     }
     // Claim before the first await so a restore in this service instance cannot begin
     // while pg_dump is reading the database. Multiple backups may coexist.
@@ -456,11 +456,9 @@ export class FullBackupService {
       // Tool stderr and exception messages may contain connection data or
       // customer values. Keep only a bounded diagnostic category.
       this.logger.error(`pg_dump failed (${safeBackupFailure(error)}).`);
-      throw new ServiceUnavailableException(
-        'The backup could not be created. The database tools on this machine ' +
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_DUMP_E049', message: 'The backup could not be created. The database tools on this machine ' +
           'reported a problem; the details are in the server log. ' +
-          'Nothing was changed.',
-      );
+          'Nothing was changed.' });
     }
 
     // The completed name now points to the validated archive. A cleanup
@@ -742,12 +740,10 @@ export class FullBackupService {
       throw new BadRequestException({ code: 'FULL_RESTORE_CONFIRM', message: 'A full restore replaces the whole database. Send confirm=true to say you understand that.' });
     }
     if (this.maintenance.isActive || this.restoreInProgress) {
-      throw new ServiceUnavailableException(
-        'A restore is already running or the database is in maintenance mode.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RESTORE_E058', message: 'A restore is already running or the database is in maintenance mode.' });
     }
     if (this.activeBackups > 0) {
-      throw new ServiceUnavailableException('A backup is running. The restore was not started.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RESTORE_E059', message: 'A backup is running. The restore was not started.' });
     }
     if (!options.uploaded?.buffer?.length && !options.fileName) {
       throw new BadRequestException({ code: 'FULL_RESTORE_CHOOSE_FILE', message: 'Choose a backup file to restore: either upload one or name one on this server.' });
@@ -764,11 +760,11 @@ export class FullBackupService {
         journal = await new RestoreJournalStore(backupDirectory()).read();
       } catch {
         this.maintenance.begin('The system restore journal cannot be verified. Maintenance remains active.');
-        throw new ServiceUnavailableException('The restore journal cannot be verified. Investigate before restoring.');
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RESTORE_E060', message: 'The restore journal cannot be verified. Investigate before restoring.' });
       }
       if (isUnfinished(journal)) {
         this.maintenance.begin('A system restore requires recovery. Maintenance remains active.');
-        throw new ServiceUnavailableException('An interrupted system restore must be recovered before restoring a database archive.');
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RESTORE_E061', message: 'An interrupted system restore must be recovered before restoring a database archive.' });
       }
       return await this.performRestore(options, userId);
     } finally {
@@ -803,9 +799,7 @@ export class FullBackupService {
     try {
       pgBackupConnectionEnv(process.env.DATABASE_URL as string);
     } catch {
-      throw new ServiceUnavailableException(
-        'The backup tool connection settings cannot be verified. The current database was not changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E062', message: 'The backup tool connection settings cannot be verified. The current database was not changed.' });
     }
 
     // Only now are the tools needed — a bad request is a bad request even on
@@ -852,9 +846,7 @@ export class FullBackupService {
         this.canCreateDatabase = false;
         this.lastCreateDatabaseFailure = safeBackupFailure(error);
         this.logger.warn('A restore could not be rehearsed in a scratch database.');
-        throw new ServiceUnavailableException(
-          'The restore rehearsal database could not be created. The current database was not changed.',
-        );
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E064', message: 'The restore rehearsal database could not be created. The current database was not changed.' });
       }
 
       if (this.canCreateDatabase) {
@@ -898,9 +890,7 @@ export class FullBackupService {
           // not been verified. Never proceed to the live database in that
           // state, even when pg_restore itself appeared to succeed.
           this.logger.error('Restore rehearsal cleanup failed; the current database was not changed.');
-          throw new ServiceUnavailableException(
-            'The restore rehearsal database could not be removed. The current database was not changed.',
-          );
+          throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E065', message: 'The restore rehearsal database could not be removed. The current database was not changed.' });
         }
         if (rehearsalFailed) {
           throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: 'This file did not restore cleanly into a test database, so the ' +
@@ -980,10 +970,8 @@ export class FullBackupService {
           await this.state?.finish(dumpJournal.id);
           await journals.clear();
           safeToReleaseMaintenance = true;
-          throw new ServiceUnavailableException(
-            'The restore finished but the data did not pass the checks that ' +
-              'follow one. The safety backup was restored back automatically.',
-          );
+          throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E067', message: 'The restore finished but the data did not pass the checks that ' +
+              'follow one. The safety backup was restored back automatically.' });
         }
       }
 
@@ -1014,9 +1002,7 @@ export class FullBackupService {
         } catch {
           this.logger.error('Could not record post-restore access repair failure.');
         }
-        throw new ServiceUnavailableException(
-          'تعذر إصلاح الصلاحيات بعد الاستعادة. يبقى النظام في وضع الصيانة. / Access repair failed after restore; maintenance remains active.',
-        );
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E068', message: 'تعذر إصلاح الصلاحيات بعد الاستعادة. يبقى النظام في وضع الصيانة. / Access repair failed after restore; maintenance remains active.' });
       }
 
       // The archive is a snapshot: its licence rows are as old as the file.
@@ -1027,9 +1013,7 @@ export class FullBackupService {
         await this.licensing.reconcile();
       } catch {
         this.logger.error('The licence could not be reconciled after the restore. Maintenance remains active.');
-        throw new ServiceUnavailableException(
-          'Licence reconciliation after restore failed. Maintenance remains active; do not enter data.',
-        );
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E069', message: 'Licence reconciliation after restore failed. Maintenance remains active; do not enter data.' });
       }
       // A successful DB-only restoration must not be recorded as complete
       // before licence reconciliation, or silently succeed if audit fails.
@@ -1056,9 +1040,7 @@ export class FullBackupService {
         }, this.prisma);
       } catch {
         this.logger.error('Database archive restore audit failed. Maintenance remains active.');
-        throw new ServiceUnavailableException(
-          'تعذر تسجيل تدقيق الاستعادة؛ يبقى النظام في وضع الصيانة. / Restore audit failed; maintenance remains active.',
-        );
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E070', message: 'تعذر تسجيل تدقيق الاستعادة؛ يبقى النظام في وضع الصيانة. / Restore audit failed; maintenance remains active.' });
       }
       await journals.advance(dumpJournal, 'committed');
       await this.state?.finish(dumpJournal.id);
@@ -1088,10 +1070,10 @@ export class FullBackupService {
   /** Called only while the shared restore ownership/barrier is held. */
   async recoverDumpJournal(journal: RestoreJournal): Promise<void> {
     if (journal.databaseFingerprint && journal.databaseFingerprint !== databaseFingerprint()) {
-      throw new ServiceUnavailableException('The recovery journal belongs to a different database. No data was changed.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RECOVER_DUMP_JOURNAL_E071', message: 'The recovery journal belongs to a different database. No data was changed.' });
     }
     if (journal.kind !== 'dump' || !journal.safetyBackup) {
-      throw new ServiceUnavailableException('The DUMP recovery journal has no safety backup.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RECOVER_DUMP_JOURNAL_E072', message: 'The DUMP recovery journal has no safety backup.' });
     }
     const tools = this.requireTools();
     const journals = new RestoreJournalStore(backupDirectory());
@@ -1236,11 +1218,9 @@ export class FullBackupService {
   private requireTools(): { pgDump: string | null; pgRestore: string | null } {
     const tools = this.findTools();
     if (!tools.pgDump || !tools.pgRestore) {
-      throw new ServiceUnavailableException(
-        'This machine has no PostgreSQL backup tools (pg_dump / pg_restore), ' +
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REQUIRE_TOOLS_E074', message: 'This machine has no PostgreSQL backup tools (pg_dump / pg_restore), ' +
           'so full backups cannot be taken or restored here. ' +
-          'Install the PostgreSQL client tools and try again.',
-      );
+          'Install the PostgreSQL client tools and try again.' });
     }
     return tools;
   }
@@ -1256,26 +1236,22 @@ export class FullBackupService {
   private requireDatabase(): string {
     const raw = process.env.DATABASE_URL?.trim();
     if (!raw) {
-      throw new ServiceUnavailableException(
-        'This server has no DATABASE_URL, so it does not know which database ' +
-          'to back up. Set DATABASE_URL and restart the server.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REQUIRE_DATABASE_E075', message: 'This server has no DATABASE_URL, so it does not know which database ' +
+          'to back up. Set DATABASE_URL and restart the server.' });
     }
     let name: string;
     try {
       const url = new URL(raw);
       name = decodeURI(url.pathname.replace(/^\//, ''));
     } catch {
-      throw new ServiceUnavailableException(
-        'The DATABASE_URL this server was started with cannot be read. Fix it and restart the server. Nothing was changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REQUIRE_DATABASE_E076', message: 'The DATABASE_URL this server was started with cannot be read. Fix it and restart the server. Nothing was changed.' });
     }
     if (!name) {
-      throw new ServiceUnavailableException('The database address names no database. Nothing was changed.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REQUIRE_DATABASE_E077', message: 'The database address names no database. Nothing was changed.' });
     }
     // libpq interprets these as connection strings rather than database names.
     if (name.includes('=') || /^postgres(?:ql)?:\/\//i.test(name)) {
-      throw new ServiceUnavailableException('The database name is ambiguous for backup tools. Nothing was changed.');
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REQUIRE_DATABASE_E078', message: 'The database name is ambiguous for backup tools. Nothing was changed.' });
     }
     return name;
   }
@@ -1353,9 +1329,7 @@ export class FullBackupService {
   ): Promise<FullBackupFile> {
     const info = await stat(path).catch(() => null);
     if (!info || info.size === 0) {
-      throw new ServiceUnavailableException(
-        'The backup tool produced no file. The database was not changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E080', message: 'The backup tool produced no file. The database was not changed.' });
     }
     const head = Buffer.alloc(5);
     let handle;
@@ -1372,10 +1346,8 @@ export class FullBackupService {
     }
     if (!head.equals(CUSTOM_MAGIC)) {
       await unlink(path).catch(() => {});
-      throw new ServiceUnavailableException(
-        'The backup tool produced a file that is not a PostgreSQL archive. ' +
-          'The file was discarded; the database was not changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E082', message: 'The backup tool produced a file that is not a PostgreSQL archive. ' +
+          'The file was discarded; the database was not changed.' });
     }
     return {
       name,

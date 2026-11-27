@@ -193,7 +193,7 @@ export class SystemRestoreService implements OnModuleInit {
   /// What the restore screen polls while it waits.
   async status() {
     const journal = await this.journals.read().catch(() => {
-      throw new ServiceUnavailableException('The restore journal cannot be read. Investigate before resuming operations.');
+      throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_STATUS_E099', message: 'The restore journal cannot be read. Investigate before resuming operations.' });
     });
     return {
       ...this.maintenance.status,
@@ -273,7 +273,7 @@ export class SystemRestoreService implements OnModuleInit {
       if (this.running) throw new ConflictException({ code: 'SYSTEM_RESTORE_RUNNING', message: 'A restore or recovery is already running.' });
       const current = await this.journals.read();
       if (isUnfinished(current)) {
-        throw new ServiceUnavailableException('An interrupted restore must be recovered before starting another.');
+        throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESTORE_E103', message: 'An interrupted restore must be recovered before starting another.' });
       }
     } catch (error) {
       await lock?.end().catch(() => {});
@@ -529,12 +529,12 @@ export class SystemRestoreService implements OnModuleInit {
         journal = await this.journals.read();
       } catch {
         this.maintenance.begin('The restore journal is unreadable. Maintenance remains active; investigate the safety backup before reopening.');
-        throw new ServiceUnavailableException('The restore journal cannot be verified. Maintenance remains active.');
+        throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESTORE_E107', message: 'The restore journal cannot be verified. Maintenance remains active.' });
       }
       if ((destructiveStarted && !journal) ||
           (journal && DESTRUCTIVE_PHASES.includes(journal.phase) && !journal.safetyBackup)) {
         this.maintenance.begin('The restore may have changed data but its safety journal is missing or incomplete. Maintenance remains active.');
-        throw new ServiceUnavailableException('The restore safety journal is missing or incomplete. Maintenance remains active.');
+        throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESTORE_E108', message: 'The restore safety journal is missing or incomplete. Maintenance remains active.' });
       }
       if (journal && DESTRUCTIVE_PHASES.includes(journal.phase) && journal.safetyBackup) {
         const rollback = await this.rollback(journal, userId).catch((rollbackError) => ({
@@ -613,7 +613,7 @@ export class SystemRestoreService implements OnModuleInit {
         };
       }
       if (journal.databaseFingerprint && journal.databaseFingerprint !== databaseFingerprint()) {
-        throw new ServiceUnavailableException('The recovery journal belongs to a different database. No data was changed.');
+        throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESUME_RECOVERY_E110', message: 'The recovery journal belongs to a different database. No data was changed.' });
       }
       // A crash can leave a completed rollback journal after its verified
       // safety copy has already been applied. Business work may have resumed
@@ -630,9 +630,7 @@ export class SystemRestoreService implements OnModuleInit {
       }
       if (!journal.safetyBackup) {
         if (DESTRUCTIVE_PHASES.includes(journal.phase)) {
-          throw new ServiceUnavailableException(
-            'The interrupted restore may have changed data but no safety backup is recorded. Maintenance remains active.',
-          );
+          throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESUME_RECOVERY_E111', message: 'The interrupted restore may have changed data but no safety backup is recorded. Maintenance remains active.' });
         }
         // Nothing was replaced, so there is nothing to put back.
         await this.state?.finish(journal.id);
@@ -648,7 +646,7 @@ export class SystemRestoreService implements OnModuleInit {
         };
       }
       if (journal.kind === 'dump') {
-        if (!this.dumps) throw new ServiceUnavailableException('DUMP recovery is unavailable. Maintenance remains active.');
+        if (!this.dumps) throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESUME_RECOVERY_E112', message: 'DUMP recovery is unavailable. Maintenance remains active.' });
         await this.dumps.recoverDumpJournal(journal);
         this.gate.forget();
         return { recovered: true, phase: journal.phase, safetyBackup: journal.safetyBackup,

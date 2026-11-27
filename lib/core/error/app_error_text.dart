@@ -428,12 +428,12 @@ class AppErrorMessageResolver {
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
       }
 
-      if (error is ApiFailure && (error.statusCode == 400 || error.statusCode == 409 || error.statusCode == 404)) {
+      if (error is ApiFailure && (error.statusCode == 400 || error.statusCode == 409 || error.statusCode == 404 || error.statusCode == 422 || error.statusCode == 503)) {
         final refusal = moduleRefusals[error.code];
         if (refusal != null) {
           final conflict = error.statusCode == 409;
           return AppErrorText(
-            reason: error.statusCode == 404 ? AppErrorReason.notFound : conflict ? AppErrorReason.conflict : AppErrorReason.invalidInput,
+            reason: error.statusCode == 503 ? AppErrorReason.server : error.statusCode == 404 ? AppErrorReason.notFound : conflict ? AppErrorReason.conflict : AppErrorReason.invalidInput,
             severity: conflict ? AppErrorSeverity.warning : AppErrorSeverity.error,
             businessMessage: fillRefusalParams(refusal[isArabic ? 0 : 1], error.params),
           );

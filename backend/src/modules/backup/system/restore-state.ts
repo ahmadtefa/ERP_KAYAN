@@ -31,7 +31,7 @@ export class PersistentRestoreState {
           safety_backup = EXCLUDED.safety_backup, updated_at = now()
         WHERE NOT kayan_restore_control.state.active OR kayan_restore_control.state.operation_id = $1
         RETURNING id`, [journal.id, journal.safetyBackup]);
-      if (result.rowCount !== 1) throw new ServiceUnavailableException('A different restore requires recovery.');
+      if (result.rowCount !== 1) throw new ServiceUnavailableException({ code: 'RESTORE_STATE_START_E097', message: 'A different restore requires recovery.' });
     });
   }
 
@@ -40,7 +40,7 @@ export class PersistentRestoreState {
       if (!await isRestorePending(client)) return;
       const result = await client.query(`UPDATE kayan_restore_control.state SET active = false, updated_at = now()
         WHERE id = 1 AND operation_id = $1 RETURNING id`, [operationId]);
-      if (result.rowCount !== 1) throw new ServiceUnavailableException('The persistent restore owner does not match.');
+      if (result.rowCount !== 1) throw new ServiceUnavailableException({ code: 'RESTORE_STATE_FINISH_E098', message: 'The persistent restore owner does not match.' });
     });
   }
 }

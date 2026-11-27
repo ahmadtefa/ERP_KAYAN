@@ -31,7 +31,7 @@ export class AuditedSuperAdminGuard implements CanActivate {
       }, this.prisma);
     } catch {
       // Do not allow a mutation simply because its denial cannot be audited.
-      throw new ServiceUnavailableException('The access check could not be recorded. No changes were made.');
+      throw new ServiceUnavailableException({ code: 'AUDITED_SUPER_ADMIN_CAN_ACTIVATE_E003', message: 'The access check could not be recorded. No changes were made.' });
     }
     throw new ForbiddenException({ code: 'SUPER_ADMIN_ONLY', message: 'Only the program administrator can do this.' });
   }

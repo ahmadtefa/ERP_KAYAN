@@ -57,7 +57,7 @@ void main() {
 
   test('every module refusal is explained from its code in both languages, never from the server text', () {
     for (final entry in moduleRefusals.entries) {
-      for (final status in [400, 404, 409]) {
+      for (final status in [400, 404, 409, 422, 503]) {
         final failure = ApiFailure('synthetic raw ${entry.key}', statusCode: status, code: entry.key);
         final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
         final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;

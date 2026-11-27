@@ -358,4 +358,208 @@ const Map<String, List<String>> wordedRefusals = {
     'السطر {line}: حُدد موقع لكن هذا الفرع بلا مخزن. احذف المواقع من السطر، أو أضف مخزنًا للفرع.',
     'Line {line} names a location, but this branch has no warehouse. Remove the locations from the line, or add a warehouse to the branch.',
   ],
+  'AUDITED_SUPER_ADMIN_CAN_ACTIVATE_E003': [
+    'تعذّر تسجيل فحص الوصول، فلم تُنفّذ العملية. أعد المحاولة، وإن استمرت المشكلة فتواصل مع الدعم. لم يتغير شيء.',
+    'The access check could not be recorded, so the operation did not run. Try again, and contact support if the problem continues. No changes were made.',
+  ],
+  'DATABASE_BARRIER_GET_POOL_E015': [
+    'تنسيق صيانة قاعدة البيانات غير متاح حاليًا، فلم تُنفّذ العملية. انتظر قليلًا ثم أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة.',
+    'Database maintenance coordination is unavailable, so the operation did not run. Wait a moment and try again; contact support if the problem continues.',
+  ],
+  'DATABASE_BARRIER_ADMIT_E016': [
+    'الخادم بصدد التوقف، فلم تُنفّذ العملية. أعد المحاولة بعد قليل.',
+    'The server is shutting down, so the operation did not run. Try again in a moment.',
+  ],
+  'DATABASE_BARRIER_ADMIT_E018': [
+    'قاعدة البيانات في وضع الصيانة أو تتطلب استردادًا. انتظر حتى تنتهي الصيانة أو يتم الاسترداد، ثم أعد المحاولة.',
+    'The database is under maintenance or needs recovery. Wait for maintenance or recovery to finish, then try again.',
+  ],
+  'DATABASE_BARRIER_ADMIT_E019': [
+    'قاعدة البيانات في وضع الصيانة أو تتطلب استردادًا. انتظر حتى تنتهي الصيانة أو يتم الاسترداد، ثم أعد المحاولة.',
+    'The database is under maintenance or needs recovery. Wait for maintenance or recovery to finish, then try again.',
+  ],
+  'MAINTENANCE_WAIT_FOR_BUSINESS_REQUESTS_E022': [
+    'لم تنتهِ الطلبات السابقة قبل الموعد النهائي للاستعادة، فتوقفت الاستعادة. راجع حالة الاستعادة، ثم أعد المحاولة. لم تتغير قاعدة البيانات.',
+    'The previous requests did not finish before the restore deadline, so the restore stopped. Check the restore status, then try again. The database was not changed.',
+  ],
+  'MAINTENANCE_INTERCEPT_E023': [
+    'قاعدة البيانات في وضع الصيانة، والقراءة والكتابة متوقفتان الآن. راجع حالة الاستعادة قبل إعادة المحاولة.',
+    'The database is in maintenance mode, and reads and writes are blocked. Check the restore status before trying again.',
+  ],
+  'BACKUP_WRITE_SAFETY_BACKUP_E039': [
+    'نسخة الأمان الخاصة بالشركة أكبر من حد الاستعادة المسموح، فلم تُنفَّذ الاستعادة. تواصل مع الدعم. لم تتغير قاعدة البيانات.',
+    'The company safety backup is larger than the allowed restore limit, so the restore did not run. Contact support. The database was not changed.',
+  ],
+  'BACKUP_WRITE_SAFETY_BACKUP_E040': [
+    'تعذّر إنشاء نسخة الأمان والتحقق منها، فتوقفت العملية. أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
+    'The safety backup could not be created and verified, so the operation stopped. Try again, and contact support if the problem continues. The database was not changed.',
+  ],
+  'BACKUP_READ_LEGACY_LOGO_E041': [
+    'تعذّر تضمين شعار الشركة القديم في النسخة. أعد رفع الشعار ثم أعد المحاولة.',
+    'The old company logo could not be included in the backup. Upload the logo again and try again.',
+  ],
+  'BACKUP_RESTORE_E042': [
+    'عملية صيانة أخرى قيد التنفيذ حاليًا، فلم تبدأ الاستعادة. انتظر حتى تنتهي ثم أعد المحاولة. لم تتغير قاعدة البيانات.',
+    'Another maintenance operation is running, so the restore did not start. Wait for it to finish, then try again. The database was not changed.',
+  ],
+  'BACKUP_ASSERT_NO_INTERRUPTED_SYSTEM_RESTORE_E043': [
+    'تعذّر التحقق من سجل الاستعادة. راجع حالة الاستعادة وعالجها أولًا، ثم أعد محاولة استعادة بيانات الشركة.',
+    'The restore record cannot be verified. Review the restore status and resolve it first, then try restoring the company data again.',
+  ],
+  'BACKUP_ASSERT_NO_INTERRUPTED_SYSTEM_RESTORE_E044': [
+    'هناك استعادة سابقة توقفت ولم يتم استردادها. نفّذ خيار الاسترداد من شاشة الاستعادة، ثم أعد محاولة استعادة بيانات الشركة.',
+    'A previous restore was interrupted and needs recovery first. Run the recovery option from the restore screen, then try restoring the company data again.',
+  ],
+  'BACKUP_LOCK_BUSINESS_TABLES_E045': [
+    'تعذّر قفل قاعدة بيانات الشركة لعدم العثور على جداول العمل. تأكد من اختيار قاعدة البيانات الصحيحة، وتواصل مع الدعم.',
+    'The company database could not be locked because no business tables were found. Make sure the correct database is selected, and contact support.',
+  ],
+  'FULL_BACKUP_CREATE_FULL_E048': [
+    'لا يمكن بدء النسخ الاحتياطي أثناء تنفيذ استعادة أو أثناء وضع الصيانة. انتظر حتى تنتهي العملية، ثم أعد المحاولة.',
+    'A backup cannot start while a restore is running or the database is in maintenance mode. Wait for it to finish, then try again.',
+  ],
+  'FULL_BACKUP_DUMP_E049': [
+    'تعذّر إنشاء النسخة الاحتياطية لأن أدوات قاعدة البيانات على هذا الجهاز أبلغت عن مشكلة. أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم يتغير شيء.',
+    'The backup could not be created because the database tools on this machine reported a problem. Try again, and contact support if the problem continues. Nothing was changed.',
+  ],
+  'FULL_BACKUP_RESTORE_E058': [
+    'هناك استعادة أخرى قيد التنفيذ، أو قاعدة البيانات في وضع الصيانة. انتظر حتى تنتهي، ثم أعد المحاولة.',
+    'Another restore is already running, or the database is in maintenance mode. Wait for it to finish, then try again.',
+  ],
+  'FULL_BACKUP_RESTORE_E059': [
+    'هناك نسخة احتياطية قيد التنفيذ حاليًا، فلم تبدأ الاستعادة. انتظر حتى تنتهي، ثم أعد المحاولة.',
+    'A backup is running, so the restore did not start. Wait for it to finish, then try again.',
+  ],
+  'FULL_BACKUP_RESTORE_E060': [
+    'تعذّر التحقق من سجل الاستعادة. راجع حالة الاستعادة وعالجها، ثم أعد المحاولة.',
+    'The restore record cannot be verified. Review the restore status and resolve it, then try again.',
+  ],
+  'FULL_BACKUP_RESTORE_E061': [
+    'هناك استعادة سابقة توقفت ويجب استردادها أولًا. نفّذ خيار الاسترداد، ثم أعد المحاولة.',
+    'A previous restore was interrupted and must be recovered first. Run the recovery option, then try again.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E062': [
+    'تعذّر التحقق من إعدادات اتصال أدوات النسخ الاحتياطي. راجع الإعدادات، ثم أعد المحاولة. لم تتغير قاعدة البيانات الحالية.',
+    'The backup tool connection settings cannot be verified. Review the settings, then try again. The current database was not changed.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E064': [
+    'تعذّر إنشاء قاعدة البيانات التجريبية للاستعادة. أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير قاعدة البيانات الحالية.',
+    'The rehearsal database for the restore could not be created. Try again, and contact support if the problem continues. The current database was not changed.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E065': [
+    'تعذّر حذف قاعدة البيانات التجريبية للاستعادة. تواصل مع الدعم لإزالة النسخة التجريبية. لم تتغير قاعدة البيانات الحالية.',
+    'The rehearsal database for the restore could not be removed. Contact support to remove the rehearsal copy. The current database was not changed.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E067': [
+    'اكتملت الاستعادة لكن البيانات لم تجتز الفحوصات اللاحقة، فأُعيدت البيانات تلقائيًا من نسخة الأمان. البيانات عادت إلى حالتها السابقة. أعد المحاولة أو تواصل مع الدعم.',
+    'The restore finished, but the data did not pass the post-restore checks, so the data was put back automatically from the safety backup. The data is back to its previous state. Try again or contact support.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E068': [
+    'تعذّر إصلاح الصلاحيات بعد الاستعادة، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'Access permissions could not be repaired after the restore, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E069': [
+    'تعذّر تسوية الترخيص بعد الاستعادة، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'The licence could not be reconciled after the restore, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E070': [
+    'تعذّر تسجيل تدقيق الاستعادة، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'The restore audit could not be recorded, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'FULL_BACKUP_RECOVER_DUMP_JOURNAL_E071': [
+    'سجل الاسترداد هذا يخص قاعدة بيانات أخرى. تأكد من أنك تعمل على قاعدة البيانات الصحيحة، وتواصل مع الدعم. لم تتغير أي بيانات.',
+    'This recovery record belongs to a different database. Make sure you are working on the correct database, and contact support. No data was changed.',
+  ],
+  'FULL_BACKUP_RECOVER_DUMP_JOURNAL_E072': [
+    'سجل الاسترداد لا يحتوي نسخة أمان، فلا يمكن التراجع عن الاستعادة المتوقفة تلقائيًا. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'The recovery record has no safety backup, so the interrupted restore cannot be rolled back automatically. Do not enter data, and contact support.',
+  ],
+  'FULL_BACKUP_REQUIRE_TOOLS_E074': [
+    'هذا الجهاز لا تتوفر فيه أدوات النسخ الاحتياطي لقاعدة البيانات، فلا يمكن إنشاء النسخ الكاملة أو استعادتها هنا. ثبّت أدوات عميل قاعدة البيانات، ثم أعد المحاولة.',
+    'This machine does not have the database backup tools, so full backups cannot be created or restored here. Install the database client tools, then try again.',
+  ],
+  'FULL_BACKUP_REQUIRE_DATABASE_E075': [
+    'الخادم لا يعرف قاعدة البيانات التي سينسخها لأن عنوان قاعدة البيانات غير مضبوط. اضبط عنوان قاعدة البيانات، ثم أعد تشغيل الخادم.',
+    'The server does not know which database to back up because the database address is not set. Set the database address, then restart the server.',
+  ],
+  'FULL_BACKUP_REQUIRE_DATABASE_E076': [
+    'تعذّرت قراءة عنوان قاعدة البيانات الذي بدأ به الخادم. صحّح العنوان، ثم أعد تشغيل الخادم. لم يتغير شيء.',
+    'The database address the server was started with cannot be read. Correct the address, then restart the server. Nothing was changed.',
+  ],
+  'FULL_BACKUP_REQUIRE_DATABASE_E077': [
+    'عنوان قاعدة البيانات لا يحدد اسم قاعدة بيانات. أضف اسم قاعدة البيانات إلى العنوان، ثم أعد تشغيل الخادم. لم يتغير شيء.',
+    'The database address does not name a database. Add the database name to the address, then restart the server. Nothing was changed.',
+  ],
+  'FULL_BACKUP_REQUIRE_DATABASE_E078': [
+    'اسم قاعدة البيانات غير واضح لأدوات النسخ الاحتياطي. استخدم اسمًا بسيطًا بلا محارف خاصة، ثم أعد تشغيل الخادم. لم يتغير شيء.',
+    'The database name is unclear to the backup tools. Use a simple name without special characters, then restart the server. Nothing was changed.',
+  ],
+  'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E080': [
+    'أداة النسخ الاحتياطي لم تنشئ أي ملف. أعد محاولة النسخ، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
+    'The backup tool did not create a file. Try the backup again, and contact support if the problem continues. The database was not changed.',
+  ],
+  'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E082': [
+    'أنشأت أداة النسخ الاحتياطي ملفًا ليس أرشيفًا صالحًا لقاعدة البيانات، فحُذف الملف. أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
+    'The backup tool created a file that is not a valid database archive, so the file was discarded. Try again, and contact support if the problem continues. The database was not changed.',
+  ],
+  'COMPLETE_BACKUP_CREATE_E085': [
+    'هذا الجهاز لا تتوفر فيه أدوات النسخ الاحتياطي لقاعدة البيانات، فلا يمكن إنشاء نسخة كاملة هنا. ثبّت أدوات عميل قاعدة البيانات، ثم أعد المحاولة. لم يتغير شيء.',
+    'This machine does not have the database backup tools, so a complete backup cannot be created here. Install the database client tools, then try again. Nothing was changed.',
+  ],
+  'RESTORE_LOCK_X_E094': [
+    'تعذّر قفل الاستعادة لأن عنوان قاعدة البيانات غير مضبوط. اضبط عنوان قاعدة البيانات، ثم أعد تشغيل الخادم.',
+    'The restore cannot be locked because the database address is not set. Set the database address, then restart the server.',
+  ],
+  'RESTORE_LOCK_X_E095': [
+    'هناك استعادة سابقة توقفت وتحتاج استردادًا أولًا. نفّذ خيار الاسترداد، ثم أعد المحاولة.',
+    'A previous restore was interrupted and needs recovery first. Run the recovery option, then try again.',
+  ],
+  'RESTORE_LOCK_X_E096': [
+    'تعذّر قفل قاعدة البيانات بأمان للاستعادة أو الاسترداد. انتظر قليلًا ثم أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير أي بيانات.',
+    'The database could not be safely locked for the restore or recovery. Wait a moment and try again, and contact support if the problem continues. No data was changed.',
+  ],
+  'RESTORE_STATE_START_E097': [
+    'هناك استعادة أخرى تحتاج استردادًا أولًا. أكمل ذلك الاسترداد، ثم أعد المحاولة.',
+    'A different restore needs recovery first. Complete that recovery, then try again.',
+  ],
+  'RESTORE_STATE_FINISH_E098': [
+    'مالك الاستعادة المسجَّل لا يطابق. تواصل مع الدعم قبل إعادة المحاولة. لم تتغير أي بيانات.',
+    'The recorded restore owner does not match. Contact support before trying again. No data was changed.',
+  ],
+  'SYSTEM_RESTORE_STATUS_E099': [
+    'تعذّرت قراءة سجل الاستعادة. راجع حالة الاستعادة قبل متابعة العمليات.',
+    'The restore record cannot be read. Review the restore status before resuming operations.',
+  ],
+  'SYSTEM_RESTORE_RESTORE_E103': [
+    'هناك استعادة سابقة توقفت ويجب استردادها أولًا. نفّذ خيار الاسترداد، ثم أعد المحاولة.',
+    'A previous restore was interrupted and must be recovered first. Run the recovery option, then try again.',
+  ],
+  'SYSTEM_RESTORE_RESTORE_E107': [
+    'تعذّر التحقق من سجل الاستعادة، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'The restore record cannot be verified, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'SYSTEM_RESTORE_RESTORE_E108': [
+    'سجل أمان الاستعادة مفقود أو غير مكتمل، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'The restore safety record is missing or incomplete, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'SYSTEM_RESTORE_RESUME_RECOVERY_E110': [
+    'سجل الاسترداد هذا يخص قاعدة بيانات أخرى. تأكد من أنك تعمل على قاعدة البيانات الصحيحة، وتواصل مع الدعم. لم تتغير أي بيانات.',
+    'This recovery record belongs to a different database. Make sure you are working on the correct database, and contact support. No data was changed.',
+  ],
+  'SYSTEM_RESTORE_RESUME_RECOVERY_E111': [
+    'استعادة متوقفة ربما غيّرت بيانات دون تسجيل نسخة أمان، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'An interrupted restore may have changed data and no safety backup is recorded; the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'SYSTEM_RESTORE_RESUME_RECOVERY_E112': [
+    'الاسترداد من أرشيف قاعدة البيانات غير متاح، وما يزال النظام في وضع الصيانة. لا تُدخل بيانات، وتواصل مع الدعم.',
+    'Recovery from a database archive is unavailable, and the system is still in maintenance mode. Do not enter data, and contact support.',
+  ],
+  'PDF_RENDER_E114': [
+    'هذا الخادم لا يحتوي متصفحًا، فلا يستطيع إنشاء ملف PDF بنفسه. استخدم زر الطباعة واختر "حفظ بتنسيق PDF"؛ فالنتيجة هي الملف نفسه.',
+    'This server has no browser, so it cannot create a PDF by itself. Use the print button and choose "Save as PDF"; the result is the same file.',
+  ],
+  'PDF_RENDER_E115': [
+    'تعذّر تحويل التقرير إلى ملف PDF على هذا الجهاز. استخدم زر الطباعة واختر "حفظ بتنسيق PDF".',
+    'The report could not be turned into a PDF on this machine. Use the print button and choose "Save as PDF".',
+  ],
 };

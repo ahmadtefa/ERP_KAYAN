@@ -347,7 +347,7 @@ export class BackupService {
       typeof value === 'bigint' ? value.toString() : value), 'utf8');
     // The recovery file must be usable by the same upload endpoint.
     if (body.length > 64 * 1024 * 1024) {
-      throw new ServiceUnavailableException('The company safety backup exceeds the restore upload limit. The database was not changed.');
+      throw new ServiceUnavailableException({ code: 'BACKUP_WRITE_SAFETY_BACKUP_E039', message: 'The company safety backup exceeds the restore upload limit. The database was not changed.' });
     }
     const directory = backupDirectory();
     const name = `kayan-company-safety-${randomUUID()}.json`;
@@ -374,7 +374,7 @@ export class BackupService {
     } catch {
       if (created) await unlink(path).catch(() => {});
       this.logger.error('The company safety backup could not be written or verified.');
-      throw new ServiceUnavailableException('Could not create and verify the company safety backup. The database was not changed.');
+      throw new ServiceUnavailableException({ code: 'BACKUP_WRITE_SAFETY_BACKUP_E040', message: 'Could not create and verify the company safety backup. The database was not changed.' });
     }
   }
 
@@ -455,9 +455,7 @@ export class BackupService {
       }
       return logo;
     } catch {
-      throw new ServiceUnavailableException(
-        'تعذّر تضمين شعار الشركة القديم في النسخة. أعد رفع الشعار ثم أعد المحاولة. / Could not include the legacy company logo. Upload the logo again and retry.',
-      );
+      throw new ServiceUnavailableException({ code: 'BACKUP_READ_LEGACY_LOGO_E041', message: 'تعذّر تضمين شعار الشركة القديم في النسخة. أعد رفع الشعار ثم أعد المحاولة. / Could not include the legacy company logo. Upload the logo again and retry.' });
     }
   }
 
@@ -614,7 +612,7 @@ export class BackupService {
   ): Promise<RestoreSummary> {
     this.validate(file);
     if (this.maintenance.isActive) {
-      throw new ServiceUnavailableException('Another maintenance operation is running. The database was not changed.');
+      throw new ServiceUnavailableException({ code: 'BACKUP_RESTORE_E042', message: 'Another maintenance operation is running. The database was not changed.' });
     }
     // Claim before the first await and drain handlers and tracked background
     // jobs before reading the safety copy. This coordination is process-local.
@@ -648,10 +646,10 @@ export class BackupService {
     try {
       journal = await new RestoreJournalStore(backupDirectory()).read();
     } catch {
-      throw new ServiceUnavailableException('The restore journal cannot be verified. Resolve it before restoring company data.');
+      throw new ServiceUnavailableException({ code: 'BACKUP_ASSERT_NO_INTERRUPTED_SYSTEM_RESTORE_E043', message: 'The restore journal cannot be verified. Resolve it before restoring company data.' });
     }
     if (isUnfinished(journal)) {
-      throw new ServiceUnavailableException('An interrupted system restore must be recovered before restoring company data.');
+      throw new ServiceUnavailableException({ code: 'BACKUP_ASSERT_NO_INTERRUPTED_SYSTEM_RESTORE_E044', message: 'An interrupted system restore must be recovered before restoring company data.' });
     }
   }
 
@@ -1016,7 +1014,7 @@ export class BackupService {
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
       ORDER BY c.relname
     `;
-    if (tables.length === 0) throw new ServiceUnavailableException('Cannot lock the company database; no business tables were found.');
+    if (tables.length === 0) throw new ServiceUnavailableException({ code: 'BACKUP_LOCK_BUSINESS_TABLES_E045', message: 'Cannot lock the company database; no business tables were found.' });
     const names = tables.map(({ name }) => `"public"."${name.replace(/"/g, '""')}"`).join(', ');
     await tx.$executeRawUnsafe(`LOCK TABLE ${names} IN SHARE ROW EXCLUSIVE MODE`);
   }

@@ -204,10 +204,8 @@ export class CompleteBackupService {
     const started = Date.now();
     const tools = await findPgTools();
     if (!tools.pgDump || !tools.pgRestore) {
-      throw new ServiceUnavailableException(
-        'This machine has no PostgreSQL backup tools (pg_dump / pg_restore), so a ' +
-          'complete backup cannot be written here. Nothing was changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'COMPLETE_BACKUP_CREATE_E085', message: 'This machine has no PostgreSQL backup tools (pg_dump / pg_restore), so a ' +
+          'complete backup cannot be written here. Nothing was changed.' });
     }
     const database = databaseNameFrom();
     const dir = await ensureDirectory(backupDirectory());

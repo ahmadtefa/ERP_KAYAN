@@ -54,7 +54,7 @@ export class DatabaseMaintenanceBarrier implements OnModuleDestroy {
   private getPool(): Pool {
     if (this.pool) return this.pool;
     const raw = process.env.DATABASE_URL;
-    if (!raw) throw new ServiceUnavailableException('Database maintenance coordination is unavailable.');
+    if (!raw) throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_GET_POOL_E015', message: 'Database maintenance coordination is unavailable.' });
     const pool = new Pool({
       connectionString: cleanDatabaseUrl(raw),
       max: barrierPoolSize(),
@@ -108,7 +108,7 @@ export class DatabaseMaintenanceBarrier implements OnModuleDestroy {
   }
 
   async admit(): Promise<() => Promise<void>> {
-    if (this.closing) throw new ServiceUnavailableException('The server is shutting down. Try again in a moment.');
+    if (this.closing) throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_ADMIT_E016', message: 'The server is shutting down. Try again in a moment.' });
     const pool = this.getPool();
     let client: PoolClient;
     this.pending += 1;
@@ -125,7 +125,7 @@ export class DatabaseMaintenanceBarrier implements OnModuleDestroy {
       if (/timeout exceeded when trying to connect/i.test(text)) {
         throw new ServiceUnavailableException(BARRIER_BUSY_MESSAGE);
       }
-      throw new ServiceUnavailableException('The database is under maintenance or recovery is required.');
+      throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_ADMIT_E018', message: 'The database is under maintenance or recovery is required.' });
     }
     let admitted = false;
     let released = false;
@@ -163,7 +163,7 @@ export class DatabaseMaintenanceBarrier implements OnModuleDestroy {
       admitted = true;
     } catch {
       destroy();
-      throw new ServiceUnavailableException('The database is under maintenance or recovery is required.');
+      throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_ADMIT_E018', message: 'The database is under maintenance or recovery is required.' });
     }
     return async () => {
       if (released) return;

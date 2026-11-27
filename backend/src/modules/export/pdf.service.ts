@@ -54,10 +54,8 @@ export class PdfService {
   async render(html: string, options: PdfRenderOptions = {}): Promise<Buffer> {
     const browser = this.findBrowser();
     if (!browser) {
-      throw new UnprocessableEntityException(
-        'This server has no browser installed, so it cannot make a PDF by itself. ' +
-          'Use the print button instead and choose "Save as PDF" - the result is the same file.',
-      );
+      throw new UnprocessableEntityException({ code: 'PDF_RENDER_E114', message: 'This server has no browser installed, so it cannot make a PDF by itself. ' +
+          'Use the print button instead and choose "Save as PDF" - the result is the same file.' });
     }
 
     const folder = await mkdtemp(join(tmpdir(), 'kayan-pdf-'));
@@ -191,10 +189,8 @@ export class PdfService {
         `PDF rendering failed: ${(error as Error).message}`,
         (error as Error).stack,
       );
-      throw new UnprocessableEntityException(
-        'The report could not be turned into a PDF on this machine. ' +
-          'Use the print button instead and choose "Save as PDF".',
-      );
+      throw new UnprocessableEntityException({ code: 'PDF_RENDER_E115', message: 'The report could not be turned into a PDF on this machine. ' +
+          'Use the print button instead and choose "Save as PDF".' });
     } finally {
       await removeProfileFolder(folder);
     }

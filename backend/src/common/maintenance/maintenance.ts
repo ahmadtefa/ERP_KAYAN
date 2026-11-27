@@ -70,9 +70,7 @@ export class MaintenanceService {
       };
       const timeout = setTimeout(() => {
         this.drained.delete(finish);
-        reject(new ServiceUnavailableException(
-          'Existing business requests did not finish before the restore deadline. The database was not changed.',
-        ));
+        reject(new ServiceUnavailableException({ code: 'MAINTENANCE_WAIT_FOR_BUSINESS_REQUESTS_E022', message: 'Existing business requests did not finish before the restore deadline. The database was not changed.' }));
       }, timeoutMs);
       this.drained.add(finish);
     });
@@ -192,9 +190,7 @@ export class MaintenanceInterceptor implements NestInterceptor {
       }
     }
 
-    throw new ServiceUnavailableException(
-      'The database is in maintenance mode. Business reads and writes are blocked; ' +
-        'check the restore status before trying again.',
-    );
+    throw new ServiceUnavailableException({ code: 'MAINTENANCE_INTERCEPT_E023', message: 'The database is in maintenance mode. Business reads and writes are blocked; ' +
+        'check the restore status before trying again.' });
   }
 }

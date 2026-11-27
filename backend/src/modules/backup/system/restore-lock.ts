@@ -12,7 +12,7 @@ export const RESTORE_LOCK_KEY = 918_273_645;
 
 export async function acquireRestoreLock(options: { recovery?: boolean } = {}): Promise<Client> {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new ServiceUnavailableException('Cannot lock the restore: DATABASE_URL is not configured.');
+  if (!url) throw new ServiceUnavailableException({ code: 'RESTORE_LOCK_X_E094', message: 'Cannot lock the restore: DATABASE_URL is not configured.' });
   const client = new Client({ connectionString: cleanDatabaseUrl(url), connectionTimeoutMillis: 10_000 });
   try {
     await client.connect();
@@ -45,12 +45,12 @@ export async function acquireRestoreLock(options: { recovery?: boolean } = {}): 
     }
     await client.query('SELECT pg_advisory_unlock($1)', [RESTORE_TOOL_LOCK_KEY]);
     if (!options.recovery && await isRestorePending(client)) {
-      throw new ServiceUnavailableException('An interrupted restore requires recovery before another restore can begin.');
+      throw new ServiceUnavailableException({ code: 'RESTORE_LOCK_X_E095', message: 'An interrupted restore requires recovery before another restore can begin.' });
     }
     return client;
   } catch (error) {
     await client.end().catch(() => {});
     if (error instanceof ConflictException) throw error;
-    throw new ServiceUnavailableException('Cannot safely lock the database for restore or recovery. No data was changed.');
+    throw new ServiceUnavailableException({ code: 'RESTORE_LOCK_X_E096', message: 'Cannot safely lock the database for restore or recovery. No data was changed.' });
   }
 }
