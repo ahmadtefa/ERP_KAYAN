@@ -44,13 +44,13 @@ export class OpeningBalancesController {
 
   private assertDraftInput(user: AuthUser, body: Record<string, unknown>) {
     if (!user.isSuperAdmin && body.branchId !== undefined && body.branchId !== user.branchId) {
-      throw new ForbiddenException('You cannot change opening balances for another branch');
+      throw new ForbiddenException({ code: 'OPENING_OTHER_BRANCH', message: 'You cannot change opening balances for another branch' });
     }
     if (body.currency !== undefined && typeof body.currency !== 'string') {
-      throw new BadRequestException('Opening balance currency must be a currency code');
+      throw new BadRequestException({ code: 'OPENING_CURRENCY_INVALID', message: 'Opening balance currency must be a currency code' });
     }
     if (!canReadCost(user) && Array.isArray(body.lines) && body.lines.some(line => line?.itemId)) {
-      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+      throw new ForbiddenException({ code: 'OPENING_COST_PERMISSION', message: 'Stock opening balances require inventory cost permission' });
     }
   }
 

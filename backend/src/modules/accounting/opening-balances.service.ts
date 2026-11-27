@@ -150,7 +150,7 @@ export class OpeningBalancesService {
     mayReadCost = true,
   ) {
     if (dto.importFingerprint !== undefined && !/^[0-9a-f]{64}$/.test(dto.importFingerprint)) {
-      throw new BadRequestException('The import fingerprint must be a SHA-256 hex digest');
+      throw new BadRequestException({ code: 'OPENING_FINGERPRINT_INVALID', message: 'The import fingerprint must be a SHA-256 hex digest' });
     }
     const targetBranch = dto.branchId ?? branchId;
     if (!targetBranch) {
@@ -182,7 +182,7 @@ export class OpeningBalancesService {
           select: { currency: true },
         });
         if (!company || dto.currency !== company.currency) {
-          throw new BadRequestException('Opening balances must use the company currency');
+          throw new BadRequestException({ code: 'OPENING_CURRENCY_MISMATCH', message: 'Opening balances must use the company currency' });
         }
         currency = company.currency;
       }
@@ -231,7 +231,7 @@ export class OpeningBalancesService {
 
       if (totalDebit.greaterThanOrEqualTo('1000000000000000') ||
           totalCredit.greaterThanOrEqualTo('1000000000000000')) {
-        throw new BadRequestException('Opening balance totals are outside the supported range');
+        throw new BadRequestException({ code: 'OPENING_TOTALS_RANGE', message: 'Opening balance totals are outside the supported range' });
       }
       if (!totalDebit.equals(totalCredit)) {
         throw new BadRequestException({
@@ -270,17 +270,17 @@ export class OpeningBalancesService {
         if (!mayReadCost && await tx.openingBalanceLine.count({
           where: { openingBalanceId: draftId, itemId: { not: null } },
         })) {
-          throw new ForbiddenException('Stock opening balances require inventory cost permission');
+          throw new ForbiddenException({ code: 'OPENING_COST_PERMISSION', message: 'Stock opening balances require inventory cost permission' });
         }
         if (existing.branchId !== targetBranch) {
-          throw new BadRequestException('A saved opening balance cannot change branches');
+          throw new BadRequestException({ code: 'OPENING_BRANCH_LOCKED', message: 'A saved opening balance cannot change branches' });
         }
         const updated = await tx.openingBalance.updateMany({
           where: { id: draftId, companyId, status: InvoiceStatus.DRAFT, deletedAt: null, updatedAt: existing.updatedAt },
           data: { ...details, importFingerprint: null },
         });
         if (updated.count !== 1) {
-          throw new BadRequestException('This opening balance changed or is no longer a draft');
+          throw new BadRequestException({ code: 'OPENING_CHANGED_OR_NOT_DRAFT', message: 'This opening balance changed or is no longer a draft' });
         }
         await tx.openingBalanceLine.deleteMany({ where: { openingBalanceId: draftId } });
         await tx.openingBalanceLine.createMany({
@@ -339,7 +339,7 @@ export class OpeningBalancesService {
         data: { deletedAt: new Date(), importFingerprint: null },
       });
       if (removed.count !== 1) {
-        throw new BadRequestException('Only an existing draft opening balance can be deleted');
+        throw new BadRequestException({ code: 'OPENING_DELETE_NOT_DRAFT', message: 'Only an existing draft opening balance can be deleted' });
       }
       await this.audit.recordRequired({
         companyId, userId, action: 'DELETE', entity: 'opening_balances', entityId: id,
@@ -360,12 +360,10 @@ export class OpeningBalancesService {
     });
     if (!document) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
     if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
-      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+      throw new ForbiddenException({ code: 'OPENING_COST_PERMISSION', message: 'Stock opening balances require inventory cost permission' });
     }
     if (document.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft opening balance can be posted (current status: ${document.status})`,
-      );
+      throw new BadRequestException({ code: 'OPENING_POST_NOT_DRAFT', message: `Only a draft opening balance can be posted (current status: ${document.status})` });
     }
 
     const alreadyPosted = await this.prisma.openingBalance.findFirst({
@@ -421,9 +419,7 @@ export class OpeningBalancesService {
         },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException(
-          'This opening balance changed. Refresh the document before posting.',
-        );
+        throw new BadRequestException({ code: 'OPENING_CHANGED_REFRESH', message: 'This opening balance changed. Refresh the document before posting.' });
       }
 
       const alreadyPostedInTransaction = await tx.openingBalance.findFirst({
@@ -437,9 +433,7 @@ export class OpeningBalancesService {
         select: { documentNumber: true },
       });
       if (alreadyPostedInTransaction) {
-        throw new BadRequestException(
-          `This branch already has a posted opening balance (${alreadyPostedInTransaction.documentNumber}).`,
-        );
+        throw new BadRequestException({ code: 'OPENING_BRANCH_ALREADY_POSTED', message: `This branch already has a posted opening balance (${alreadyPostedInTransaction.documentNumber}).` });
       }
 
       const warehouseId = await this.warehouses.resolve(
@@ -463,22 +457,18 @@ export class OpeningBalancesService {
           where: { id: line.itemId, companyId, deletedAt: null },
           select: { id: true, isStockTracked: true, code: true, requiresBatch: true, requiresProductionDate: true, requiresExpiryDate: true },
         });
-        if (!item) throw new BadRequestException('An opening line references a missing item');
+        if (!item) throw new BadRequestException({ code: 'OPENING_ITEM_MISSING', message: 'An opening line references a missing item' });
         if (!item.isStockTracked) continue;
         this.assertNoLotControl(item, line.lineNumber);
         if (!line.quantity || !line.unitCost) {
-          throw new BadRequestException(
-            `Item line ${line.lineNumber} needs both a quantity and a unit cost`,
-          );
+          throw new BadRequestException({ code: 'OPENING_ITEM_NEEDS_QTY_COST', message: `Item line ${line.lineNumber} needs both a quantity and a unit cost` });
         }
         if (!line.debit.equals(line.quantity.mul(line.unitCost).toDecimalPlaces(MONEY_SCALE))) {
-          throw new BadRequestException(
-            `Item line ${line.lineNumber}: quantity x unit cost (${line.quantity
+          throw new BadRequestException({ code: 'OPENING_ITEM_VALUE_MISMATCH', message: `Item line ${line.lineNumber}: quantity x unit cost (${line.quantity
               .mul(line.unitCost)
               .toDecimalPlaces(MONEY_SCALE)
               .toFixed(MONEY_SCALE)}) does not equal the debit on the line ` +
-              `(${line.debit.toFixed(MONEY_SCALE)})`,
-          );
+              `(${line.debit.toFixed(MONEY_SCALE)})` });
         }
 
         // An item created with its own opening stock already carries that
@@ -590,7 +580,7 @@ export class OpeningBalancesService {
     });
     if (!document) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
     if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
-      throw new ForbiddenException('Stock opening balances require inventory cost permission');
+      throw new ForbiddenException({ code: 'OPENING_COST_PERMISSION', message: 'Stock opening balances require inventory cost permission' });
     }
     if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
       throw new BadRequestException('Only a posted opening balance can be reversed');
@@ -654,7 +644,7 @@ export class OpeningBalancesService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This opening balance was already reversed or changed. Refresh the document.');
+        throw new BadRequestException({ code: 'OPENING_ALREADY_REVERSED', message: 'This opening balance was already reversed or changed. Refresh the document.' });
       }
       const reversal = await this.posting.reverse(
         tx,
@@ -681,11 +671,9 @@ export class OpeningBalancesService {
         const onHand = balance?.quantity ?? new Prisma.Decimal(0);
         const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
         if (onHand.lessThan(line.quantity) || valueOnHand.lessThan(line.debit)) {
-          throw new BadRequestException(
-            `Cannot reverse opening balance: ${onHand.toFixed(MONEY_SCALE)} units and ` +
+          throw new BadRequestException({ code: 'OPENING_REVERSE_STOCK_USED', message: `Cannot reverse opening balance: ${onHand.toFixed(MONEY_SCALE)} units and ` +
               `${valueOnHand.toFixed(MONEY_SCALE)} of inventory value are available; ` +
-              `${line.quantity.toFixed(MONEY_SCALE)} units and ${line.debit.toFixed(MONEY_SCALE)} of value are required.`,
-          );
+              `${line.quantity.toFixed(MONEY_SCALE)} units and ${line.debit.toFixed(MONEY_SCALE)} of value are required.` });
         }
 
         const openShelf = (line as { storageLocationId?: string | null }).storageLocationId ?? null;
@@ -781,25 +769,25 @@ export class OpeningBalancesService {
 
     for (const [index, raw] of input.entries()) {
       if (!raw || typeof raw.accountId !== 'string') {
-        throw new BadRequestException(`Line ${index + 1}: choose a ledger account`);
+        throw new BadRequestException({ code: 'OPENING_LINE_ACCOUNT_MISSING', message: `Line ${index + 1}: choose a ledger account` });
       }
       if ([raw.customerId, raw.supplierId, raw.itemId].filter(Boolean).length > 1) {
-        throw new BadRequestException(`Line ${index + 1}: choose a single customer, supplier or stock item`);
+        throw new BadRequestException({ code: 'OPENING_LINE_SUBJECT_AMBIGUOUS', message: `Line ${index + 1}: choose a single customer, supplier or stock item` });
       }
       const debit = this.amount(raw.debit, `Line ${index + 1} debit`);
       const credit = this.amount(raw.credit, `Line ${index + 1} credit`);
       if (debit.isZero() && credit.isZero()) {
-        throw new BadRequestException(`Line ${index + 1} needs either a debit or a credit`);
+        throw new BadRequestException({ code: 'OPENING_LINE_NO_AMOUNT', message: `Line ${index + 1} needs either a debit or a credit` });
       }
       if (!debit.isZero() && !credit.isZero()) {
-        throw new BadRequestException(`Line ${index + 1} cannot be both a debit and a credit`);
+        throw new BadRequestException({ code: 'OPENING_LINE_BOTH_SIDES', message: `Line ${index + 1} cannot be both a debit and a credit` });
       }
 
       const account = await tx.account.findFirst({
         where: { id: raw.accountId, companyId, deletedAt: null },
         select: { id: true, code: true, isPostable: true, isActive: true, currency: true },
       });
-      if (!account) throw new BadRequestException(`Line ${index + 1}: the account does not exist`);
+      if (!account) throw new BadRequestException({ code: 'OPENING_LINE_ACCOUNT_NOT_FOUND', message: `Line ${index + 1}: the account does not exist` });
       if (!account.isPostable) {
         throw new BadRequestException(
           `Line ${index + 1}: account ${account.code} is a grouping account and cannot carry a balance`,
@@ -816,7 +804,7 @@ export class OpeningBalancesService {
         const key = raw.customerId ? 'accountsReceivable' : 'accountsPayable';
         const mapped = await this.accounts.resolve(tx, companyId, [key]);
         if (account.id !== mapped[key]) {
-          throw new BadRequestException(`Line ${index + 1}: use the designated ${key} account`);
+          throw new BadRequestException({ code: 'OPENING_LINE_DESIGNATED_ACCOUNT', message: `Line ${index + 1}: use the designated ${key} account` });
         }
       }
 
@@ -853,9 +841,7 @@ export class OpeningBalancesService {
           this.assertNoLotControl(item, index + 1);
           const previousLine = seenStockItems.get(item.id);
           if (previousLine !== undefined) {
-            throw new BadRequestException(
-              `Line ${index + 1}: stock item ${item.id} is repeated from line ${previousLine}; combine its opening quantity and cost into one line.`,
-            );
+            throw new BadRequestException({ code: 'OPENING_LINE_ITEM_REPEATED', message: `Line ${index + 1}: stock item ${item.id} is repeated from line ${previousLine}; combine its opening quantity and cost into one line.` });
           }
           seenStockItems.set(item.id, index + 1);
           quantity = this.amount(raw.quantity, `Line ${index + 1} quantity`);
@@ -865,24 +851,18 @@ export class OpeningBalancesService {
           }
           const stockValue = quantity.mul(unitCost).toDecimalPlaces(MONEY_SCALE);
           if (!debit.equals(stockValue)) {
-            throw new BadRequestException(
-              `Line ${index + 1}: quantity x unit cost (${stockValue.toFixed(MONEY_SCALE)}) ` +
-                `must equal the debit (${debit.toFixed(MONEY_SCALE)}).`,
-            );
+            throw new BadRequestException({ code: 'OPENING_LINE_VALUE_MISMATCH', message: `Line ${index + 1}: quantity x unit cost (${stockValue.toFixed(MONEY_SCALE)}) ` +
+                `must equal the debit (${debit.toFixed(MONEY_SCALE)}).` });
           }
           const inventory = await this.accounts.resolve(tx, companyId, ['inventory']);
           if (account.id !== inventory.inventory) {
-            throw new BadRequestException(
-              `Line ${index + 1}: opening stock must be posted to the inventory account.`,
-            );
+            throw new BadRequestException({ code: 'OPENING_LINE_INVENTORY_ACCOUNT', message: `Line ${index + 1}: opening stock must be posted to the inventory account.` });
           }
         } else if (
           (raw.quantity !== undefined && raw.quantity !== '') ||
           (raw.unitCost !== undefined && raw.unitCost !== '')
         ) {
-          throw new BadRequestException(
-            `Line ${index + 1}: non-stock items cannot carry an opening stock quantity or cost.`,
-          );
+          throw new BadRequestException({ code: 'OPENING_LINE_NON_STOCK_QTY', message: `Line ${index + 1}: non-stock items cannot carry an opening stock quantity or cost.` });
         }
       }
 
@@ -891,14 +871,14 @@ export class OpeningBalancesService {
           where: { id: raw.customerId, companyId, deletedAt: null },
           select: { id: true },
         });
-        if (!customer) throw new BadRequestException(`Line ${index + 1}: the customer does not exist`);
+        if (!customer) throw new BadRequestException({ code: 'OPENING_LINE_CUSTOMER_MISSING', message: `Line ${index + 1}: the customer does not exist` });
       }
       if (raw.supplierId) {
         const supplier = await tx.supplier.findFirst({
           where: { id: raw.supplierId, companyId, deletedAt: null },
           select: { id: true },
         });
-        if (!supplier) throw new BadRequestException(`Line ${index + 1}: the supplier does not exist`);
+        if (!supplier) throw new BadRequestException({ code: 'OPENING_LINE_SUPPLIER_MISSING', message: `Line ${index + 1}: the supplier does not exist` });
       }
 
       prepared.push({
@@ -971,7 +951,7 @@ export class OpeningBalancesService {
     try {
       const decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
       if (!decimal.isFinite() || decimal.greaterThanOrEqualTo('1000000000000000')) {
-        throw new BadRequestException(`${field} is outside the supported range`);
+        throw new BadRequestException({ code: 'OPENING_RANGE', message: `${field} is outside the supported range` });
       }
       if (decimal.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
       return decimal;
