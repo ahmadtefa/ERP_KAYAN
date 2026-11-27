@@ -83,8 +83,8 @@ class _Api extends ApiClient {
 class _Profile extends CompanyProfileController {
   @override
   Future<Map<String, dynamic>> build() async => const {
-    'id': 'company-1', 'code': 'KAYAN-01', 'nameAr': 'شركة الكيان للتجارة', 'nameEn': 'Kayan Trading Co',
-    'taxId': '300123456', 'phone': '+20 100 000 0000', 'email': 'info@kayan.test',
+    'id': 'company-1', 'code': 'NOUR-01', 'nameAr': 'شركة النور للتجارة', 'nameEn': 'Al Nour Trading Co',
+    'taxId': '300123456', 'phone': '+20 100 000 0000', 'email': 'info@alnour.test',
     'address': 'Cairo, Egypt', 'hasLogo': false,
   };
 }
@@ -177,7 +177,7 @@ void main() {
                 branchesProvider.overrideWith(() => _Branches()),
                 licenceStatusProvider.overrideWith((ref) async => _licence),
                 backupSummaryProvider.overrideWith((ref) async => const {
-                  'companyName': 'Kayan Trading Co',
+                  'companyName': 'Al Nour Trading Co',
                   'contains': <String, int>{'customers': 128, 'suppliers': 46, 'items': 412, 'salesInvoices': 1893, 'purchaseInvoices': 604, 'journalEntries': 5210},
                   'total': 8293,
                 }),
