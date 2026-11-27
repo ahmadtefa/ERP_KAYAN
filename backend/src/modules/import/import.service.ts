@@ -506,9 +506,7 @@ export class ImportService {
     canImportAcrossBranches = false,
   ): Promise<ImportReport> {
     if (!IMPORT_KINDS.includes(kind)) {
-      throw new BadRequestException(
-        `Unknown import "${kind}". Known imports: ${IMPORT_KINDS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'IMPORT_KIND_UNKNOWN', message: `Unknown import "${kind}". Known imports: ${IMPORT_KINDS.join(', ')}.` });
     }
     if (!file?.buffer?.length) {
       throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'No file was uploaded.' });
@@ -574,7 +572,7 @@ export class ImportService {
     // Duplicate aliases for the tax field make a blank/explicit value
     // ambiguous. Refuse instead of letting column order decide a bulk write.
     if (kind === 'items' && sheet.headers.filter((header) => byHeader.get(normaliseHeader(header))?.key === 'taxrate').length > 1) {
-      throw new BadRequestException('The file contains multiple tax rate columns. Keep only one.');
+      throw new BadRequestException({ code: 'IMPORT_TAX_COLUMNS', message: 'The file contains multiple tax rate columns. Keep only one.' });
     }
 
     const unknownColumns = sheet.headers
@@ -1060,7 +1058,7 @@ export class ImportService {
           if (!row.parentCode || newRows.has(row.parentCode)) continue;
           const parent = currentByCode.get(row.parentCode);
           if (!parent || parent.deletedAt || !parent.isActive || parent.type !== row.type) {
-            throw new BadRequestException('An account parent changed while this workbook was being imported. Read it again and retry.');
+            throw new BadRequestException({ code: 'IMPORT_PARENT_CHANGED', message: 'An account parent changed while this workbook was being imported. Read it again and retry.' });
           }
         }
         for (const row of newRows.values()) {
@@ -1107,9 +1105,7 @@ export class ImportService {
               if (parentIsPostable) {
                 const movements = await tx.journalLine.count({ where: { accountId: parentId } });
                 if (movements > 0) {
-                  throw new BadRequestException(
-                    `Parent account "${row.parentCode}" already has ledger movements and cannot become a grouping account. Nothing was imported.`,
-                  );
+                  throw new BadRequestException({ code: 'IMPORT_PARENT_HAS_MOVEMENTS', message: `Parent account "${row.parentCode}" already has ledger movements and cannot become a grouping account. Nothing was imported.` });
                 }
                 await tx.account.update({
                   where: { id: parentId },
@@ -1119,7 +1115,7 @@ export class ImportService {
             }
           }
           if (!progressed) {
-            throw new BadRequestException('The parent hierarchy changed or contains an unresolved cycle. Nothing was imported.');
+            throw new BadRequestException({ code: 'IMPORT_HIERARCHY', message: 'The parent hierarchy changed or contains an unresolved cycle. Nothing was imported.' });
           }
         }
       });

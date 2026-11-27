@@ -29,7 +29,7 @@ export class ReportsService {
     // Validate the calendar date before Date parses it (JS normalizes Feb 31).
     const datePrefix = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value);
     if (!datePrefix) {
-      throw new BadRequestException(`"${field}" must be an ISO date or timestamp`);
+      throw new BadRequestException({ code: 'REPORT_DATE_INVALID', message: `"${field}" must be an ISO date or timestamp` });
     }
 
     const [, year, month, day] = datePrefix;
@@ -39,12 +39,12 @@ export class ReportsService {
       normalized.getUTCMonth() !== Number(month) - 1 ||
       normalized.getUTCDate() !== Number(day)
     ) {
-      throw new BadRequestException(`"${field}" must be a valid calendar date`);
+      throw new BadRequestException({ code: 'REPORT_DATE_INVALID', message: `"${field}" must be a valid calendar date` });
     }
 
     const parsed = new Date(value);
     if (!Number.isFinite(parsed.getTime())) {
-      throw new BadRequestException(`"${field}" must be a valid date`);
+      throw new BadRequestException({ code: 'REPORT_DATE_INVALID', message: `"${field}" must be a valid date` });
     }
     return parsed;
   }
@@ -512,7 +512,7 @@ export class ReportsService {
       select: { id: true, code: true, nameEn: true, nameAr: true, type: true },
     });
     if (!account) {
-      throw new NotFoundException('The account does not exist in this company');
+      throw new NotFoundException({ code: 'REPORT_ACCOUNT_MISSING', message: 'The account does not exist in this company' });
     }
 
     const branchFilter = query.branchId

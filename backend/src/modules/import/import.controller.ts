@@ -119,9 +119,7 @@ export class ImportController {
     }
 
     if (!file) {
-      throw new BadRequestException(
-        'No file arrived. Choose a .xlsx or .csv file and try again.',
-      );
+      throw new BadRequestException({ code: 'IMPORT_NO_FILE', message: 'No file arrived. Choose a .xlsx or .csv file and try again.' });
     }
 
     return this.service.run(slug, user.companyId, user.userId, file, {
@@ -133,9 +131,7 @@ export class ImportController {
 
   private kind(value: string): ImportKind {
     if (!IMPORT_KINDS.includes(value as ImportKind)) {
-      throw new BadRequestException(
-        `Unknown import "${value}". Known imports: ${IMPORT_KINDS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'IMPORT_KIND_UNKNOWN', message: `Unknown import "${value}". Known imports: ${IMPORT_KINDS.join(', ')}.` });
     }
     return value as ImportKind;
   }

@@ -177,7 +177,7 @@ export class CompanyService {
         (dto.nameEn !== undefined && !dto.nameEn.trim()) ||
         (dto.nameAr !== undefined && !dto.nameAr.trim())
       ) {
-        throw new BadRequestException('Company names cannot be blank');
+        throw new BadRequestException({ code: 'COMPANY_NAME_BLANK', message: 'Company names cannot be blank' });
       }
 
       const code = dto.code?.trim();
@@ -480,9 +480,7 @@ export class CompanyService {
       // make the relationship circular by construction.
       if (dto.kind === 'HEADQUARTERS' || branch.kind === 'HEADQUARTERS') {
         if (dto.parentBranchId) {
-          throw new BadRequestException(
-            'The headquarters cannot have a parent unit',
-          );
+          throw new BadRequestException({ code: 'UNIT_HQ_NO_PARENT', message: 'The headquarters cannot have a parent unit' });
         }
       }
 
@@ -547,20 +545,14 @@ export class CompanyService {
       ]);
 
       if (children > 0) {
-        throw new BadRequestException(
-          'This unit has sub-units under it. Move or delete them first.',
-        );
+        throw new BadRequestException({ code: 'UNIT_HAS_CHILDREN', message: 'This unit has sub-units under it. Move or delete them first.' });
       }
       if (entries > 0 || stock > 0) {
-        throw new BadRequestException(
-          'This unit already has accounting or stock movements. ' +
-            'Deactivate it instead of deleting it so the history stays intact.',
-        );
+        throw new BadRequestException({ code: 'UNIT_HAS_MOVEMENTS', message: 'This unit already has accounting or stock movements. ' +
+            'Deactivate it instead of deleting it so the history stays intact.' });
       }
       if (users > 0) {
-        throw new BadRequestException(
-          'Users are still assigned to this unit. Unassign them first.',
-        );
+        throw new BadRequestException({ code: 'UNIT_HAS_USERS', message: 'Users are still assigned to this unit. Unassign them first.' });
       }
 
       await tx.branch.update({
@@ -685,24 +677,20 @@ export class CompanyService {
   ): Promise<string | null> {
     if (kind === 'HEADQUARTERS') {
       if (requested) {
-        throw new BadRequestException(
-          'The headquarters cannot have a parent unit',
-        );
+        throw new BadRequestException({ code: 'UNIT_HQ_NO_PARENT', message: 'The headquarters cannot have a parent unit' });
       }
       return null;
     }
 
     if (requested) {
       if (selfId && requested === selfId) {
-        throw new BadRequestException('A unit cannot be its own parent');
+        throw new BadRequestException({ code: 'UNIT_OWN_PARENT', message: 'A unit cannot be its own parent' });
       }
       const parent = await client.branch.findFirst({
         where: { id: requested, companyId, deletedAt: null },
       });
       if (!parent) {
-        throw new BadRequestException(
-          'The parent unit does not exist in this company',
-        );
+        throw new BadRequestException({ code: 'UNIT_PARENT_MISSING', message: 'The parent unit does not exist in this company' });
       }
       // Walk up from the proposed parent: if we ever reach selfId, the new
       // link would close a circle.
@@ -711,9 +699,7 @@ export class CompanyService {
         const seen = new Set<string>([parent.id]);
         while (cursor) {
           if (cursor === selfId) {
-            throw new BadRequestException(
-              'This would make the unit its own ancestor. Choose another parent.',
-            );
+            throw new BadRequestException({ code: 'UNIT_CYCLE', message: 'This would make the unit its own ancestor. Choose another parent.' });
           }
           if (seen.has(cursor)) break; // database already inconsistent; stop
           seen.add(cursor);
@@ -735,9 +721,7 @@ export class CompanyService {
     });
     if (hq) return hq.id;
 
-    throw new BadRequestException(
-      'A branch needs a parent unit. Create the headquarters first, or name the parent explicitly.',
-    );
+    throw new BadRequestException({ code: 'UNIT_BRANCH_NEEDS_PARENT', message: 'A branch needs a parent unit. Create the headquarters first, or name the parent explicitly.' });
   }
 }
 

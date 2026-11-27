@@ -46,7 +46,7 @@ export class OperationsReportsService {
     if (!status) return { status: InvoiceStatus.POSTED };
     const upper = status.toUpperCase();
     if (!['DRAFT', 'POSTED', 'REVERSED', 'ALL'].includes(upper)) {
-      throw new BadRequestException('status must be DRAFT, POSTED, REVERSED or ALL');
+      throw new BadRequestException({ code: 'REPORT_FILTER_UNKNOWN', message: 'status must be DRAFT, POSTED, REVERSED or ALL' });
     }
     return upper === 'ALL' ? {} : { status: upper as InvoiceStatus };
   }
@@ -302,7 +302,7 @@ export class OperationsReportsService {
     if (query.kind) {
       const upper = query.kind.toUpperCase();
       if (!['RECEIPT', 'PAYMENT', 'ALL'].includes(upper)) {
-        throw new BadRequestException('kind must be RECEIPT, PAYMENT or ALL');
+        throw new BadRequestException({ code: 'REPORT_FILTER_UNKNOWN', message: 'kind must be RECEIPT, PAYMENT or ALL' });
       }
       if (upper !== 'ALL') kindFilter.kind = upper as CashVoucherKind;
     }
@@ -450,7 +450,7 @@ export class OperationsReportsService {
       : new Date();
     const side = (query.kind ?? 'sales').toLowerCase();
     if (!['sales', 'purchases'].includes(side)) {
-      throw new BadRequestException('kind must be sales or purchases');
+      throw new BadRequestException({ code: 'REPORT_FILTER_UNKNOWN', message: 'kind must be sales or purchases' });
     }
 
     const sales = side === 'sales';

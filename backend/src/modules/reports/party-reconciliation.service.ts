@@ -63,9 +63,7 @@ export class PartyReconciliationService {
       select: { id: true, code: true, nameEn: true, nameAr: true },
     });
     if (!control) {
-      throw new NotFoundException(
-        `Control account ${controlCode} does not exist in this company's chart`,
-      );
+      throw new NotFoundException({ code: 'REPORT_CONTROL_ACCOUNT_MISSING', message: `Control account ${controlCode} does not exist in this company's chart` });
     }
 
     // The ledger side, signed the way the balance reads: a receivable
