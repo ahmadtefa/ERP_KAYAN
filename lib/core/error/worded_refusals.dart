@@ -350,6 +350,26 @@ const Map<String, List<String>> wordedRefusals = {
     'الملف لا يحتوي على عمود «{column}»، ولا يمكن مطابقة أي صف بسجله بدونه. أضف العمود أو استخدم النموذج الموجود في هذه الشاشة، ثم ارفع الملف من جديد. لم يُستورد شيء.',
     'The file has no "{column}" column, and without it a row cannot be matched to its record. Add the column or use the template on this screen, then upload the file again. Nothing was imported.',
   ],
+  'PICTURE_BAD_TYPE': [
+    'نوع ملف {subjectAr} غير مقبول. اختر ملف صورة بصيغة PNG أو JPEG أو WebP، ثم أعد الرفع. لم يتغير شيء.',
+    'The {subjectEn} file type is not accepted. Choose an image file in PNG, JPEG or WebP format, then upload again. Nothing was changed.',
+  ],
+  'PICTURE_EMPTY': [
+    'ملف {subjectAr} فارغ. اختر ملف صورة سليمًا ثم أعد الرفع. لم يتغير شيء.',
+    'The {subjectEn} file is empty. Choose a valid image file, then upload again. Nothing was changed.',
+  ],
+  'PICTURE_TOO_BIG': [
+    'حجم ملف {subjectAr} يتجاوز {maxMb} ميجابايت. اختر صورة أصغر ثم أعد الرفع. لم يتغير شيء.',
+    'The {subjectEn} file is larger than {maxMb} MB. Choose a smaller image, then upload again. Nothing was changed.',
+  ],
+  'PICTURE_BAD_SIZE': [
+    'أبعاد {subjectAr} غير مناسبة: يجب ألا تقل عن 32 × 32 بكسل، ولا تكون متحركة، ولا تتجاوز الحد المسموح. اختر صورة مناسبة ثم أعد الرفع. لم يتغير شيء.',
+    'The {subjectEn} size is not suitable: it must be at least 32 × 32 pixels, not animated, and within the pixel limit. Choose a suitable image, then upload again. Nothing was changed.',
+  ],
+  'WAREHOUSE_ACCESS_DENIED': [
+    'لا تملك صلاحية {actionAr} هذا المخزن. اطلب من مدير النظام منحك صلاحية الوصول إلى هذا المخزن، أو استخدم مخزنًا مصرّحًا لك به. لم يتغير شيء.',
+    'You do not have permission to {actionEn} this warehouse. Ask the system administrator to give you access to this warehouse, or use a warehouse you are allowed to use. Nothing was changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

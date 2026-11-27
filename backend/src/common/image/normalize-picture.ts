@@ -55,19 +55,25 @@ export async function normalizePicture(
 ): Promise<NormalizedPicture> {
   const normalised = (mime ?? '').split(';')[0].trim().toLowerCase();
   if (!LOGO_TYPES[normalised]) {
-    throw new BadRequestException(
-      `${labels.subjectAr} يجب أن يكون صورة PNG أو JPEG أو WebP / ${labels.subjectEn} must be PNG, JPEG or WebP.`,
-    );
+    throw new BadRequestException({
+      code: 'PICTURE_BAD_TYPE',
+      message: `${labels.subjectEn} must be PNG, JPEG or WebP.`,
+      params: { subjectAr: labels.subjectAr, subjectEn: stripArticle(labels.subjectEn) },
+    });
   }
   if (data.length === 0) {
-    throw new BadRequestException(
-      `ملف ${labels.subjectAr} فارغ / The ${stripArticle(labels.subjectEn)} file is empty.`,
-    );
+    throw new BadRequestException({
+      code: 'PICTURE_EMPTY',
+      message: `The ${stripArticle(labels.subjectEn)} file is empty.`,
+      params: { subjectAr: labels.subjectAr, subjectEn: stripArticle(labels.subjectEn) },
+    });
   }
   if (data.length > maxBytes) {
-    throw new BadRequestException(
-      `حجم ${labels.subjectAr} يتجاوز ${Math.round(maxBytes / 1024 / 1024)} ميجابايت / The ${stripArticle(labels.subjectEn)} exceeds ${Math.round(maxBytes / 1024 / 1024)} MB.`,
-    );
+    throw new BadRequestException({
+      code: 'PICTURE_TOO_BIG',
+      message: `The ${stripArticle(labels.subjectEn)} exceeds ${Math.round(maxBytes / 1024 / 1024)} MB.`,
+      params: { subjectAr: labels.subjectAr, subjectEn: stripArticle(labels.subjectEn), maxMb: String(Math.round(maxBytes / 1024 / 1024)) },
+    });
   }
 
   // The magic bytes are checked as well as the declared type: a caller can send
@@ -85,9 +91,11 @@ export async function normalizePicture(
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
   if (width < 32 || height < 32 || width * height > labels.maxPixels || (metadata.pages ?? 1) > 1) {
-    throw new BadRequestException(
-      `يجب أن تكون أبعاد ${labels.subjectAr} ٣٢ × ٣٢ بكسل على الأقل، وألا تتجاوز الصورة المتحركة الحد المسموح / Use a non-animated ${stripArticle(labels.subjectEn)} of at least 32 × 32 pixels and no more than the pixel limit.`,
-    );
+    throw new BadRequestException({
+      code: 'PICTURE_BAD_SIZE',
+      message: `Use a non-animated ${stripArticle(labels.subjectEn)} of at least 32 × 32 pixels and no more than the pixel limit.`,
+      params: { subjectAr: labels.subjectAr, subjectEn: stripArticle(labels.subjectEn) },
+    });
   }
 
   for (const [bound, quality] of GENERIC_QUALITY) {

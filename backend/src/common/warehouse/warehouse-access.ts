@@ -84,11 +84,13 @@ export function assertWarehouseAccess(
 ): void {
   if (!warehouseId) return;
   if (may(user, warehouseId, action)) return;
-  throw new ForbiddenException(
-    'You do not have permission to ' +
-      `${{ view: 'view', receive: 'receive into', issue: 'issue from', transfer: 'transfer out of', count: 'count', approve: 'approve in', cost: 'see the cost of' }[action]} ` +
-      'this warehouse. / لا تملك صلاحية تنفيذ هذا الإجراء في هذا المخزن.',
-  );
+  const actionEn = { view: 'view', receive: 'receive into', issue: 'issue from', transfer: 'transfer out of', count: 'count', approve: 'approve in', cost: 'see the cost of' }[action];
+  const actionAr = { view: 'عرض بيانات', receive: 'استلام بضاعة إلى', issue: 'صرف بضاعة من', transfer: 'تحويل بضاعة من', count: 'جرد', approve: 'الاعتماد في', cost: 'الاطلاع على تكلفة أصناف' }[action];
+  throw new ForbiddenException({
+    code: 'WAREHOUSE_ACCESS_DENIED',
+    message: `You do not have permission to ${actionEn} this warehouse.`,
+    params: { actionEn, actionAr },
+  });
 }
 
 /// The same check for a pair of shelves: a transfer needs to leave one and
