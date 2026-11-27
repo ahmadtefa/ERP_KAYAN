@@ -10,6 +10,7 @@ import 'purchase_refusals.dart';
 import 'opening_balance_refusals.dart';
 import 'order_unit_refusals.dart';
 import 'return_refusals.dart';
+import 'stock_document_refusals.dart';
 import 'sales_refusals.dart';
 
 /// Reviewed sentences for the refusals of serial numbers, commissions,
@@ -28,6 +29,7 @@ const Map<String, List<String>> moduleRefusals = {
   ...purchaseRefusals,
   ...salesRefusals,
   ...returnRefusals,
+  ...stockDocumentRefusals,
   ...orderUnitRefusals,
   ...openingBalanceRefusals,
   'SERIAL_DUPLICATE': [

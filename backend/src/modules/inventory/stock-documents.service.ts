@@ -135,14 +135,14 @@ export class StockDocumentsService {
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(StockDocumentKind).includes(kind as StockDocumentKind)) {
-        throw new BadRequestException(`Unknown stock document kind: ${query.kind}`);
+        throw new BadRequestException({ code: 'STOCKDOC_KIND_UNKNOWN', message: `Unknown stock document kind: ${query.kind}` });
       }
       where.kind = kind as StockDocumentKind;
     }
     if (query.voucherOnly) where.voucherKind = { not: null };
     if (query.q !== undefined) {
       if (typeof query.q !== 'string' || query.q.trim().length > 120) {
-        throw new BadRequestException('Search must be text of at most 120 characters');
+        throw new BadRequestException({ code: 'STOCKDOC_SEARCH_TOO_LONG', message: 'Search must be text of at most 120 characters' });
       }
       const term = query.q.trim();
       if (term) where.OR = [
@@ -349,36 +349,34 @@ export class StockDocumentsService {
       ? orderCreationIdentity({ ...dto, idempotencyKey } as unknown as Record<string, unknown>)
       : null;
     const voucherKind = dto.voucherKind === undefined ? null : String(dto.voucherKind).toUpperCase();
-    if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
+    if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException({ code: 'STOCKVOUCHER_KIND_UNKNOWN', message: 'Unknown stock voucher kind' });
     // A receipt records inventory valuation. The controller also checks the
     // warehouse cost grant, but enforce the service contract so internal and
     // background callers cannot submit a cost without cost-read authority.
     if (voucherKind === 'RECEIPT' && !mayReadCost) {
-      throw new ForbiddenException('inventory.cost.read permission is required to record receipt unit costs');
+      throw new ForbiddenException({ code: 'STOCKVOUCHER_COST_PERMISSION', message: 'inventory.cost.read permission is required to record receipt unit costs' });
     }
-    if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
-    if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
+    if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException({ code: 'STOCKVOUCHER_OTHER_BRANCH', message: 'Stock voucher must belong to the signed-in branch' });
+    if (voucherKind && !identity) throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'idempotencyKey is required for stock vouchers' });
 
     // The request fingerprint is the authority for retries. A document key
     // alone is not enough: reusing it with a different payload must conflict.
 
       const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
       if (!Object.values(StockDocumentKind).includes(kind)) {
-        throw new BadRequestException('kind must be ADJUSTMENT, TRANSFER, COUNT, WRITE_OFF or OPENING');
+        throw new BadRequestException({ code: 'STOCKDOC_KIND_INVALID', message: 'kind must be ADJUSTMENT, TRANSFER, COUNT, WRITE_OFF or OPENING' });
       }
-      if (voucherKind && kind !== StockDocumentKind.ADJUSTMENT) throw new BadRequestException('Stock vouchers must be adjustments');
+      if (voucherKind && kind !== StockDocumentKind.ADJUSTMENT) throw new BadRequestException({ code: 'STOCKVOUCHER_ADJUSTMENT_ONLY', message: 'Stock vouchers must be adjustments' });
       // A write-off is a loss somebody has to own. The reason is not decoration:
       // it is the sentence that explains the difference to an auditor.
       if (kind === StockDocumentKind.WRITE_OFF && !String(dto.reason ?? '').trim()) {
         throw new BadRequestException('A write-off needs a reason. / مستند الإعدام يتطلب سببًا.');
       }
       if (kind === StockDocumentKind.OPENING) {
-        throw new BadRequestException(
-          'Use an opening balance document for opening stock: it posts the accounting and the stock together.',
-        );
+        throw new BadRequestException({ code: 'STOCKDOC_USE_OPENING_BALANCE', message: 'Use an opening balance document for opening stock: it posts the accounting and the stock together.' });
       }
       if (voucherKind && (typeof dto.reason !== 'string' || !dto.reason.trim() || typeof dto.counterpartyName !== 'string' || !dto.counterpartyName.trim() || dto.counterpartyName.trim().length > 200 || !dto.toWarehouseId)) {
-        throw new BadRequestException('A stock voucher needs a warehouse, reason and counterparty');
+        throw new BadRequestException({ code: 'STOCKVOUCHER_FIELDS_REQUIRED', message: 'A stock voucher needs a warehouse, reason and counterparty' });
       }
       if (voucherKind) {
         const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.toWarehouseId, companyId, branchId: targetBranch, deletedAt: null, isActive: true }, select: { id: true } });
@@ -413,15 +411,13 @@ export class StockDocumentsService {
           select: { id: true },
         });
         if (legacy) {
-          throw new ConflictException(
-            'The idempotency key belongs to a document without a request fingerprint; use a new key.',
-          );
+          throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED', message: 'The idempotency key belongs to a document without a request fingerprint; use a new key.' });
         }
       }
       const branchModel = (tx as { branch?: typeof this.prisma.branch }).branch ?? this.prisma.branch;
       if (branchModel) {
         const branch = await branchModel.findFirst({ where: { id: targetBranch, companyId, deletedAt: null }, select: { id: true } });
-        if (!branch) throw new BadRequestException('Target branch does not belong to this company');
+        if (!branch) throw new BadRequestException({ code: 'STOCKDOC_TARGET_BRANCH_INVALID', message: 'Target branch does not belong to this company' });
       }
 
       // Only the documents whose posting touches a profit-and-loss account can
@@ -430,10 +426,10 @@ export class StockDocumentsService {
       const costCenterId = dto.costCenterId ? String(dto.costCenterId).trim() : null;
       if (costCenterId) {
         if (kind === StockDocumentKind.TRANSFER) {
-          throw new BadRequestException('A stock transfer cannot carry a cost center: it is not a cost.');
+          throw new BadRequestException({ code: 'STOCKDOC_TRANSFER_NO_COST_CENTER', message: 'A stock transfer cannot carry a cost center: it is not a cost.' });
         }
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) {
-          throw new BadRequestException('costCenterId must be a UUID');
+          throw new BadRequestException({ code: 'STOCKDOC_COST_CENTER_INVALID', message: 'costCenterId must be a UUID' });
         }
         await this.costCenters.assertPostable(tx, companyId, [costCenterId], date);
       }
@@ -474,7 +470,7 @@ export class StockDocumentsService {
             ? null
             : parseDocumentQuantity(raw.countedQuantity, `Line ${index + 1} counted quantity`);
         if (voucherKind === 'RECEIPT' && (raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '')) {
-          throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
+          throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_COST_REQUIRED', message: `Line ${index + 1}: receipt unit cost is required` });
         }
         const unitCost =
           raw.unitCost === undefined
@@ -527,12 +523,12 @@ export class StockDocumentsService {
         }
 
         if (kind !== StockDocumentKind.COUNT && quantity.isZero()) {
-          throw new BadRequestException(`Line ${index + 1}: a quantity is required`);
+          throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_QTY_REQUIRED', message: `Line ${index + 1}: a quantity is required` });
         }
-        if (voucherKind === 'RECEIPT' && !quantity.isPositive()) throw new BadRequestException(`Line ${index + 1}: receipt quantity must be positive`);
-        if (voucherKind === 'ISSUE' && !quantity.isNegative()) throw new BadRequestException(`Line ${index + 1}: issue quantity must be negative`);
+        if (voucherKind === 'RECEIPT' && !quantity.isPositive()) throw new BadRequestException({ code: 'STOCKVOUCHER_RECEIPT_QTY_POSITIVE', message: `Line ${index + 1}: receipt quantity must be positive` });
+        if (voucherKind === 'ISSUE' && !quantity.isNegative()) throw new BadRequestException({ code: 'STOCKVOUCHER_ISSUE_QTY_NEGATIVE', message: `Line ${index + 1}: issue quantity must be negative` });
         if (kind === StockDocumentKind.TRANSFER && quantity.isNegative()) {
-          throw new BadRequestException(`Line ${index + 1}: transfer quantity must be positive`);
+          throw new BadRequestException({ code: 'STOCKDOC_TRANSFER_QTY_POSITIVE', message: `Line ${index + 1}: transfer quantity must be positive` });
         }
         // A write-off is goods leaving. Its quantity is the signed change, so a
         // positive one would quietly RECEIVE the goods the paper says were
@@ -545,13 +541,13 @@ export class StockDocumentsService {
           );
         }
         if (kind === StockDocumentKind.COUNT && (!countedQuantity || countedQuantity.isNegative())) {
-          throw new BadRequestException(`Line ${index + 1}: a count needs the quantity that was actually counted`);
+          throw new BadRequestException({ code: 'STOCKDOC_COUNT_QTY_REQUIRED', message: `Line ${index + 1}: a count needs the quantity that was actually counted` });
         }
         if (unitCost.isNegative()) {
-          throw new BadRequestException(`Line ${index + 1}: the unit cost cannot be negative`);
+          throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_COST_NEGATIVE', message: `Line ${index + 1}: the unit cost cannot be negative` });
         }
         if (quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) {
-          throw new BadRequestException(`Line ${index + 1}: stock value exceeds the supported range`);
+          throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_VALUE_RANGE', message: `Line ${index + 1}: stock value exceeds the supported range` });
         }
 
         // A line may name the lot it moves and the shelf it sat on. The lot
@@ -563,7 +559,7 @@ export class StockDocumentsService {
             where: { id: String(raw.batchId), companyId, itemId: item.id, deletedAt: null },
             select: { id: true },
           });
-          if (!lot) throw new BadRequestException(`Line ${index + 1}: the lot does not belong to this item`);
+          if (!lot) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_LOT_MISMATCH', message: `Line ${index + 1}: the lot does not belong to this item` });
           batchId = lot.id;
         }
         // On a transfer the named shelf is the one the goods leave from, in the
@@ -664,7 +660,7 @@ export class StockDocumentsService {
           throw new BadRequestException('A transfer needs the branch the stock leaves');
         }
         const sourceBranch = await branchModel.findFirst({ where: { id: fromBranchId, companyId, deletedAt: null }, select: { id: true } });
-        if (!sourceBranch) throw new BadRequestException('Source branch does not belong to this company');
+        if (!sourceBranch) throw new BadRequestException({ code: 'STOCKDOC_SOURCE_BRANCH_INVALID', message: 'Source branch does not belong to this company' });
         if (fromBranchId === targetBranch && !movesBetweenWarehouses) {
           throw new BadRequestException(
             'A transfer needs two different branches, or two different warehouses of the same branch',
@@ -760,7 +756,7 @@ export class StockDocumentsService {
     const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
     if (!identity) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'idempotencyKey is required', field: 'idempotencyKey' });
     if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 0) {
-      throw new BadRequestException('expectedVersion must be a non-negative integer');
+      throw new BadRequestException({ code: 'STOCKVOUCHER_VERSION_INVALID', message: 'expectedVersion must be a non-negative integer' });
     }
     await this.prisma.$transaction(async tx => {
       // Acquire key before row, consistently for same-key concurrent retries.
@@ -783,26 +779,26 @@ export class StockDocumentsService {
           throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
         }
         if (document.editVersion !== previous[0].resultVersion || document.status !== InvoiceStatus.DRAFT) {
-          throw new ConflictException('The voucher has changed since this request; reload the latest version');
+          throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed since this request; reload the latest version' });
         }
         return;
       }
-      if (document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be edited');
+      if (document.status !== InvoiceStatus.DRAFT) throw new BadRequestException({ code: 'STOCKVOUCHER_EDIT_NOT_DRAFT', message: 'Only a draft stock voucher can be edited' });
       if (document.editVersion !== dto.expectedVersion) throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed; reload the latest version' });
       if (typeof dto.reason !== 'string' || !dto.reason.trim() || typeof dto.counterpartyName !== 'string' ||
           !dto.counterpartyName.trim() || dto.counterpartyName.trim().length > 200 || typeof dto.toWarehouseId !== 'string') {
-        throw new BadRequestException('A stock voucher needs a warehouse, reason and counterparty');
+        throw new BadRequestException({ code: 'STOCKVOUCHER_FIELDS_REQUIRED', message: 'A stock voucher needs a warehouse, reason and counterparty' });
       }
-      if (dto.notes != null && typeof dto.notes !== 'string') throw new BadRequestException('notes must be text');
+      if (dto.notes != null && typeof dto.notes !== 'string') throw new BadRequestException({ code: 'STOCKVOUCHER_NOTES_INVALID', message: 'notes must be text' });
       if (!Array.isArray(dto.lines) || dto.lines.length === 0 || dto.lines.length > 1000) {
-        throw new BadRequestException('A stock voucher needs between 1 and 1000 lines');
+        throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_COUNT', message: 'A stock voucher needs between 1 and 1000 lines' });
       }
       const date = this.date(dto.documentDate, 'documentDate');
       const warehouse = await tx.warehouse.findFirst({ where: { id: dto.toWarehouseId, companyId, branchId, deletedAt: null, isActive: true }, select: { id: true } });
       if (!warehouse) throw new BadRequestException({ code: 'VOUCHER_WAREHOUSE_INVALID', message: 'The voucher warehouse does not belong to this branch or is inactive' });
       const costCenterId = dto.costCenterId ? String(dto.costCenterId).trim() : null;
       if (costCenterId) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) throw new BadRequestException('costCenterId must be a UUID');
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) throw new BadRequestException({ code: 'STOCKDOC_COST_CENTER_INVALID', message: 'costCenterId must be a UUID' });
         await this.costCenters.assertPostable(tx, companyId, [costCenterId], date);
       }
       const existing = new Map(document.lines.map(line => [line.id, line]));
@@ -810,26 +806,26 @@ export class StockDocumentsService {
       const lines: Array<{ id?: string; itemId: string; lineNumber: number; quantity: Prisma.Decimal; unitCost: Prisma.Decimal;
         unitName: string | null; unitFactor: Prisma.Decimal | null; unitQuantity: Prisma.Decimal | null; notes: string | null }> = [];
       for (const [index, raw] of dto.lines.entries()) {
-        if (!raw || typeof raw.itemId !== 'string') throw new BadRequestException(`Line ${index + 1}: item is required`);
+        if (!raw || typeof raw.itemId !== 'string') throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_ITEM_REQUIRED', message: `Line ${index + 1}: item is required` });
         const old = raw.id ? existing.get(raw.id) : undefined;
-        if (raw.id && (!old || used.has(raw.id))) throw new BadRequestException(`Line ${index + 1}: invalid or duplicate line id`);
+        if (raw.id && (!old || used.has(raw.id))) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_ID_INVALID', message: `Line ${index + 1}: invalid or duplicate line id` });
         if (raw.id) used.add(raw.id);
-        if (raw.unitId) throw new BadRequestException(`Line ${index + 1}: use unitName when editing a voucher`);
+        if (raw.unitId) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_NAME_REQUIRED', message: `Line ${index + 1}: use unitName when editing a voucher` });
         const item = await tx.item.findFirst({ where: { id: raw.itemId, companyId, deletedAt: null }, select: { id: true, isStockTracked: true, code: true, unit: true, units: true } });
-        if (!item || !item.isStockTracked) throw new BadRequestException(`Line ${index + 1}: the stock item does not exist`);
+        if (!item || !item.isStockTracked) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_ITEM_MISSING', message: `Line ${index + 1}: the stock item does not exist` });
         const entered = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
         if ((document.voucherKind === 'RECEIPT' && !entered.isPositive()) ||
-            (document.voucherKind === 'ISSUE' && !entered.isNegative())) throw new BadRequestException(`Line ${index + 1}: invalid voucher quantity`);
+            (document.voucherKind === 'ISSUE' && !entered.isNegative())) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_QTY_INVALID', message: `Line ${index + 1}: invalid voucher quantity` });
         const name = raw.unitName ?? raw.unit ?? null;
         let quantity: Prisma.Decimal, unitName: string | null, unitFactor: Prisma.Decimal | null, unitQuantity: Prisma.Decimal | null;
         if (old && old.itemId === item.id && old.unitName === name) {
           if (old.unitName === null) {
-            if (old.unitFactor !== null || old.unitQuantity !== null) throw new BadRequestException(`Line ${index + 1}: invalid historic unit snapshot`);
+            if (old.unitFactor !== null || old.unitQuantity !== null) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_SNAPSHOT_INVALID', message: `Line ${index + 1}: invalid historic unit snapshot` });
             quantity = entered; unitName = null; unitFactor = null; unitQuantity = null;
           } else {
-            if (old.unitFactor === null || old.unitQuantity === null) throw new BadRequestException(`Line ${index + 1}: invalid historic unit snapshot`);
+            if (old.unitFactor === null || old.unitQuantity === null) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_SNAPSHOT_INVALID', message: `Line ${index + 1}: invalid historic unit snapshot` });
             unitFactor = parseFactor(old.unitFactor, `Line ${index + 1} historic factor`);
-            if (!exactBaseQuantity(old.unitQuantity, unitFactor).equals(old.quantity)) throw new BadRequestException(`Line ${index + 1}: inconsistent historic unit snapshot`);
+            if (!exactBaseQuantity(old.unitQuantity, unitFactor).equals(old.quantity)) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_SNAPSHOT_INVALID', message: `Line ${index + 1}: inconsistent historic unit snapshot` });
             quantity = exactBaseQuantity(entered, unitFactor);
             unitName = old.unitName; unitQuantity = entered;
           }
@@ -841,13 +837,13 @@ export class StockDocumentsService {
         } else { quantity = entered; unitName = null; unitFactor = null; unitQuantity = null; }
         const costMissing = raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '';
         if (!mayReadCost && document.voucherKind === 'RECEIPT' && !costMissing) {
-          throw new ForbiddenException('inventory.cost.read permission is required to submit receipt unit costs');
+          throw new ForbiddenException({ code: 'STOCKVOUCHER_COST_PERMISSION', message: 'inventory.cost.read permission is required to submit receipt unit costs' });
         }
         const sameSavedItem = old !== undefined && old.itemId === item.id;
         const preserveHiddenCost = !mayReadCost && sameSavedItem &&
           (document.voucherKind === 'ISSUE' || costMissing);
         if (document.voucherKind === 'RECEIPT' && costMissing && !preserveHiddenCost) {
-          throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
+          throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_UNIT_COST_REQUIRED', message: `Line ${index + 1}: receipt unit cost is required` });
         }
         // Editors without purchase-price visibility can still update quantities
         // and metadata without blanking or changing a saved valuation. A new
@@ -857,8 +853,8 @@ export class StockDocumentsService {
           : raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === ''
             ? new Prisma.Decimal(0)
             : this.decimal(raw.unitCost, `Line ${index + 1} unit cost`);
-        if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException(`Line ${index + 1}: invalid stock value`);
-        if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
+        if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException({ code: 'STOCKVOUCHER_LINE_VALUE_INVALID', message: `Line ${index + 1}: invalid stock value` });
+        if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException({ code: 'STOCKVOUCHER_NOTES_INVALID', message: `Line ${index + 1}: notes must be text` });
         lines.push({ id: old?.id ?? randomUUID(), itemId: item.id, lineNumber: index + 1, quantity, unitCost, unitName, unitFactor, unitQuantity, notes: raw.notes ?? null });
       }
       if (document.voucherKind === 'ISSUE' && !costCenterId) {
@@ -898,13 +894,13 @@ export class StockDocumentsService {
       `);
       if (locked.length !== 1) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       const document = await tx.stockDocument.findUniqueOrThrow({ where: { id } });
-      if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
+      if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException({ code: 'STOCKVOUCHER_REVIEW_NOT_DRAFT', message: 'Only a draft stock voucher can be reviewed or approved' });
       if (expectedVersion !== undefined && document.editVersion !== expectedVersion) throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed; reload the latest version' });
       if (stage === 'REVIEW') {
         if (document.reviewedAt) return;
         await tx.stockDocument.update({ where: { id }, data: { reviewedAt: new Date(), reviewedBy: userId, editVersion: { increment: 1 } } });
       } else {
-        if (!document.reviewedAt) throw new BadRequestException('The stock voucher must be reviewed before approval');
+        if (!document.reviewedAt) throw new BadRequestException({ code: 'STOCKVOUCHER_REVIEW_REQUIRED', message: 'The stock voucher must be reviewed before approval' });
         if (document.approvedAt) return;
         await tx.stockDocument.update({ where: { id }, data: { approvedAt: new Date(), approvedBy: userId, editVersion: { increment: 1 } } });
       }
@@ -997,7 +993,7 @@ export class StockDocumentsService {
       throw new BadRequestException(`This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`);
     }
     if (document.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException('Only a draft write-off can be approved');
+      throw new BadRequestException({ code: 'WRITEOFF_APPROVE_NOT_DRAFT', message: 'Only a draft write-off can be approved' });
     }
     if (document.createdBy && document.createdBy === userId) {
       throw new BadRequestException({
@@ -1042,12 +1038,10 @@ export class StockDocumentsService {
     if (!initialDocument) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
     if (initialDocument.voucherKind && initialDocument.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
     if (initialDocument.voucherKind && requireVoucherVersion && (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 0)) {
-      throw new BadRequestException('expectedVersion is required for posting a stock voucher');
+      throw new BadRequestException({ code: 'STOCKVOUCHER_VERSION_REQUIRED', message: 'expectedVersion is required for posting a stock voucher' });
     }
     if (initialDocument.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft stock document can be posted (current status: ${initialDocument.status})`,
-      );
+      throw new BadRequestException({ code: 'STOCKDOC_POST_NOT_DRAFT', message: `Only a draft stock document can be posted (current status: ${initialDocument.status})` });
     }
     if (initialDocument.voucherKind && (!initialDocument.reviewedAt || !initialDocument.approvedAt)) {
       throw new BadRequestException({ code: 'VOUCHER_NOT_APPROVED', message: 'Stock voucher must be reviewed and approved before posting' });
@@ -1204,10 +1198,8 @@ export class StockDocumentsService {
           const availableQty = fromBalance?.quantity ?? new Prisma.Decimal(0);
           const availableValue = fromBalance?.value ?? new Prisma.Decimal(0);
           if (availableQty.lessThan(line.quantity) && !settings.allowNegativeStock) {
-            throw new BadRequestException(
-              `Not enough stock to transfer: ${availableQty.toFixed(MONEY_SCALE)} on hand, ` +
-                `${line.quantity.toFixed(MONEY_SCALE)} requested.`,
-            );
+            throw new BadRequestException({ code: 'STOCKDOC_TRANSFER_SHORT_STOCK', message: `Not enough stock to transfer: ${availableQty.toFixed(MONEY_SCALE)} on hand, ` +
+                `${line.quantity.toFixed(MONEY_SCALE)} requested.` });
           }
           // What the goods are worth where they leave, not what the branch
           // averages: a transfer carries the source shelf's cost to the
@@ -1639,7 +1631,7 @@ export class StockDocumentsService {
 
     if (document.kind === StockDocumentKind.TRANSFER &&
         document.lines.some((line) => line.quantity.isNegative())) {
-      throw new BadRequestException('Cannot automatically reverse a transfer with negative quantities; contact support');
+      throw new BadRequestException({ code: 'STOCKDOC_REVERSE_NEGATIVE_TRANSFER', message: 'Cannot automatically reverse a transfer with negative quantities; contact support' });
     }
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
@@ -1756,7 +1748,7 @@ export class StockDocumentsService {
             if (transferOriginal &&
                 (!original.unitCost.equals(transferOriginal.unitCost) ||
                  !original.totalCost.equals(transferOriginal.totalCost))) {
-              throw new BadRequestException('The original transfer movements have different costs; it cannot be reversed automatically.');
+              throw new BadRequestException({ code: 'STOCKDOC_REVERSE_COST_DIFFERS', message: 'The original transfer movements have different costs; it cannot be reversed automatically.' });
             }
             transferOriginal = original;
           }
@@ -2210,10 +2202,8 @@ export class StockDocumentsService {
       input.direction === StockDirection.OUT &&
       onHand.lessThan(input.quantity)
     ) {
-      throw new BadRequestException(
-        `Not enough stock: ${onHand.toFixed(MONEY_SCALE)} on hand, ` +
-          `${input.quantity.toFixed(MONEY_SCALE)} requested in ${input.referenceNumber}.`,
-      );
+      throw new BadRequestException({ code: 'STOCKDOC_SHORT_STOCK', message: `Not enough stock: ${onHand.toFixed(MONEY_SCALE)} on hand, ` +
+          `${input.quantity.toFixed(MONEY_SCALE)} requested in ${input.referenceNumber}.` });
     }
 
     await this.assertSourceLocation(tx, input);
@@ -2561,9 +2551,9 @@ export class StockDocumentsService {
   private decimal(value: unknown, field: string): Prisma.Decimal {
     let parsed: Prisma.Decimal;
     try { parsed = new Prisma.Decimal(String(value)); }
-    catch { throw new BadRequestException(`${field} is not a valid number`); }
+    catch { throw new BadRequestException({ code: 'STOCKDOC_NUMBER_INVALID', message: `${field} is not a valid number` }); }
     if (!parsed.isFinite() || parsed.abs().greaterThanOrEqualTo('1e15') || !parsed.equals(parsed.toDecimalPlaces(MONEY_SCALE))) {
-      throw new BadRequestException(`${field} is outside the supported range or precision`);
+      throw new BadRequestException({ code: 'STOCKDOC_NUMBER_RANGE', message: `${field} is outside the supported range or precision` });
     }
     return parsed;
   }
