@@ -171,6 +171,12 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [
+                appConfigProvider.overrideWithValue(const AppConfig(
+                  environment: AppEnvironment.onPremise,
+                  apiBaseUrl: 'http://unused.invalid/api/v1',
+                  connectTimeout: Duration(seconds: 1),
+                  receiveTimeout: Duration(seconds: 1),
+                )),
                 apiClientProvider.overrideWithValue(_Api()),
                 currentUserProvider.overrideWithValue(screenshotAdmin),
                 companyProfileProvider.overrideWith(() => _Profile()),

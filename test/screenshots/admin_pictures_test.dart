@@ -23,7 +23,7 @@ class _Api extends ApiClient {
   _Api() : super(AppConfig.forLocalServer('http://screenshot.invalid/api/v1'), FakeTokenStore());
 
   static const _roles = [
-    {'id': 'r-admin', 'code': 'ADMIN', 'nameEn': 'System administrator', 'nameAr': 'مدير النظام', 'isSystem': true, 'isActive': true, 'category': 'ADMIN', 'userCount': 1, 'permissions': ['admin.users.manage', 'admin.roles.manage', 'sales.invoices.read', 'sales.invoices.write']},
+    {'id': 'r-admin', 'code': 'ADMIN', 'nameEn': 'System administrator', 'nameAr': 'مدير النظام', 'isSystem': true, 'isActive': true, 'category': 'MANAGEMENT', 'userCount': 1, 'permissions': ['admin.users.manage', 'admin.roles.manage', 'sales.invoices.read', 'sales.invoices.write']},
     {'id': 'r-acc', 'code': 'ACCOUNTANT', 'nameEn': 'Accountant', 'nameAr': 'محاسب', 'isSystem': true, 'isActive': true, 'category': 'FINANCE', 'userCount': 2, 'permissions': ['sales.invoices.read', 'accounting.journal.read', 'accounting.journal.post']},
     {'id': 'r-sales', 'code': 'SALES', 'nameEn': 'Sales representative', 'nameAr': 'مندوب مبيعات', 'isSystem': true, 'isActive': true, 'category': 'SALES', 'userCount': 3, 'permissions': ['sales.invoices.read', 'sales.invoices.write']},
     {'id': 'r-store', 'code': 'STOREKEEPER', 'nameEn': 'Storekeeper', 'nameAr': 'أمين مخزن', 'isSystem': true, 'isActive': true, 'category': 'INVENTORY', 'userCount': 2, 'permissions': ['inventory.items.read']},
