@@ -227,11 +227,9 @@ export class SystemRestoreService implements OnModuleInit {
 
     const existing = await this.journals.read();
     if (existing && isUnfinished(existing)) {
-      throw new ServiceUnavailableException(
-        `An earlier restore stopped at "${existing.phase}" and has not been resolved. ` +
+      throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESTORE_E101', message: `An earlier restore stopped at "${existing.phase}" and has not been resolved. ` +
           'Run "resume recovery" first so the safety backup is put back before anything else ' +
-          'is attempted. Nothing was changed.',
-      );
+          'is attempted. Nothing was changed.', params: { phase: existing.phase } });
     }
 
     const dir = await ensureDirectory(backupDirectory());
@@ -542,12 +540,10 @@ export class SystemRestoreService implements OnModuleInit {
           detail: `the automatic recovery itself failed: ${(rollbackError as Error).message}`,
         }));
         if (rollback.recovered) {
-          throw new ServiceUnavailableException(
-            'لم تكتمل الاستعادة، وتم إرجاع البيانات السابقة تلقائياً من نسخة الأمان ' +
+          throw new ServiceUnavailableException({ code: 'SYSTEM_RESTORE_RESTORE_E109', message: 'لم تكتمل الاستعادة، وتم إرجاع البيانات السابقة تلقائياً من نسخة الأمان ' +
               `(${journal.safetyBackup}). لم تُفقد أي بيانات. / The restore did not finish and ` +
               `the previous data was put back automatically from the safety backup ` +
-              `(${journal.safetyBackup}). No data was lost. Details: ${this.messageOf(error).slice(0, 400)}`,
-          );
+              `(${journal.safetyBackup}). No data was lost. Details: ${this.messageOf(error).slice(0, 400)}`, params: { backup: journal.safetyBackup } });
         }
         this.maintenance.begin(
           'فشلت الاستعادة وفشل التعافي التلقائي أيضاً. النظام في وضع الصيانة ولا يقبل أي تعديل. ' +

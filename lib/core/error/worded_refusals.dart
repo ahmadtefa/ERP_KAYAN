@@ -562,4 +562,72 @@ const Map<String, List<String>> wordedRefusals = {
     'تعذّر تحويل التقرير إلى ملف PDF على هذا الجهاز. استخدم زر الطباعة واختر "حفظ بتنسيق PDF".',
     'The report could not be turned into a PDF on this machine. Use the print button and choose "Save as PDF".',
   ],
+  'BACKUP_INSERT_TABLE_E046': [
+    'تعذّرت استعادة الجدول {table} لأن معالج بياناته غير متاح. تواصل مع الدعم. لم يتغير شيء.',
+    'The table {table} could not be restored because its data handler is unavailable. Contact support. Nothing was changed.',
+  ],
+  'BACKUP_INSERT_TABLE_E047': [
+    'عدد الصفوف المستعادة للجدول {table} لا يطابق قاعدة البيانات. تواصل مع الدعم. لم يتغير شيء.',
+    'The number of restored rows for the table {table} did not match the database. Contact support. Nothing was changed.',
+  ],
+  'FULL_BACKUP_LIST_E050': [
+    'تعذّرت قراءة مجلد النسخ الاحتياطية ({reason}). تأكد من وجود المجلد ومن قدرة البرنامج على الوصول إليه، ثم أعد المحاولة.',
+    'The backup folder could not be read ({reason}). Make sure the folder exists and the program can access it, then try again.',
+  ],
+  'FULL_BACKUP_READ_E051': [
+    'تعذّرت قراءة ملف النسخة الاحتياطية {name}؛ قد يكون تالفًا أو لا يستطيع البرنامج الوصول إليه ({reason}). اختر نسخة أخرى أو تواصل مع الدعم. لم تتغير قاعدة البيانات.',
+    'The backup file {name} could not be read; it may be damaged or the program cannot access it ({reason}). Choose another backup or contact support. The database was not changed.',
+  ],
+  'FULL_BACKUP_VERIFY_E052': [
+    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه ({reason}). أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم يتغير شيء.',
+    'The backup file {name} could not be re-read for checking ({reason}). Try again, and use another backup if the problem continues. Nothing was changed.',
+  ],
+  'FULL_BACKUP_VERIFY_E053': [
+    'الملف {name} ليس أرشيفًا صالحًا لقاعدة البيانات. اختر ملف نسخة احتياطية صالحًا. لم يتغير شيء.',
+    'The file {name} is not a valid database archive. Choose a valid backup file. Nothing was changed.',
+  ],
+  'FULL_BACKUP_VERIFY_E054': [
+    'تعذّرت قراءة ملف النسخة الاحتياطية {name}؛ قد يكون تالفًا أو أُنشئ بإصدار أحدث من قاعدة البيانات. استخدم ملفًا آخر أو تواصل مع الدعم. لم يتغير شيء.',
+    'The backup file {name} could not be read; it may be damaged or created with a newer database version. Use another file or contact support. Nothing was changed.',
+  ],
+  'FULL_BACKUP_VERIFY_E055': [
+    'ملف النسخة الاحتياطية {name} لا يحتوي أي بيانات قاعدة بيانات. اختر ملف نسخة احتياطية صالحًا. لم يتغير شيء.',
+    'The backup file {name} contains no database data. Choose a valid backup file. Nothing was changed.',
+  ],
+  'FULL_BACKUP_VERIFY_E056': [
+    'ملف النسخة الاحتياطية {name} يحتوي بيانات تعذّرت قراءتها. اختر ملفًا آخر أو تواصل مع الدعم. لم يتغير شيء.',
+    'The backup file {name} contains data that could not be read. Choose another file or contact support. Nothing was changed.',
+  ],
+  'FULL_BACKUP_REMOVE_E057': [
+    'تعذّر حذف ملف النسخة الاحتياطية {name} ({reason}). تأكد من أن الملف غير مستخدم من برنامج آخر، ثم أعد المحاولة. لم يتغير أي شيء آخر.',
+    'The backup file {name} could not be deleted ({reason}). Make sure it is not in use by another program, then try again. Nothing else was changed.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E063': [
+    'تعذّرت كتابة الملف المرفوع في مجلد النسخ الاحتياطية ({reason}). غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
+    'The uploaded file could not be written to the backup folder ({reason}). Change the backup folder setting to a folder the program can write to, then try again.',
+  ],
+  'FULL_BACKUP_PERFORM_RESTORE_E066': [
+    'فشلت الاستعادة في منتصفها، وأُعيدت البيانات تلقائيًا من نسخة الأمان {safety}. البيانات عادت إلى حالتها السابقة. تواصل مع الدعم مع ذكر تفاصيل المشكلة.',
+    'The restore failed part way through, and the data was put back automatically from the safety backup {safety}. The data is back to its previous state. Contact support with the problem details.',
+  ],
+  'FULL_BACKUP_RECOVER_FROM_E073': [
+    'فشلت الاستعادة وفشل معها الاسترداد التلقائي، وما يزال النظام في وضع الصيانة. استعد البيانات يدويًا من ملف نسخة الأمان {name}.',
+    'The restore and the automatic recovery both failed, and the system is still in maintenance mode. Restore the data manually from the safety backup file {name}.',
+  ],
+  'FULL_BACKUP_ENSURE_BACKUP_DIR_E079': [
+    'تعذّرت كتابة النسخ الاحتياطية في المجلد ({reason}). غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
+    'Backups cannot be written to the folder ({reason}). Change the backup folder setting to a folder the program can write to, then try again.',
+  ],
+  'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E081': [
+    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه ({reason}). أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
+    'The backup file {name} could not be re-read for checking ({reason}). Try again, and use another backup if the problem continues. The database was not changed.',
+  ],
+  'SYSTEM_RESTORE_RESTORE_E101': [
+    'استعادة سابقة توقفت عند مرحلة "{phase}" ولم تُعالج. نفّذ خيار استكمال الاسترداد أولًا حتى تُعاد نسخة الأمان، ثم أعد المحاولة. لم يتغير شيء.',
+    'An earlier restore stopped at the stage "{phase}" and has not been resolved. Run the resume recovery option first so the safety backup is put back, then try again. Nothing was changed.',
+  ],
+  'SYSTEM_RESTORE_RESTORE_E109': [
+    'لم تكتمل الاستعادة، وأُعيدت البيانات السابقة تلقائيًا من نسخة الأمان {backup}، ولم تُفقد أي بيانات. ما يزال النظام في وضع الصيانة؛ تواصل مع الدعم.',
+    'The restore did not finish, and the previous data was put back automatically from the safety backup {backup}; no data was lost. The system is still in maintenance mode; contact support.',
+  ],
 };

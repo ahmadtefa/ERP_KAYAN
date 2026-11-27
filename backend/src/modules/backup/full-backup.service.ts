@@ -500,10 +500,8 @@ export class FullBackupService {
         entries = await readdir(dir);
       } catch (error) {
         // A folder the program cannot read is a machine problem with a name.
-        throw new ServiceUnavailableException(
-          `The backup folder "${dir}" could not be read ` +
-            `(${safeBackupFailure(error)}).`,
-        );
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_LIST_E050', message: `The backup folder "${dir}" could not be read ` +
+            `(${safeBackupFailure(error)}).`, params: { reason: safeBackupFailure(error) } });
       }
 
       for (const name of entries) {
@@ -535,10 +533,8 @@ export class FullBackupService {
     try {
       return { data: await readFile(path), name };
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be read ` +
-          `(${safeBackupFailure(error)}). The database was not changed.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_READ_E051', message: `The backup file "${name}" could not be read ` +
+          `(${safeBackupFailure(error)}). The database was not changed.`, params: { name: name, reason: safeBackupFailure(error) } });
     }
   }
 
@@ -561,18 +557,14 @@ export class FullBackupService {
       handle = await open(path, 'r');
       await handle.read(head, 0, 5, 0);
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be read back for checking ` +
-          `(${safeBackupFailure(error)}). Nothing was changed.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E052', message: `The backup file "${name}" could not be read back for checking ` +
+          `(${safeBackupFailure(error)}). Nothing was changed.`, params: { name: name, reason: safeBackupFailure(error) } });
     } finally {
       await handle?.close();
     }
     if (!head.equals(CUSTOM_MAGIC)) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" is not a PostgreSQL archive. ` +
-          'Nothing was changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E053', message: `The backup file "${name}" is not a PostgreSQL archive. ` +
+          'Nothing was changed.', params: { name: name } });
     }
 
     let listing: string;
@@ -583,11 +575,9 @@ export class FullBackupService {
         120_000,
       );
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be read by pg_restore ` +
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E054', message: `The backup file "${name}" could not be read by pg_restore ` +
           `(${safeBackupFailure(error)}). It may be damaged, or written by a ` +
-          'newer PostgreSQL than this machine has. Nothing was changed.',
-      );
+          'newer PostgreSQL than this machine has. Nothing was changed.', params: { name: name } });
     }
 
     // One line per object in the archive, plus a handful of comment lines a
@@ -597,18 +587,14 @@ export class FullBackupService {
     const toc = tocCounts(listing);
 
     if (toc.entries === 0) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" holds no database objects. ` +
-          'Nothing was changed.',
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E055', message: `The backup file "${name}" holds no database objects. ` +
+          'Nothing was changed.', params: { name: name } });
     }
 
     try {
       await this.readArchiveContent(tools.pgRestore as string, path);
     } catch {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" contains data that pg_restore could not read. Nothing was changed.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E056', message: `The backup file "${name}" contains data that pg_restore could not read. Nothing was changed.`, params: { name: name } });
     }
 
     return {
@@ -715,10 +701,8 @@ export class FullBackupService {
     try {
       await unlink(path);
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be deleted ` +
-          `(${safeBackupFailure(error)}). Nothing else was changed.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_REMOVE_E057', message: `The backup file "${name}" could not be deleted ` +
+          `(${safeBackupFailure(error)}). Nothing else was changed.`, params: { name: name, reason: safeBackupFailure(error) } });
     }
     await this.audit.record({
       action: 'DELETE',
@@ -811,11 +795,9 @@ export class FullBackupService {
     try {
       await writeFile(staging, buffer, { flag: 'wx', mode: 0o600 });
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The upload could not be written to "${dir}" ` +
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E063', message: `The upload could not be written to "${dir}" ` +
           `(${safeBackupFailure(error)}). Set KAYAN_BACKUP_DIR to a folder ` +
-          'this program may write to, then try again.',
-      );
+          'this program may write to, then try again.', params: { reason: safeBackupFailure(error) } });
     }
 
     // Once production is touched, never release maintenance until either the
@@ -952,11 +934,9 @@ export class FullBackupService {
         await this.state?.finish(dumpJournal.id);
         await journals.clear();
         safeToReleaseMaintenance = true;
-        throw new ServiceUnavailableException(
-          'The restore failed part way through. The safety backup taken just ' +
+        throw new ServiceUnavailableException({ code: 'FULL_BACKUP_PERFORM_RESTORE_E066', message: 'The restore failed part way through. The safety backup taken just ' +
             `before (${safety.name}) was restored back automatically. ` +
-            `Diagnostic: ${safeBackupFailure(error)}.`,
-        );
+            `Diagnostic: ${safeBackupFailure(error)}.`, params: { safety: safety.name } });
       }
 
       // 5. Does the database answer like a database?
@@ -1161,9 +1141,7 @@ export class FullBackupService {
           'Restore manually from the backup files in the backup folder.',
       );
       this.logger.error(`Recovery from safety backup failed (${safeBackupFailure(error)}).`);
-      throw new ServiceUnavailableException(
-        `The restore and automatic recovery both failed. Maintenance remains active. Restore manually from ${name}.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_RECOVER_FROM_E073', message: `The restore and automatic recovery both failed. Maintenance remains active. Restore manually from ${name}.`, params: { name: name } });
     }
   }
 
@@ -1292,11 +1270,9 @@ export class FullBackupService {
       // a missing drive, a permission) is a machine problem with an obvious
       // fix worth naming - not a mystery "unexpected server error".
       this.logger.error(`Could not create the backup folder (${safeBackupFailure(error)}).`);
-      throw new ServiceUnavailableException(
-        `Backups cannot be written to "${dir}" on this machine ` +
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_ENSURE_BACKUP_DIR_E079', message: `Backups cannot be written to "${dir}" on this machine ` +
           `(${safeBackupFailure(error)}). Set KAYAN_BACKUP_DIR to a folder ` +
-          'this program may write to, then try again.',
-      );
+          'this program may write to, then try again.', params: { reason: safeBackupFailure(error) } });
     }
     return dir;
   }
@@ -1337,10 +1313,8 @@ export class FullBackupService {
       handle = await open(path, 'r');
       await handle.read(head, 0, 5, 0);
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be read back for checking ` +
-          `(${safeBackupFailure(error)}). The database was not changed.`,
-      );
+      throw new ServiceUnavailableException({ code: 'FULL_BACKUP_VERIFY_E052', message: `The backup file "${name}" could not be read back for checking ` +
+          `(${safeBackupFailure(error)}). The database was not changed.`, params: { name: name, reason: safeBackupFailure(error) } });
     } finally {
       await handle?.close();
     }

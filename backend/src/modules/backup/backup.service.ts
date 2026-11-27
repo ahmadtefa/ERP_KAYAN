@@ -1105,7 +1105,7 @@ export class BackupService {
   ): Promise<number> {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.createMany) {
-      throw new ServiceUnavailableException(`Cannot restore table ${spec.model}; its database delegate is unavailable. Nothing was changed.`);
+      throw new ServiceUnavailableException({ code: 'BACKUP_INSERT_TABLE_E046', message: `Cannot restore table ${spec.model}; its database delegate is unavailable. Nothing was changed.`, params: { table: spec.model } });
     }
 
     rows = this.decodeBinaryFields(rows, spec.binaryFields);
@@ -1221,7 +1221,7 @@ export class BackupService {
       const chunk = ordered.slice(index, index + size);
       const result = await delegate.createMany({ data: chunk, skipDuplicates: false });
       if (result.count !== chunk.length) {
-        throw new ServiceUnavailableException(`The restored row count for ${spec.model} did not match the database result. Nothing was changed.`);
+        throw new ServiceUnavailableException({ code: 'BACKUP_INSERT_TABLE_E047', message: `The restored row count for ${spec.model} did not match the database result. Nothing was changed.`, params: { table: spec.model } });
       }
       inserted += result.count;
     }
