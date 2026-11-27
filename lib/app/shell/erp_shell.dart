@@ -605,6 +605,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),
+      _NavItem(
+        AppRoutes.serials,
+        Icons.qr_code_2_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'الأرقام التسلسلية والضمان' : 'Serial numbers and warranty',
+        permissions: const ['serials.read'],
+        group: _NavGroup.inventory,
+      ),
       // Who may enter which shelf. Reading it and changing it are two grants,
       // and the entry needs only the first: the screen says which is missing
       // rather than hiding itself from someone allowed to look.
