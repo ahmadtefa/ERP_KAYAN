@@ -261,8 +261,8 @@ export class PurchaseInvoicesService {
       where: { id: dto.supplierId, companyId, deletedAt: null },
       select: { id: true, isActive: true },
     });
-    if (!supplier) throw new BadRequestException('The supplier does not exist');
-    if (!supplier.isActive) throw new BadRequestException('The supplier is inactive');
+    if (!supplier) throw new BadRequestException({ code: 'SUPPLIER_MISSING', message: 'The supplier does not exist' });
+    if (!supplier.isActive) throw new BadRequestException({ code: 'SUPPLIER_INACTIVE', message: 'The supplier is inactive' });
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
@@ -383,8 +383,8 @@ export class PurchaseInvoicesService {
       where: { id: dto.supplierId, companyId, deletedAt: null },
       select: { id: true, isActive: true },
     });
-    if (!supplier) throw new BadRequestException('The supplier does not exist');
-    if (!supplier.isActive) throw new BadRequestException('The supplier is inactive');
+    if (!supplier) throw new BadRequestException({ code: 'SUPPLIER_MISSING', message: 'The supplier does not exist' });
+    if (!supplier.isActive) throw new BadRequestException({ code: 'SUPPLIER_INACTIVE', message: 'The supplier is inactive' });
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;

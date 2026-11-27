@@ -190,7 +190,7 @@ export class PostingService {
       select: { id: true, code: true, isPostable: true, isActive: true },
     });
     if (accounts.length !== accountIds.length) {
-      throw new BadRequestException('One or more accounts do not exist');
+      throw new BadRequestException({ code: 'ACCOUNT_MISSING', message: 'One or more accounts do not exist' });
     }
     const invalid = accounts.filter((a) => !a.isPostable || !a.isActive);
     if (invalid.length > 0) {
@@ -312,7 +312,7 @@ export class PostingService {
       throw new BadRequestException('The journal entry to reverse was not found');
     }
     if (original.status === JournalStatus.REVERSED) {
-      throw new BadRequestException('This journal entry has already been reversed');
+      throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This journal entry has already been reversed' });
     }
     if (original.status !== JournalStatus.POSTED) {
       throw new BadRequestException('Only a posted journal entry can be reversed');
@@ -346,7 +346,7 @@ export class PostingService {
       data: { status: JournalStatus.REVERSED },
     });
     if (claimed.count !== 1) {
-      throw new BadRequestException('This journal entry has already been reversed');
+      throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This journal entry has already been reversed' });
     }
 
     // A reversal is a posting like any other: it may not land in a closed

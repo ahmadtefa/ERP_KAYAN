@@ -196,7 +196,7 @@ export class CashVouchersService {
 
     const amount = this.positive(dto.amount, 'amount');
     const cashAccount = await this.requireCashAccount(companyId, dto.cashAccountId);
-    if (!cashAccount.isActive) throw new BadRequestException('That cash account is inactive');
+    if (!cashAccount.isActive) throw new BadRequestException({ code: 'CASH_ACCOUNT_INACTIVE', message: 'That cash account is inactive' });
 
     const date = this.date(dto.voucherDate, 'voucherDate');
     const party = await this.resolveParty(companyId, dto);
@@ -357,7 +357,7 @@ export class CashVouchersService {
       );
     }
     if (!voucher.cashAccount.isActive) {
-      throw new BadRequestException('That cash account is inactive');
+      throw new BadRequestException({ code: 'CASH_ACCOUNT_INACTIVE', message: 'That cash account is inactive' });
     }
 
     const accounts = await this.accounts.resolve(
@@ -389,7 +389,7 @@ export class CashVouchersService {
         }
         if (allocation.salesInvoiceId) {
           if (voucher.kind !== CashVoucherKind.RECEIPT) {
-            throw new BadRequestException('A sales invoice can only be settled by a receipt');
+            throw new BadRequestException({ code: 'SETTLE_SALES_NEEDS_RECEIPT', message: 'A sales invoice can only be settled by a receipt' });
           }
           const invoice = await tx.salesInvoice.findFirst({
             where: { id: allocation.salesInvoiceId, companyId, deletedAt: null },
@@ -433,7 +433,7 @@ export class CashVouchersService {
         }
         if (allocation.purchaseInvoiceId) {
           if (voucher.kind !== CashVoucherKind.PAYMENT) {
-            throw new BadRequestException('A purchase invoice can only be settled by a payment');
+            throw new BadRequestException({ code: 'SETTLE_PURCHASE_NEEDS_PAYMENT', message: 'A purchase invoice can only be settled by a payment' });
           }
           const invoice = await tx.purchaseInvoice.findFirst({
             where: { id: allocation.purchaseInvoiceId, companyId, deletedAt: null },
@@ -637,7 +637,7 @@ export class CashVouchersService {
     });
     if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
     if (voucher.status !== InvoiceStatus.POSTED || !voucher.journalEntryId) {
-      throw new BadRequestException('Only a posted voucher can be reversed');
+      throw new BadRequestException({ code: 'ONLY_POSTED_REVERSE', message: 'Only a posted voucher can be reversed' });
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
@@ -646,7 +646,7 @@ export class CashVouchersService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This voucher has just been changed by someone else.');
+        throw new BadRequestException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'This voucher has just been changed by someone else.' });
       }
 
       for (const allocation of voucher.allocations) {
@@ -804,10 +804,10 @@ export class CashVouchersService {
         throw new BadRequestException('Each allocation must name exactly one invoice');
       }
       if (sales && kind !== CashVoucherKind.RECEIPT) {
-        throw new BadRequestException('A sales invoice can only be settled by a receipt');
+        throw new BadRequestException({ code: 'SETTLE_SALES_NEEDS_RECEIPT', message: 'A sales invoice can only be settled by a receipt' });
       }
       if (purchase && kind !== CashVoucherKind.PAYMENT) {
-        throw new BadRequestException('A purchase invoice can only be settled by a payment');
+        throw new BadRequestException({ code: 'SETTLE_PURCHASE_NEEDS_PAYMENT', message: 'A purchase invoice can only be settled by a payment' });
       }
     }
 
@@ -955,7 +955,7 @@ export class CashVouchersService {
       where: { id, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, isActive: true, code: true },
     });
-    if (!cashAccount) throw new BadRequestException('The cash account does not exist');
+    if (!cashAccount) throw new BadRequestException({ code: 'CASH_ACCOUNT_MISSING', message: 'The cash account does not exist' });
     return cashAccount;
   }
 
@@ -968,23 +968,23 @@ export class CashVouchersService {
         where: { id: dto.customerId, companyId, deletedAt: null },
         select: { id: true, isActive: true },
       });
-      if (!customer) throw new BadRequestException('The customer does not exist');
-      if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+      if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
+      if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
     }
     if (dto.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: dto.supplierId, companyId, deletedAt: null },
         select: { id: true, isActive: true },
       });
-      if (!supplier) throw new BadRequestException('The supplier does not exist');
-      if (!supplier.isActive) throw new BadRequestException('The supplier is inactive');
+      if (!supplier) throw new BadRequestException({ code: 'SUPPLIER_MISSING', message: 'The supplier does not exist' });
+      if (!supplier.isActive) throw new BadRequestException({ code: 'SUPPLIER_INACTIVE', message: 'The supplier is inactive' });
     }
     if (dto.counterAccountId) {
       const account = await this.prisma.account.findFirst({
         where: { id: dto.counterAccountId, companyId, deletedAt: null },
         select: { id: true, code: true, isPostable: true, isActive: true },
       });
-      if (!account) throw new BadRequestException('The counter account does not exist');
+      if (!account) throw new BadRequestException({ code: 'ACCOUNT_MISSING', message: 'The counter account does not exist' });
       if (!account.isPostable) {
         throw new BadRequestException(`Account ${account.code} is a grouping account`);
       }

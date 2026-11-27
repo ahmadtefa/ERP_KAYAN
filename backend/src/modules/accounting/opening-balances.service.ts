@@ -154,7 +154,7 @@ export class OpeningBalancesService {
     }
     const targetBranch = dto.branchId ?? branchId;
     if (!targetBranch) {
-      throw new BadRequestException('Select the branch these opening figures belong to');
+      throw new BadRequestException({ code: 'BRANCH_REQUIRED', message: 'Select the branch these opening figures belong to' });
     }
     const asOfDate = this.date(dto.asOfDate);
     const minimum = dto.autoBalanceToEquity === true ? 1 : 2;
@@ -168,7 +168,7 @@ export class OpeningBalancesService {
         select: { id: true },
       });
       if (!branch) {
-        throw new BadRequestException('The branch does not exist in this company');
+        throw new BadRequestException({ code: 'BRANCH_MISSING', message: 'The branch does not exist in this company' });
       }
 
       // Resolve every reference and calculate the document inside the same
@@ -329,7 +329,7 @@ export class OpeningBalancesService {
   }
 
   async removeDraft(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
-    if (branchId === null) throw new BadRequestException('Select a branch before deleting a draft');
+    if (branchId === null) throw new BadRequestException({ code: 'BRANCH_REQUIRED', message: 'Select a branch before deleting a draft' });
     await this.prisma.$transaction(async (tx) => {
       const removed = await tx.openingBalance.updateMany({
         where: {
@@ -353,7 +353,7 @@ export class OpeningBalancesService {
    * stocked item line, all in the same transaction.
    */
   async post(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
-    if (branchId === null) throw new BadRequestException('Select a branch first');
+    if (branchId === null) throw new BadRequestException({ code: 'BRANCH_REQUIRED', message: 'Select a branch first' });
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -583,7 +583,7 @@ export class OpeningBalancesService {
 
   /** Reverses a posted opening balance: a mirror entry, plus stock back out. */
   async reverse(companyId: string, userId: string, id: string, branchId?: string | null, mayReadCost = true) {
-    if (branchId === null) throw new BadRequestException('Select a branch first');
+    if (branchId === null) throw new BadRequestException({ code: 'BRANCH_REQUIRED', message: 'Select a branch first' });
     const document = await this.prisma.openingBalance.findFirst({
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },

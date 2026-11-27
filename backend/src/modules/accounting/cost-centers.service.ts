@@ -337,7 +337,7 @@ export class CostCentersService {
     const startDate = parsedStart === undefined ? existing?.startDate ?? null : parsedStart;
     const endDate = parsedEnd === undefined ? existing?.endDate ?? null : parsedEnd;
     if (startDate && endDate && endDate < startDate) {
-      throw new BadRequestException('endDate cannot be before startDate');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'endDate cannot be before startDate' });
     }
     return { startDate, endDate };
   }

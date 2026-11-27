@@ -201,7 +201,7 @@ export class CashTransfersService {
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This transfer has just been posted by someone else.');
+        throw new BadRequestException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'This transfer has just been posted by someone else.' });
       }
 
       const entry = await this.posting.post(tx, {
@@ -260,7 +260,7 @@ export class CashTransfersService {
     });
     if (!transfer) throw new NotFoundException({ code: 'TRANSFER_NOT_FOUND', message: 'Transfer not found' });
     if (transfer.status !== InvoiceStatus.POSTED || !transfer.journalEntryId) {
-      throw new BadRequestException('Only a posted transfer can be reversed');
+      throw new BadRequestException({ code: 'ONLY_POSTED_REVERSE', message: 'Only a posted transfer can be reversed' });
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
@@ -269,7 +269,7 @@ export class CashTransfersService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This transfer has just been changed by someone else.');
+        throw new BadRequestException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'This transfer has just been changed by someone else.' });
       }
       return this.posting.reverse(
         tx,

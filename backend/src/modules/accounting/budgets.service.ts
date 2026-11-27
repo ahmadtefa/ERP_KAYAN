@@ -129,7 +129,7 @@ export class BudgetsService {
     const periodStart = this.date(dto.periodStart, 'periodStart');
     const periodEnd = this.date(dto.periodEnd, 'periodEnd');
     if (periodEnd < periodStart) {
-      throw new BadRequestException('periodEnd must not be before periodStart');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'periodEnd must not be before periodStart' });
     }
     const amount = this.money(dto.amount);
     const currency = this.currency(dto.currency, company.currency);
@@ -225,7 +225,7 @@ export class BudgetsService {
       data.periodEnd = next;
     }
     if (periodEnd < periodStart) {
-      throw new BadRequestException('periodEnd must not be before periodStart');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'periodEnd must not be before periodStart' });
     }
     if (dto.amount !== undefined) data.amount = this.money(dto.amount);
     if (dto.currency !== undefined) {
@@ -313,7 +313,7 @@ export class BudgetsService {
       ? this.date(query.to, 'to')
       : new Date(Date.UTC(new Date().getUTCFullYear(), 11, 31));
     if (to < from) {
-      throw new BadRequestException('to must not be before from');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'to must not be before from' });
     }
 
     const type = query.type ? String(query.type).toUpperCase() : null;

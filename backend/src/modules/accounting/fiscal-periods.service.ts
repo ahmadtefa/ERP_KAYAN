@@ -70,7 +70,7 @@ export class FiscalPeriodsService {
     const startDate = this.date(dto.startDate, 'startDate');
     const endDate = this.date(dto.endDate, 'endDate');
     if (endDate < startDate) {
-      throw new BadRequestException('The end date must be after the start date');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'The end date must be after the start date' });
     }
     return this.prisma.$transaction(async (tx) => {
       await this.lockRanges(tx, companyId);
@@ -101,7 +101,7 @@ export class FiscalPeriodsService {
       const startDate = dto.startDate ? this.date(dto.startDate, 'startDate') : period.startDate;
       const endDate = dto.endDate ? this.date(dto.endDate, 'endDate') : period.endDate;
       if (endDate < startDate) {
-        throw new BadRequestException('The end date must be after the start date');
+        throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'The end date must be after the start date' });
       }
       await this.assertNoOverlap(tx, companyId, startDate, endDate, id);
       await this.assertBoundaryPreservesHistory(tx, companyId, period, startDate, endDate);
@@ -178,7 +178,7 @@ export class FiscalPeriodsService {
       const period = await tx.fiscalPeriod.findFirst({ where: { id, companyId } });
       if (!period) throw new NotFoundException({ code: 'FISCAL_PERIOD_NOT_FOUND', message: 'Fiscal period not found' });
       if (period.status === PeriodStatus.CLOSED) {
-        throw new BadRequestException('This period is already closed');
+        throw new BadRequestException({ code: 'PERIOD_CLOSED', message: 'This period is already closed' });
       }
       // Legacy data can contain overlapping periods from earlier releases.
       // The DB posting trigger locks only one matching row, so an ambiguous

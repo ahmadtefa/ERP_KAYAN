@@ -342,8 +342,8 @@ export class ChartOfAccountsService {
         tx.journalLine.count({where:{accountId:id}}),
         tx.account.count({where:{parentId:id,companyId,deletedAt:null}}),
       ]);
-      if (movements > 0) throw new BadRequestException('This account has journal movements and cannot be deleted. Deactivate it instead so the past stays readable.');
-      if (children > 0) throw new BadRequestException('This account has sub-accounts. Move or delete them first, or deactivate this account.');
+      if (movements > 0) throw new BadRequestException({ code: 'ACCOUNT_HAS_MOVEMENTS_DELETE', message: 'This account has journal movements and cannot be deleted. Deactivate it instead so the past stays readable.' });
+      if (children > 0) throw new BadRequestException({ code: 'ACCOUNT_HAS_CHILDREN', message: 'This account has sub-accounts. Move or delete them first, or deactivate this account.' });
       await tx.account.update({where:{id},data:{deletedAt:new Date(),updatedBy:userId}});
       await this.audit.recordRequired({companyId,userId,action:'DELETE',entity:'accounts',entityId:id,before:toResponse(account, await this.schemeOf(companyId, tx))},tx);
     });

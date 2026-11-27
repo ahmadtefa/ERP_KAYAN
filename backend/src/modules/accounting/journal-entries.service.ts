@@ -147,7 +147,7 @@ export class JournalEntriesService {
     });
 
     if (accounts.length !== accountIds.length) {
-      throw new BadRequestException('One or more accounts do not exist');
+      throw new BadRequestException({ code: 'ACCOUNT_MISSING', message: 'One or more accounts do not exist' });
     }
     const notPostable = accounts.filter((a) => !a.isPostable);
     if (notPostable.length > 0) {
@@ -600,7 +600,7 @@ export class JournalEntriesService {
     });
     if (!original) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (original.status !== JournalStatus.POSTED) {
-      throw new BadRequestException('Only posted entries can be reversed');
+      throw new BadRequestException({ code: 'ONLY_POSTED_REVERSE', message: 'Only posted entries can be reversed' });
     }
 
     const alreadyReversed = await this.prisma.journalEntry.findFirst({
@@ -608,7 +608,7 @@ export class JournalEntriesService {
       select: { id: true },
     });
     if (alreadyReversed) {
-      throw new BadRequestException('This entry has already been reversed');
+      throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This entry has already been reversed' });
     }
 
     // The mirror entry is dated today; if today falls inside a closed
@@ -661,7 +661,7 @@ export class JournalEntriesService {
         data: { status: JournalStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This entry has already been reversed');
+        throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This entry has already been reversed' });
       }
 
 

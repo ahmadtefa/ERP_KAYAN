@@ -259,6 +259,66 @@ const Map<String, List<String>> moduleRefusals = {
     'اعتمد مستخدم آخر هذا الإعدام قبل لحظات. حدّث الشاشة وراجع حالته. لم تتكرر الموافقة.',
     'Someone else approved this write-off a moment ago. Reload the screen and check its status. Your approval was not repeated.',
   ],
+  'PERIOD_CLOSED': [
+    'هذه الفترة المحاسبية مغلقة ولا تقبل قيودًا جديدة. اختر تاريخًا في فترة مفتوحة، أو اطلب من المسؤول إعادة فتح الفترة. لم يُسجَّل شيء.',
+    'This fiscal period is closed and takes no new entries. Choose a date in an open period, or ask an administrator to reopen it. Nothing was recorded.',
+  ],
+  'ALREADY_REVERSED': [
+    'هذا المستند عُكس من قبل، ولا يُعكس مرتين. افتح قيد العكس من دفتر اليومية إن أردت مراجعته. لم يتغير شيء.',
+    'This document was already reversed and cannot be reversed twice. Open the reversal entry in the journal to review it. Nothing changed.',
+  ],
+  'ONLY_POSTED_REVERSE': [
+    'لا يُعكس إلا المستند المرحّل. المسودة تُعدَّل أو تُحذف بدل عكسها. لم يتغير شيء.',
+    'Only a posted document can be reversed. Edit or delete a draft instead of reversing it. Nothing changed.',
+  ],
+  'CASH_ACCOUNT_MISSING': [
+    'حساب الصندوق أو البنك المختار غير موجود. اختره من القائمة أو أضفه من شاشة الحسابات النقدية. لم يُحفظ شيء.',
+    'The chosen cash or bank account does not exist. Pick it from the list or add it in the cash accounts screen. Nothing was saved.',
+  ],
+  'CASH_ACCOUNT_INACTIVE': [
+    'حساب الصندوق أو البنك المختار متوقف. فعّله من شاشة الحسابات النقدية أو اختر حسابًا آخر. لم يُحفظ شيء.',
+    'The chosen cash or bank account is inactive. Activate it in the cash accounts screen or choose another one. Nothing was saved.',
+  ],
+  'BRANCH_REQUIRED': [
+    'اختر الفرع أولًا ثم أعد المحاولة. لم يتغير شيء.',
+    'Choose a branch first and try again. Nothing changed.',
+  ],
+  'BRANCH_MISSING': [
+    'الفرع المختار غير موجود في هذه الشركة. اختر فرعًا من القائمة. لم يُحفظ شيء.',
+    'The chosen branch does not exist in this company. Pick a branch from the list. Nothing was saved.',
+  ],
+  'SUPPLIER_INACTIVE': [
+    'المورّد المختار متوقف. فعّله من شاشة الموردين أو اختر مورّدًا آخر. لم يُحفظ شيء.',
+    'The chosen supplier is inactive. Activate them in the Suppliers screen or choose another supplier. Nothing was saved.',
+  ],
+  'SUPPLIER_MISSING': [
+    'المورّد المختار غير موجود. اختره من القائمة أو أضفه أولًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The chosen supplier does not exist. Pick them from the list or add them first, then try again. Nothing was saved.',
+  ],
+  'ACCOUNT_HAS_MOVEMENTS_DELETE': [
+    'لا يُحذف حساب عليه حركات في الدفتر حتى تبقى السجلات السابقة مقروءة. عطّله بدل الحذف.',
+    'An account with ledger movements cannot be deleted, so past records stay readable. Deactivate it instead.',
+  ],
+  'ACCOUNT_HAS_CHILDREN': [
+    'لهذا الحساب حسابات فرعية. انقل الحسابات الفرعية أو احذفها أولًا، أو عطّل هذا الحساب بدل حذفه.',
+    'This account has sub-accounts. Move or delete them first, or deactivate this account instead of deleting it.',
+  ],
+  'SETTLE_SALES_NEEDS_RECEIPT': [
+    'فاتورة البيع تُسدَّد بسند قبض فقط. غيّر نوع السند إلى قبض ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A sales invoice is settled by a receipt only. Change the voucher type to receipt and try again. Nothing was saved.',
+  ],
+  'SETTLE_PURCHASE_NEEDS_PAYMENT': [
+    'فاتورة الشراء تُسدَّد بسند صرف فقط. غيّر نوع السند إلى صرف ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A purchase invoice is settled by a payment only. Change the voucher type to payment and try again. Nothing was saved.',
+  ],
+  'DATE_RANGE_REVERSED': [
+    'تاريخ النهاية قبل تاريخ البداية. صحّح التواريخ بحيث تأتي البداية أولًا ثم أعد المحاولة.',
+    'The end date is before the start date. Correct the dates so the start comes first, then try again.',
+  ],
+  'ACCOUNT_MISSING': [
+    'حساب واحد أو أكثر غير موجود في دليل الحسابات. اختر الحسابات من القائمة ثم أعد المحاولة. لم يُسجَّل شيء.',
+    'One or more accounts do not exist in the chart of accounts. Choose the accounts from the list and try again. Nothing was recorded.',
+  ],
 };
 
 /// Arabic names of the inputs these refusals point at, for the generic

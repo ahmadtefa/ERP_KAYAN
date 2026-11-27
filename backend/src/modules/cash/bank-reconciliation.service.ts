@@ -134,13 +134,13 @@ export class BankReconciliationService {
       where: { id: dto.cashAccountId, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, kind: true, code: true },
     });
-    if (!cashAccount) throw new BadRequestException('The cash account does not exist');
+    if (!cashAccount) throw new BadRequestException({ code: 'CASH_ACCOUNT_MISSING', message: 'The cash account does not exist' });
 
     const statementDate = this.date(dto.statementDate, 'statementDate');
     const periodFrom = this.date(dto.periodFrom, 'periodFrom');
     const periodTo = this.date(dto.periodTo, 'periodTo');
     if (periodTo < periodFrom) {
-      throw new BadRequestException('periodTo must not be before periodFrom');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: 'periodTo must not be before periodFrom' });
     }
 
     let statementBalance: Prisma.Decimal;

@@ -94,7 +94,7 @@ export class CashAccountsService {
       where: { id: accountId, companyId, deletedAt: null },
       select: { id: true, code: true, isPostable: true, isActive: true },
     });
-    if (!account) throw new BadRequestException('The ledger account does not exist');
+    if (!account) throw new BadRequestException({ code: 'ACCOUNT_MISSING', message: 'The ledger account does not exist' });
     if (!account.isPostable) {
       throw new BadRequestException(
         `Account ${account.code} is a grouping account and cannot be a cash or bank account`,

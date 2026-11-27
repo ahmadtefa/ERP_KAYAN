@@ -82,7 +82,7 @@ export class YearEndCloseService {
       `);
       const period = await this.requirePeriod(companyId, periodId, tx);
       if (period.status === PeriodStatus.CLOSED) {
-        throw new BadRequestException('This period is already closed');
+        throw new BadRequestException({ code: 'PERIOD_CLOSED', message: 'This period is already closed' });
       }
       // Legacy data can contain overlapping periods from earlier releases.
       // The DB posting trigger locks only one matching row, so an ambiguous
