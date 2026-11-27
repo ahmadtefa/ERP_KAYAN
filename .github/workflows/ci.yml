@@ -484,6 +484,117 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
+  k6-smoke:
+    name: Load, stress and spike scripts against the real API (small synthetic run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_k6
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_k6"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_k6?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 3600
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      # The in-memory rate limit would measure the limiter, not the app, when
+      # every virtual user comes from one address. Test server only.
+      RATE_LIMIT_ENABLED: "false"
+      PORT: 3000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Repair the driver adapter's PostgreSQL type map
+        run: node scripts/patch-adapter-pg-name-type.mjs
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Apply migrations to a freshly created database
+        run: node scripts/apply-migrations.mjs
+      - name: Seed an isolated company and administrator
+        run: npx ts-node prisma/seed.ts
+      - name: Build API
+        run: npm run build
+      - name: Install k6 (official release, checksum checked)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/k6.tgz https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz
+          echo "c7f03434854f837b6790ee81572e4b0f955241974c79a43cbb9f8d0fef069589  /tmp/k6.tgz" | sha256sum -c -
+          tar -xzf /tmp/k6.tgz -C /tmp
+          sudo install /tmp/k6-v0.54.0-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+      - name: Start the API
+        run: |
+          npm run start:prod > /tmp/kayan-k6-api.log 2>&1 &
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-k6-health.json 2>/dev/null; then
+              node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-k6-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)' && break
+            fi
+            sleep 2
+          done
+          cat /tmp/kayan-k6-health.json
+      - name: Create synthetic customers, items and draft invoices
+        working-directory: tools/k6
+        env:
+          BASE_URL: http://127.0.0.1:3000/api/v1
+          ADMIN_USERNAME: ci-admin
+          ADMIN_PASSWORD: CI-only-Admin-Password-12345
+          SEED: "1"
+          CUSTOMERS: "30"
+          ITEMS: "30"
+          INVOICES: "10"
+          DELAY_MS: "0"
+        run: |
+          node gen-data.mjs
+          test ! -s data/seed-failures.json || { echo "::error::The synthetic data was refused by the real API"; cat data/seed-failures.json; exit 1; }
+      - name: Load script (20 sessions, small)
+        working-directory: tools/k6
+        run: |
+          k6 run -e BASE_URL=http://127.0.0.1:3000/api/v1 -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=CI-only-Admin-Password-12345 -e VUS=20 -e RAMP=10s -e HOLD=40s --summary-export=/tmp/k6-load.json load.js
+      - name: Stress script (10 then 20 sessions, small)
+        working-directory: tools/k6
+        run: |
+          k6 run -e BASE_URL=http://127.0.0.1:3000/api/v1 -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=CI-only-Admin-Password-12345 -e STEPS=10,20 -e STEP_DURATION=20s --summary-export=/tmp/k6-stress.json stress.js
+      - name: Spike script (5 to 30 sessions, small)
+        working-directory: tools/k6
+        run: |
+          k6 run -e BASE_URL=http://127.0.0.1:3000/api/v1 -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=CI-only-Admin-Password-12345 -e BASELINE_VUS=5 -e SPIKE_VUS=30 --summary-export=/tmp/k6-spike.json spike.js
+      - name: API log when a step failed
+        if: failure()
+        run: tail -n 200 /tmp/kayan-k6-api.log
+      - name: Record the k6 summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summaries
+          path: /tmp/k6-*.json
+          if-no-files-found: ignore
+
   regressions:
     name: Regression scenario (reported issues 1-9)
     runs-on: ubuntu-latest
