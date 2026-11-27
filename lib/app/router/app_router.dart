@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/cheques/presentation/cheques_screen.dart';
 import '../../features/withholding/presentation/withholding_screen.dart';
 import '../../features/commissions/presentation/commissions_screen.dart';
+import '../../features/installments/presentation/installments_screen.dart';
 import '../../features/serials/presentation/serials_screen.dart';
 import '../../features/accounting/presentation/screens/budgets_screen.dart';
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
@@ -80,6 +81,7 @@ class AppRoutes {
   static const withholding = '/withholding';
   static const serials = '/inventory/serials';
   static const commissions = '/sales/commissions';
+  static const installments = '/sales/installments';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
@@ -283,6 +285,8 @@ final routerProvider = Provider<GoRouter>((ref) {
                                 ? ItemThresholdsScreen()
                                 : route.path == AppRoutes.stockTakes
                                   ? StockTakesScreen()
+                                  : route.path == AppRoutes.installments
+                                    ? InstallmentsScreen()
                                   : route.path == AppRoutes.commissions
                                     ? CommissionsScreen()
                                   : route.path == AppRoutes.serials
@@ -310,7 +314,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 const _guardedShellPaths = <String>{
-  AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.cheques, AppRoutes.withholding, AppRoutes.serials, AppRoutes.commissions, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
+  AppRoutes.administration, AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.cheques, AppRoutes.withholding, AppRoutes.serials, AppRoutes.commissions, AppRoutes.installments, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
   AppRoutes.warehouses, AppRoutes.openingBalances,
   AppRoutes.batches,
@@ -345,6 +349,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.withholding, child: WithholdingScreen()),
   (path: AppRoutes.serials, child: SerialsScreen()),
   (path: AppRoutes.commissions, child: CommissionsScreen()),
+  (path: AppRoutes.installments, child: InstallmentsScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
   (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),
