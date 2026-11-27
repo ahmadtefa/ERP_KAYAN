@@ -64,7 +64,7 @@ class _Api extends ApiClient {
               'createdAt': '2026-11-27T${(10 - i).toString().padLeft(2, '0')}:${(10 + i * 7).toString().padLeft(2, '0')}:00Z',
               'action': acts[i],
               'entity': ents[i],
-              'entityId': '3f9a1c0${i}-aaaa-bbbb-cccc-000000000000',
+              'entityId': '3f9a1c0$i-aaaa-bbbb-cccc-000000000000',
               'username': names[i % 4],
               'ipAddress': '192.168.1.${20 + i}',
               'before': null,
