@@ -1,0 +1,93 @@
+/// Names of the record kinds a backup counts, `[Arabic, English]`.
+///
+/// The server counts by internal table name; people read these as chips on the
+/// backup screen, so each name is written out once here in both languages.
+const Map<String, List<String>> backupRecordLabels = {
+  'branch': ['الفروع', 'branches'],
+  'role': ['الأدوار', 'roles'],
+  'rolePermission': ['صلاحيات الأدوار', 'role permissions'],
+  'user': ['المستخدمون', 'users'],
+  'userPermission': ['صلاحيات المستخدمين', 'user permissions'],
+  'userRole': ['أدوار المستخدمين', 'user roles'],
+  'userBranch': ['فروع المستخدمين', 'user branches'],
+  'userProfilePhoto': ['صور المستخدمين', 'user photos'],
+  'fiscalPeriod': ['الفترات المالية', 'fiscal periods'],
+  'account': ['الحسابات', 'accounts'],
+  'costCenter': ['مراكز التكلفة', 'cost centres'],
+  'notificationSetting': ['إعدادات الإشعارات', 'notification settings'],
+  'approvalPolicy': ['سياسات الاعتماد', 'approval policies'],
+  'approvalLevel': ['مستويات الاعتماد', 'approval levels'],
+  'approvalDecision': ['قرارات الاعتماد', 'approval decisions'],
+  'budget': ['الموازنات', 'budgets'],
+  'companySetting': ['إعدادات الشركة', 'company settings'],
+  'printPriceSetting': ['إعدادات أسعار الطباعة', 'print price settings'],
+  'quotationTermTemplate': ['قوالب شروط العروض', 'quotation term templates'],
+  'quotationColumnTemplate': ['قوالب أعمدة العروض', 'quotation column templates'],
+  'priceList': ['قوائم الأسعار', 'price lists'],
+  'itemCategory': ['تصنيفات الأصناف', 'item categories'],
+  'customer': ['العملاء', 'customers'],
+  'supplier': ['الموردون', 'suppliers'],
+  'item': ['الأصناف', 'items'],
+  'itemImage': ['صور الأصناف', 'item images'],
+  'itemUnit': ['وحدات الأصناف', 'item units'],
+  'warehouse': ['المخازن', 'warehouses'],
+  'storageLocation': ['مواقع التخزين', 'storage locations'],
+  'itemWarehouseSetting': ['إعدادات الأصناف في المخازن', 'item warehouse settings'],
+  'itemBatch': ['الدفعات', 'lots'],
+  'warehouseStockBalance': ['أرصدة المخازن', 'warehouse balances'],
+  'itemCostHistory': ['سجل تكلفة الأصناف', 'item cost history'],
+  'userWarehouseAccess': ['صلاحيات المخازن للمستخدمين', 'user warehouse access'],
+  'stockTakeSession': ['جلسات الجرد', 'stock counts'],
+  'stockTakeLine': ['بنود الجرد', 'stock count lines'],
+  'notification': ['الإشعارات', 'notifications'],
+  'priceListItem': ['أسعار الأصناف', 'price list items'],
+  'stockBalance': ['أرصدة المخزون', 'stock balances'],
+  'stockMovement': ['حركات المخزون', 'stock movements'],
+  'journalEntry': ['قيود اليومية', 'journal entries'],
+  'journalLine': ['بنود القيود', 'journal lines'],
+  'journalLineAllocation': ['توزيعات بنود القيود', 'journal line allocations'],
+  'salesOrder': ['أوامر البيع', 'sales orders'],
+  'salesOrderLine': ['بنود أوامر البيع', 'sales order lines'],
+  'orderCreationRequest': ['طلبات إنشاء الأوامر', 'order creation requests'],
+  'purchaseOrder': ['أوامر الشراء', 'purchase orders'],
+  'purchaseOrderLine': ['بنود أوامر الشراء', 'purchase order lines'],
+  'salesInvoice': ['فواتير المبيعات', 'sales invoices'],
+  'salesInvoiceLine': ['بنود فواتير المبيعات', 'sales invoice lines'],
+  'purchaseInvoice': ['فواتير المشتريات', 'purchase invoices'],
+  'purchaseInvoiceLine': ['بنود فواتير المشتريات', 'purchase invoice lines'],
+  'stockTransfer': ['تحويلات المخزون', 'stock transfers'],
+  'stockTransferLine': ['بنود تحويلات المخزون', 'stock transfer lines'],
+  'stockTransferAction': ['إجراءات تحويلات المخزون', 'stock transfer actions'],
+  'stockDocument': ['مستندات المخزون', 'stock documents'],
+  'stockDocumentLine': ['بنود مستندات المخزون', 'stock document lines'],
+  'stockDocumentCreationRequest': ['طلبات إنشاء مستندات المخزون', 'stock document creation requests'],
+  'quotation': ['عروض الأسعار', 'quotations'],
+  'quotationTable': ['جداول عروض الأسعار', 'quotation tables'],
+  'quotationLine': ['بنود عروض الأسعار', 'quotation lines'],
+  'quotationEvent': ['أحداث عروض الأسعار', 'quotation events'],
+  'openingBalance': ['الأرصدة الافتتاحية', 'opening balances'],
+  'openingBalanceLine': ['بنود الأرصدة الافتتاحية', 'opening balance lines'],
+  'cashAccount': ['حسابات النقدية', 'cash accounts'],
+  'bankReconciliation': ['تسويات البنوك', 'bank reconciliations'],
+  'cashVoucher': ['سندات النقدية', 'cash vouchers'],
+  'cashTransfer': ['تحويلات النقدية', 'cash transfers'],
+  'cashVoucherAllocation': ['توزيعات سندات النقدية', 'cash voucher allocations'],
+  'fixedAsset': ['الأصول الثابتة', 'fixed assets'],
+  'depreciationRun': ['عمليات الإهلاك', 'depreciation runs'],
+  'assetDepreciation': ['إهلاك الأصول', 'asset depreciation'],
+  'documentSequence': ['تسلسل المستندات', 'document sequences'],
+  'auditLog': ['سجل التدقيق', 'audit trail'],
+};
+
+/// The name of one counted record kind. An unknown table name falls back to its
+/// own words split on capitals, so a new table is never shown blank.
+String backupRecordLabel(String key, {required bool arabic}) {
+  final known = backupRecordLabels[key];
+  if (known != null) return arabic ? known[0] : known[1];
+  return key
+      .replaceAllMapped(
+        RegExp(r'([A-Z])'),
+        (match) => ' ${match.group(1)!.toLowerCase()}',
+      )
+      .trim();
+}

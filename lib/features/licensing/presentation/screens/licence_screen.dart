@@ -234,7 +234,7 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    final dateFormat = MaterialLocalizations.of(context).formatMediumDate;
+    final dateFormat = MaterialLocalizations.of(context).formatFullDate;
 
     final (label, colour) = switch (status.state) {
       'ACTIVE' => (l10n.licenceStateActive, theme.colorScheme.primary),

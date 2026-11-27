@@ -9,6 +9,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../backup_record_labels.dart';
 import '../providers/data_providers.dart';
 import '../widgets/full_backup_section.dart';
 
@@ -331,7 +332,7 @@ class _TakingCopy extends StatelessWidget {
                       children: [
                         for (final entry in contains.entries)
                           Chip(
-                            label: Text('${_label(entry.key.toString())}: ${entry.value}'),
+                            label: Text('${backupRecordLabel(entry.key.toString(), arabic: Localizations.localeOf(context).languageCode == 'ar')}: ${entry.value}'),
                             visualDensity: VisualDensity.compact,
                           ),
                       ],
@@ -359,9 +360,6 @@ class _TakingCopy extends StatelessWidget {
 
   /// The table names come from the database. A handful have a label the user
   /// recognises; the rest are shown as they are rather than hidden.
-  String _label(String name) => name
-      .replaceAllMapped(RegExp(r'([A-Z])'), (match) => ' ${match.group(1)!.toLowerCase()}')
-      .trim();
 }
 
 class _DemoBackupSection extends StatelessWidget {
@@ -572,14 +570,11 @@ class _Counts extends StatelessWidget {
       children: [
         for (final entry in (map as Map).entries)
           Chip(
-            label: Text('${_label('${entry.key}')}: ${entry.value}'),
+            label: Text('${backupRecordLabel('${entry.key}', arabic: Localizations.localeOf(context).languageCode == 'ar')}: ${entry.value}'),
             visualDensity: VisualDensity.compact,
           ),
       ],
     );
   }
 
-  String _label(String name) => name
-      .replaceAllMapped(RegExp(r'([A-Z])'), (match) => ' ${match.group(1)!.toLowerCase()}')
-      .trim();
 }
