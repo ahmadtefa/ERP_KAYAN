@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../widget/test_harness.dart';
 
 void main() {
-  group('only the six approved methods are offered, all twelve keep their labels', () {
+  group('twelve methods are offered, in both languages', () {
     test('every method has a label in Arabic and English', () {
       expect(termMethodCodes, hasLength(12));
       for (final code in termMethodCodes) {
@@ -14,22 +14,9 @@ void main() {
         expect(termMethodLabel(code, isArabic: false), isNot(code));
       }
     });
-    test('the method select lists the six approved methods and no others', () {
+    test('the method select lists all twelve', () {
       final method = customerTermFields(isArabic: false).firstWhere((f) => f.key == 'paymentTermMethod');
-      expect(method.options.map((o) => o.value).toList(), approvedTermMethodCodes);
-      expect(approvedTermMethodCodes, hasLength(6));
-      for (final hidden in ['COD_ADVANCE', 'INSTALLMENTS', 'DAY_WINDOWS', 'MILESTONES', 'LATE_PENALTY', 'WEEKLY_CUTOFF']) {
-        expect(method.options.map((o) => o.value), isNot(contains(hidden)));
-      }
-    });
-    test('a customer who already has a hidden method keeps it selectable, and nothing else is added', () {
-      final method = customerTermFields(isArabic: false, storedMethod: 'INSTALLMENTS').firstWhere((f) => f.key == 'paymentTermMethod');
-      expect(method.options.map((o) => o.value).toList(), [...approvedTermMethodCodes, 'INSTALLMENTS']);
-      expect(termInitialFrom({'paymentTermMethod': 'INSTALLMENTS'})['paymentTermMethod'], 'INSTALLMENTS');
-    });
-    test('a remembered default that is not approved is not offered to a new customer', () {
-      expect(termInitialFrom(null, defaultMethod: 'MILESTONES')['paymentTermMethod'], 'FROM_INVOICE_DATE');
-      expect(termInitialFrom(null, defaultMethod: 'FROM_MONTH_END')['paymentTermMethod'], 'FROM_MONTH_END');
+      expect(method.options.map((o) => o.value).toList(), termMethodCodes);
     });
   });
 

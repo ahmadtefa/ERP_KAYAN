@@ -118,7 +118,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           kind: FieldKind.decimal,
           helper: l10n.creditLimitNote,
         ),
-      if (_isCustomer) ...customerTermFields(isArabic: isArabic, storedMethod: existing?['paymentTermMethod']?.toString()),
+      if (_isCustomer) ...customerTermFields(isArabic: isArabic),
       FieldSpec(
         'notes',
         l10n.description,
