@@ -425,6 +425,8 @@ const Map<String, List<String>> moduleRefusals = {
 /// Arabic names of the inputs these refusals point at, for the generic
 /// "check this field" sentence.
 const Map<String, String> moduleFieldLabelsAr = {
+  'discountPercent': 'نسبة الخصم',
+  'discountAmount': 'مبلغ الخصم',
   'serials': 'الأرقام التسلسلية',
   'serial': 'الرقم التسلسلي',
   'warrantyMonths': 'مدة الضمان',

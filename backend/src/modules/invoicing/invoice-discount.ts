@@ -110,8 +110,8 @@ function parseNonNegative(value: string, field: string, scale: number): Prisma.D
   try {
     result = new Prisma.Decimal(value).toDecimalPlaces(scale);
   } catch {
-    throw new BadRequestException(`${field} is not a valid number`);
+    throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${field} is not a valid number`, field });
   }
-  if (result.isNegative()) throw new BadRequestException(`${field} cannot be negative`);
+  if (result.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
   return result;
 }
