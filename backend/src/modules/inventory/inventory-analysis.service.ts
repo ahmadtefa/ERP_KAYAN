@@ -100,14 +100,14 @@ export class InventoryAnalysisService {
       case 'audit-trail':
         return this.auditTrail(companyId, filter);
       default:
-        throw new BadRequestException(`Unknown report: ${slug}`);
+        throw new BadRequestException({ code: 'REPORT_UNKNOWN', message: `Unknown report: ${slug}` });
     }
   }
 
   // ────────────────────────────────────────────────────────────── readings
 
   private async itemCard(companyId: string, filter: ReportFilter, scope: WarehouseScope) {
-    if (!filter.itemId) throw new BadRequestException('The item card needs an item.');
+    if (!filter.itemId) throw new BadRequestException({ code: 'ITEM_CARD_NEEDS_ITEM', message: 'The item card needs an item.' });
     const from = this.date(filter.from) ?? new Date('2000-01-01T00:00:00.000Z');
     const to = this.date(filter.to) ?? new Date();
     const rows = await this.prisma.stockMovement.findMany({

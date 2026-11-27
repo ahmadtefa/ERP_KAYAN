@@ -163,7 +163,7 @@ export class ItemsService {
     let barcode = String(requested ?? '').trim();
     if (barcode) {
       if (barcode.length > 60) {
-        throw new BadRequestException('barcode cannot be longer than 60 characters');
+        throw new BadRequestException({ code: 'BARCODE_TOO_LONG', message: 'barcode cannot be longer than 60 characters' });
       }
       await this.assertBarcodeFree(companyId, barcode, itemId);
     } else {
@@ -174,9 +174,7 @@ export class ItemsService {
         if (!taken) barcode = candidate;
       }
       if (!barcode) {
-        throw new ConflictException(
-          'Could not generate a free internal barcode; try again or enter one by hand',
-        );
+        throw new ConflictException({ code: 'BARCODE_GENERATE_FAILED', message: 'Could not generate a free internal barcode; try again or enter one by hand' });
       }
     }
 
@@ -802,10 +800,8 @@ export class ItemsService {
       new Prisma.Decimal(0),
     );
     if (!onHand.isZero()) {
-      throw new BadRequestException(
-        `This item still has ${onHand.toFixed(MONEY_SCALE)} in stock. ` +
-          'Move it out before deactivating the item.',
-      );
+      throw new BadRequestException({ code: 'ITEM_HAS_STOCK', message: `This item still has ${onHand.toFixed(MONEY_SCALE)} in stock. ` +
+          'Move it out before deactivating the item.' });
     }
 
     const updated = await this.prisma.item.update({
@@ -858,10 +854,10 @@ export class ItemsService {
     try {
       const d = new Prisma.Decimal(String(value)).toDecimalPlaces(RATE_SCALE);
       if (d.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
-      if (d.greaterThan(100)) throw new BadRequestException(`${field} cannot exceed 100`);
+      if (d.greaterThan(100)) throw new BadRequestException({ code: 'ITEM_PERCENT_RANGE', message: `${field} cannot exceed 100` });
       return d;
     } catch {
-      throw new BadRequestException(`${field} is not a valid percentage`);
+      throw new BadRequestException({ code: 'ITEM_PERCENT_RANGE', message: `${field} is not a valid percentage` });
     }
   }
 

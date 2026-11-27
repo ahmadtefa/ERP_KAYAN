@@ -55,9 +55,7 @@ export function resolveInventoryReportAccess(
     branchScope !== null &&
     !branchScope.includes(query.branchId)
   ) {
-    throw new ForbiddenException(
-      "This report is outside your assigned branches.",
-    );
+    throw new ForbiddenException({ code: 'REPORT_OUTSIDE_BRANCHES', message: "This report is outside your assigned branches." });
   }
 
   let warehouseIds: string[] | undefined;
@@ -66,9 +64,7 @@ export function resolveInventoryReportAccess(
     const allowed = grants.filter((grant) => grant.canView);
     const allowedIds = new Set(allowed.map((grant) => grant.warehouseId));
     if (requested.some((id) => !allowedIds.has(id))) {
-      throw new ForbiddenException(
-        "This report is outside your assigned warehouses.",
-      );
+      throw new ForbiddenException({ code: 'REPORT_OUTSIDE_WAREHOUSES', message: "This report is outside your assigned warehouses." });
     }
     warehouseIds = requested.length > 0 ? requested : [...allowedIds];
     // Do not let an explicit branch filter broaden a warehouse assignment.
@@ -77,9 +73,7 @@ export function resolveInventoryReportAccess(
       branchScope !== null &&
       !branchScope.includes(query.branchId)
     ) {
-      throw new ForbiddenException(
-        "This report is outside your assigned branches.",
-      );
+      throw new ForbiddenException({ code: 'REPORT_OUTSIDE_BRANCHES', message: "This report is outside your assigned branches." });
     }
     const selected = new Set(warehouseIds);
     costAllowed =
@@ -122,8 +116,6 @@ export function assertWarehouseReportSupported(
     (access.restricted && slug === "reconciliation") ||
     ((access.restricted || access.branchRestricted) && slug === "audit-trail")
   ) {
-    throw new ForbiddenException(
-      "This report cannot be safely narrowed to the caller’s assigned scope.",
-    );
+    throw new ForbiddenException({ code: 'REPORT_NOT_NARROWABLE', message: "This report cannot be safely narrowed to the caller’s assigned scope." });
   }
 }

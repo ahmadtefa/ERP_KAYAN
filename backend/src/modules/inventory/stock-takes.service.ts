@@ -194,7 +194,7 @@ export class StockTakesService {
 
   private createKey(raw: string): string {
     const key = String(raw).trim();
-    if (!key || key.length > 120) throw new BadRequestException('The request key must be 1 to 120 characters.');
+    if (!key || key.length > 120) throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'The request key must be 1 to 120 characters.' });
     return key;
   }
 
@@ -253,7 +253,7 @@ export class StockTakesService {
       const prior = await this.keyedSession(companyId, userId, key);
       if (prior) {
         if (prior.createRequestHash !== fingerprint) {
-          throw new ConflictException('This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.');
+          throw new ConflictException({ code: 'STOCKTAKE_KEY_REUSED', message: 'This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.' });
         }
         return this.findOne(companyId, prior.id, scope);
       }
@@ -264,13 +264,13 @@ export class StockTakesService {
     });
     if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
-      throw new BadRequestException('This warehouse belongs to a branch you cannot access.');
+      throw new BadRequestException({ code: 'STOCKTAKE_BRANCH_FORBIDDEN', message: 'This warehouse belongs to a branch you cannot access.' });
     }
 
     const partial = (dto.scope ?? 'FULL') === 'PARTIAL';
     const itemIds = (dto.itemIds ?? []).filter(Boolean);
     if (partial && itemIds.length === 0) {
-      throw new BadRequestException('A partial count must name the items it covers.');
+      throw new BadRequestException({ code: 'STOCKTAKE_PARTIAL_NEEDS_ITEMS', message: 'A partial count must name the items it covers.' });
     }
     if (partial) {
       const uniqueItemIds = [...new Set(itemIds)];
@@ -284,7 +284,7 @@ export class StockTakesService {
         select: { id: true },
       });
       if (eligible.length !== uniqueItemIds.length) {
-        throw new BadRequestException('A partial count can include only existing stock-tracked items.');
+        throw new BadRequestException({ code: 'STOCKTAKE_PARTIAL_ITEMS_INVALID', message: 'A partial count can include only existing stock-tracked items.' });
       }
     }
 
@@ -424,7 +424,7 @@ export class StockTakesService {
           },
           select: { id: true },
         });
-        if (!item) throw new BadRequestException('A counted item does not exist');
+        if (!item) throw new BadRequestException({ code: 'STOCKTAKE_ITEM_MISSING', message: 'A counted item does not exist' });
         await tx.stockTakeLine.create({
           data: { sessionId: session.id, itemId, systemQuantity: 0, unitCost: 0 },
         });
@@ -444,7 +444,7 @@ export class StockTakesService {
         const winner = await this.keyedSession(companyId, userId, key);
         if (winner) {
           if (winner.createRequestHash !== fingerprint) {
-            throw new ConflictException('This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.');
+            throw new ConflictException({ code: 'STOCKTAKE_KEY_REUSED', message: 'This request key was already used for a different count. Nothing was created. Review the earlier count or start a new one with a new request.' });
           }
           return this.findOne(companyId, winner.id, scope);
         }
@@ -594,12 +594,10 @@ export class StockTakesService {
     });
     if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status !== 'COUNTING') {
-      throw new BadRequestException(
-        `This session is no longer open for counting (status: ${session.status}).`,
-      );
+      throw new BadRequestException({ code: 'STOCKTAKE_NOT_OPEN', message: `This session is no longer open for counting (status: ${session.status}).` });
     }
     if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
-      throw new BadRequestException('Nothing to record.');
+      throw new BadRequestException({ code: 'STOCKTAKE_NOTHING_TO_RECORD', message: 'Nothing to record.' });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -636,7 +634,7 @@ export class StockTakesService {
           },
         });
         if (!line) {
-          throw new BadRequestException(`Line ${entry.lineId} does not belong to this session.`);
+          throw new BadRequestException({ code: 'STOCKTAKE_LINE_NOT_IN_SESSION', message: `Line ${entry.lineId} does not belong to this session.` });
         }
         // The shelf count is compared with the frozen system figure, and that
         // figure is in base units. A counter who scanned a carton typed "1",
@@ -687,9 +685,7 @@ export class StockTakesService {
           where: { sessionId: session.id, countedQuantity: null },
         });
         if (uncounted > 0) {
-          throw new BadRequestException(
-            `Cannot finish this count: ${uncounted} line(s) have not been counted.`,
-          );
+          throw new BadRequestException({ code: 'STOCKTAKE_UNCOUNTED_LINES', message: `Cannot finish this count: ${uncounted} line(s) have not been counted.` });
         }
         await tx.stockTakeSession.update({
           where: { id: session.id },
@@ -780,14 +776,10 @@ export class StockTakesService {
       );
     }
     if (session.status !== 'REVIEW') {
-      throw new BadRequestException(
-        `A count can be approved only after every line is counted and submitted for review (status: ${session.status}).`,
-      );
+      throw new BadRequestException({ code: 'STOCKTAKE_APPROVE_STAGE', message: `A count can be approved only after every line is counted and submitted for review (status: ${session.status}).` });
     }
     if (session.createdBy && session.createdBy === userId) {
-      throw new BadRequestException(
-        'The person who opened a count cannot approve its differences.',
-      );
+      throw new BadRequestException({ code: 'STOCKTAKE_OWN_APPROVE', message: 'The person who opened a count cannot approve its differences.' });
     }
 
     const claimed = await this.prisma.stockTakeSession.updateMany({
@@ -795,7 +787,7 @@ export class StockTakesService {
       data: { status: 'APPROVED', approvedAt: new Date(), approvedBy: userId },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('This count was approved by someone else a moment ago.');
+      throw new ConflictException({ code: 'STOCKTAKE_APPROVED_ELSEWHERE', message: 'This count was approved by someone else a moment ago.' });
     }
 
     await this.audit.record({
@@ -844,7 +836,7 @@ export class StockTakesService {
       data: { status: 'POSTED', postedAt: new Date(), postedBy: userId },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('This count was posted by someone else a moment ago.');
+      throw new ConflictException({ code: 'STOCKTAKE_POSTED_ELSEWHERE', message: 'This count was posted by someone else a moment ago.' });
     }
 
     try {
@@ -881,7 +873,7 @@ export class StockTakesService {
           (existing.stockTakeSessionId !== null && existing.stockTakeSessionId !== session.id) ||
           !sameLines
         ) {
-          throw new ConflictException('The existing stock-take document does not match this approved count.');
+          throw new ConflictException({ code: 'STOCKTAKE_DOC_MISMATCH', message: 'The existing stock-take document does not match this approved count.' });
         }
         document = { id: existing.id };
       } else {
@@ -952,7 +944,7 @@ export class StockTakesService {
     });
     if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status === 'POSTED') {
-      throw new BadRequestException('A posted count cannot be cancelled; reverse its document.');
+      throw new BadRequestException({ code: 'STOCKTAKE_POSTED_NO_CANCEL', message: 'A posted count cannot be cancelled; reverse its document.' });
     }
     const claimed = await this.prisma.stockTakeSession.updateMany({
       where: { id: session.id, companyId, status: { in: ['DRAFT', 'COUNTING', 'REVIEW', 'APPROVED'] } },
@@ -964,7 +956,7 @@ export class StockTakesService {
       },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('This count is no longer open.');
+      throw new ConflictException({ code: 'STOCKTAKE_NOT_OPEN', message: 'This count is no longer open.' });
     }
     await this.audit.record({
       companyId,

@@ -81,7 +81,7 @@ export class InventoryAnalysisController {
   ) {
     this.assertReportPermission(user, slug);
     if (!user.isSuperAdmin && !user.permissions.includes('inventory.export')) {
-      throw new ForbiddenException('Missing permission: inventory.export');
+      throw new ForbiddenException({ code: 'INVENTORY_EXPORT_PERMISSION', message: 'Missing permission: inventory.export' });
     }
     const report = await this.run(user, slug, query);
     const rows =
@@ -130,9 +130,7 @@ export class InventoryAnalysisController {
       limit: query.limit ? Number(query.limit as string) : undefined,
     };
     if (query.warehouseId && access.warehouseIds?.length === 0) {
-      throw new ForbiddenException(
-        "This report is outside your assigned warehouses.",
-      );
+      throw new ForbiddenException({ code: 'REPORT_OUTSIDE_WAREHOUSES', message: "This report is outside your assigned warehouses." });
     }
 
     const scope = access.branchId ? [access.branchId] : warehouseScopeOf(user);
@@ -169,7 +167,7 @@ export class InventoryAnalysisController {
 
   private assertReportPermission(user: AuthUser, slug: string): void {
     if (!this.hasReportPermission(user, slug)) {
-      throw new ForbiddenException(`Missing permission: inventory.reports.${slug}.read`);
+      throw new ForbiddenException({ code: 'INVENTORY_REPORT_PERMISSION', message: `Missing permission: inventory.reports.${slug}.read` });
     }
   }
 }

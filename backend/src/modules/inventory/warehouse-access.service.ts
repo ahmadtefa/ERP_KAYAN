@@ -155,12 +155,12 @@ export class WarehouseAccessService {
     const cleaned = grants ?? [];
     for (const grant of cleaned) {
       if (!grant.warehouseId) {
-        throw new BadRequestException('Every grant needs a warehouse.');
+        throw new BadRequestException({ code: 'WH_ACCESS_WAREHOUSE_REQUIRED', message: 'Every grant needs a warehouse.' });
       }
     }
     const ids = [...new Set(cleaned.map((grant) => grant.warehouseId))];
     if (ids.length !== cleaned.length) {
-      throw new BadRequestException('The same warehouse was listed twice.');
+      throw new BadRequestException({ code: 'WH_ACCESS_DUPLICATE', message: 'The same warehouse was listed twice.' });
     }
     if (ids.length > 0) {
       const known = await this.prisma.warehouse.findMany({
@@ -173,7 +173,7 @@ export class WarehouseAccessService {
         select: { id: true },
       });
       if (known.length !== ids.length) {
-        throw new BadRequestException('One of the warehouses is not available to you.');
+        throw new BadRequestException({ code: 'WH_ACCESS_NOT_AVAILABLE', message: 'One of the warehouses is not available to you.' });
       }
     }
 

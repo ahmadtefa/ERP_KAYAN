@@ -117,7 +117,7 @@ export class StockDocumentsController {
   ) {
     const voucherKind = String(body.voucherKind ?? '').toUpperCase();
     if (voucherKind !== 'RECEIPT' && voucherKind !== 'ISSUE') {
-      throw new BadRequestException('voucherKind must be RECEIPT or ISSUE');
+      throw new BadRequestException({ code: 'STOCKVOUCHER_KIND_UNKNOWN', message: 'voucherKind must be RECEIPT or ISSUE' });
     }
     return this.createDocument(user, { ...body, kind: 'ADJUSTMENT', voucherKind }, idempotencyKey);
   }
@@ -311,7 +311,7 @@ export class StockDocumentsController {
 
   private voucherVersion(body: Record<string, unknown> | undefined): number {
     const version = body?.expectedVersion;
-    if (!Number.isSafeInteger(version) || (version as number) < 0) throw new BadRequestException('expectedVersion is required');
+    if (!Number.isSafeInteger(version) || (version as number) < 0) throw new BadRequestException({ code: 'STOCKVOUCHER_VERSION_REQUIRED', message: 'expectedVersion is required' });
     return version as number;
   }
 

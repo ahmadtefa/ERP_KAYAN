@@ -191,16 +191,16 @@ export class InventoryReportsController {
     if (scope === null) return requested;
     if (requested) {
       if (!scope.includes(requested)) {
-        throw new ForbiddenException('This report is outside your assigned branches.');
+        throw new ForbiddenException({ code: 'REPORT_OUTSIDE_BRANCHES', message: 'This report is outside your assigned branches.' });
       }
       return requested;
     }
     if (scope.length === 1) return scope[0];
     if (user.branchId && scope.includes(user.branchId)) return user.branchId;
     if (scope.length === 0) {
-      throw new ForbiddenException('No branch is assigned to this account.');
+      throw new ForbiddenException({ code: 'REPORT_NO_BRANCH', message: 'No branch is assigned to this account.' });
     }
-    throw new BadRequestException('Select one of your assigned branches to run this report.');
+    throw new BadRequestException({ code: 'REPORT_SELECT_BRANCH', message: 'Select one of your assigned branches to run this report.' });
   }
 
   private mayManageBarcodes(user: AuthUser): boolean {

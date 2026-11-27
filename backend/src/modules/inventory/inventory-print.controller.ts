@@ -188,7 +188,7 @@ export class InventoryPrintController {
       const allowed = new Set(access.warehouseIds ?? []);
       const documentWarehouses = [document.fromWarehouseId, document.toWarehouseId].filter((value): value is string => Boolean(value));
       if (documentWarehouses.length === 0 || documentWarehouses.some((warehouseId) => !allowed.has(warehouseId))) {
-        throw new ForbiddenException('This stock document is outside your assigned warehouses.');
+        throw new ForbiddenException({ code: 'STOCKDOC_OUTSIDE_WAREHOUSES', message: 'This stock document is outside your assigned warehouses.' });
       }
     }
     const table = stockDocumentTable(document as never);
@@ -252,10 +252,10 @@ export class InventoryPrintController {
 
   private reportAccess(user: AuthUser, query: PriceQuery, slug: string): InventoryReportAccess {
     if (!user.isSuperAdmin && !user.permissions.includes(`inventory.reports.${slug}.read`)) {
-      throw new ForbiddenException(`Missing permission: inventory.reports.${slug}.read`);
+      throw new ForbiddenException({ code: 'INVENTORY_REPORT_PERMISSION', message: `Missing permission: inventory.reports.${slug}.read` });
     }
     if (!user.isSuperAdmin && !user.permissions.includes('inventory.reports.print')) {
-      throw new ForbiddenException('Missing permission: inventory.reports.print');
+      throw new ForbiddenException({ code: 'INVENTORY_PRINT_PERMISSION', message: 'Missing permission: inventory.reports.print' });
     }
     return resolveInventoryReportAccess(user, query);
   }
@@ -267,14 +267,14 @@ export class InventoryPrintController {
   private reportBranch(user: AuthUser, requested?: string): string | undefined {
     const scope = warehouseScopeOf(user);
     if (requested && scope !== null && !scope.includes(requested)) {
-      throw new ForbiddenException('This report is outside your assigned branches.');
+      throw new ForbiddenException({ code: 'REPORT_OUTSIDE_BRANCHES', message: 'This report is outside your assigned branches.' });
     }
     if (requested) return requested;
     if (scope === null) return undefined;
     if (scope.length === 1) return scope[0];
-    if (scope.length === 0) throw new ForbiddenException('No branch is assigned to this account.');
+    if (scope.length === 0) throw new ForbiddenException({ code: 'REPORT_NO_BRANCH', message: 'No branch is assigned to this account.' });
     if (user.branchId && scope.includes(user.branchId)) return user.branchId;
-    throw new BadRequestException('Select one of your assigned branches to run this report.');
+    throw new BadRequestException({ code: 'REPORT_SELECT_BRANCH', message: 'Select one of your assigned branches to run this report.' });
   }
 
   private async redact(

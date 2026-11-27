@@ -177,14 +177,14 @@ export class InventoryReportsService {
         if (value.isNegative()) throw new Error('negative');
         data[key] = value;
       } catch {
-        throw new BadRequestException(`${key} is not a valid amount`);
+        throw new BadRequestException({ code: 'REPORT_AMOUNT_INVALID', message: `${key} is not a valid amount` });
       }
     }
 
     for (const key of ['isDefaultSale', 'isDefaultPurchase'] as const) {
       if (dto[key] === undefined) continue;
       if (typeof dto[key] !== 'boolean') {
-        throw new BadRequestException(`${key} must be a boolean`);
+        throw new BadRequestException({ code: 'REPORT_FLAG_INVALID', message: `${key} must be a boolean` });
       }
       data[key] = dto[key];
     }
@@ -378,7 +378,7 @@ export class InventoryReportsService {
 
     let barcode = String(requested ?? '').trim();
     if (barcode) {
-      if (barcode.length > 60) throw new BadRequestException('barcode cannot be longer than 60 characters');
+      if (barcode.length > 60) throw new BadRequestException({ code: 'BARCODE_TOO_LONG', message: 'barcode cannot be longer than 60 characters' });
       await this.assertBarcodeFree(companyId, barcode, itemId, unitId);
     } else {
       for (let attempt = 0; attempt < 20 && !barcode; attempt += 1) {
@@ -645,10 +645,10 @@ export class InventoryReportsService {
   ) {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (filters.costCenterId && !uuid.test(filters.costCenterId)) {
-      throw new BadRequestException('costCenterId must be a UUID');
+      throw new BadRequestException({ code: 'REPORT_ID_INVALID', message: 'costCenterId must be a UUID' });
     }
     if (filters.branchId && !uuid.test(filters.branchId)) {
-      throw new BadRequestException('branchId must be a UUID');
+      throw new BadRequestException({ code: 'REPORT_ID_INVALID', message: 'branchId must be a UUID' });
     }
     const raw = await this.prisma.$queryRaw<Array<{
       id: string; movementDate: Date; direction: string; quantity: Prisma.Decimal;
