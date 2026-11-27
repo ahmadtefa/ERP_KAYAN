@@ -120,17 +120,15 @@ export class RolesService {
     // must never be rejected by a rule invented later; spaces and punctuation
     // are still refused because they make a code impossible to type or search.
     if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(code)) {
-      throw new BadRequestException(
-        'A role code is 2-40 letters, digits, underscores or hyphens',
-      );
+      throw new BadRequestException({ code: 'ROLE_CODE_FORMAT', message: 'A role code is 2-40 letters, digits, underscores or hyphens' });
     }
     if (code === 'ADMIN') {
-      throw new ConflictException('That role code is reserved');
+      throw new ConflictException({ code: 'ROLE_CODE_RESERVED', message: 'That role code is reserved' });
     }
     const existing = await this.prisma.role.findFirst({
       where: { companyId, code, deletedAt: null },
     });
-    if (existing) throw new ConflictException('A role with that code already exists');
+    if (existing) throw new ConflictException({ code: 'ROLE_CODE_DUPLICATE', message: 'A role with that code already exists' });
 
     // "Copy role": the new role starts from another role's permissions, which
     // the caller may only do if it could grant that set in the first place.
@@ -144,7 +142,7 @@ export class RolesService {
         },
         include: { rolePermissions: { include: { permission: true } } },
       });
-      if (!source) throw new NotFoundException('The role to copy was not found');
+      if (!source) throw new NotFoundException({ code: 'ROLE_COPY_MISSING', message: 'The role to copy was not found' });
       sourcePermissions = source.rolePermissions.map((rp) => rp.permission.code);
       this.assertCanGrantPermissionCodes(sourcePermissions, actorPermissions, isSuperAdmin);
     }
@@ -190,12 +188,12 @@ export class RolesService {
     });
     if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
     if (role.isSystem && (dto.nameEn || dto.nameAr)) {
-      throw new BadRequestException('A system role cannot be renamed');
+      throw new BadRequestException({ code: 'ROLE_SYSTEM_RENAME', message: 'A system role cannot be renamed' });
     }
     // The administrator's own role is the one the product relies on: it can be
     // described differently, but not switched off.
     if (role.code === 'ADMIN' && dto.isActive === false) {
-      throw new BadRequestException('The system administrator role cannot be disabled');
+      throw new BadRequestException({ code: 'ROLE_ADMIN_DISABLE', message: 'The system administrator role cannot be disabled' });
     }
 
     await this.prisma.role.update({
@@ -242,7 +240,7 @@ export class RolesService {
     const knownCodes = new Set(known.map((row) => row.code));
     const unknown = unique.filter((code) => !knownCodes.has(code));
     if (unknown.length) {
-      throw new BadRequestException(`Unknown permission(s): ${unknown.join(', ')}`);
+      throw new BadRequestException({ code: 'PERMISSION_UNKNOWN', message: `Unknown permission(s): ${unknown.join(', ')}` });
     }
     const byModule = new Map<string, number>();
     for (const row of known) {
@@ -308,7 +306,7 @@ export class RolesService {
       if (expectedPermissions !== undefined) {
         const expected = [...expectedPermissions].sort();
         if (expected.length !== previous.length || expected.some((code, index) => code !== previous[index])) {
-          throw new ConflictException('Role permissions changed since they were loaded. Refresh and review them before saving.');
+          throw new ConflictException({ code: 'ROLE_PERMS_CHANGED', message: 'Role permissions changed since they were loaded. Refresh and review them before saving.' });
         }
       }
       await tx.rolePermission.deleteMany({ where: { roleId: id } });
@@ -329,11 +327,9 @@ export class RolesService {
       include: { _count: { select: { userRoles: { where: { user: { deletedAt: null } } } } } },
     });
     if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
-    if (role.isSystem) throw new BadRequestException('A system role cannot be removed');
+    if (role.isSystem) throw new BadRequestException({ code: 'ROLE_SYSTEM_REMOVE', message: 'A system role cannot be removed' });
     if (role._count.userRoles > 0) {
-      throw new BadRequestException(
-        `${role._count.userRoles} user(s) still hold this role. Move them to another role first.`,
-      );
+      throw new BadRequestException({ code: 'ROLE_IN_USE', message: `${role._count.userRoles} user(s) still hold this role. Move them to another role first.` });
     }
 
     await this.prisma.role.update({ where: { id }, data: { deletedAt: new Date() } });
@@ -377,9 +373,7 @@ export class RolesService {
     if (found.length !== codes.length) {
       const known = new Set(found.map((p) => p.code));
       const missing = codes.filter((code) => !known.has(code));
-      throw new BadRequestException(
-        `Unknown permission(s): ${missing.join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'PERMISSION_UNKNOWN', message: `Unknown permission(s): ${missing.join(', ')}` });
     }
     return found.map((p) => p.id);
   }

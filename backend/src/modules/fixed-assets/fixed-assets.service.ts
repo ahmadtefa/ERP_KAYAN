@@ -118,7 +118,7 @@ export class FixedAssetsService {
       },
     });
     if (!line) {
-      throw new BadRequestException('The purchase invoice line does not exist');
+      throw new BadRequestException({ code: 'ASSET_PURCHASE_LINE_MISSING', message: 'The purchase invoice line does not exist' });
     }
     // Serialize capitalisations of this one line. The cumulative check
     // below reads what other assets already took; without the row lock
@@ -133,9 +133,7 @@ export class FixedAssetsService {
       input.purchaseInvoiceId &&
       input.purchaseInvoiceId !== line.invoice.id
     ) {
-      throw new BadRequestException(
-        'The purchase line belongs to a different invoice than the one given',
-      );
+      throw new BadRequestException({ code: 'ASSET_LINE_OTHER_INVOICE', message: 'The purchase line belongs to a different invoice than the one given' });
     }
     // What the line still holds after any posted returns against it.
     const lineCost = (
@@ -156,27 +154,21 @@ export class FixedAssetsService {
     const usedCost = new Prisma.Decimal(others._sum.cost ?? 0);
     const usedQty = new Prisma.Decimal(others._sum.purchaseQuantity ?? 0);
     if (usedCost.plus(input.cost).greaterThan(lineCost)) {
-      throw new BadRequestException(
-        `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineCost)} and ` +
+      throw new BadRequestException({ code: 'ASSET_LINE_COST_USED', message: `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineCost)} and ` +
           `${money(usedCost)} of it is already capitalised in other assets; ` +
-          `this asset's ${money(input.cost)} would count the same purchase twice`,
-      );
+          `this asset's ${money(input.cost)} would count the same purchase twice` });
     }
     const quantity =
       input.purchaseQuantity != null && input.purchaseQuantity !== ''
         ? this.amount(input.purchaseQuantity, 'purchaseQuantity')
         : lineQuantity.minus(usedQty);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        'The quantity capitalised from a purchase line must be greater than zero',
-      );
+      throw new BadRequestException({ code: 'ASSET_QTY_POSITIVE', message: 'The quantity capitalised from a purchase line must be greater than zero' });
     }
     if (usedQty.plus(quantity).greaterThan(lineQuantity)) {
-      throw new BadRequestException(
-        `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineQuantity)} unit(s) ` +
+      throw new BadRequestException({ code: 'ASSET_LINE_QTY_USED', message: `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineQuantity)} unit(s) ` +
           `(after returns) and ${money(usedQty)} are already capitalised; ` +
-          `${money(quantity)} more cannot come from it`,
-      );
+          `${money(quantity)} more cannot come from it` });
     }
     return {
       purchaseInvoiceId: line.invoice.id,
@@ -245,7 +237,7 @@ export class FixedAssetsService {
       })
       .catch((error) => {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-          throw new ConflictException('An asset with that code already exists');
+          throw new ConflictException({ code: 'ASSET_CODE_DUPLICATE', message: 'An asset with that code already exists' });
         }
         throw error;
       });
@@ -266,7 +258,7 @@ export class FixedAssetsService {
     if (query.status) {
       const status = query.status.toUpperCase();
       if (!Object.values(FixedAssetStatus).includes(status as FixedAssetStatus)) {
-        throw new BadRequestException(`Unknown asset status: ${query.status}`);
+        throw new BadRequestException({ code: 'ASSET_STATUS_UNKNOWN', message: `Unknown asset status: ${query.status}` });
       }
       where.status = status as FixedAssetStatus;
     }
@@ -369,9 +361,7 @@ export class FixedAssetsService {
   ) {
     const asset = await this.get(companyId, id);
     if (asset.status !== FixedAssetStatus.DRAFT) {
-      throw new BadRequestException(
-        'Only a draft asset can be edited; an active asset is corrected through disposal or a journal, not by rewriting its cost',
-      );
+      throw new BadRequestException({ code: 'ASSET_NOT_DRAFT_EDIT', message: 'Only a draft asset can be edited; an active asset is corrected through disposal or a journal, not by rewriting its cost' });
     }
     const cost = dto.cost !== undefined ? this.amount(dto.cost, 'cost') : asset.cost;
     const salvageValue =
@@ -444,9 +434,7 @@ export class FixedAssetsService {
   async remove(companyId: string, userId: string, id: string) {
     const asset = await this.get(companyId, id);
     if (asset.status !== FixedAssetStatus.DRAFT) {
-      throw new BadRequestException(
-        'Only a draft asset can be deleted; an asset on the books leaves through disposal',
-      );
+      throw new BadRequestException({ code: 'ASSET_NOT_DRAFT_DELETE', message: 'Only a draft asset can be deleted; an asset on the books leaves through disposal' });
     }
     await this.prisma.fixedAsset.update({
       where: { id },
@@ -479,9 +467,7 @@ export class FixedAssetsService {
       if (claim.count !== 1) {
         const asset = await tx.fixedAsset.findFirst({ where: { id, companyId } });
         if (!asset) throw new NotFoundException({ code: 'FIXED_ASSET_NOT_FOUND', message: 'Fixed asset not found' });
-        throw new BadRequestException(
-          `Only a draft asset can be activated (current status: ${asset.status})`,
-        );
+        throw new BadRequestException({ code: 'ASSET_NOT_DRAFT_ACTIVATE', message: `Only a draft asset can be activated (current status: ${asset.status})` });
       }
       const asset = await tx.fixedAsset.findUniqueOrThrow({ where: { id } });
       await this.assertPostableAccount(tx, companyId, dto.fundingAccountId, 'funding');
@@ -503,23 +489,17 @@ export class FixedAssetsService {
           select: { invoiceNumber: true, status: true, warehouseId: true },
         });
         if (!invoice) {
-          throw new BadRequestException(
-            'The linked purchase invoice no longer exists, so this asset cannot be activated against it',
-          );
+          throw new BadRequestException({ code: 'ASSET_INVOICE_MISSING', message: 'The linked purchase invoice no longer exists, so this asset cannot be activated against it' });
         }
         if (invoice.status !== InvoiceStatus.POSTED) {
-          throw new BadRequestException(
-            `Purchase invoice ${invoice.invoiceNumber} is not posted yet. ` +
-              'Post it first — activating now would record the cost twice when the invoice posts.',
-          );
+          throw new BadRequestException({ code: 'ASSET_INVOICE_NOT_POSTED', message: `Purchase invoice ${invoice.invoiceNumber} is not posted yet. ` +
+              'Post it first — activating now would record the cost twice when the invoice posts.' });
         }
         const accounts = await this.accountMap.resolve(tx, companyId, ['inventory']);
         if (dto.fundingAccountId !== accounts.inventory) {
-          throw new BadRequestException(
-            `This asset came from purchase invoice ${invoice.invoiceNumber}, which already ` +
+          throw new BadRequestException({ code: 'ASSET_INVENTORY_ACCOUNT', message: `This asset came from purchase invoice ${invoice.invoiceNumber}, which already ` +
               'debited the inventory account. Activate it against the inventory account ' +
-              'so the cost moves from stock to the asset instead of being recorded twice.',
-          );
+              'so the cost moves from stock to the asset instead of being recorded twice.' });
         }
         linkedInvoice = invoice;
       }
@@ -549,18 +529,14 @@ export class FixedAssetsService {
       if (asset.purchaseInvoiceLineId) {
         const quantity = asset.purchaseQuantity;
         if (!quantity || quantity.lessThanOrEqualTo(0)) {
-          throw new BadRequestException(
-            'This asset is linked to a purchase line but records no quantity to issue from stock',
-          );
+          throw new BadRequestException({ code: 'ASSET_NO_ISSUE_QTY', message: 'This asset is linked to a purchase line but records no quantity to issue from stock' });
         }
         const line = await tx.purchaseInvoiceLine.findFirst({
           where: { id: asset.purchaseInvoiceLineId },
           select: { itemId: true },
         });
         if (!line?.itemId) {
-          throw new BadRequestException(
-            'The linked purchase line has no stocked item to issue',
-          );
+          throw new BadRequestException({ code: 'ASSET_NO_STOCK_ITEM', message: 'The linked purchase line has no stocked item to issue' });
         }
         const warehouseId = await this.warehouses.resolve(
           tx,
@@ -582,11 +558,9 @@ export class FixedAssetsService {
         const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
         const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
         if (qtyOnHand.lessThan(quantity) || valueOnHand.lessThan(asset.cost)) {
-          throw new BadRequestException(
-            `Cannot capitalise from stock: ${money(qtyOnHand)} unit(s) worth ${money(valueOnHand)} ` +
+          throw new BadRequestException({ code: 'ASSET_STOCK_SHORT', message: `Cannot capitalise from stock: ${money(qtyOnHand)} unit(s) worth ${money(valueOnHand)} ` +
               `are on hand, but this asset needs ${money(quantity)} unit(s) worth ${money(asset.cost)}. ` +
-              'The stock may already have been sold or moved.',
-          );
+              'The stock may already have been sold or moved.' });
         }
         await tx.stockMovement.create({
           data: {
@@ -714,9 +688,7 @@ export class FixedAssetsService {
           const reasons = skipped
             .map((row) => `${row.code}: ${row.reason}`)
             .join('; ');
-          throw new BadRequestException(
-            `Nothing to depreciate for ${periodKey}${reasons ? ` — ${reasons}` : ''}`,
-          );
+          throw new BadRequestException({ code: 'DEPRECIATION_NOTHING', message: `Nothing to depreciate for ${periodKey}${reasons ? ` — ${reasons}` : ''}` });
         }
 
         const runNumber = await this.numbers.next(tx, companyId, 'DEPRECIATION_RUN', 'DEP');
@@ -813,9 +785,7 @@ export class FixedAssetsService {
         // Two runs racing for the same month: the (asset, period) unique
         // index is the last word. Say so plainly instead of leaking SQL.
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-          throw new ConflictException(
-            `Depreciation for ${periodKey} was already recorded for at least one of these assets`,
-          );
+          throw new ConflictException({ code: 'DEPRECIATION_ALREADY', message: `Depreciation for ${periodKey} was already recorded for at least one of these assets` });
         }
         throw error;
       });
@@ -882,12 +852,10 @@ export class FixedAssetsService {
   ) {
     const proceeds = this.amount(dto.proceeds ?? '0', 'proceeds');
     if (proceeds.lessThan(0)) {
-      throw new BadRequestException('Disposal proceeds cannot be negative');
+      throw new BadRequestException({ code: 'ASSET_PROCEEDS_NEGATIVE', message: 'Disposal proceeds cannot be negative' });
     }
     if (proceeds.greaterThan(0) && !dto.proceedsAccountId) {
-      throw new BadRequestException(
-        'Name the account that received the proceeds (cash, bank or receivable)',
-      );
+      throw new BadRequestException({ code: 'ASSET_PROCEEDS_ACCOUNT', message: 'Name the account that received the proceeds (cash, bank or receivable)' });
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -899,9 +867,7 @@ export class FixedAssetsService {
         asset.status !== FixedAssetStatus.ACTIVE &&
         asset.status !== FixedAssetStatus.FULLY_DEPRECIATED
       ) {
-        throw new BadRequestException(
-          `Only an active asset can be disposed of (current status: ${asset.status})`,
-        );
+        throw new BadRequestException({ code: 'ASSET_NOT_ACTIVE_DISPOSE', message: `Only an active asset can be disposed of (current status: ${asset.status})` });
       }
       const claim = await tx.fixedAsset.updateMany({
         where: {
@@ -917,7 +883,7 @@ export class FixedAssetsService {
         },
       });
       if (claim.count !== 1) {
-        throw new ConflictException('The asset was disposed of by another request');
+        throw new ConflictException({ code: 'ASSET_DISPOSED_ELSEWHERE', message: 'The asset was disposed of by another request' });
       }
 
       const accumulated =
@@ -1212,9 +1178,7 @@ export class FixedAssetsService {
 
   private requireBranch(branchId: string | null): string {
     if (!branchId) {
-      throw new BadRequestException(
-        'Your session is not attached to a branch, so it cannot own assets or depreciation runs',
-      );
+      throw new BadRequestException({ code: 'ASSET_NO_BRANCH', message: 'Your session is not attached to a branch, so it cannot own assets or depreciation runs' });
     }
     return branchId;
   }
@@ -1357,7 +1321,7 @@ export class FixedAssetsService {
       select: { code: true, isPostable: true, isActive: true },
     });
     if (!account) {
-      throw new BadRequestException(`The ${role} account does not exist in this company`);
+      throw new BadRequestException({ code: 'ASSET_ACCOUNT_MISSING', message: `The ${role} account does not exist in this company` });
     }
     if (!account.isPostable || !account.isActive) {
       throw new BadRequestException(`Account ${account.code} cannot receive postings`);

@@ -145,7 +145,7 @@ export class UsersService {
   ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
-      throw new ConflictException('That username is reserved');
+      throw new ConflictException({ code: 'USER_NAME_RESERVED', message: 'That username is reserved' });
     }
     const existing = await this.prisma.user.findUnique({ where: { username } });
     if (existing) throw new ConflictException('That username is already taken. Choose a different username.');
@@ -223,15 +223,15 @@ export class UsersService {
     isSuperAdmin: boolean,
   ) {
     if (dto.extraPermissions !== undefined && !Array.isArray(dto.extraPermissions)) {
-      throw new BadRequestException('Extra permissions must be an array when supplied.');
+      throw new BadRequestException({ code: 'USER_EXTRA_PERMS_FORMAT', message: 'Extra permissions must be an array when supplied.' });
     }
     if (dto.deniedPermissions !== undefined && !Array.isArray(dto.deniedPermissions)) {
-      throw new BadRequestException('Denied permissions must be an array when supplied.');
+      throw new BadRequestException({ code: 'USER_EXTRA_PERMS_FORMAT', message: 'Denied permissions must be an array when supplied.' });
     }
     if ((dto.expectedRoleIds !== undefined && !Array.isArray(dto.roleIds)) ||
         (dto.expectedExtraPermissions !== undefined && !Array.isArray(dto.extraPermissions)) ||
         (dto.expectedDeniedPermissions !== undefined && !Array.isArray(dto.deniedPermissions))) {
-      throw new BadRequestException('An expected permission set requires its corresponding replacement.');
+      throw new BadRequestException({ code: 'USER_EXPECTED_PERMS', message: 'An expected permission set requires its corresponding replacement.' });
     }
     const before = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -286,21 +286,21 @@ export class UsersService {
       if (dto.expectedRoleIds !== undefined) {
         const current = await tx.userRole.findMany({where:{userId:id,companyId},select:{roleId:true}});
         if (!matches(current.map((row) => row.roleId), dto.expectedRoleIds)) {
-          throw new ConflictException('User roles changed since they were loaded. Refresh and review them before saving.');
+          throw new ConflictException({ code: 'USER_ROLES_CHANGED', message: 'User roles changed since they were loaded. Refresh and review them before saving.' });
         }
       }
       if (dto.expectedExtraPermissions !== undefined) {
         const current = await tx.userPermission.findMany({where:{userId:id},include:{permission:true}});
         const grants = current.filter((row) => !row.isDenied).map((row) => row.permission.code);
         if (!matches(grants, dto.expectedExtraPermissions)) {
-          throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
+          throw new ConflictException({ code: 'USER_PERMS_CHANGED', message: 'User permissions changed since they were loaded. Refresh and review them before saving.' });
         }
       }
       if (dto.expectedDeniedPermissions !== undefined) {
         const current = await tx.userPermission.findMany({where:{userId:id},include:{permission:true}});
         const denies = current.filter((row) => row.isDenied).map((row) => row.permission.code);
         if (!matches(denies, dto.expectedDeniedPermissions)) {
-          throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
+          throw new ConflictException({ code: 'USER_PERMS_CHANGED', message: 'User permissions changed since they were loaded. Refresh and review them before saving.' });
         }
       }
       await tx.user.update({
@@ -409,7 +409,7 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (user.id === actorId) {
-      throw new BadRequestException('You cannot deactivate your own account');
+      throw new BadRequestException({ code: 'USER_SELF_DEACTIVATE', message: 'You cannot deactivate your own account' });
     }
     if (user.isSuperAdmin && !actorIsSuperAdmin) {
       throw new ForbiddenException('Only a super administrator can deactivate a super administrator account');
@@ -488,7 +488,7 @@ export class UsersService {
       },
     });
     if (roles.length !== roleIds.length) {
-      throw new BadRequestException('One of the roles does not exist in this company');
+      throw new BadRequestException({ code: 'USER_ROLE_MISSING', message: 'One of the roles does not exist in this company' });
     }
     if (isSuperAdmin) return;
 
@@ -527,9 +527,7 @@ export class UsersService {
     const known = new Set(found.map((permission) => permission.code));
     const unknown = unique.filter((code) => !known.has(code));
     if (unknown.length) {
-      throw new BadRequestException(
-        `Unknown permission code(s): ${unknown.join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'PERMISSION_UNKNOWN', message: `Unknown permission code(s): ${unknown.join(', ')}` });
     }
     if (!isSuperAdmin) {
       const forbidden = unique.filter((code) => !actorPermissions.includes(code));
@@ -555,7 +553,7 @@ export class UsersService {
     const known = new Set(found.map((permission) => permission.code));
     const unknown = unique.filter((code) => !known.has(code));
     if (unknown.length) {
-      throw new BadRequestException(`Unknown permission code(s): ${unknown.join(', ')}`);
+      throw new BadRequestException({ code: 'PERMISSION_UNKNOWN', message: `Unknown permission code(s): ${unknown.join(', ')}` });
     }
     return unique.sort();
   }
@@ -589,7 +587,7 @@ export class UsersService {
       select: { id: true, code: true },
     });
     if (permissions.length !== codes.length) {
-      throw new BadRequestException('One of the permissions no longer exists');
+      throw new BadRequestException({ code: 'PERMISSION_GONE', message: 'One of the permissions no longer exists' });
     }
     await tx.userPermission.createMany({
       data: permissions.map((permission) => ({
@@ -713,7 +711,7 @@ export class UsersService {
       where: { id: { in: branchIds }, companyId, deletedAt: null },
     });
     if (found !== branchIds.length) {
-      throw new BadRequestException('One of the branches does not exist in this company');
+      throw new BadRequestException({ code: 'USER_BRANCH_MISSING', message: 'One of the branches does not exist in this company' });
     }
   }
 
