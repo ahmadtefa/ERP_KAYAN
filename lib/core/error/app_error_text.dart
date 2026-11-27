@@ -553,6 +553,13 @@ class AppErrorMessageResolver {
           );
         }
       }
+      if (error is ApiFailure && error.statusCode == 403 && moduleRefusals.containsKey(error.code)) {
+        return AppErrorText(
+          reason: AppErrorReason.permission,
+          severity: AppErrorSeverity.error,
+          businessMessage: moduleRefusals[error.code]![isArabic ? 0 : 1],
+        );
+      }
       if (error is ApiFailure &&
           error.statusCode == 403 &&
           error.code == 'LICENSE_STATE_ID_MISMATCH') {

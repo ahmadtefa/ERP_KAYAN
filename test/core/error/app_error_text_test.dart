@@ -45,6 +45,16 @@ void main() {
     }
   });
 
+  test('a permission refusal (403) with a reviewed code is explained from the code, never from the server text', () {
+    final failure = const ApiFailure('synthetic raw prices', statusCode: 403, code: 'MD_PRICES_NOT_ALLOWED');
+    final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure);
+    final en = const AppErrorMessageResolver(isArabic: false).resolve(failure);
+    expect(ar.reason, AppErrorReason.permission);
+    expect(ar.businessMessage, moduleRefusals['MD_PRICES_NOT_ALLOWED']![0]);
+    expect(en.businessMessage, moduleRefusals['MD_PRICES_NOT_ALLOWED']![1]);
+    expect(en.businessMessage, isNot(contains('synthetic raw')));
+  });
+
   test('every module refusal is explained from its code in both languages, never from the server text', () {
     for (final entry in moduleRefusals.entries) {
       for (final status in [400, 404, 409]) {
