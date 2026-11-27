@@ -1,4 +1,5 @@
 import 'cash_refusals.dart';
+import 'purchase_refusals.dart';
 
 /// Reviewed sentences for the refusals of serial numbers, commissions,
 /// installments and withholding tax. The code picks the sentence; the server
@@ -6,6 +7,7 @@ import 'cash_refusals.dart';
 /// what to do next.
 const Map<String, List<String>> moduleRefusals = {
   ...cashRefusals,
+  ...purchaseRefusals,
   'SERIAL_DUPLICATE': [
     'رقم تسلسلي أو أكثر مسجّل من قبل لنفس الصنف. راجع الأرقام وأزل المكرر ثم أعد المحاولة. لم يُحفظ شيء.',
     'One or more serial numbers are already registered for this item. Check the list, remove the repeats and try again. Nothing was saved.',

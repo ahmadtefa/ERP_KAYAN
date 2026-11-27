@@ -128,7 +128,7 @@ export class PurchaseInvoicesService {
     if (query.status) {
       const status = query.status.toUpperCase() as InvoiceStatus;
       if (!Object.values(InvoiceStatus).includes(status)) {
-        throw new BadRequestException(`Unknown status: ${query.status}`);
+        throw new BadRequestException({ code: 'PURCHASE_STATUS_UNKNOWN', message: `Unknown status: ${query.status}` });
       }
       where.status = status;
     }
@@ -370,13 +370,13 @@ export class PurchaseInvoicesService {
     if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.purchaseOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
-      throw new BadRequestException('Return documents cannot be edited as purchase invoices');
+      throw new BadRequestException({ code: 'PURCHASE_RETURN_NOT_EDITABLE', message: 'Return documents cannot be edited as purchase invoices' });
     }
     if (invoice.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException('Only a draft purchase invoice can be edited');
+      throw new BadRequestException({ code: 'PURCHASE_NOT_DRAFT_EDIT', message: 'Only a draft purchase invoice can be edited' });
     }
     if (invoice.branchId !== branchId) {
-      throw new BadRequestException('A draft can only be edited from its assigned branch');
+      throw new BadRequestException({ code: 'PURCHASE_OTHER_BRANCH_EDIT', message: 'A draft can only be edited from its assigned branch' });
     }
 
     const supplier = await this.prisma.supplier.findFirst({
@@ -538,7 +538,7 @@ export class PurchaseInvoicesService {
       if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
         throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'Only an active draft invoice can be amended' });
       }
-      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
+      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException({ code: 'PURCHASE_CHANGED_RELOAD', message: 'The invoice changed; reload before editing' });
       if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException({ code: 'ORDER_NOT_AMENDABLE', message: 'Related order cannot be amended' });
       if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero() || !invoice.landedCostAmount.isZero()) {
         throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'This invoice has additional charges or discounts; manual review required' });
@@ -615,7 +615,7 @@ export class PurchaseInvoicesService {
       });
       if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
       if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
-        throw new BadRequestException('Only a draft invoice can be cancelled');
+        throw new BadRequestException({ code: 'PURCHASE_NOT_DRAFT_CANCEL', message: 'Only a draft invoice can be cancelled' });
       }
       if (invoice.purchaseOrderId) {
         // An amendment can commit while we wait for the order lock. Reload
@@ -714,9 +714,7 @@ export class PurchaseInvoicesService {
 
       for (const line of invoice.lines) {
         if (!line.itemId) {
-          throw new BadRequestException(
-            'A purchase invoice line has no item, so it cannot be posted to stock',
-          );
+          throw new BadRequestException({ code: 'PURCHASE_LINE_NO_ITEM', message: 'A purchase invoice line has no item, so it cannot be posted to stock' });
         }
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
@@ -901,7 +899,7 @@ export class PurchaseInvoicesService {
         },
       },
     });
-    if (!original) throw new NotFoundException('The original journal entry is missing');
+    if (!original) throw new NotFoundException({ code: 'PURCHASE_ENTRY_MISSING', message: 'The original journal entry is missing' });
     if (original.status === JournalStatus.REVERSED) {
       throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
     }
@@ -927,9 +925,7 @@ export class PurchaseInvoicesService {
         },
       });
       if (activeReturns > 0) {
-        throw new BadRequestException(
-          'Reverse the posted purchase returns before reversing their source invoice.',
-        );
+        throw new BadRequestException({ code: 'PURCHASE_HAS_RETURNS', message: 'Reverse the posted purchase returns before reversing their source invoice.' });
       }
       const warehouseId = await this.warehouses.resolveForReversal(
         tx,
@@ -959,9 +955,7 @@ export class PurchaseInvoicesService {
       const usedReceipts = new Set<string>();
       for (const line of invoice.lines) {
         if (!line.itemId) {
-          throw new BadRequestException(
-            'A purchase invoice line has no item, so its stock cannot be returned',
-          );
+          throw new BadRequestException({ code: 'PURCHASE_LINE_NO_ITEM', message: 'A purchase invoice line has no item, so its stock cannot be returned' });
         }
         const lockedBalances = await tx.$queryRaw<
           Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
@@ -979,10 +973,8 @@ export class PurchaseInvoicesService {
           ? line.lineTotal
           : line.inventoryCostTotal;
         if (qtyOnHand.lessThan(line.quantity) || (balance && balance.value.lessThan(inventoryCostTotal))) {
-          throw new BadRequestException(
-            'Cannot reverse this purchase: part of the stock has already been sold or ' +
-              'moved, so returning it would leave a negative balance.',
-          );
+          throw new BadRequestException({ code: 'PURCHASE_STOCK_ALREADY_USED', message: 'Cannot reverse this purchase: part of the stock has already been sold or ' +
+              'moved, so returning it would leave a negative balance.' });
         }
 
         // The shelf must be able to give the goods back, not just the branch.
@@ -1163,12 +1155,12 @@ export class PurchaseInvoicesService {
 
     if (dto.landedCostCharges !== undefined) {
       if (!Array.isArray(dto.landedCostCharges) || dto.landedCostCharges.length > 50) {
-        throw new BadRequestException('A purchase invoice may contain at most 50 landed-cost charges');
+        throw new BadRequestException({ code: 'PURCHASE_TOO_MANY_CHARGES', message: 'A purchase invoice may contain at most 50 landed-cost charges' });
       }
       const charges = dto.landedCostCharges.map((raw, index) => {
         const description = String(raw?.description ?? '').trim();
         if (!description || description.length > 120) {
-          throw new BadRequestException(`Landed-cost charge ${index + 1} needs a description of 1–120 characters`);
+          throw new BadRequestException({ code: 'PURCHASE_CHARGE_DESCRIPTION', message: `Landed-cost charge ${index + 1} needs a description of 1–120 characters` });
         }
         return {
           description,
@@ -1181,9 +1173,7 @@ export class PurchaseInvoicesService {
         new Prisma.Decimal(0),
       );
       if (legacyTotal !== null && !legacyTotal.equals(total)) {
-        throw new BadRequestException(
-          `landedCostAmount (${legacyTotal.toFixed(MONEY_SCALE)}) must equal the sum of named charges (${total.toFixed(MONEY_SCALE)})`,
-        );
+        throw new BadRequestException({ code: 'PURCHASE_CHARGES_MISMATCH', message: `landedCostAmount (${legacyTotal.toFixed(MONEY_SCALE)}) must equal the sum of named charges (${total.toFixed(MONEY_SCALE)})` });
       }
       const tax = charges.reduce(
         (sum, charge) => sum.plus(charge.amount.mul(charge.taxRate).div(100).toDecimalPlaces(MONEY_SCALE)),
@@ -1269,7 +1259,7 @@ export class PurchaseInvoicesService {
     const settings = await this.settings.get(companyId, client);
 
     if (orderUnits && orderUnits.length !== input.length) {
-      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+      throw new BadRequestException({ code: 'PURCHASE_UNIT_SNAPSHOT', message: 'Order invoice unit snapshots do not match its lines' });
     }
     for (const [index, raw] of input.entries()) {
       const item = await client.item.findFirst({
@@ -1328,9 +1318,7 @@ export class PurchaseInvoicesService {
           : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
       if (unitPrice === null) {
-        throw new BadRequestException(
-          `Line ${index + 1}: enter a purchase unit price; this item has no saved default price`,
-        );
+        throw new BadRequestException({ code: 'PURCHASE_PRICE_REQUIRED', message: `Line ${index + 1}: enter a purchase unit price; this item has no saved default price` });
       }
 
       // Missing or cleared tax is zero. Conversion callers pass the stored
@@ -1502,7 +1490,7 @@ export class PurchaseInvoicesService {
   private rate(value: string, field: string): Prisma.Decimal {
     const d = this.decimal(value, field, RATE_SCALE);
     if (d.isNegative() || d.greaterThan(100)) {
-      throw new BadRequestException(`${field} must be between 0 and 100`);
+      throw new BadRequestException({ code: 'PURCHASE_PERCENT_RANGE', message: `${field} must be between 0 and 100` });
     }
     return d;
   }
@@ -1511,7 +1499,7 @@ export class PurchaseInvoicesService {
     try {
       return new Prisma.Decimal(value).toDecimalPlaces(scale);
     } catch {
-      throw new BadRequestException(`${field} is not a valid number: ${value}`);
+      throw new BadRequestException({ code: 'PURCHASE_NUMBER_INVALID', message: `${field} is not a valid number: ${value}` });
     }
   }
 
