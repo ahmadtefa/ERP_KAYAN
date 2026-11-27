@@ -419,11 +419,13 @@ export class CompleteBackupService {
       const report = await this.verifyPath(target);
       if (!report.ok) {
         await removeIfExists(target);
-        throw new ServiceUnavailableException(
-          `The backup was written but did not pass its own verification ` +
+        throw new ServiceUnavailableException({
+          code: 'COMPLETE_BACKUP_VERIFY_FAILED',
+          message:
+            `The backup was written but did not pass its own verification ` +
             `(${report.failure ?? 'unknown reason'}). The file was removed so it cannot ` +
             'be mistaken for a usable backup. Nothing else was changed.',
-        );
+        });
       }
 
       const info = await stat(target);
@@ -490,9 +492,10 @@ export class CompleteBackupService {
       try {
         names = await readdir(dir);
       } catch (error) {
-        throw new ServiceUnavailableException(
-          `The backup folder "${dir}" could not be read (${(error as Error).message}).`,
-        );
+        throw new ServiceUnavailableException({
+          code: 'COMPLETE_BACKUP_FOLDER_UNREADABLE',
+          message: `The backup folder "${dir}" could not be read (${(error as Error).message}).`,
+        });
       }
       for (const name of names) {
         if (!name.endsWith(ARCHIVE_EXTENSION) || seen.has(name)) continue;
@@ -531,10 +534,13 @@ export class CompleteBackupService {
     try {
       return { data: await readFile(path), name };
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be read (${(error as Error).message}). ` +
+      throw new ServiceUnavailableException({
+        code: 'COMPLETE_BACKUP_FILE_UNREADABLE',
+        message:
+          `The backup file "${name}" could not be read (${(error as Error).message}). ` +
           'The database was not changed.',
-      );
+        params: { name },
+      });
     }
   }
 
@@ -546,9 +552,11 @@ export class CompleteBackupService {
     try {
       await unlink(path);
     } catch (error) {
-      throw new ServiceUnavailableException(
-        `The backup file "${name}" could not be deleted (${(error as Error).message}).`,
-      );
+      throw new ServiceUnavailableException({
+        code: 'COMPLETE_BACKUP_FILE_NOT_DELETED',
+        message: `The backup file "${name}" could not be deleted (${(error as Error).message}).`,
+        params: { name },
+      });
     }
     await this.audit.record({
       action: 'DELETE',

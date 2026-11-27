@@ -285,9 +285,10 @@ export class SystemRestoreService implements OnModuleInit {
       // 3. Verify the archive before anything is believed about it.
       const report = await this.backups.verifyPath(sourcePath, label, Boolean(uploadedTemporary));
       if (!report.ok || !report.manifest) {
-        throw new BadRequestException(
-          report.failure ?? 'The archive did not pass verification; nothing was changed.',
-        );
+        throw new BadRequestException({
+          code: 'RESTORE_ARCHIVE_NOT_VERIFIED',
+          message: report.failure ?? 'The archive did not pass verification; nothing was changed.',
+        });
       }
       const manifest = await this.backups.readManifest(sourcePath);
 
@@ -342,11 +343,13 @@ export class SystemRestoreService implements OnModuleInit {
       try {
         await createScratchDatabase(scratchName);
       } catch (error) {
-        throw new ServiceUnavailableException(
-          'A restore cannot be rehearsed on this database server because it cannot create a ' +
+        throw new ServiceUnavailableException({
+          code: 'RESTORE_SCRATCH_DB_FAILED',
+          message:
+            'A restore cannot be rehearsed on this database server because it cannot create a ' +
             `scratch database (${(error as Error).message}). The safety gate above should have ` +
             'caught this; nothing was changed.',
-        );
+        });
       }
       try {
         await pgRestoreInto(scratchName, dumpPath);
@@ -390,10 +393,12 @@ export class SystemRestoreService implements OnModuleInit {
       try {
         safety = await this.backups.createSafety(userId);
       } catch (error) {
-        throw new ServiceUnavailableException(
-          'The restore was stopped before anything was replaced because a safety backup could ' +
+        throw new ServiceUnavailableException({
+          code: 'RESTORE_SAFETY_BACKUP_FAILED',
+          message:
+            'The restore was stopped before anything was replaced because a safety backup could ' +
             `not be written (${(error as Error).message}). The current data is untouched.`,
-        );
+        });
       }
       journal = await this.journals.advance(journal, 'safety-taken', { safetyBackup: safety.name });
       await this.state?.start(journal);

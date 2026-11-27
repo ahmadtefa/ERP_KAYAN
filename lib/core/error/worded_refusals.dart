@@ -226,6 +226,34 @@ const Map<String, List<String>> wordedRefusals = {
     'تغيّرت دفعة المخزون أثناء عكس الفاتورة، فلم يكتمل العكس. أعد المحاولة بعد لحظات، وإن تكرر ذلك فتأكد أن لا أحد يعدّل نفس الدفعة. لم يتغير شيء.',
     'The stock lot changed while the invoice was being reversed, so the reversal did not finish. Try again in a moment, and if it keeps happening make sure nobody else is editing the same lot. Nothing changed.',
   ],
+  'COMPLETE_BACKUP_VERIFY_FAILED': [
+    'النسخة الاحتياطية كُتبت لكنها لم تجتز الفحص، فحُذف الملف حتى لا يُعتمد عليه خطأً. أعد إنشاء النسخة، وتأكد من وجود مساحة كافية على القرص. لم يتغير شيء آخر.',
+    'The backup was written but did not pass its check, so the file was removed to prevent it from being used by mistake. Create the backup again, and make sure the disk has enough free space. Nothing else was changed.',
+  ],
+  'COMPLETE_BACKUP_FOLDER_UNREADABLE': [
+    'تعذّرت قراءة مجلد النسخ الاحتياطية. تأكد أن المجلد موجود وأن حساب تشغيل البرنامج يملك صلاحية قراءته، ثم حدّث الصفحة.',
+    'The backup folder could not be read. Check that the folder exists and that the program account has permission to read it, then refresh the page.',
+  ],
+  'COMPLETE_BACKUP_FILE_UNREADABLE': [
+    'تعذّرت قراءة ملف النسخة الاحتياطية {name}. تأكد أن الملف موجود وغير مفتوح في برنامج آخر، ثم أعد المحاولة. لم تتغير قاعدة البيانات.',
+    'The backup file {name} could not be read. Check that the file exists and is not open in another program, then try again. The database was not changed.',
+  ],
+  'COMPLETE_BACKUP_FILE_NOT_DELETED': [
+    'تعذّر حذف ملف النسخة الاحتياطية {name}. تأكد أن الملف غير مفتوح في برنامج آخر وأن البرنامج يملك صلاحية الحذف، ثم أعد المحاولة.',
+    'The backup file {name} could not be deleted. Check that the file is not open in another program and that the program has permission to delete it, then try again.',
+  ],
+  'RESTORE_ARCHIVE_NOT_VERIFIED': [
+    'الملف المختار لم يجتز فحص الاستعادة، فقد يكون تالفًا أو ناقصًا أو ليس نسخة كاملة من هذا البرنامج. اختر ملفًا آخر أو أنشئ نسخة جديدة. لم يتغير شيء.',
+    'The chosen file did not pass the restore check, so it may be damaged, incomplete, or not a complete backup from this program. Choose another file or create a new backup. Nothing was changed.',
+  ],
+  'RESTORE_SCRATCH_DB_FAILED': [
+    'تعذّرت تجربة الاستعادة لأن خادم قاعدة البيانات لا يستطيع إنشاء قاعدة تجريبية. امنح حساب قاعدة البيانات صلاحية إنشاء قواعد البيانات، ثم أعد المحاولة. لم يتغير شيء.',
+    'The restore could not be rehearsed because the database server cannot create a scratch database. Give the database account permission to create databases, then try again. Nothing was changed.',
+  ],
+  'RESTORE_SAFETY_BACKUP_FAILED': [
+    'أُوقفت الاستعادة قبل استبدال أي شيء لأن نسخة الأمان لم تُكتب. تأكد من وجود مساحة كافية في مجلد النسخ الاحتياطية، ثم أعد المحاولة. بياناتك الحالية كما هي.',
+    'The restore was stopped before anything was replaced because the safety backup could not be written. Make sure the backup folder has enough free space, then try again. Your current data is untouched.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
