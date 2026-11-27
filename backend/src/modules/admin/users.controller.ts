@@ -121,7 +121,7 @@ export class UsersController {
   @Post(':id/photo')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1, fields: 0, parts: 1 } }))
   setPhoto(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @UploadedFile() file?: Upload) {
-    if (!file?.buffer?.length) throw new BadRequestException('No photo file was uploaded');
+    if (!file?.buffer?.length) throw new BadRequestException({ code: 'USER_PHOTO_MISSING', message: 'No photo file was uploaded' });
     return this.photos.setForUser(user.companyId, user.userId, id, file.buffer, logoMimeForUpload(file.mimetype, file.originalname));
   }
 

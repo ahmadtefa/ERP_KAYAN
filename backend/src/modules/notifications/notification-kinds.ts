@@ -309,7 +309,7 @@ export function notificationKind(type: string): NotificationKind | null {
 
 export function assertKnownKind(type: string): NotificationKind {
   const kind = notificationKind(type);
-  if (!kind) throw new BadRequestException(`Unknown notification type: ${type}`);
+  if (!kind) throw new BadRequestException({ code: 'NOTIFICATION_TYPE_UNKNOWN', message: `Unknown notification type: ${type}` });
   return kind;
 }
 

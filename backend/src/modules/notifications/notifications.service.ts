@@ -359,7 +359,7 @@ export class NotificationsService {
     includeUnread: boolean,
   ) {
     if (!Number.isInteger(days) || days < 1 || days > 3650) {
-      throw new BadRequestException('days must be an integer between 1 and 3650');
+      throw new BadRequestException({ code: 'NOTIFICATION_DAYS_INVALID', message: 'days must be an integer between 1 and 3650' });
     }
     const cutoff = new Date(Date.now() - days * 86_400_000);
     const rows = await this.prisma.notification.findMany({
@@ -595,7 +595,7 @@ export class NotificationsService {
     const kind = assertKnownKind(type);
     const severity = dto.severity ? String(dto.severity).toUpperCase() : undefined;
     if (severity && !['INFO', 'WARNING', 'CRITICAL'].includes(severity)) {
-      throw new NotFoundException(`Unknown severity: ${dto.severity}`);
+      throw new NotFoundException({ code: 'NOTIFICATION_SEVERITY_UNKNOWN', message: `Unknown severity: ${dto.severity}` });
     }
     const data = {
       isEnabled: dto.isEnabled ?? true,

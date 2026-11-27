@@ -31,12 +31,10 @@ export function uniqueAccountClash(error: unknown): ConflictException | null {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
   const where = `${JSON.stringify(error.meta ?? {})} ${error.message}`.toLowerCase();
   if (where.includes('email')) {
-    return new ConflictException(
-      'That email address is already used by another account. Enter a different email address, or leave it empty.',
-    );
+    return new ConflictException({ code: 'USER_EMAIL_TAKEN', message: 'That email address is already used by another account. Enter a different email address, or leave it empty.' });
   }
   if (where.includes('username')) {
-    return new ConflictException('That username is already taken. Choose a different username.');
+    return new ConflictException({ code: 'USER_USERNAME_TAKEN', message: 'That username is already taken. Choose a different username.' });
   }
   return null;
 }
@@ -148,7 +146,7 @@ export class UsersService {
       throw new ConflictException({ code: 'USER_NAME_RESERVED', message: 'That username is reserved' });
     }
     const existing = await this.prisma.user.findUnique({ where: { username } });
-    if (existing) throw new ConflictException('That username is already taken. Choose a different username.');
+    if (existing) throw new ConflictException({ code: 'USER_USERNAME_TAKEN', message: 'That username is already taken. Choose a different username.' });
 
     await this.assertRolesAssignable(
       companyId,
@@ -238,7 +236,7 @@ export class UsersService {
     });
     if (!before) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (before.isSuperAdmin && !isSuperAdmin) {
-      throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+      throw new ForbiddenException({ code: 'SUPER_ADMIN_MODIFY_ONLY', message: 'Only a super administrator can modify a super administrator account' });
     }
     if (before.username === SYSTEM_USERNAME && dto.isActive === false) {
       throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
@@ -271,7 +269,7 @@ export class UsersService {
       const lockedBefore = await tx.user.findFirst({where:{id,companyId,deletedAt:null}});
       if (!lockedBefore) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
       if (lockedBefore.isSuperAdmin && !isSuperAdmin) {
-        throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+        throw new ForbiddenException({ code: 'SUPER_ADMIN_MODIFY_ONLY', message: 'Only a super administrator can modify a super administrator account' });
       }
       if (lockedBefore.username === SYSTEM_USERNAME && dto.isActive === false) {
         throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
@@ -363,7 +361,7 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (user.isSuperAdmin && !actorIsSuperAdmin) {
-      throw new ForbiddenException('Only a super administrator can reset a super administrator password');
+      throw new ForbiddenException({ code: 'SUPER_ADMIN_RESET_ONLY', message: 'Only a super administrator can reset a super administrator password' });
     }
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
@@ -412,7 +410,7 @@ export class UsersService {
       throw new BadRequestException({ code: 'USER_SELF_DEACTIVATE', message: 'You cannot deactivate your own account' });
     }
     if (user.isSuperAdmin && !actorIsSuperAdmin) {
-      throw new ForbiddenException('Only a super administrator can deactivate a super administrator account');
+      throw new ForbiddenException({ code: 'SUPER_ADMIN_DEACTIVATE_ONLY', message: 'Only a super administrator can deactivate a super administrator account' });
     }
     if (user.username === SYSTEM_USERNAME) {
       throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
@@ -502,9 +500,7 @@ export class UsersService {
       ),
     ];
     if (forbidden.length) {
-      throw new ForbiddenException(
-        `You cannot assign permissions you do not hold: ${forbidden.join(', ')}`,
-      );
+      throw new ForbiddenException({ code: 'PERMISSION_GRANT_NOT_HELD', message: `You cannot assign permissions you do not hold: ${forbidden.join(', ')}` });
     }
   }
 
@@ -532,9 +528,7 @@ export class UsersService {
     if (!isSuperAdmin) {
       const forbidden = unique.filter((code) => !actorPermissions.includes(code));
       if (forbidden.length) {
-        throw new ForbiddenException(
-          `You cannot grant permissions you do not hold: ${forbidden.join(', ')}`,
-        );
+        throw new ForbiddenException({ code: 'PERMISSION_GRANT_NOT_HELD', message: `You cannot grant permissions you do not hold: ${forbidden.join(', ')}` });
       }
     }
     return unique.sort();

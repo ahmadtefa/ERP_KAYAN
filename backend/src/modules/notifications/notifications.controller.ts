@@ -181,7 +181,7 @@ export class NotificationsController {
 function parseDays(value: string | undefined): number {
   const days = Number(value);
   if (!Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new BadRequestException('days must be an integer between 1 and 3650');
+    throw new BadRequestException({ code: 'NOTIFICATION_DAYS_INVALID', message: 'days must be an integer between 1 and 3650' });
   }
   return days;
 }

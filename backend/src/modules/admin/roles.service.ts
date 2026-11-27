@@ -281,9 +281,7 @@ export class RolesService {
     // A company's own seeded roles are theirs to tune - the escalation check
     // below still stops them granting anything they do not hold themselves.
     if (role.companyId === null && !isSuperAdmin) {
-      throw new ForbiddenException(
-        'Only a super administrator can change permissions on a global system role',
-      );
+      throw new ForbiddenException({ code: 'GLOBAL_ROLE_SUPER_ADMIN_ONLY', message: 'Only a super administrator can change permissions on a global system role' });
     }
 
     this.assertCanGrantPermissionCodes(codes, actorPermissions, isSuperAdmin);
@@ -297,7 +295,7 @@ export class RolesService {
       });
       if (!lockedRole) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
       if (lockedRole.companyId === null && !isSuperAdmin) {
-        throw new ForbiddenException('Only a super administrator can change permissions on a global system role');
+        throw new ForbiddenException({ code: 'GLOBAL_ROLE_SUPER_ADMIN_ONLY', message: 'Only a super administrator can change permissions on a global system role' });
       }
       const before = await tx.rolePermission.findMany({
         where: { roleId: id }, include: { permission: true },
@@ -354,9 +352,7 @@ export class RolesService {
     if (isSuperAdmin || !codes?.length) return;
     const forbidden = [...new Set(codes.filter((code) => !actorPermissions.includes(code)))];
     if (forbidden.length) {
-      throw new ForbiddenException(
-        `You cannot grant permissions you do not hold: ${forbidden.join(', ')}`,
-      );
+      throw new ForbiddenException({ code: 'PERMISSION_GRANT_NOT_HELD', message: `You cannot grant permissions you do not hold: ${forbidden.join(', ')}` });
     }
   }
 

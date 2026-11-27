@@ -122,7 +122,7 @@ export class PartiesService {
   async findOne(companyId: string, kind: PartyKind, id: string) {
     const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!row) throw new NotFoundException(`${kind} not found`);
+    if (!row) throw new NotFoundException({ code: kind === 'customer' ? 'CUSTOMER_NOT_FOUND' : 'SUPPLIER_NOT_FOUND', message: `${kind} not found` });
     return this.toResponse(row);
   }
 
@@ -367,7 +367,7 @@ export class PartiesService {
   async summary(companyId: string, kind: PartyKind, id: string) {
     const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!row) throw new NotFoundException(`${kind} not found`);
+    if (!row) throw new NotFoundException({ code: kind === 'customer' ? 'CUSTOMER_NOT_FOUND' : 'SUPPLIER_NOT_FOUND', message: `${kind} not found` });
 
     const { signed, attributed, invoices, vouchers, totalInvoiced, totalPaid, outstanding, overdue, onAccount, openingBalance, netBalance } =
       await this.balanceFigures(companyId, kind, id);
@@ -444,7 +444,7 @@ export class PartiesService {
   ) {
     const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!row) throw new NotFoundException(`${kind} not found`);
+    if (!row) throw new NotFoundException({ code: kind === 'customer' ? 'CUSTOMER_NOT_FOUND' : 'SUPPLIER_NOT_FOUND', message: `${kind} not found` });
 
     const to = query.to ? new Date(`${query.to.slice(0, 10)}T23:59:59.999Z`) : new Date();
     const from = query.from
@@ -721,7 +721,7 @@ export class PartiesService {
     const dto = body as Record<string, unknown>;
     const model = this.model(kind);
     const before = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!before) throw new NotFoundException(`${kind} not found`);
+    if (!before) throw new NotFoundException({ code: kind === 'customer' ? 'CUSTOMER_NOT_FOUND' : 'SUPPLIER_NOT_FOUND', message: `${kind} not found` });
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
       const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
@@ -792,7 +792,7 @@ export class PartiesService {
   ) {
     const model = this.model(kind);
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
-    if (!row) throw new NotFoundException(`${kind} not found`);
+    if (!row) throw new NotFoundException({ code: kind === 'customer' ? 'CUSTOMER_NOT_FOUND' : 'SUPPLIER_NOT_FOUND', message: `${kind} not found` });
     if (!row.isActive) return this.toResponse(row);
 
     const updated = await model.update({
