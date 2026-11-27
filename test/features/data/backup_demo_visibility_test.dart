@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart';
 import 'package:erp_kayan/features/data/presentation/screens/backup_screen.dart';
+import 'package:erp_kayan/features/data/presentation/widgets/auto_backup_section.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -40,6 +41,23 @@ class _FakeSystemBackupService extends SystemBackupService {
   };
 }
 
+class _FakeAutoBackupService extends AutoBackupService {
+  _FakeAutoBackupService() : super(Dio());
+
+  @override
+  Future<Map<String, dynamic>> settings() async => const {
+    'intervalHours': 168, 'retentionCount': 14, 'destinationPath': null, 'startHour': 2,
+  };
+
+  @override
+  Future<Map<String, dynamic>> status() async => const {
+    'enabled': true, 'intervalHours': 168, 'retentionCount': 14, 'lastRun': null, 'nextDueAt': null,
+  };
+
+  @override
+  Future<List<Map<String, dynamic>>> history() async => const [];
+}
+
 void main() {
   for (final environment in AppEnvironment.values) {
     testWidgets('sample visibility for $environment preserves real backup', (tester) async {
@@ -62,6 +80,7 @@ void main() {
           systemBackupServiceProvider.overrideWithValue(
             _FakeSystemBackupService(),
           ),
+          autoBackupServiceProvider.overrideWithValue(_FakeAutoBackupService()),
         ],
         child: const MaterialApp(
           locale: Locale('en'),

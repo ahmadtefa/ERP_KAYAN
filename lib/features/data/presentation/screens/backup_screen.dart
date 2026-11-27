@@ -11,6 +11,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../backup_record_labels.dart';
 import '../providers/data_providers.dart';
+import '../widgets/auto_backup_section.dart';
 import '../widgets/full_backup_section.dart';
 
 /// Copying the company's books out, and putting a copy back.
@@ -134,6 +135,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
             onInspect: _inspect,
             onRestore: _restore,
           ),
+          const SizedBox(height: 24),
+          const AutoBackupSection(),
           const SizedBox(height: 24),
           // Section two: the whole installation. It carries its own heading
           // and warning, because it is the one operation that can replace

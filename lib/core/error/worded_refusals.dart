@@ -502,6 +502,26 @@ const Map<String, List<String>> wordedRefusals = {
     'أنشأت أداة النسخ الاحتياطي ملفًا ليس أرشيفًا صالحًا لقاعدة البيانات، فحُذف الملف. أعد المحاولة، وتواصل مع الدعم إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
     'The backup tool created a file that is not a valid database archive, so the file was discarded. Try again, and contact support if the problem continues. The database was not changed.',
   ],
+  'BACKUP_DEST_NOT_ABSOLUTE': [
+    'لم يُكتب مسار مجلد كامل للنسخ الاحتياطي. اكتب المسار الكامل للمجلد، مثل D:\\Backups، ثم اضغط فحص المجلد.',
+    'A full folder path was not entered for the backup copies. Type the full path of the folder, for example D:\\Backups, then press Check folder.',
+  ],
+  'BACKUP_DEST_INSIDE_PROGRAM': [
+    'المجلد المختار داخل مجلدات البرنامج أو يحتويها، فلن تنجو النسخة إن تلف البرنامج. اختر مجلدًا خارج مجلد البرنامج، يفضّل على قرص آخر.',
+    'The chosen folder is inside, or contains, the program folders, so the copy would not survive if the program were damaged. Choose a folder outside the program folder, preferably on another disk.',
+  ],
+  'BACKUP_DEST_CANNOT_CREATE': [
+    'تعذّر إنشاء المجلد المختار أو الوصول إليه. تأكد أن المسار صحيح وأن القرص أو المجلد المشترك متصل، ثم أعد المحاولة.',
+    'The chosen folder could not be created or reached. Check that the path is correct and that the disk or shared folder is connected, then try again.',
+  ],
+  'BACKUP_DEST_NOT_WRITABLE': [
+    'لا يستطيع البرنامج الكتابة في المجلد المختار. امنح حساب تشغيل البرنامج صلاحية الكتابة في المجلد أو اختر مجلدًا آخر، ثم أعد الفحص.',
+    'The program cannot write to the chosen folder. Give the program account permission to write to the folder, or choose another folder, then check again.',
+  ],
+  'BACKUP_START_HOUR_INVALID': [
+    'ساعة بدء النسخ الاحتياطي غير صحيحة. اختر ساعة من 0 إلى 23، ثم احفظ الإعدادات.',
+    'The backup start hour is not valid. Choose an hour from 0 to 23, then save the settings.',
+  ],
   'COMPLETE_BACKUP_CREATE_E085': [
     'هذا الجهاز لا تتوفر فيه أدوات النسخ الاحتياطي لقاعدة البيانات، فلا يمكن إنشاء نسخة كاملة هنا. ثبّت أدوات عميل قاعدة البيانات، ثم أعد المحاولة. لم يتغير شيء.',
     'This machine does not have the database backup tools, so a complete backup cannot be created here. Install the database client tools, then try again. Nothing was changed.',
