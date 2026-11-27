@@ -42,7 +42,7 @@ Future<void> showVoucherWithholding(BuildContext context, WidgetRef ref, Json vo
         ),
   ];
   final held = current['withholding'];
-  final heldRate = held is Map ? asString(held['rateId']) : '';
+  final heldRate = held is Map ? (asString(held['rateId']) ?? '') : '';
   final saved = await showFormSheet(
     context,
     title: arabic ? 'ضريبة الخصم على السند' : 'Withholding tax on the voucher',
