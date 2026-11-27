@@ -293,7 +293,9 @@ void main() {
     expect(find.textContaining('154'), findsWidgets);
     expect(find.textContaining('70'), findsWidgets);
     expect(find.textContaining('84'), findsWidgets);
-    expect(find.text('Net (positive = payable)'), findsOneWidget);
+    expect(find.textContaining('Net (positive = payable): '), findsOneWidget);
+    expect(find.textContaining('Output VAT (sales): '), findsOneWidget);
+    expect(find.textContaining('Input VAT (purchases): '), findsOneWidget);
   });
 
   testWidgets('a reader without the VAT permission does not see the VAT tab', (tester) async {
