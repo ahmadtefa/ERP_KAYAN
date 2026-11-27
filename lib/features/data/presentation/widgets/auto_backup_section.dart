@@ -136,7 +136,7 @@ class _AutoBackupSectionState extends ConsumerState<AutoBackupSection> {
         _history = history;
         _preset = _presets.containsKey(interval) ? interval : -1;
         _hours.text = '$interval';
-        _keep.text = '${(settings['retentionCount'] as num?)?.toInt() ?? 14}';
+        _keep.text = '${(settings['retentionCount'] as num?)?.toInt() ?? 3}';
         _folder.text = (settings['destinationPath'] as String?) ?? '';
         _startHour = (settings['startHour'] as num?)?.toInt() ?? 2;
         _loading = false;

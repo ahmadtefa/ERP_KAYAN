@@ -2,6 +2,8 @@
 -- Only the column default changes; no existing company_settings row is touched,
 -- so an installation that already has a daily or custom schedule keeps it.
 ALTER TABLE company_settings ALTER COLUMN "backupIntervalHours" SET DEFAULT 168;
+-- Keep the newest 3 verified copies by default (the administrator can change it).
+ALTER TABLE company_settings ALTER COLUMN "backupRetentionCount" SET DEFAULT 3;
 
 -- Where scheduled backups are copied to, besides the program's own backup
 -- folder. One row per company; the path is chosen by an administrator and
