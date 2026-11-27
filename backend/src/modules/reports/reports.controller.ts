@@ -167,7 +167,7 @@ export class ReportsController {
   ) {
     const unallocated = costCenterId === 'unallocated';
     if (!unallocated && !UUID_PATTERN.test(costCenterId)) {
-      throw new BadRequestException('costCenterId must be a UUID or "unallocated"');
+      throw new BadRequestException({ code: 'REPORT_ID_INVALID', message: 'costCenterId must be a UUID or "unallocated"' });
     }
     return this.statements.costCenterTransactions(
       user.companyId,
@@ -185,7 +185,7 @@ export class ReportsController {
     @Query() query: BudgetReportQueryDto,
   ) {
     if (!mayReadCompanyAggregates(user)) {
-      throw new ForbiddenException('Company-wide budget figures are restricted to company and finance managers.');
+      throw new ForbiddenException({ code: 'BUDGET_REPORT_RESTRICTED', message: 'Company-wide budget figures are restricted to company and finance managers.' });
     }
     return this.budgets.report(user.companyId, query);
   }

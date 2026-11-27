@@ -308,9 +308,7 @@ export class AuditPurgeService {
 
   private assertAllowed(request: AuditPurgeRequest): void {
     if (!request || !REASONS.includes(request.reason)) {
-      throw new BadRequestException(
-        'An audit purge needs one of the operations that is allowed to perform it.',
-      );
+      throw new BadRequestException({ code: 'AUDIT_PURGE_NOT_ALLOWED', message: 'An audit purge needs one of the operations that is allowed to perform it.' });
     }
   }
 }

@@ -112,14 +112,14 @@ export class MasterDataBackupController {
 
   private kind(value: string): MasterDataKind {
     if (!MASTER_DATA_KINDS.includes(value as MasterDataKind)) {
-      throw new BadRequestException(`Unknown master-data backup type: ${value}.`);
+      throw new BadRequestException({ code: 'MASTER_BACKUP_TYPE_UNKNOWN', message: `Unknown master-data backup type: ${value}.` });
     }
     return value as MasterDataKind;
   }
 
   private require(user: AuthUser, permission: string): void {
     if (!user.isSuperAdmin && !user.permissions.includes(permission)) {
-      throw new ForbiddenException(`Missing permission: ${permission}.`);
+      throw new ForbiddenException({ code: 'PERMISSION_MISSING', message: `Missing permission: ${permission}.` });
     }
   }
 
@@ -127,9 +127,7 @@ export class MasterDataBackupController {
     if (user.isSuperAdmin) return;
     const needed = [CREATE_PERMISSION[kind], UPDATE_PERMISSION[kind]];
     if (!needed.every((permission) => user.permissions.includes(permission))) {
-      throw new ForbiddenException(
-        `Restoring ${kind} requires both ${needed[0]} and ${needed[1]}.`,
-      );
+      throw new ForbiddenException({ code: 'MASTER_BACKUP_RESTORE_PERMISSION', message: `Restoring ${kind} requires both ${needed[0]} and ${needed[1]}.` });
     }
   }
 }

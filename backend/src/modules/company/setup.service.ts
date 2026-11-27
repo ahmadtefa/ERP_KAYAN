@@ -81,9 +81,7 @@ export class SetupService {
       }),
     ]);
     if (companyRows > 0 || userRows > 0 || retiredCompany !== null) {
-      throw new ConflictException(
-        'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
-      );
+      throw new ConflictException({ code: 'SETUP_CLOSED', message: 'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.' });
     }
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
     if (dto.logoBase64) {
@@ -104,9 +102,7 @@ export class SetupService {
         tx.company.findFirst({ where: { deletedAt: { not: null } }, select: { id: true } }),
       ]);
       if (existingCompanies > 0 || existingUsers > 0 || retiredInTransaction !== null) {
-        throw new ConflictException(
-          'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
-        );
+        throw new ConflictException({ code: 'SETUP_CLOSED', message: 'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.' });
       }
 
       // The request's own code and names are what the operator is entering.

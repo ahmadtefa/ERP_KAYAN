@@ -259,10 +259,8 @@ export class StockLedgerService {
       value: before.value.plus(value).toDecimalPlaces(MONEY_SCALE),
     };
     if (after.quantity.lessThan(0) && !allowNegative) {
-      throw new BadRequestException(
-        `Not enough stock in the selected warehouse: ${before.quantity.toFixed(MONEY_SCALE)} available, ` +
-          `${quantity.abs().toFixed(MONEY_SCALE)} requested.`,
-      );
+      throw new BadRequestException({ code: 'STOCK_SHORT_IN_WAREHOUSE', message: `Not enough stock in the selected warehouse: ${before.quantity.toFixed(MONEY_SCALE)} available, ` +
+          `${quantity.abs().toFixed(MONEY_SCALE)} requested.` });
     }
     // An emptied shelf is worth nothing: a rounded average must not leave a
     // fils of valuation floating on a shelf that holds no stock.
@@ -346,7 +344,7 @@ export class StockLedgerService {
     target: LedgerTarget,
   ): Promise<LedgerPosition> {
     if (!target.warehouseId) {
-      throw new BadRequestException('A rebuild needs a warehouse.');
+      throw new BadRequestException({ code: 'LEDGER_REBUILD_NEEDS_WAREHOUSE', message: 'A rebuild needs a warehouse.' });
     }
     const rows = await tx.$queryRaw<
       Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>

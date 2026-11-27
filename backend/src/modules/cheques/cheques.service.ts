@@ -210,14 +210,14 @@ export class ChequesService {
     const parts: Prisma.Sql[] = [];
     if (query.direction) {
       const d = query.direction.toUpperCase();
-      if (d !== 'RECEIVED' && d !== 'ISSUED') throw new BadRequestException('direction must be RECEIVED or ISSUED');
+      if (d !== 'RECEIVED' && d !== 'ISSUED') throw new BadRequestException({ code: 'CHEQUE_DIRECTION_INVALID', message: 'direction must be RECEIVED or ISSUED' });
       parts.push(Prisma.sql`AND q.direction = ${d}`);
     }
     if (query.status) {
       const s = query.status.toUpperCase();
       if (s === 'OPEN') parts.push(Prisma.sql`AND q.status IN ('HELD','DEPOSITED')`);
       else if (CHEQUE_STATUSES.includes(s as ChequeStatus)) parts.push(Prisma.sql`AND q.status = ${s}`);
-      else throw new BadRequestException('status must be OPEN or one of ' + CHEQUE_STATUSES.join(', '));
+      else throw new BadRequestException({ code: 'CHEQUE_STATUS_INVALID', message: 'status must be OPEN or one of ' + CHEQUE_STATUSES.join(', ') });
     }
     if (query.dueBefore) parts.push(Prisma.sql`AND q."dueDate" <= ${this.date(query.dueBefore, 'dueBefore')}::date`);
     if (query.branchScope) parts.push(Prisma.sql`AND q."branchId" = ANY(${query.branchScope}::uuid[])`);

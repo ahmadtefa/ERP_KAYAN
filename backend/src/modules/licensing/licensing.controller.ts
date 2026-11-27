@@ -98,9 +98,7 @@ export class LicensingController {
 
   private superAdmin(user: AuthUser): void {
     if (!user?.isSuperAdmin) {
-      throw new ForbiddenException(
-        'Applying a licence key changes the whole installation, so only a super administrator may do it.',
-      );
+      throw new ForbiddenException({ code: 'LICENCE_SUPER_ADMIN_ONLY', message: 'Applying a licence key changes the whole installation, so only a super administrator may do it.' });
     }
   }
 

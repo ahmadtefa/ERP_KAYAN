@@ -57,14 +57,14 @@ export class BranchWriteGuard implements CanActivate {
       const body = (request.body ?? {}) as Record<string, unknown>;
       for (const key of ['branchId', 'toBranchId', 'fromBranchId']) {
         const v = body[key];
-        if (typeof v === 'string' && v && !scope.includes(v)) throw new ForbiddenException('This branch is outside your assignment.');
+        if (typeof v === 'string' && v && !scope.includes(v)) throw new ForbiddenException({ code: 'BRANCH_OUTSIDE_ASSIGNMENT', message: 'This branch is outside your assignment.' });
       }
       for (const key of ['toWarehouseId', 'fromWarehouseId', 'warehouseId']) {
         const v = body[key];
         if (typeof v !== 'string' || !v) continue;
         const wh = await (this.prisma as unknown as { warehouse: { findFirst(a: unknown): Promise<{ branchId: string } | null> } })
           .warehouse.findFirst({ where: { id: v, companyId: user.companyId }, select: { branchId: true } });
-        if (wh && !scope.includes(wh.branchId)) throw new ForbiddenException('This warehouse is outside your assignment.');
+        if (wh && !scope.includes(wh.branchId)) throw new ForbiddenException({ code: 'WAREHOUSE_OUTSIDE_ASSIGNMENT', message: 'This warehouse is outside your assignment.' });
       }
       return true;
     }

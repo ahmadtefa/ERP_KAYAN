@@ -106,7 +106,7 @@ export class SalesInvoicesController {
   @Post(':id/credit-approval')
   @RequirePermissions('sales.credit.approve')
   approveCredit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: CreditApprovalDto) {
-    if (!this.credit) throw new NotFoundException('Credit approval is not available');
+    if (!this.credit) throw new NotFoundException({ code: 'CREDIT_APPROVAL_UNAVAILABLE', message: 'Credit approval is not available' });
     return this.credit.approve(user.companyId, user.userId, id, body.reason, branchReadScope(user));
   }
 
@@ -115,7 +115,7 @@ export class SalesInvoicesController {
   @Post(':id/payment-term-approval')
   @RequirePermissions('sales.credit.approve')
   approvePeriod(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: CreditApprovalDto) {
-    if (!this.credit) throw new NotFoundException('Approval is not available');
+    if (!this.credit) throw new NotFoundException({ code: 'CREDIT_APPROVAL_UNAVAILABLE', message: 'Approval is not available' });
     return this.credit.approvePeriod(user.companyId, user.userId, id, body.reason, branchReadScope(user));
   }
 

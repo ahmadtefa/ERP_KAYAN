@@ -13,7 +13,7 @@ export class ProfilePhotoController {
   constructor(private readonly photos: ProfilePhotoService) {}
   private assertSession(user: AuthUser, expectedUserId: unknown) {
     if (typeof expectedUserId !== 'string' || expectedUserId !== user.userId) {
-      throw new ForbiddenException('The signed-in user changed; reload the profile');
+      throw new ForbiddenException({ code: 'USER_CHANGED_RELOAD', message: 'The signed-in user changed; reload the profile' });
     }
   }
   @Get()
@@ -27,7 +27,7 @@ export class ProfilePhotoController {
   @UseInterceptors(FileInterceptor('file',{limits:{fileSize:LOGO_UPLOAD_MAX_BYTES,files:1,fields:1,fieldSize:128,parts:2}}))
   set(@CurrentUser() user: AuthUser, @Body('expectedUserId') expectedUserId: string, @UploadedFile() file?: Upload) {
     this.assertSession(user,expectedUserId);
-    if (!file?.buffer?.length) throw new BadRequestException('No photo file was uploaded');
+    if (!file?.buffer?.length) throw new BadRequestException({ code: 'USER_PHOTO_MISSING', message: 'No photo file was uploaded' });
     return this.photos.set(user.companyId,user.userId,file.buffer,logoMimeForUpload(file.mimetype,file.originalname));
   }
   @Delete()

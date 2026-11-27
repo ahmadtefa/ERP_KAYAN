@@ -81,7 +81,7 @@ export class PrintSettingsService {
       );
     }
     if (entries.length > PRINT_TYPES.length + 1) {
-      throw new BadRequestException('Too many print settings in one request');
+      throw new BadRequestException({ code: 'PRINT_SETTINGS_TOO_MANY', message: 'Too many print settings in one request' });
     }
     const seen = new Set<string>();
     for (const entry of entries) {
@@ -92,7 +92,7 @@ export class PrintSettingsService {
         );
       }
       if (seen.has(type)) {
-        throw new BadRequestException(`Duplicate print type: ${type}`);
+        throw new BadRequestException({ code: 'PRINT_SETTINGS_DUPLICATE', message: `Duplicate print type: ${type}` });
       }
       seen.add(type);
       if (typeof entry.showSalePrice !== 'boolean' || typeof entry.showCost !== 'boolean') {

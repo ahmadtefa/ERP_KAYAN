@@ -55,6 +55,6 @@ export class BranchReportScopeGuard implements CanActivate {
       return true;
     }
 
-    throw new ForbiddenException('Choose one of your assigned branches to view this report.');
+    throw new ForbiddenException({ code: 'REPORT_SELECT_BRANCH', message: 'Choose one of your assigned branches to view this report.' });
   }
 }

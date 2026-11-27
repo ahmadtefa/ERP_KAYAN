@@ -324,7 +324,7 @@ export class ExportController {
   private allowed(user: AuthUser, permission: string): void {
     if (user.isSuperAdmin) return;
     if (!user.permissions.includes(permission)) {
-      throw new ForbiddenException(`Missing permission: ${permission}`);
+      throw new ForbiddenException({ code: 'PERMISSION_MISSING', message: `Missing permission: ${permission}` });
     }
   }
 
@@ -335,7 +335,7 @@ export class ExportController {
     if (user.isSuperAdmin) return;
     if (user.permissions.includes(exportPermission)) return;
     if (user.permissions.includes(read)) return;
-    throw new ForbiddenException(`Missing permission: ${exportPermission}`);
+    throw new ForbiddenException({ code: 'PERMISSION_MISSING', message: `Missing permission: ${exportPermission}` });
   }
 
   private assertReportRead(user: AuthUser, report: ExportableReport): void {
@@ -346,7 +346,7 @@ export class ExportController {
           ? 'reports.party-statement.read'
           : undefined);
     if (user.isSuperAdmin || (permission && user.permissions.includes(permission))) return;
-    throw new ForbiddenException(`Missing permission: ${permission ?? `reports.${report}.read`}`);
+    throw new ForbiddenException({ code: 'PERMISSION_MISSING', message: `Missing permission: ${permission ?? `reports.${report}.read`}` });
   }
 
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
@@ -441,7 +441,7 @@ export class ExportController {
     const slug = this.known(report);
     this.assertReportRead(user, slug);
     if (!user.isSuperAdmin && !user.permissions.includes('reports.print')) {
-      throw new ForbiddenException('Missing permission: reports.print');
+      throw new ForbiddenException({ code: 'PERMISSION_MISSING', message: 'Missing permission: reports.print' });
     }
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = applyPriceVisibility(

@@ -1171,7 +1171,7 @@ export class LicensingService implements OnModuleInit {
     // One lock per licence when the caller names one, so two companies never
     // wait on each other; the single installation lock otherwise.
     if (input.licenseId && !/^[A-Za-z0-9_.-]{1,128}$/.test(input.licenseId)) {
-      throw new BadRequestException('The licence identifier is not valid.');
+      throw new BadRequestException({ code: 'LICENCE_ID_INVALID', message: 'The licence identifier is not valid.' });
     }
     const lockName = input.licenseId ? `kayan.license.seats.${input.licenseId}` : 'kayan.license.seats';
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('${lockName}'))`);

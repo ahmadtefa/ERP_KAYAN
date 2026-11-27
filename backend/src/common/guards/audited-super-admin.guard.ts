@@ -16,7 +16,7 @@ export class AuditedSuperAdminGuard implements CanActivate {
     // JWT should have established the caller before this guard. Do not attempt
     // to invent a tenant or write a foreign key when it has not.
     if (!user?.userId || !user.companyId) {
-      throw new ForbiddenException('Only the program administrator can do this.');
+      throw new ForbiddenException({ code: 'SUPER_ADMIN_ONLY', message: 'Only the program administrator can do this.' });
     }
     try {
       await this.audit.recordRequired({
@@ -33,6 +33,6 @@ export class AuditedSuperAdminGuard implements CanActivate {
       // Do not allow a mutation simply because its denial cannot be audited.
       throw new ServiceUnavailableException('The access check could not be recorded. No changes were made.');
     }
-    throw new ForbiddenException('Only the program administrator can do this.');
+    throw new ForbiddenException({ code: 'SUPER_ADMIN_ONLY', message: 'Only the program administrator can do this.' });
   }
 }

@@ -663,10 +663,8 @@ export class WarehouseService {
     await this.lockForPosting(tx, companyId, warehouseId);
     const available = await this.availableQuantity(tx, companyId, warehouseId, itemId);
     if (available.lessThan(quantity)) {
-      throw new BadRequestException(
-        `Not enough stock in the selected warehouse: ${available.toFixed(MONEY_SCALE)} available, ` +
-          `${quantity.toFixed(MONEY_SCALE)} requested in ${reference}.`,
-      );
+      throw new BadRequestException({ code: 'STOCK_SHORT_IN_WAREHOUSE', message: `Not enough stock in the selected warehouse: ${available.toFixed(MONEY_SCALE)} available, ` +
+          `${quantity.toFixed(MONEY_SCALE)} requested in ${reference}.` });
     }
   }
 
@@ -747,7 +745,7 @@ export class WarehouseService {
 
   private text(value: unknown, field: string): string {
     const text = String(value ?? '').trim();
-    if (!text) throw new BadRequestException(`${field} is required`);
+    if (!text) throw new BadRequestException({ code: 'WAREHOUSE_FIELD_REQUIRED', message: `${field} is required` });
     return text;
   }
 

@@ -108,9 +108,7 @@ export class CompanySettingsService {
       if (dto.inventoryValuation !== undefined) {
         const method = String(dto.inventoryValuation).toUpperCase();
         if (!VALUATION_METHODS.includes(method as ValuationMethod)) {
-          throw new BadRequestException(
-            `Unsupported valuation method "${dto.inventoryValuation}". This installation supports: ${VALUATION_METHODS.join(', ')}`,
-          );
+          throw new BadRequestException({ code: 'VALUATION_METHOD_UNSUPPORTED', message: `Unsupported valuation method "${dto.inventoryValuation}". This installation supports: ${VALUATION_METHODS.join(', ')}` });
         }
         // Switching method on a company that already holds stock would make
         // every figure before today incomparable with every figure after it.
@@ -119,10 +117,8 @@ export class CompanySettingsService {
             where: { companyId, quantity: { not: 0 } },
           });
           if (stock > 0) {
-            throw new BadRequestException(
-              'The valuation method cannot be changed while there is stock on hand: ' +
-                'the figures before and after the change would not be comparable.',
-            );
+            throw new BadRequestException({ code: 'VALUATION_METHOD_LOCKED', message: 'The valuation method cannot be changed while there is stock on hand: ' +
+                'the figures before and after the change would not be comparable.' });
           }
         }
         data.inventoryValuation = method;
