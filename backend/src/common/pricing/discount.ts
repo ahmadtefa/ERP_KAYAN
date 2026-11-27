@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { allocateMoneyByWeight } from './money-allocation';
@@ -27,7 +28,13 @@ export type DiscountType = (typeof DISCOUNT_TYPES)[number];
 export const DISCOUNT_SCALE = 4;
 const HUNDRED = new Prisma.Decimal(100);
 
-export class DiscountError extends Error {}
+/// A refused discount. It is a 400 with a reviewed code (and plain values) so
+/// the app shows its own bilingual sentence, whichever document it came from.
+export class DiscountError extends BadRequestException {
+  constructor(code: string, message: string, params?: Record<string, string>) {
+    super(params ? { code, message, params } : { code, message });
+  }
+}
 
 export interface DiscountInput {
   type?: string | null;
@@ -58,7 +65,7 @@ export function hasDiscount(input: DiscountInput | null | undefined): boolean {
 function toDecimalOrNull(value: string | number | Prisma.Decimal | null | undefined) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = new Prisma.Decimal(value);
-  if (!parsed.isFinite()) throw new DiscountError('A discount must be a finite number');
+  if (!parsed.isFinite()) throw new DiscountError('DISCOUNT_NOT_FINITE', 'A discount must be a finite number');
   return parsed;
 }
 
@@ -74,13 +81,13 @@ export function resolveDiscount(
   base: Prisma.Decimal,
   input: DiscountInput | null | undefined,
 ): ResolvedDiscount {
-  if (base.isNegative()) throw new DiscountError('A discount base cannot be negative');
+  if (base.isNegative()) throw new DiscountError('DISCOUNT_BASE_NEGATIVE', 'A discount base cannot be negative');
 
   const percentInput = toDecimalOrNull(input?.percent);
   const amountInput = toDecimalOrNull(input?.amount);
   const explicitType = input?.type ?? null;
   if (explicitType !== null && !isDiscountType(explicitType)) {
-    throw new DiscountError(`Unknown discount type "${explicitType}"`);
+    throw new DiscountError('DISCOUNT_TYPE_UNKNOWN', `Unknown discount type "${explicitType}"`);
   }
 
   // No type but a value is the shape older clients send: percent wins when it
@@ -94,11 +101,11 @@ export function resolveDiscount(
 
   if (type === 'PERCENT') {
     const percent = percentInput ?? new Prisma.Decimal(0);
-    if (percent.isNegative()) throw new DiscountError('A discount percent cannot be negative');
-    if (percent.greaterThan(HUNDRED)) throw new DiscountError('A discount percent cannot exceed 100');
+    if (percent.isNegative()) throw new DiscountError('DISCOUNT_PERCENT_NEGATIVE', 'A discount percent cannot be negative');
+    if (percent.greaterThan(HUNDRED)) throw new DiscountError('DISCOUNT_PERCENT_OVER_100', 'A discount percent cannot exceed 100');
     const amount = base.mul(percent).div(HUNDRED).toDecimalPlaces(DISCOUNT_SCALE);
     if (amount.greaterThan(base)) {
-      throw new DiscountError('The discount is larger than the value it applies to');
+      throw new DiscountError('DISCOUNT_LARGER_THAN_VALUE', 'The discount is larger than the value it applies to');
     }
     return { type, percent: percent.toDecimalPlaces(DISCOUNT_SCALE), amount, base, net: base.minus(amount) };
   }
@@ -106,10 +113,12 @@ export function resolveDiscount(
   // A fixed discount. The client may also send a percent it derived for
   // display; that number is not trusted, the amount is the document's word.
   const amount = (amountInput ?? new Prisma.Decimal(0)).toDecimalPlaces(DISCOUNT_SCALE);
-  if (amount.isNegative()) throw new DiscountError('A discount amount cannot be negative');
+  if (amount.isNegative()) throw new DiscountError('DISCOUNT_AMOUNT_NEGATIVE', 'A discount amount cannot be negative');
   if (amount.greaterThan(base)) {
     throw new DiscountError(
+      'DISCOUNT_AMOUNT_OVER_VALUE',
       `A discount of ${amount.toFixed(DISCOUNT_SCALE)} cannot be taken from a value of ${base.toFixed(DISCOUNT_SCALE)}`,
+      { amount: amount.toFixed(DISCOUNT_SCALE), value: base.toFixed(DISCOUNT_SCALE) },
     );
   }
   const percent = base.isZero()
@@ -162,7 +171,9 @@ export function assertDiscountLimit(
   if (maximum === null || maximum === undefined) return;
   if (percent.greaterThan(maximum)) {
     throw new DiscountError(
+      'DISCOUNT_OVER_LIMIT',
       `${what} discount of ${percent.toFixed(DISCOUNT_SCALE)}% exceeds the company maximum of ${maximum.toFixed(DISCOUNT_SCALE)}%`,
+      { percent: percent.toFixed(DISCOUNT_SCALE), maximum: maximum.toFixed(DISCOUNT_SCALE) },
     );
   }
 }

@@ -136,3 +136,18 @@ describe('invoice and quotation discounts', () => {
     });
   });
 });
+
+describe('discount refusals carry reviewed codes', () => {
+  const codeOf = (fn: () => unknown) => {
+    try { fn(); } catch (error) { return (error as { getResponse(): Record<string, unknown> }).getResponse(); }
+    return null;
+  };
+  it('over-limit discount reports the percentages as values', () => {
+    const response = codeOf(() => assertDiscountLimit(new Prisma.Decimal('30'), new Prisma.Decimal('10'), 'Invoice'));
+    expect(response).toMatchObject({ code: 'DISCOUNT_OVER_LIMIT', params: { percent: '30.0000', maximum: '10.0000' } });
+  });
+  it('percent above 100 and unknown type are coded', () => {
+    expect(codeOf(() => resolveDiscount(new Prisma.Decimal('10'), { type: 'PERCENT', percent: '120' }))).toMatchObject({ code: 'DISCOUNT_PERCENT_OVER_100' });
+    expect(codeOf(() => resolveDiscount(new Prisma.Decimal('10'), { type: 'BOGO' }))).toMatchObject({ code: 'DISCOUNT_TYPE_UNKNOWN' });
+  });
+});

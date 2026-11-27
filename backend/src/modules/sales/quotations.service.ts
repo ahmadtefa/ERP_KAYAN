@@ -1067,7 +1067,7 @@ export class QuotationsService {
         });
         assertDiscountLimit(discount.percent, limit, `Table ${tableIndex + 1}`);
       } catch (error) {
-        throw new BadRequestException(this.discountMessage(error, `Table ${tableIndex + 1}`));
+        throw this.discountFailure(error, `Table ${tableIndex + 1}`);
       }
 
       preparedTables.push({
@@ -1109,7 +1109,7 @@ export class QuotationsService {
         'Quotation',
       );
     } catch (error) {
-      throw new BadRequestException(this.discountMessage(error, 'Quotation'));
+      throw this.discountFailure(error, 'Quotation');
     }
 
     const discountTotal = tableDiscountTotal.plus(allocation.discount.amount);
@@ -1420,6 +1420,13 @@ export class QuotationsService {
     if (value === null || value === undefined) return null;
     const trimmed = value.trim();
     return trimmed.length === 0 ? null : trimmed;
+  }
+
+  /// A refused discount keeps its reviewed code and values; anything else is
+  /// reported with the place it happened.
+  private discountFailure(error: unknown, subject: string): Error {
+    if (error instanceof DiscountError) return error;
+    return new BadRequestException(this.discountMessage(error, subject));
   }
 
   private discountMessage(error: unknown, subject: string): string {

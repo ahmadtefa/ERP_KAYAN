@@ -166,6 +166,42 @@ const Map<String, List<String>> wordedRefusals = {
     'لا يمكن لمسؤول الفرع إزالة آخر قيد للمستودعات. يجب أن يبقى قيد واحد على الأقل.',
     'A branch manager cannot remove the last warehouse restriction. At least one restriction must remain.',
   ],
+  'DISCOUNT_NOT_FINITE': [
+    'قيمة الخصم ليست رقمًا صحيحًا. اكتب رقمًا عاديًا في خانة الخصم، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount value is not a valid number. Enter a normal number in the discount field, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_BASE_NEGATIVE': [
+    'لا يمكن حساب الخصم لأن القيمة التي يُحسب عليها سالبة. راجع الكميات والأسعار في المستند، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount cannot be calculated because the value it applies to is negative. Check the quantities and prices on the document, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_TYPE_UNKNOWN': [
+    'نوع الخصم غير معروف. اختر نسبة مئوية أو مبلغًا ثابتًا من قائمة نوع الخصم، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount type is not known. Choose a percentage or a fixed amount from the discount type list, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_PERCENT_NEGATIVE': [
+    'نسبة الخصم لا يمكن أن تكون سالبة. اكتب نسبة من 0 إلى 100، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount percentage cannot be negative. Enter a percentage from 0 to 100, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_PERCENT_OVER_100': [
+    'نسبة الخصم لا يمكن أن تتجاوز 100. اكتب نسبة من 0 إلى 100، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount percentage cannot be more than 100. Enter a percentage from 0 to 100, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_LARGER_THAN_VALUE': [
+    'الخصم أكبر من القيمة التي يُطبَّق عليها. خفّض الخصم أو راجع الأسعار، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount is larger than the value it applies to. Lower the discount or check the prices, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_AMOUNT_NEGATIVE': [
+    'مبلغ الخصم لا يمكن أن يكون سالبًا. اكتب مبلغًا من صفر فأكثر، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount amount cannot be negative. Enter an amount of zero or more, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_AMOUNT_OVER_VALUE': [
+    'مبلغ الخصم {amount} أكبر من القيمة التي يُطبَّق عليها وهي {value}. خفّض مبلغ الخصم إلى {value} أو أقل، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount amount {amount} is larger than the value it applies to, which is {value}. Lower the discount to {value} or less, then try again. Nothing was saved.',
+  ],
+  'DISCOUNT_OVER_LIMIT': [
+    'نسبة الخصم {percent}% أعلى من الحد الأقصى المسموح للشركة وهو {maximum}%. خفّض الخصم إلى {maximum}% أو أقل، أو اطلب من مدير النظام رفع الحد، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The discount of {percent}% is above the maximum the company allows, which is {maximum}%. Lower the discount to {maximum}% or less, or ask the system administrator to raise the limit, then try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

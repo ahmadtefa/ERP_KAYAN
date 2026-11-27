@@ -1724,7 +1724,7 @@ export class SalesInvoicesService {
         documentDiscount,
       );
     } catch (error) {
-      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+      throw this.discountFailure(error, 'Invoice');
     }
 
     const grossTotal = prepared.reduce(
@@ -1745,7 +1745,7 @@ export class SalesInvoicesService {
         'Document',
       );
     } catch (error) {
-      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+      throw this.discountFailure(error, 'Invoice');
     }
 
     const lines = prepared.map((line, index) => {
@@ -1781,8 +1781,15 @@ export class SalesInvoicesService {
       assertDiscountLimit(resolved.percent, maximum, `Line ${index + 1}`);
       return resolved;
     } catch (error) {
-      throw new BadRequestException(this.discountMessage(error, `Line ${index + 1}`));
+      throw this.discountFailure(error, `Line ${index + 1}`);
     }
+  }
+
+  /// A refused discount keeps its reviewed code and values; anything else is
+  /// reported with the place it happened.
+  private discountFailure(error: unknown, subject: string): Error {
+    if (error instanceof DiscountError) return error;
+    return new BadRequestException(this.discountMessage(error, subject));
   }
 
   private discountMessage(error: unknown, subject: string): string {
