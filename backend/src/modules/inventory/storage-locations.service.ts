@@ -100,14 +100,14 @@ export class StorageLocationsService {
     warehouseIds?: string[],
   ) {
     if (warehouseIds !== undefined && !warehouseIds.includes(warehouseId)) {
-      throw new ForbiddenException('You cannot view locations in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_VIEW_FORBIDDEN', message: 'You cannot view locations in this warehouse' });
     }
     const rows = await this.prisma.storageLocation.findMany({
       where: { companyId, warehouseId, deletedAt: null },
       orderBy: [{ kind: 'asc' }, { code: 'asc' }],
     });
     if (scope !== null && rows.some((row) => !scope.includes(row.branchId))) {
-      throw new ForbiddenException('This warehouse belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This warehouse belongs to another branch' });
     }
     const counts = await this.stockByLocation(
       companyId,
@@ -136,13 +136,11 @@ export class StorageLocationsService {
   ) {
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     if (warehouseIds !== undefined && !warehouseIds.includes(warehouse.id)) {
-      throw new ForbiddenException('You cannot manage locations in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MANAGE_FORBIDDEN', message: 'You cannot manage locations in this warehouse' });
     }
     const kind = (input.kind ?? 'BIN').toUpperCase() as LocationKind;
     if (!LOCATION_KINDS.includes(kind)) {
-      throw new BadRequestException(
-        `Unknown location kind ${input.kind}. Use one of ${LOCATION_KINDS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'LOCATION_KIND_UNKNOWN', message: `Unknown location kind ${input.kind}. Use one of ${LOCATION_KINDS.join(', ')}.` });
     }
 
     let parent: { id: string; kind: string } | null = null;
@@ -220,10 +218,10 @@ export class StorageLocationsService {
     });
     if (!existing) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
-      throw new ForbiddenException('You cannot manage locations in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MANAGE_FORBIDDEN', message: 'You cannot manage locations in this warehouse' });
     }
     if (scope !== null && !scope.includes(existing.branchId)) {
-      throw new ForbiddenException('This location belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
     }
     if (input.code && input.code.trim() !== existing.code) {
       const duplicate = await this.prisma.storageLocation.findFirst({
@@ -242,7 +240,7 @@ export class StorageLocationsService {
     }
     if (input.parentId !== undefined && input.parentId !== existing.parentId) {
       if (input.parentId === id) {
-        throw new BadRequestException('A location cannot contain itself');
+        throw new BadRequestException({ code: 'LOCATION_OWN_PARENT', message: 'A location cannot contain itself' });
       }
       if (input.parentId) {
         const parent = await this.prisma.storageLocation.findFirst({
@@ -254,11 +252,9 @@ export class StorageLocationsService {
           },
           select: { kind: true },
         });
-        if (!parent) throw new BadRequestException('The parent location does not exist here');
+        if (!parent) throw new BadRequestException({ code: 'LOCATION_PARENT_MISSING', message: 'The parent location does not exist here' });
         if (!PARENT_OF[existing.kind as LocationKind].includes(parent.kind as LocationKind)) {
-          throw new BadRequestException(
-            `A ${existing.kind} cannot be placed inside a ${parent.kind}`,
-          );
+          throw new BadRequestException({ code: 'LOCATION_KIND_NESTING', message: `A ${existing.kind} cannot be placed inside a ${parent.kind}` });
         }
         // A move that made a shelf its own grandparent would orphan the tree.
         let cursor: string | null = input.parentId;
@@ -319,10 +315,10 @@ export class StorageLocationsService {
     });
     if (!existing) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
-      throw new ForbiddenException('You cannot manage locations in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MANAGE_FORBIDDEN', message: 'You cannot manage locations in this warehouse' });
     }
     if (scope !== null && !scope.includes(existing.branchId)) {
-      throw new ForbiddenException('This location belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
     }
     const children = await this.prisma.storageLocation.count({
       where: { parentId: id, deletedAt: null },
@@ -410,16 +406,16 @@ export class StorageLocationsService {
       );
     }
     if (!from.isActive || !to.isActive) {
-      throw new BadRequestException('Both locations must be active');
+      throw new BadRequestException({ code: 'LOCATION_BOTH_ACTIVE', message: 'Both locations must be active' });
     }
     if (scope !== null && !scope.includes(from.branchId)) {
-      throw new ForbiddenException('This location belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
     }
     if (warehouseIds !== undefined && !warehouseIds.includes(from.warehouseId)) {
-      throw new ForbiddenException('You cannot move stock in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MOVE_FORBIDDEN', message: 'You cannot move stock in this warehouse' });
     }
     if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(from.warehouseId)) {
-      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_TRANSFER_GRANT', message: 'You do not have the transfer grant for this warehouse' });
     }
 
     const item = await this.prisma.item.findFirst({
@@ -682,15 +678,15 @@ export class StorageLocationsService {
         'الموقع ليس في هذا المخزن. / The location is not in that warehouse.',
       );
     }
-    if (!to.isActive) throw new BadRequestException('The location must be active');
+    if (!to.isActive) throw new BadRequestException({ code: 'LOCATION_MUST_BE_ACTIVE', message: 'The location must be active' });
     if (scope !== null && !scope.includes(to.branchId)) {
-      throw new ForbiddenException('This location belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
     }
     if (warehouseIds !== undefined && !warehouseIds.includes(to.warehouseId)) {
-      throw new ForbiddenException('You cannot move stock in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MOVE_FORBIDDEN', message: 'You cannot move stock in this warehouse' });
     }
     if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(to.warehouseId)) {
-      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_TRANSFER_GRANT', message: 'You do not have the transfer grant for this warehouse' });
     }
     const item = await this.prisma.item.findFirst({
       where: { id: input.itemId, companyId, deletedAt: null },
@@ -703,7 +699,7 @@ export class StorageLocationsService {
         where: { id: batchId, companyId, itemId: item.id, warehouseId: to.warehouseId },
         select: { id: true },
       });
-      if (!batch) throw new BadRequestException('That lot is not in this warehouse for this item');
+      if (!batch) throw new BadRequestException({ code: 'LOCATION_LOT_NOT_HERE', message: 'That lot is not in this warehouse for this item' });
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -828,13 +824,13 @@ export class StorageLocationsService {
       throw new BadRequestException('The shelf is not in that warehouse. / الموقع ليس في هذا المخزن.');
     }
     if (scope !== null && !scope.includes(from.branchId)) {
-      throw new ForbiddenException('This location belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
     }
     if (warehouseIds !== undefined && !warehouseIds.includes(from.warehouseId)) {
-      throw new ForbiddenException('You cannot move stock in this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_MOVE_FORBIDDEN', message: 'You cannot move stock in this warehouse' });
     }
     if (transferWarehouseIds !== undefined && !transferWarehouseIds.includes(from.warehouseId)) {
-      throw new ForbiddenException('You do not have the transfer grant for this warehouse');
+      throw new ForbiddenException({ code: 'LOCATION_TRANSFER_GRANT', message: 'You do not have the transfer grant for this warehouse' });
     }
     const item = await this.prisma.item.findFirst({
       where: { id: input.itemId, companyId, deletedAt: null },
@@ -941,7 +937,7 @@ export class StorageLocationsService {
     });
     if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
-      throw new ForbiddenException('This warehouse belongs to another branch');
+      throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This warehouse belongs to another branch' });
     }
     return warehouse;
   }

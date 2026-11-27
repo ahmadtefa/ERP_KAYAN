@@ -76,8 +76,8 @@ export class StockTransfersService {
   }, allowedBranches: string[] | null = null) {
     const key = this.key(input.idempotencyKey);
     const reason = String(input.reason ?? '').trim();
-    if (!reason) throw new BadRequestException('A transfer reason is required');
-    if (!Array.isArray(input.lines) || input.lines.length === 0 || input.lines.length > 500) throw new BadRequestException('A transfer needs 1 to 500 lines');
+    if (!reason) throw new BadRequestException({ code: 'STOCKXFER_REASON_REQUIRED', message: 'A transfer reason is required' });
+    if (!Array.isArray(input.lines) || input.lines.length === 0 || input.lines.length > 500) throw new BadRequestException({ code: 'STOCKXFER_LINE_COUNT', message: 'A transfer needs 1 to 500 lines' });
     const date = this.day(input.transferDate);
     const hash = this.hash({ ...input, idempotencyKey: key });
     const result = await this.prisma.$transaction(async tx => {
@@ -89,33 +89,33 @@ export class StockTransfersService {
       const prior = await tx.stockTransfer.findFirst({ where: { companyId, idempotencyKey: key } });
       if (prior) {
         const recorded = await tx.stockTransferAction.findFirst({ where: { transferId: prior.id, requestKey: `CREATE:${key}` } });
-        if (!recorded || recorded.requestHash !== hash) throw new ConflictException('The idempotency key belongs to a different transfer request');
+        if (!recorded || recorded.requestHash !== hash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_TRANSFER', message: 'The idempotency key belongs to a different transfer request' });
         return prior.id;
       }
       const [source, destination] = await Promise.all([
         tx.warehouse.findFirst({ where: { id: input.sourceWarehouseId, companyId, deletedAt: null, isActive: true, isTransit: false }, include: { branch: { select: { id: true } } } }),
         tx.warehouse.findFirst({ where: { id: input.destinationWarehouseId, companyId, deletedAt: null, isActive: true, isTransit: false }, include: { branch: { select: { id: true } } } }),
       ]);
-      if (!source || !destination) throw new BadRequestException('Source and destination warehouses must be active warehouses in this company');
+      if (!source || !destination) throw new BadRequestException({ code: 'STOCKXFER_WAREHOUSE_INVALID', message: 'Source and destination warehouses must be active warehouses in this company' });
       if (allowedBranches && (!allowedBranches.includes(source.branch.id) || !allowedBranches.includes(destination.branch.id))) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
-      if (source.id === destination.id) throw new BadRequestException('Choose two different warehouses');
+      if (source.id === destination.id) throw new BadRequestException({ code: 'STOCKXFER_SAME_WAREHOUSE', message: 'Choose two different warehouses' });
       const normalized = [] as Array<{ itemId: string; quantity: Prisma.Decimal; enteredQuantity: Prisma.Decimal; unitFactor: Prisma.Decimal; batchId: string | null; unitName: string; notes: string | null }>;
       for (const [idx, line] of input.lines.entries()) {
         const quantity = this.positive(line.quantity, `Line ${idx + 1} quantity`);
         const item = await tx.item.findFirst({ where: { id: line.itemId, companyId, deletedAt: null, isActive: true }, include: { units: { select: { id: true, unit: true, factor: true, isActive: true } } } });
-        if (!item?.isStockTracked) throw new BadRequestException(`Line ${idx + 1}: item is not a stock-tracked item`);
+        if (!item?.isStockTracked) throw new BadRequestException({ code: 'STOCKXFER_LINE_NOT_TRACKED', message: `Line ${idx + 1}: item is not a stock-tracked item` });
         const selectedUnit = item.units.find(u => line.unitId ? u.id === line.unitId : u.unit === (line.unitName?.trim() || item.unit));
-        if (!selectedUnit && (line.unitId || (line.unitName?.trim() && line.unitName.trim() !== item.unit))) throw new BadRequestException(`Line ${idx + 1}: selected unit does not exist for this item`);
-        if (selectedUnit && !selectedUnit.isActive) throw new BadRequestException(`Line ${idx + 1}: selected unit is not active for this item`);
+        if (!selectedUnit && (line.unitId || (line.unitName?.trim() && line.unitName.trim() !== item.unit))) throw new BadRequestException({ code: 'STOCKXFER_LINE_UNIT_MISSING', message: `Line ${idx + 1}: selected unit does not exist for this item` });
+        if (selectedUnit && !selectedUnit.isActive) throw new BadRequestException({ code: 'STOCKXFER_LINE_UNIT_INACTIVE', message: `Line ${idx + 1}: selected unit is not active for this item` });
         const unitFactor = selectedUnit ? new Prisma.Decimal(selectedUnit.factor) : new Prisma.Decimal(1);
         const baseQuantity = quantity.mul(unitFactor);
-        if (!baseQuantity.equals(baseQuantity.toDecimalPlaces(4))) throw new BadRequestException(`Line ${idx + 1}: quantity does not convert exactly to base units`);
+        if (!baseQuantity.equals(baseQuantity.toDecimalPlaces(4))) throw new BadRequestException({ code: 'STOCKXFER_LINE_QTY_INEXACT', message: `Line ${idx + 1}: quantity does not convert exactly to base units` });
         let batchId: string | null = null;
         if (line.batchId) {
           const batch = await tx.itemBatch.findFirst({ where: { id: line.batchId, companyId, itemId: item.id, warehouseId: source.id, deletedAt: null, remainingQuantity: { gte: baseQuantity } } });
-          if (!batch) throw new BadRequestException(`Line ${idx + 1}: source lot is unavailable or has insufficient quantity`);
+          if (!batch) throw new BadRequestException({ code: 'STOCKXFER_LINE_LOT_UNAVAILABLE', message: `Line ${idx + 1}: source lot is unavailable or has insufficient quantity` });
           batchId = batch.id;
-        } else if (item.requiresBatch) throw new BadRequestException(`Line ${idx + 1}: choose a source lot for this batch-controlled item`);
+        } else if (item.requiresBatch) throw new BadRequestException({ code: 'STOCKXFER_LINE_LOT_REQUIRED', message: `Line ${idx + 1}: choose a source lot for this batch-controlled item` });
         normalized.push({ itemId: item.id, quantity: baseQuantity, enteredQuantity: quantity, unitFactor, batchId, unitName: selectedUnit?.unit ?? item.unit, notes: line.notes?.trim() || null });
       }
       const number = `TR-${date.toISOString().slice(0,10).replaceAll('-', '')}-${randomSuffix()}`;
@@ -146,7 +146,7 @@ export class StockTransfersService {
     const chain = await this.chainFor(companyId, row);
     if (chain.source === 'LEGACY') {
       if (row.createdBy === userId) {
-        throw new BadRequestException('The requester cannot review their own transfer');
+        throw new BadRequestException({ code: 'STOCKXFER_OWN_REVIEW', message: 'The requester cannot review their own transfer' });
       }
       return this.transition(companyId, userId, id, key, ['DRAFT'], 'REVIEWED', {
         reviewedBy: userId,
@@ -182,14 +182,14 @@ export class StockTransfersService {
     const row = await this.findOne(companyId, id);
     const chain = await this.chainFor(companyId, row);
     if (chain.source === 'LEGACY') {
-      if (row.createdBy === userId) throw new BadRequestException('The requester cannot approve their own transfer');
-      if (row.reviewedBy === userId) throw new BadRequestException('The reviewer cannot also approve the transfer');
+      if (row.createdBy === userId) throw new BadRequestException({ code: 'STOCKXFER_OWN_APPROVE', message: 'The requester cannot approve their own transfer' });
+      if (row.reviewedBy === userId) throw new BadRequestException({ code: 'STOCKXFER_REVIEWER_APPROVE', message: 'The reviewer cannot also approve the transfer' });
       return this.transition(companyId, userId, id, key, ['REVIEWED'], 'APPROVED', {
         approvedBy: userId,
         approvedAt: new Date(),
       });
     }
-    if (!actor) throw new BadRequestException('An approval actor is required for a configured chain');
+    if (!actor) throw new BadRequestException({ code: 'STOCKXFER_ACTOR_REQUIRED', message: 'An approval actor is required for a configured chain' });
     const result = await this.approvals.decide(actor, {
       entityType: 'StockTransfer',
       entityId: id,
@@ -218,16 +218,16 @@ export class StockTransfersService {
   /// Refuse the request. The chain is marked as stopped and the transfer goes
   /// back to REJECTED; the requester sees the reason and the history keeps it.
   async reject(companyId: string, userId: string, id: string, key: string, reason: string, actor?: ApprovalActor) {
-    if (!reason?.trim()) throw new BadRequestException('A rejection reason is required');
+    if (!reason?.trim()) throw new BadRequestException({ code: 'STOCKXFER_REJECT_REASON', message: 'A rejection reason is required' });
     const row = await this.findOne(companyId, id);
     const chain = await this.chainFor(companyId, row);
     if (chain.source === 'LEGACY') {
-      if (row.createdBy === userId) throw new BadRequestException('The requester cannot reject their own transfer');
+      if (row.createdBy === userId) throw new BadRequestException({ code: 'STOCKXFER_OWN_REJECT', message: 'The requester cannot reject their own transfer' });
       return this.transition(companyId, userId, id, key, ['REVIEWED'], 'REJECTED', {
         rejectedBy: userId, rejectedAt: new Date(), rejectionReason: reason.trim(),
       });
     }
-    if (!actor) throw new BadRequestException('An approval actor is required to reject a configured chain');
+    if (!actor) throw new BadRequestException({ code: 'STOCKXFER_ACTOR_REQUIRED', message: 'An approval actor is required to reject a configured chain' });
     await this.approvals.decide(actor, {
       entityType: 'StockTransfer', entityId: id, chain,
       requesterId: row.createdBy, decision: 'REJECT', requestKey: `REJECT:${this.key(key)}`, reason: reason.trim(),
@@ -254,14 +254,14 @@ export class StockTransfersService {
     reason: string,
     actor: ApprovalActor,
   ) {
-    if (!reason?.trim()) throw new BadRequestException('A return reason is required');
+    if (!reason?.trim()) throw new BadRequestException({ code: 'STOCKXFER_RETURN_REASON', message: 'A return reason is required' });
     const row = await this.findOne(companyId, id);
     if (!['PENDING_APPROVAL', 'SUBMITTED', 'REVIEWED'].includes(row.status)) {
-      throw new ConflictException(`A transfer cannot be returned from ${row.status}`);
+      throw new ConflictException({ code: 'STOCKXFER_RETURN_STAGE', message: `A transfer cannot be returned from ${row.status}` });
     }
     const chain = await this.chainFor(companyId, row);
     if (chain.source === 'LEGACY') {
-      if (row.createdBy === userId) throw new BadRequestException('The requester cannot return their own transfer');
+      if (row.createdBy === userId) throw new BadRequestException({ code: 'STOCKXFER_OWN_RETURN', message: 'The requester cannot return their own transfer' });
       return this.transition(companyId, userId, id, key, [row.status], 'DRAFT', {
         returnedBy: userId, returnedAt: new Date(), returnReason: reason.trim(),
       });
@@ -418,7 +418,7 @@ export class StockTransfersService {
     const actionKey = `DISPATCH:${safeKey}`;
     const actionHash = this.hash({ lines: lines ?? null });
     let action = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
-    if (action && action.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different dispatch quantities');
+    if (action && action.requestHash !== actionHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_QUANTITIES', message: 'Idempotency key was reused with different dispatch quantities' });
     if (action?.stockDocumentId) {
       await this.notifyNextStages(transfer);
       return transfer;
@@ -436,8 +436,8 @@ export class StockTransfersService {
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
         if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
         const currentAction = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
-        if (currentAction) { if (currentAction.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different dispatch quantities'); return; }
-        if (!['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot dispatch a transfer in ${current.status}`);
+        if (currentAction) { if (currentAction.requestHash !== actionHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_QUANTITIES', message: 'Idempotency key was reused with different dispatch quantities' }); return; }
+        if (!['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException({ code: 'STOCKXFER_DISPATCH_STAGE', message: `Cannot dispatch a transfer in ${current.status}` });
         quantities = this.stageQuantities(current.lines, lines, 'dispatch');
         await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: actionKey, requestHash: actionHash, action: 'DISPATCH', resultVersion: current.version + 1 } });
         await tx.stockTransfer.update({ where: { id }, data: { status: 'DISPATCHING', dispatchedBy: userId, dispatchedAt: new Date(), version: { increment: 1 } } });
@@ -453,8 +453,8 @@ export class StockTransfersService {
         if (pending) { action = pending; effectiveKey = pending.requestKey.slice('DISPATCH:'.length); }
       }
     }
-    if (!action) throw new ConflictException('Another dispatch is in progress; retry after it completes');
-    if (transfer.status !== 'DISPATCHING' && !['APPROVED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED'].includes(transfer.status)) throw new ConflictException(`Cannot dispatch a transfer in ${transfer.status}`);
+    if (!action) throw new ConflictException({ code: 'STOCKXFER_DISPATCH_BUSY', message: 'Another dispatch is in progress; retry after it completes' });
+    if (transfer.status !== 'DISPATCHING' && !['APPROVED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED'].includes(transfer.status)) throw new ConflictException({ code: 'STOCKXFER_DISPATCH_STAGE', message: `Cannot dispatch a transfer in ${transfer.status}` });
     const transit = await this.transitWarehouse(companyId, transfer.sourceBranchId, userId);
     const docKey = `transfer:${id}:dispatch:${createHash('sha256').update(effectiveKey).digest('hex').slice(0,24)}`;
     const doc = await this.documents.create(companyId, transfer.sourceBranchId, userId, {
@@ -467,7 +467,7 @@ export class StockTransfersService {
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const currentAction = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: action!.requestKey } });
-      if (!currentAction) throw new ConflictException('Dispatch reservation was lost');
+      if (!currentAction) throw new ConflictException({ code: 'STOCKXFER_RESERVATION_LOST', message: 'Dispatch reservation was lost' });
       if (currentAction.stockDocumentId) return;
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
       if (!current || current.status !== 'DISPATCHING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while dispatching' });
@@ -498,7 +498,7 @@ export class StockTransfersService {
     const actionKey = `RECEIVE:${safeKey}`;
     const actionHash = this.hash({ lines });
     let action = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
-    if (action && action.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different receipt quantities');
+    if (action && action.requestHash !== actionHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_QUANTITIES', message: 'Idempotency key was reused with different receipt quantities' });
     if (action?.stockDocumentId) {
       await this.notifyNextStages(transfer);
       return transfer;
@@ -516,16 +516,16 @@ export class StockTransfersService {
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
         if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
         const prior = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
-        if (prior) { if (prior.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different receipt quantities'); return; }
-        if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot receive a transfer in ${current.status}`);
+        if (prior) { if (prior.requestHash !== actionHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_QUANTITIES', message: 'Idempotency key was reused with different receipt quantities' }); return; }
+        if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException({ code: 'STOCKXFER_RECEIVE_STAGE', message: `Cannot receive a transfer in ${current.status}` });
         quantities = this.stageQuantities(current.lines, lines, 'receive');
         await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: actionKey, requestHash: actionHash, action: 'RECEIVE', resultVersion: current.version + 1 } });
         await tx.stockTransfer.update({ where: { id }, data: { status: 'RECEIVING', version: { increment: 1 } } });
       });
       action = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
     }
-    if (!action) throw new ConflictException('Another receipt is in progress; retry after it completes');
-    if (transfer.status !== 'RECEIVING' && !['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED'].includes(transfer.status)) throw new ConflictException(`Cannot receive a transfer in ${transfer.status}`);
+    if (!action) throw new ConflictException({ code: 'STOCKXFER_RECEIVE_BUSY', message: 'Another receipt is in progress; retry after it completes' });
+    if (transfer.status !== 'RECEIVING' && !['DISPATCHED','PARTIALLY_DISPATCHED','PARTIALLY_RECEIVED'].includes(transfer.status)) throw new ConflictException({ code: 'STOCKXFER_RECEIVE_STAGE', message: `Cannot receive a transfer in ${transfer.status}` });
     const transit = await this.transitWarehouse(companyId, transfer.sourceBranchId, userId);
     const documentKey = `transfer:${id}:receive:${createHash('sha256').update(effectiveKey).digest('hex').slice(0,24)}`;
     const doc = await this.documents.create(companyId, transfer.destinationBranchId, userId, {
@@ -538,7 +538,7 @@ export class StockTransfersService {
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const currentAction = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: action!.requestKey } });
-      if (!currentAction) throw new ConflictException('Receipt reservation was lost');
+      if (!currentAction) throw new ConflictException({ code: 'STOCKXFER_RESERVATION_LOST', message: 'Receipt reservation was lost' });
       if (currentAction.stockDocumentId) return;
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
       if (!current || current.status !== 'RECEIVING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while receiving' });
@@ -564,36 +564,36 @@ export class StockTransfersService {
       prior = reservations.find(x => x.requestHash === requestHash) ?? null;
       if (prior) requestKey = prior.requestKey;
     }
-    if (prior && prior.requestHash !== requestHash) throw new ConflictException('Idempotency key was reused with different settlement quantities');
+    if (prior && prior.requestHash !== requestHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_QUANTITIES', message: 'Idempotency key was reused with different settlement quantities' });
     if (prior && transfer.status !== 'SETTLING') {
       await this.notifyNextStages(transfer);
       return transfer;
     }
-    if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED', 'SETTLING'].includes(transfer.status)) throw new ConflictException('Receive dispatched goods before settling differences');
+    if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED', 'SETTLING'].includes(transfer.status)) throw new ConflictException({ code: 'STOCKXFER_SETTLE_BEFORE_RECEIVE', message: 'Receive dispatched goods before settling differences' });
     const returns: Array<{ line: typeof transfer.lines[number]; quantity: Prisma.Decimal }> = [];
     const writeOffs: Array<{ line: typeof transfer.lines[number]; quantity: Prisma.Decimal; shortage: Prisma.Decimal; damage: Prisma.Decimal; reason: string }> = [];
     const used = new Set<string>();
     for (const input of lines) {
       const line = transfer.lines.find(x => x.id === input.lineId);
-      if (!line || used.has(input.lineId)) throw new BadRequestException('Unknown or repeated transfer line');
+      if (!line || used.has(input.lineId)) throw new BadRequestException({ code: 'STOCKXFER_LINE_UNKNOWN', message: 'Unknown or repeated transfer line' });
       used.add(input.lineId);
       const returned = input.returnedQuantity === undefined ? new Prisma.Decimal(0) : this.nonnegative(input.returnedQuantity, 'returned quantity');
       const shortage = input.shortage === undefined ? new Prisma.Decimal(0) : this.nonnegative(input.shortage, 'shortage');
       const damage = input.damage === undefined ? new Prisma.Decimal(0) : this.nonnegative(input.damage, 'damage');
       const unresolved = line.dispatchedQuantity.sub(line.receivedQuantity).sub(line.returnedQuantity).sub(line.writtenOffQuantity);
-      if (returned.plus(shortage).plus(damage).greaterThan(unresolved)) throw new BadRequestException('Settlement exceeds the unresolved quantity in transit');
-      if ((shortage.greaterThan(0) || damage.greaterThan(0)) && !input.reason?.trim()) throw new BadRequestException('A reason is required for every shortage or damage write-off');
+      if (returned.plus(shortage).plus(damage).greaterThan(unresolved)) throw new BadRequestException({ code: 'STOCKXFER_SETTLE_EXCEEDS', message: 'Settlement exceeds the unresolved quantity in transit' });
+      if ((shortage.greaterThan(0) || damage.greaterThan(0)) && !input.reason?.trim()) throw new BadRequestException({ code: 'STOCKXFER_SETTLE_REASON', message: 'A reason is required for every shortage or damage write-off' });
       if (returned.greaterThan(0)) returns.push({ line, quantity: returned });
       const writeOff = shortage.plus(damage);
       if (writeOff.greaterThan(0)) writeOffs.push({ line, quantity: writeOff, shortage, damage, reason: input.reason.trim() });
     }
-    if (!returns.length && !writeOffs.length) throw new BadRequestException('Enter returned, missing or damaged quantities to settle');
+    if (!returns.length && !writeOffs.length) throw new BadRequestException({ code: 'STOCKXFER_SETTLE_EMPTY', message: 'Enter returned, missing or damaged quantities to settle' });
     if (!prior) {
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId } });
         if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
-        if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot settle a transfer in ${current.status}`);
+        if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException({ code: 'STOCKXFER_SETTLE_STAGE', message: `Cannot settle a transfer in ${current.status}` });
         await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey, requestHash, action: 'SETTLE', resultVersion: current.version + 1 } });
         await tx.stockTransfer.update({ where: { id }, data: { status: 'SETTLING', version: { increment: 1 } } });
       });
@@ -624,7 +624,7 @@ export class StockTransfersService {
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const previous = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey } });
-      if (!previous || previous.requestHash !== requestHash) throw new ConflictException('Settlement reservation was lost or changed');
+      if (!previous || previous.requestHash !== requestHash) throw new ConflictException({ code: 'STOCKXFER_SETTLE_CHANGED', message: 'Settlement reservation was lost or changed' });
       const currentTransfer = await tx.stockTransfer.findFirst({ where: { id, companyId } });
       if (!currentTransfer || currentTransfer.status !== 'SETTLING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while settlement was processing' });
       for (const {line,quantity} of returns) await tx.stockTransferLine.update({ where: { id: line.id }, data: { returnedQuantity: { increment: quantity } } });
@@ -655,12 +655,12 @@ export class StockTransfersService {
     if (settlementKey) {
       const prior = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: settlementKey } });
       if (prior) {
-        if (prior.requestHash !== settlementHash) throw new ConflictException('Idempotency key was reused for a different settlement approval');
+        if (prior.requestHash !== settlementHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_APPROVAL', message: 'Idempotency key was reused for a different settlement approval' });
         return transfer;
       }
     }
-    if (transfer.status !== 'SETTLEMENT_PENDING' || !transfer.settlementDocumentId) throw new ConflictException('There is no pending transfer write-off to approve');
-    if (transfer.settlementRequestedBy === userId) throw new BadRequestException('The person reporting a transfer difference cannot approve its write-off');
+    if (transfer.status !== 'SETTLEMENT_PENDING' || !transfer.settlementDocumentId) throw new ConflictException({ code: 'STOCKXFER_NO_PENDING_WRITEOFF', message: 'There is no pending transfer write-off to approve' });
+    if (transfer.settlementRequestedBy === userId) throw new BadRequestException({ code: 'STOCKXFER_OWN_WRITEOFF', message: 'The person reporting a transfer difference cannot approve its write-off' });
     const document = await this.documents.findOne(companyId, transfer.settlementDocumentId, true) as { status?: string; approvedAt?: string | null };
     if (document.status !== 'POSTED') {
       if (!document.approvedAt) await this.documents.approve(companyId, userId, transfer.settlementDocumentId, true);
@@ -675,7 +675,7 @@ export class StockTransfersService {
       if (settlementKey) {
         const again = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: settlementKey } });
         if (again) {
-          if (again.requestHash !== settlementHash) throw new ConflictException('Idempotency key was reused for a different settlement approval');
+          if (again.requestHash !== settlementHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_APPROVAL', message: 'Idempotency key was reused for a different settlement approval' });
           return;
         }
       }
@@ -706,7 +706,7 @@ export class StockTransfersService {
 
   async close(companyId: string, userId: string, id: string, key: string) {
     const row = await this.findOne(companyId, id);
-    if (!['RECEIVED', 'SETTLED'].includes(row.status)) throw new ConflictException('A transfer may close only after receipts and differences are reconciled');
+    if (!['RECEIVED', 'SETTLED'].includes(row.status)) throw new ConflictException({ code: 'STOCKXFER_CLOSE_UNRECONCILED', message: 'A transfer may close only after receipts and differences are reconciled' });
     const outstanding = row.lines.some(x => x.dispatchedQuantity.lt(x.requestedQuantity) || x.dispatchedQuantity.gt(x.receivedQuantity.add(x.returnedQuantity).add(x.writtenOffQuantity)));
     if (outstanding) throw new ConflictException({ code: 'TRANSIT_UNRESOLVED', message: 'Unresolved goods remain in transit; receive, return or approve a write-off before closing' });
     return this.transition(companyId, userId, id, key, [row.status], 'CLOSED', { closedBy: userId, closedAt: new Date() });
@@ -723,7 +723,7 @@ export class StockTransfersService {
       approve_settlement: ['SETTLEMENT_APPROVED', 'SETTLE_ALREADY_DONE'],
     };
     const prefixes = map[String(alias).toLowerCase()];
-    if (!prefixes) throw new BadRequestException('Unknown action. Use one of: ' + Object.keys(map).join(', '));
+    if (!prefixes) throw new BadRequestException({ code: 'STOCKXFER_ACTION_UNKNOWN', message: 'Unknown action. Use one of: ' + Object.keys(map).join(', ') });
     return prefixes;
   }
 
@@ -830,11 +830,11 @@ export class StockTransfersService {
     const actionKey = `CANCEL:${safeKey}`;
     const actionHash = this.hash({ id, action: 'CANCEL' });
     const existing = await this.prisma.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
-    if (existing) { if (existing.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused for a different cancellation'); return row; }
+    if (existing) { if (existing.requestHash !== actionHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_CANCEL', message: 'Idempotency key was reused for a different cancellation' }); return row; }
     if (['DRAFT', 'REVIEWED', 'REJECTED'].includes(row.status)) {
       return this.transition(companyId, userId, id, safeKey, [row.status], 'CANCELLED', { cancelledBy: userId, cancelledAt: new Date() });
     }
-    if (row.status === 'SETTLEMENT_PENDING') throw new ConflictException('Approve or reconcile the pending write-off before cancellation');
+    if (row.status === 'SETTLEMENT_PENDING') throw new ConflictException({ code: 'STOCKXFER_CANCEL_PENDING_WRITEOFF', message: 'Approve or reconcile the pending write-off before cancellation' });
     if (['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'SETTLED'].includes(row.status)) {
       const actions = await this.prisma.stockTransferAction.findMany({
         where: { companyId, transferId: id, action: { in: ['RECEIVE', 'DISPATCH', 'RETURN', 'SETTLE'] } },
@@ -849,7 +849,7 @@ export class StockTransfersService {
         if (reversed) continue;
         const document = await this.documents.findOne(companyId, action.stockDocumentId, true) as { status?: string };
         if (document.status === 'POSTED') await this.documents.reverse(companyId, userId, action.stockDocumentId, true);
-        else if (document.status !== 'REVERSED') throw new ConflictException('A transfer movement is not in a reversible posted state');
+        else if (document.status !== 'REVERSED') throw new ConflictException({ code: 'STOCKXFER_MOVEMENT_NOT_REVERSIBLE', message: 'A transfer movement is not in a reversible posted state' });
         await this.prisma.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: reverseKey, requestHash: this.hash({ documentId: action.stockDocumentId }), action: 'REVERSAL', stockDocumentId: action.stockDocumentId, resultVersion: row.version } });
       }
       await this.prisma.$transaction(async tx => {
@@ -865,7 +865,7 @@ export class StockTransfersService {
       await this.notifyNextStages(cancelled);
       return cancelled;
     }
-    throw new ConflictException('This transfer cannot be cancelled at its current stage');
+    throw new ConflictException({ code: 'STOCKXFER_CANCEL_STAGE', message: 'This transfer cannot be cancelled at its current stage' });
   }
 
   async report(companyId: string, query: { from?: string; to?: string; status?: string } = {}) {
@@ -894,8 +894,8 @@ export class StockTransfersService {
       const row = await tx.stockTransfer.findFirst({ where: { id, companyId } });
       if (!row) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
       const previous = await tx.stockTransferAction.findFirst({ where: { transferId: id, requestKey } });
-      if (previous) { if (previous.requestHash !== hash) throw new ConflictException('Idempotency key was reused with a different action'); return; }
-      if (!allowed.includes(row.status)) throw new ConflictException(`Cannot transition transfer from ${row.status} to ${status}`);
+      if (previous) { if (previous.requestHash !== hash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_REUSED_ACTION', message: 'Idempotency key was reused with a different action' }); return; }
+      if (!allowed.includes(row.status)) throw new ConflictException({ code: 'STOCKXFER_STAGE_INVALID', message: `Cannot transition transfer from ${row.status} to ${status}` });
       const updated = await tx.stockTransfer.updateMany({ where: { id, companyId, status: row.status, version: row.version }, data: { status, version: { increment: 1 }, ...extra } as never });
       if (updated.count !== 1) throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed; reload and retry' });
       await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey, requestHash: hash, action: status, resultVersion: row.version + 1 } });
@@ -1112,7 +1112,7 @@ export class StockTransfersService {
     } catch {
       const created = await this.prisma.warehouse.findFirst({ where: { companyId, branchId, isTransit: true, deletedAt: null } });
       if (created) return created;
-      throw new ConflictException('Could not initialize the company transit warehouse');
+      throw new ConflictException({ code: 'STOCKXFER_TRANSIT_WAREHOUSE', message: 'Could not initialize the company transit warehouse' });
     }
   }
 
@@ -1126,21 +1126,21 @@ export class StockTransfersService {
       ? line.requestedQuantity.sub(line.dispatchedQuantity)
       : line.dispatchedQuantity.sub(line.receivedQuantity).sub(line.returnedQuantity).sub(line.writtenOffQuantity);
     const source = input?.length ? input : lines.filter(x => remaining(x).gt(0)).map(x => ({ lineId: x.id, quantity: remaining(x).toString() }));
-    if (!source.length) throw new BadRequestException('No quantities are available for this action');
+    if (!source.length) throw new BadRequestException({ code: 'STOCKXFER_NOTHING_AVAILABLE', message: 'No quantities are available for this action' });
     const seen = new Set<string>();
     return source.map(x => {
-      const line = lines.find(l => l.id === x.lineId); if (!line || seen.has(x.lineId)) throw new BadRequestException('Unknown or repeated transfer line'); seen.add(x.lineId);
+      const line = lines.find(l => l.id === x.lineId); if (!line || seen.has(x.lineId)) throw new BadRequestException({ code: 'STOCKXFER_LINE_UNKNOWN', message: 'Unknown or repeated transfer line' }); seen.add(x.lineId);
       const quantity = this.positive(x.quantity, 'quantity');
       const available = stage==='dispatch' ? line.requestedQuantity.sub(line.dispatchedQuantity) : line.dispatchedQuantity.sub(line.receivedQuantity).sub(line.returnedQuantity).sub(line.writtenOffQuantity);
-      if (quantity.gt(available)) throw new BadRequestException(`Quantity exceeds the ${stage==='dispatch'?'undispatched':'in-transit'} quantity`);
-      if (stage==='receive' && line.sourceBatchId && !line.transitBatchId) throw new ConflictException('Transit lot is not available; refresh the transfer');
+      if (quantity.gt(available)) throw new BadRequestException({ code: 'STOCKXFER_QTY_EXCEEDS', message: `Quantity exceeds the ${stage==='dispatch'?'undispatched':'in-transit'} quantity` });
+      if (stage==='receive' && line.sourceBatchId && !line.transitBatchId) throw new ConflictException({ code: 'STOCKXFER_TRANSIT_LOT', message: 'Transit lot is not available; refresh the transfer' });
       return { line, quantity };
     });
   }
-  private positive(v: string|number, label: string) { return this.nonnegative(v,label).gt(0) ? this.nonnegative(v,label) : (()=>{throw new BadRequestException(`${label} must be greater than zero`)})(); }
-  private nonnegative(v: string|number, label: string) { let n: Prisma.Decimal; try { n = new Prisma.Decimal(String(v)); } catch { throw new BadRequestException(`${label} must be numeric`); } if (!n.isFinite() || n.lessThan(0) || !n.equals(n.toDecimalPlaces(4))) throw new BadRequestException(`${label} must be non-negative with at most four decimal places`); return n; }
-  private key(v: string) { const key=String(v??'').trim(); if (!key || key.length>120) throw new BadRequestException('A valid idempotency key is required'); if (key.length > 60) throw new BadRequestException('Idempotency keys may be at most 60 characters'); return key; }
+  private positive(v: string|number, label: string) { return this.nonnegative(v,label).gt(0) ? this.nonnegative(v,label) : (()=>{throw new BadRequestException({ code: 'STOCKXFER_NUMBER_INVALID', message: `${label} must be greater than zero` })})(); }
+  private nonnegative(v: string|number, label: string) { let n: Prisma.Decimal; try { n = new Prisma.Decimal(String(v)); } catch { throw new BadRequestException({ code: 'STOCKXFER_NUMBER_INVALID', message: `${label} must be numeric` }); } if (!n.isFinite() || n.lessThan(0) || !n.equals(n.toDecimalPlaces(4))) throw new BadRequestException({ code: 'STOCKXFER_NUMBER_INVALID', message: `${label} must be non-negative with at most four decimal places` }); return n; }
+  private key(v: string) { const key=String(v??'').trim(); if (!key || key.length>120) throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'A valid idempotency key is required' }); if (key.length > 60) throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'Idempotency keys may be at most 60 characters' }); return key; }
   private hash(v: unknown) { return createHash('sha256').update(JSON.stringify(v)).digest('hex'); }
-  private day(v: string) { const s=String(v??'').slice(0,10), d=new Date(`${s}T00:00:00.000Z`); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)||Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s) throw new BadRequestException('A valid YYYY-MM-DD date is required'); return d; }
+  private day(v: string) { const s=String(v??'').slice(0,10), d=new Date(`${s}T00:00:00.000Z`); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)||Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s) throw new BadRequestException({ code: 'STOCKXFER_DATE_INVALID', message: 'A valid YYYY-MM-DD date is required' }); return d; }
 }
 function randomSuffix() { return randomUUID().slice(0, 8).toUpperCase(); }

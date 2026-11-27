@@ -53,7 +53,7 @@ export class StockTransfersController {
   create(@CurrentUser() user: AuthUser, @Body() body: Parameters<StockTransfersService['create']>[2], @Headers('idempotency-key') key?: string) {
     const idempotencyKey = key?.trim() || body.idempotencyKey;
     assertTransferAccess(user, body.sourceWarehouseId, body.destinationWarehouseId);
-    if (!idempotencyKey) throw new BadRequestException('Idempotency-Key header is required');
+    if (!idempotencyKey) throw new BadRequestException({ code: 'IDEMPOTENCY_HEADER_REQUIRED', message: 'Idempotency-Key header is required' });
     return this.present(user, this.service.create(user.companyId, user.userId, { ...body, idempotencyKey }, warehouseScopeOf(user)));
   }
 
@@ -76,9 +76,7 @@ export class StockTransfersController {
     // Under a configured chain, submitting is the requester's own act and is
     // served by /submit; this door keeps its historical meaning.
     if (chain.source === 'POLICY') {
-      throw new ConflictException(
-        'This transfer uses a configured approval chain; the requester submits it, then each level is decided with /approve',
-      );
+      throw new ConflictException({ code: 'STOCKXFER_APPROVAL_CHAIN_ONLY', message: 'This transfer uses a configured approval chain; the requester submits it, then each level is decided with /approve' });
     }
     return this.present(user, this.service.review(user.companyId, user.userId, id, key));
   }

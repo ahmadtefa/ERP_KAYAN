@@ -10,6 +10,7 @@ import 'purchase_refusals.dart';
 import 'opening_balance_refusals.dart';
 import 'order_unit_refusals.dart';
 import 'return_refusals.dart';
+import 'transfer_location_refusals.dart';
 import 'stock_document_refusals.dart';
 import 'sales_refusals.dart';
 
@@ -29,6 +30,7 @@ const Map<String, List<String>> moduleRefusals = {
   ...purchaseRefusals,
   ...salesRefusals,
   ...returnRefusals,
+  ...transferLocationRefusals,
   ...stockDocumentRefusals,
   ...orderUnitRefusals,
   ...openingBalanceRefusals,
