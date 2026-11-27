@@ -1,5 +1,6 @@
 import 'package:erp_kayan/core/error/app_error_text.dart';
 import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/error/module_refusals.dart';
 import 'package:erp_kayan/core/error/not_found_entities.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,6 +43,33 @@ void main() {
       expect(en.businessMessage, isNot(contains('synthetic raw')));
       expect(ar.businessMessage, isNot(contains('synthetic raw')));
     }
+  });
+
+  test('every module refusal is explained from its code in both languages, never from the server text', () {
+    for (final entry in moduleRefusals.entries) {
+      for (final status in [400, 404, 409]) {
+        final failure = ApiFailure('synthetic raw ${entry.key}', statusCode: status, code: entry.key);
+        final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
+        final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;
+        expect(ar, entry.value[0]);
+        expect(en, entry.value[1]);
+        expect(ar, isNot(contains('synthetic raw')));
+        expect(en, isNot(contains('synthetic raw')));
+      }
+      expect(entry.value[0], isNotEmpty);
+      expect(entry.value[1].endsWith('.'), isTrue, reason: entry.key);
+    }
+  });
+
+  test('a plain validation refusal names the field, in Arabic with its label', () {
+    final failure = ApiFailure('synthetic raw', statusCode: 400, code: 'VALIDATION', errorField: 'repId');
+    final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
+    final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;
+    expect(ar, contains('المندوب'));
+    expect(en, contains('repId'));
+    expect(ar, isNot(contains('synthetic raw')));
+    final unknown = const AppErrorMessageResolver(isArabic: true).resolve(ApiFailure('x', statusCode: 400, code: 'VALIDATION', errorField: 'zzzUnknown')).businessMessage!;
+    expect(unknown, contains('راجع الحقول'));
   });
 
   test('an unlisted not-found code falls back to the generic sentence, not the server text', () {

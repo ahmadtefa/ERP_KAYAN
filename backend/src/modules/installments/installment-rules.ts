@@ -6,7 +6,11 @@
  * what has been paid so far is allocated to the installments oldest first.
  * All money is worked in whole piasters.
  */
-export class InstallmentError extends Error {}
+export class InstallmentError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 
 export interface PlanInput {
   totalPiasters: number;
@@ -47,17 +51,17 @@ export function addMonths(value: string, months: number): string {
 
 export function planInstallments(input: PlanInput): PlannedInstallment[] {
   const { totalPiasters, downPaymentPiasters, count, intervalMonths } = input;
-  if (!Number.isInteger(totalPiasters) || totalPiasters <= 0) throw new InstallmentError('The invoice has no amount to split');
+  if (!Number.isInteger(totalPiasters) || totalPiasters <= 0) throw new InstallmentError('The invoice has no amount to split', 'INSTALLMENT_NO_AMOUNT');
   if (!Number.isInteger(downPaymentPiasters) || downPaymentPiasters < 0) throw new InstallmentError('The down payment cannot be negative');
-  if (downPaymentPiasters >= totalPiasters) throw new InstallmentError('The down payment must be less than the invoice total');
+  if (downPaymentPiasters >= totalPiasters) throw new InstallmentError('The down payment must be less than the invoice total', 'INSTALLMENT_DOWN_TOO_BIG');
   if (!Number.isInteger(count) || count < 2 || count > 120) throw new InstallmentError('Choose from 2 to 120 installments');
   if (!Number.isInteger(intervalMonths) || intervalMonths < 1 || intervalMonths > 12) throw new InstallmentError('The gap between installments is 1 to 12 months');
   parseIsoDate(input.invoiceDate);
   parseIsoDate(input.firstDue);
-  if (input.firstDue < input.invoiceDate) throw new InstallmentError('The first installment cannot fall before the invoice date');
+  if (input.firstDue < input.invoiceDate) throw new InstallmentError('The first installment cannot fall before the invoice date', 'INSTALLMENT_FIRST_BEFORE_INVOICE');
   const rest = totalPiasters - downPaymentPiasters;
   const base = Math.floor(rest / count);
-  if (base < 1) throw new InstallmentError('Too many installments for this amount');
+  if (base < 1) throw new InstallmentError('Too many installments for this amount', 'INSTALLMENT_TOO_MANY');
   const remainder = rest - base * count;
   const out: PlannedInstallment[] = [];
   let no = 1;

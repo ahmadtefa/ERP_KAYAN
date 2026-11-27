@@ -36,8 +36,8 @@ const rateView = (r: RateRow) => ({
   accountCode: r.accountCode ?? null, accountNameEn: r.accountNameEn ?? null, accountNameAr: r.accountNameAr ?? null,
 });
 
-function fail(field: string, message: string): never {
-  throw new BadRequestException({ code: 'VALIDATION', message, field });
+function fail(field: string, message: string, code = 'VALIDATION'): never {
+  throw new BadRequestException({ code, message, field });
 }
 
 /**
@@ -76,12 +76,12 @@ export class WithholdingService {
       SELECT type::text AS type, "isPostable", "isActive", code FROM accounts
        WHERE id = ${String(accountId)}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL`);
     if (!a) fail('accountId', 'That account does not exist');
-    if (!a.isPostable || !a.isActive) fail('accountId', `Account ${a.code} cannot receive postings`);
+    if (!a.isPostable || !a.isActive) fail('accountId', `Account ${a.code} cannot receive postings`, 'WITHHOLDING_ACCOUNT_NOT_POSTABLE');
     const wanted = direction === 'PAYABLE' ? 'LIABILITY' : 'ASSET';
     if (a.type !== wanted) {
       fail('accountId', direction === 'PAYABLE'
         ? 'Tax withheld from suppliers is owed to the tax authority: choose a liability account'
-        : 'Tax withheld by customers is a claim on the tax authority: choose an asset account');
+        : 'Tax withheld by customers is a claim on the tax authority: choose an asset account', 'WITHHOLDING_ACCOUNT_TYPE');
     }
     return String(accountId);
   }
@@ -90,7 +90,7 @@ export class WithholdingService {
     const direction = String(input.direction ?? '').toUpperCase();
     if (direction !== 'PAYABLE' && direction !== 'RECEIVABLE') fail('direction', 'direction must be PAYABLE or RECEIVABLE');
     let rate: Prisma.Decimal;
-    try { rate = parseRate(input.ratePercent); } catch (e) { if (e instanceof WithholdingError) fail('ratePercent', e.message); throw e; }
+    try { rate = parseRate(input.ratePercent); } catch (e) { if (e instanceof WithholdingError) fail('ratePercent', e.message, e.code); throw e; }
     const code = this.text(input.code, 'code', 32);
     const nameAr = this.text(input.nameAr, 'nameAr', 160);
     const nameEn = this.text(input.nameEn, 'nameEn', 160);
@@ -125,7 +125,7 @@ export class WithholdingService {
         throw new ConflictException({ code: 'WITHHOLDING_RATE_IN_USE', message: 'This rate was already used on vouchers. Add a new rate instead of changing it.' });
       }
       if (input.ratePercent !== undefined) {
-        try { rate = parseRate(input.ratePercent); } catch (e) { if (e instanceof WithholdingError) fail('ratePercent', e.message); throw e; }
+        try { rate = parseRate(input.ratePercent); } catch (e) { if (e instanceof WithholdingError) fail('ratePercent', e.message, e.code); throw e; }
       }
       if (input.accountId !== undefined) accountId = await this.checkAccount(companyId, input.accountId, current.direction);
     }
@@ -156,18 +156,18 @@ export class WithholdingService {
     const v = await this.draftVoucher(companyId, voucherId);
     const [rate] = await this.rateRows(companyId, Prisma.sql`AND r.id = ${String(rateId)}::uuid`);
     if (!rate) fail('rateId', 'That withholding rate does not exist');
-    if (!rate.isActive) fail('rateId', 'That withholding rate is not active');
+    if (!rate.isActive) fail('rateId', 'That withholding rate is not active', 'WITHHOLDING_RATE_INACTIVE');
     let tax: Prisma.Decimal;
     try {
       const direction = directionFor(v.kind, !!v.customerId, !!v.supplierId);
       if (direction !== rate.direction) {
         fail('rateId', direction === 'PAYABLE'
           ? 'This is a payment to a supplier: choose a rate for tax withheld from suppliers'
-          : 'This is a receipt from a customer: choose a rate for tax withheld by customers');
+          : 'This is a receipt from a customer: choose a rate for tax withheld by customers', 'WITHHOLDING_RATE_DIRECTION');
       }
       tax = withheldAmount(v.amount, rate.ratePercent);
     } catch (e) {
-      if (e instanceof WithholdingError) fail('rateId', e.message);
+      if (e instanceof WithholdingError) fail('rateId', e.message, e.code);
       throw e;
     }
     await this.prisma.$executeRaw(Prisma.sql`

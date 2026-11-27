@@ -33,7 +33,7 @@ function rules<T>(field: string, fn: () => T): T {
   try {
     return fn();
   } catch (e) {
-    if (e instanceof SerialError) fail(field, e.message);
+    if (e instanceof SerialError) fail(field, e.message, e.code);
     throw e;
   }
 }
@@ -186,12 +186,12 @@ export class SerialsService {
       SELECT id, status::text AS status, "invoiceDate", "customerId", "invoiceNumber", "documentType"::text AS "documentType" FROM sales_invoices
        WHERE id = ${String(input.salesInvoiceId)}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL`);
     if (!inv) fail('salesInvoiceId', 'That sales invoice does not exist');
-    if (inv.status !== 'POSTED' || inv.documentType !== 'INVOICE') fail('salesInvoiceId', 'Serial numbers are assigned to a posted sales invoice');
+    if (inv.status !== 'POSTED' || inv.documentType !== 'INVOICE') fail('salesInvoiceId', 'Serial numbers are assigned to a posted sales invoice', 'SERIAL_INVOICE_NOT_POSTED');
     const [{ qty }] = await this.prisma.$queryRaw<{ qty: Prisma.Decimal | null }[]>(Prisma.sql`
       SELECT COALESCE(SUM(quantity), 0) AS qty FROM sales_invoice_lines
        WHERE "invoiceId" = ${inv.id}::uuid AND "itemId" = ${itemId}::uuid AND "isAdditionalCharge" = false`);
     const allowed = Math.floor(Number(qty ?? 0));
-    if (allowed <= 0) fail('itemId', `Invoice ${inv.invoiceNumber} has no line for that item`);
+    if (allowed <= 0) fail('itemId', `Invoice ${inv.invoiceNumber} has no line for that item`, 'SERIAL_ITEM_NOT_ON_INVOICE');
     const soldOn = inv.invoiceDate.toISOString().slice(0, 10);
 
     const result = await this.prisma.$transaction(async (tx) => {

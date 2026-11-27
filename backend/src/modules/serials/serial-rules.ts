@@ -8,7 +8,11 @@
 export type SerialStatus = 'IN_STOCK' | 'SOLD' | 'RETURNED' | 'SCRAPPED';
 export type SerialAction = 'sell' | 'return' | 'scrap';
 
-export class SerialError extends Error {}
+export class SerialError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 
 const MOVES: Record<SerialAction, { from: SerialStatus[]; to: SerialStatus }> = {
   sell: { from: ['IN_STOCK', 'RETURNED'], to: 'SOLD' },

@@ -129,6 +129,11 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         if (typeof b.code === 'string' && /^[A-Z0-9_]{3,64}$/.test(b.code)) {
           extra = { ...extra, code: b.code };
         }
+        // The name of the input a refusal is about, so the app can point at it.
+        // Only a plain identifier travels: no text a person typed.
+        if (typeof b.field === 'string' && /^[A-Za-z][A-Za-z0-9.]{0,39}$/.test(b.field)) {
+          extra = { ...extra, errorField: b.field };
+        }
         // Credit figures for a permitted viewer: forwarded only for the credit
         // refusal code, only these four keys, only plain decimal strings.
         if (b.code === 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' && b.creditSummary && typeof b.creditSummary === 'object') {

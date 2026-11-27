@@ -14,7 +14,7 @@ function rules<T>(field: string, fn: () => T): T {
   try {
     return fn();
   } catch (e) {
-    if (e instanceof CommissionError) fail(field, e.message);
+    if (e instanceof CommissionError) fail(field, e.message, e.code);
     throw e;
   }
 }
@@ -102,24 +102,24 @@ export class CommissionsService {
         SELECT id, status::text AS status, "documentType"::text AS "documentType", "originalInvoiceId", "invoiceDate", "totalAmount", "taxAmount", "invoiceNumber"
           FROM sales_invoices WHERE id = ${String(input.salesInvoiceId)}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`);
       if (!doc) fail('salesInvoiceId', 'That sales document does not exist');
-      if (doc.status !== 'POSTED') fail('salesInvoiceId', 'Commission is set on a posted document');
-      if (doc.documentType === 'DEBIT_NOTE') fail('salesInvoiceId', 'Debit notes do not carry commission');
+      if (doc.status !== 'POSTED') fail('salesInvoiceId', 'Commission is set on a posted document', 'COMMISSION_DOC_NOT_POSTED');
+      if (doc.documentType === 'DEBIT_NOTE') fail('salesInvoiceId', 'Debit notes do not carry commission', 'COMMISSION_DEBIT_NOTE');
       const [exists] = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM commission_entries WHERE "salesInvoiceId" = ${doc.id}::uuid`);
       if (exists) throw new ConflictException({ code: 'COMMISSION_EXISTS', message: `${doc.invoiceNumber} already has a commission entry`, field: 'salesInvoiceId' });
       const basisP = invoiceBasis(doc.totalAmount.toString(), doc.taxAmount.toString());
       let repId: string; let rate: number; let kind: 'SALE' | 'RETURN';
       if (doc.documentType === 'CREDIT_NOTE') {
-        if (!doc.originalInvoiceId) fail('salesInvoiceId', 'This credit note does not name the invoice it returns');
+        if (!doc.originalInvoiceId) fail('salesInvoiceId', 'This credit note does not name the invoice it returns', 'COMMISSION_CREDIT_NO_ORIGINAL');
         const [orig] = await tx.$queryRaw<{ repId: string; ratePercent: Prisma.Decimal }[]>(Prisma.sql`
           SELECT "repId", "ratePercent" FROM commission_entries WHERE "salesInvoiceId" = ${doc.originalInvoiceId}::uuid`);
-        if (!orig) fail('salesInvoiceId', 'The invoice it returns has no commission entry, so there is nothing to take back');
+        if (!orig) fail('salesInvoiceId', 'The invoice it returns has no commission entry, so there is nothing to take back', 'COMMISSION_ORIGINAL_UNASSIGNED');
         repId = orig.repId; rate = parseRate(String(orig.ratePercent)); kind = 'RETURN';
       } else {
         if (!input.repId) fail('repId', 'Choose the rep');
         const [rep] = await tx.$queryRaw<Rep[]>(Prisma.sql`
           SELECT id, "nameEn", "nameAr", "ratePercent", active FROM sales_reps WHERE id = ${String(input.repId)}::uuid AND "companyId" = ${companyId}::uuid`);
         if (!rep) fail('repId', 'That rep does not exist');
-        if (!rep.active) fail('repId', 'That rep is not active');
+        if (!rep.active) fail('repId', 'That rep is not active', 'REP_INACTIVE');
         repId = rep.id; rate = parseRate(String(rep.ratePercent)); kind = 'SALE';
       }
       const amountP = (kind === 'RETURN' ? -1 : 1) * commissionPiasters(Math.abs(basisP), rate);

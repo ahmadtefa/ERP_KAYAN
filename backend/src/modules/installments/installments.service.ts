@@ -14,7 +14,7 @@ function rules<T>(field: string, fn: () => T): T {
   try {
     return fn();
   } catch (e) {
-    if (e instanceof InstallmentError) fail(field, e.message);
+    if (e instanceof InstallmentError) fail(field, e.message, e.code);
     throw e;
   }
 }
@@ -77,7 +77,7 @@ export class InstallmentsService {
   /** Creates the plan, or replaces it. Replacing is safe because payments are never recorded on installments: they follow the invoice. */
   async save(companyId: string, userId: string, invoiceId: string, input: { downPayment?: unknown; count?: unknown; intervalMonths?: unknown; firstDue?: string }) {
     const inv = await this.invoice(companyId, invoiceId);
-    if (inv.status !== 'POSTED' || inv.documentType !== 'INVOICE') fail('invoiceId', 'An installment plan belongs to a posted sales invoice');
+    if (inv.status !== 'POSTED' || inv.documentType !== 'INVOICE') fail('invoiceId', 'An installment plan belongs to a posted sales invoice', 'INSTALLMENT_INVOICE_NOT_POSTED');
     const down = input.downPayment === undefined || input.downPayment === '' || input.downPayment === null ? 0 : rules('downPayment', () => parseMoney(input.downPayment, 'the down payment'));
     const count = Number(input.count);
     const interval = input.intervalMonths === undefined || input.intervalMonths === '' ? 1 : Number(input.intervalMonths);

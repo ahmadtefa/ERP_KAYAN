@@ -13,7 +13,11 @@ import { Prisma } from '@prisma/client';
  */
 export type WithholdingDirection = 'PAYABLE' | 'RECEIVABLE';
 
-export class WithholdingError extends Error {}
+export class WithholdingError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
 
@@ -34,8 +38,8 @@ export function withheldAmount(gross: Prisma.Decimal.Value, ratePercent: Prisma.
   const base = D(gross);
   if (base.lessThanOrEqualTo(0)) throw new WithholdingError('The voucher amount must be above zero');
   const tax = base.times(D(ratePercent)).dividedBy(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  if (tax.lessThanOrEqualTo(0)) throw new WithholdingError('At this rate the tax on this amount rounds to zero');
-  if (tax.greaterThanOrEqualTo(base)) throw new WithholdingError('The tax cannot be as large as the voucher');
+  if (tax.lessThanOrEqualTo(0)) throw new WithholdingError('At this rate the tax on this amount rounds to zero', 'WITHHOLDING_TAX_ZERO');
+  if (tax.greaterThanOrEqualTo(base)) throw new WithholdingError('The tax cannot be as large as the voucher', 'WITHHOLDING_TAX_TOO_BIG');
   return tax;
 }
 
@@ -45,6 +49,7 @@ export function directionFor(kind: 'RECEIPT' | 'PAYMENT', hasCustomer: boolean, 
   if (kind === 'RECEIPT' && hasCustomer) return 'RECEIVABLE';
   throw new WithholdingError(
     'Withholding applies to a payment to a supplier or a receipt from a customer',
+    'WITHHOLDING_NOT_APPLICABLE',
   );
 }
 
@@ -68,17 +73,17 @@ export function applyWithholdingToLines(
   taxAccountId: string,
 ): JournalLineDraft[] {
   const cashIndex = lines.findIndex((l) => l.accountId === cashLedgerAccountId && (l.debit || l.credit));
-  if (cashIndex < 0) throw new WithholdingError('The voucher has no cash line to adjust');
+  if (cashIndex < 0) throw new WithholdingError('The voucher has no cash line to adjust', 'WITHHOLDING_NO_CASH_LINE');
   const out = lines.map((l) => ({ ...l }));
   const cash = out[cashIndex];
   if (direction === 'PAYABLE') {
     const credit = D(cash.credit ?? 0).minus(tax);
-    if (credit.lessThanOrEqualTo(0)) throw new WithholdingError('The tax cannot be as large as the cash paid');
+    if (credit.lessThanOrEqualTo(0)) throw new WithholdingError('The tax cannot be as large as the cash paid', 'WITHHOLDING_TAX_TOO_BIG');
     cash.credit = credit;
     out.push({ accountId: taxAccountId, credit: tax, description: 'Withholding tax' });
   } else {
     const debit = D(cash.debit ?? 0).minus(tax);
-    if (debit.lessThanOrEqualTo(0)) throw new WithholdingError('The tax cannot be as large as the cash received');
+    if (debit.lessThanOrEqualTo(0)) throw new WithholdingError('The tax cannot be as large as the cash received', 'WITHHOLDING_TAX_TOO_BIG');
     cash.debit = debit;
     out.push({ accountId: taxAccountId, debit: tax, description: 'Withholding tax withheld by the customer' });
   }

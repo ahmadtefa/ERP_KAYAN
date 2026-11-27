@@ -366,6 +366,9 @@ class ApiClient {
           userAction: data is Map && data['userAction'] is String
               ? data['userAction'] as String
               : null,
+          errorField: data is Map && data['errorField'] is String && RegExp(r'^[A-Za-z][A-Za-z0-9.]{0,39}$').hasMatch(data['errorField'] as String)
+              ? data['errorField'] as String
+              : null,
           requestId: data is Map && data['requestId'] is String
               ? data['requestId'] as String
               : null,

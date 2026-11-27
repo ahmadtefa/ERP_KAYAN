@@ -1,4 +1,5 @@
 import 'failure.dart';
+import 'module_refusals.dart';
 import 'not_found_entities.dart';
 
 /// What kind of problem the user is being told about.
@@ -425,6 +426,29 @@ class AppErrorMessageResolver {
           businessMessage: isArabic
             ? 'استغرقت العملية وقتًا أطول من المسموح وأُلغيت تغييراتها. حدّث المستند وتحقق من حالته قبل المحاولة مرة أخرى.'
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
+      }
+
+      if (error is ApiFailure && (error.statusCode == 400 || error.statusCode == 409 || error.statusCode == 404)) {
+        final refusal = moduleRefusals[error.code];
+        if (refusal != null) {
+          final conflict = error.statusCode == 409;
+          return AppErrorText(
+            reason: error.statusCode == 404 ? AppErrorReason.notFound : conflict ? AppErrorReason.conflict : AppErrorReason.invalidInput,
+            severity: conflict ? AppErrorSeverity.warning : AppErrorSeverity.error,
+            businessMessage: refusal[isArabic ? 0 : 1],
+          );
+        }
+        final field = error.errorField;
+        if (error.statusCode == 400 && error.code == 'VALIDATION' && field != null) {
+          final label = isArabic ? (moduleFieldLabelsAr[field] ?? _fieldLabelsAr[field]) : field;
+          return AppErrorText(
+            reason: AppErrorReason.invalidInput,
+            severity: AppErrorSeverity.error,
+            businessMessage: isArabic
+                ? (label == null ? 'إحدى القيم المدخلة غير صالحة. راجع الحقول ثم أعد المحاولة. لم يُحفظ شيء.' : 'القيمة في «$label» غير صالحة أو ناقصة. صحّحها ثم أعد المحاولة. لم يُحفظ شيء.')
+                : 'The value in "$label" is missing or not valid. Correct it and try again. Nothing was saved.',
+          );
+        }
       }
 
       if (error is ApiFailure && error.statusCode == 404) {

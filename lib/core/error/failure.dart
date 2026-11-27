@@ -33,6 +33,7 @@ class ApiFailure extends Failure {
     this.creditSummary,
     this.userAction,
     this.requestId,
+    this.errorField,
     super.cause,
   });
 
@@ -44,6 +45,9 @@ class ApiFailure extends Failure {
   final CreditSummary? creditSummary;
   final String? userAction;
   final String? requestId;
+
+  /// The input a refusal is about (a plain identifier from the server).
+  final String? errorField;
 }
 
 /// Authentication is missing, expired or rejected.

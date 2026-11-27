@@ -5,7 +5,11 @@
  * takes the same rep and the same rate back (a negative entry). Amounts are
  * worked in whole piasters with integer arithmetic so no float error creeps in.
  */
-export class CommissionError extends Error {}
+export class CommissionError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 
 /** A percentage from 0 to 100 with at most 4 decimals, as an integer of 1/10000 percent. */
 export function parseRate(input: unknown): number {
@@ -47,8 +51,8 @@ export interface PayoutEntry { id: string; amountPiasters: number }
 
 /** A payout nets sales against returns. It must be above zero to be paid. */
 export function payoutTotal(entries: PayoutEntry[]): number {
-  if (entries.length === 0) throw new CommissionError('There is nothing to pay for that period');
+  if (entries.length === 0) throw new CommissionError('There is nothing to pay for that period', 'COMMISSION_NOTHING_TO_PAY');
   const total = entries.reduce((s, e) => s + e.amountPiasters, 0);
-  if (total <= 0) throw new CommissionError('Returns cancel the commission for that period, so there is nothing to pay');
+  if (total <= 0) throw new CommissionError('Returns cancel the commission for that period, so there is nothing to pay', 'COMMISSION_RETURNS_CANCEL');
   return total;
 }
