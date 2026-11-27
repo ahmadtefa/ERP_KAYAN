@@ -134,7 +134,7 @@ export class InventoryReportsService {
     const isBase = unit.unit === item.unit;
     if (!unit.isActive &&
         (dto.isDefaultSale === true || dto.isDefaultPurchase === true)) {
-      throw new BadRequestException('An inactive unit cannot be a default unit');
+      throw new BadRequestException({ code: 'UNIT_INACTIVE_DEFAULT', message: 'An inactive unit cannot be a default unit' });
     }
 
     const data: Record<string, unknown> = {};
@@ -142,9 +142,7 @@ export class InventoryReportsService {
       const name = String(dto.unit ?? '').trim();
       if (!name) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'unit is required', field: 'unit' });
       if (isBase && name !== item.unit) {
-        throw new BadRequestException(
-          'The base unit of an item cannot be renamed; add the new name as another unit instead.',
-        );
+        throw new BadRequestException({ code: 'UNIT_BASE_RENAME', message: 'The base unit of an item cannot be renamed; add the new name as another unit instead.' });
       }
       const clash = await this.prisma.itemUnit.findFirst({
         where: { itemId, unit: name, id: { not: unitId } },
@@ -245,9 +243,7 @@ export class InventoryReportsService {
     const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
     if (!unit) throw new NotFoundException({ code: 'UNIT_NOT_FOUND', message: 'Unit not found' });
     if (unit.unit === item.unit || unit.factor.equals(1)) {
-      throw new BadRequestException(
-        'The base unit cannot be removed; it is the unit stock is counted in.',
-      );
+      throw new BadRequestException({ code: 'UNIT_BASE_REMOVE', message: 'The base unit cannot be removed; it is the unit stock is counted in.' });
     }
 
     if (await this.unitIsReferenced(itemId, unit.unit)) {
@@ -294,7 +290,7 @@ export class InventoryReportsService {
   ) {
     const { item, unit } = await this.requireOwnedUnit(companyId, itemId, unitId);
     if (unit.factor.equals(1) || unit.unit === item.unit) {
-      throw new BadRequestException('The base unit cannot be deactivated.');
+      throw new BadRequestException({ code: 'UNIT_BASE_DEACTIVATE', message: 'The base unit cannot be deactivated.' });
     }
     if (!unit.isActive) return this.listUnits(companyId, itemId, mayReadCost);
     await this.prisma.itemUnit.update({
@@ -392,7 +388,7 @@ export class InventoryReportsService {
         if (!taken) barcode = candidate;
       }
       if (!barcode) {
-        throw new ConflictException('Could not generate a free internal barcode; enter one by hand');
+        throw new ConflictException({ code: 'BARCODE_GENERATE_FAILED', message: 'Could not generate a free internal barcode; enter one by hand' });
       }
     }
 

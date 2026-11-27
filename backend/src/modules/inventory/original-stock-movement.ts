@@ -43,9 +43,7 @@ export function takeOriginalStockMovement(
     !candidate.unitCost.equals(first.unitCost) ||
     !candidate.totalCost.equals(first.totalCost),
   )) {
-    throw new BadRequestException(
-      'The original stock movements are missing or ambiguous; this document cannot be reversed automatically.',
-    );
+    throw new BadRequestException({ code: 'REVERSE_MOVEMENTS_AMBIGUOUS', message: 'The original stock movements are missing or ambiguous; this document cannot be reversed automatically.' });
   }
   used.add(first.id);
   return first;

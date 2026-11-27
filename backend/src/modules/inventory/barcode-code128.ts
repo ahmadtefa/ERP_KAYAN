@@ -63,9 +63,7 @@ export interface Code128Encoding {
 function valueForSetB(char: string, index: number): number {
   const code = char.charCodeAt(0);
   if (code < 32 || code > 127) {
-    throw new BadRequestException(
-      `Barcode character at position ${index + 1} is outside the printable Code 128 set B range`,
-    );
+    throw new BadRequestException({ code: 'LABEL_BARCODE_CHARS', message: `Barcode character at position ${index + 1} is outside the printable Code 128 set B range` });
   }
   return code - 32;
 }
@@ -73,10 +71,10 @@ function valueForSetB(char: string, index: number): number {
 /** Encode text into a Code 128 set B symbol with its modulus-103 checksum. */
 export function encodeCode128B(value: string): Code128Encoding {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new BadRequestException('A barcode label needs a non-empty barcode');
+    throw new BadRequestException({ code: 'LABEL_BARCODE_EMPTY', message: 'A barcode label needs a non-empty barcode' });
   }
   if (value.length > 80) {
-    throw new BadRequestException('Barcode is too long for a Code 128 label (max 80 characters)');
+    throw new BadRequestException({ code: 'LABEL_BARCODE_LONG', message: 'Barcode is too long for a Code 128 label (max 80 characters)' });
   }
 
   const dataValues: number[] = [];

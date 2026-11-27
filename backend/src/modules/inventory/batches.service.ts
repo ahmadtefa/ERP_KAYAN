@@ -1228,7 +1228,7 @@ export class BatchesService {
         deletedAt: null,
       },
     });
-    if (!batch) throw new NotFoundException('Batch not found in this warehouse');
+    if (!batch) throw new NotFoundException({ code: 'BATCH_NOT_IN_WAREHOUSE', message: 'Batch not found in this warehouse' });
     if (batch.remainingQuantity.lessThan(quantity)) {
       throw new BadRequestException(
         `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +
@@ -1439,7 +1439,7 @@ export class BatchesService {
     const batch = await this.prisma.itemBatch.findFirst({
       where: { id: input.batchId, companyId, warehouseId: from.id, deletedAt: null },
     });
-    if (!batch) throw new NotFoundException('Batch not found in the source warehouse');
+    if (!batch) throw new NotFoundException({ code: 'BATCH_NOT_IN_SOURCE', message: 'Batch not found in the source warehouse' });
     if (batch.remainingQuantity.lessThan(quantity)) {
       throw new BadRequestException(
         `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +

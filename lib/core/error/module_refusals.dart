@@ -1,6 +1,7 @@
 import 'accounting_refusals.dart';
 import 'admin_asset_refusals.dart';
 import 'backup_refusals.dart';
+import 'inventory_refusals.dart';
 import 'cash_refusals.dart';
 import 'purchase_refusals.dart';
 import 'return_refusals.dart';
@@ -14,6 +15,7 @@ const Map<String, List<String>> moduleRefusals = {
   ...accountingRefusals,
   ...adminAssetRefusals,
   ...backupRefusals,
+  ...inventoryRefusals,
   ...cashRefusals,
   ...purchaseRefusals,
   ...salesRefusals,

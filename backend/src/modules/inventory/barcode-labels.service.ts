@@ -50,28 +50,28 @@ export class BarcodeLabelsService {
 
   /** Parses `unitId:copies` query fragments, rejecting anything malformed. */
   parseSpecs(raw: string[] | string | undefined): LabelSpec[] {
-    if (!raw) throw new BadRequestException('At least one label specification (unitId:copies) is required');
+    if (!raw) throw new BadRequestException({ code: 'LABEL_SPEC_REQUIRED', message: 'At least one label specification (unitId:copies) is required' });
     const fragments = Array.isArray(raw) ? raw : [raw];
     const specs: LabelSpec[] = [];
     const seen = new Set<string>();
     for (const fragment of fragments) {
       const [unitId, copiesRaw] = String(fragment).split(':');
       if (!unitId || !UUID_RE.test(unitId) || !/^\d{1,3}$/.test(copiesRaw ?? '')) {
-        throw new BadRequestException(`Malformed label specification "${fragment}". Use unitId:copies`);
+        throw new BadRequestException({ code: 'LABEL_SPEC_MALFORMED', message: `Malformed label specification "${fragment}". Use unitId:copies` });
       }
       const copies = Number(copiesRaw);
       if (copies < 1 || copies > MAX_COPIES_PER_UNIT) {
-        throw new BadRequestException(`Copies must be between 1 and ${MAX_COPIES_PER_UNIT}`);
+        throw new BadRequestException({ code: 'LABEL_COPIES_RANGE', message: `Copies must be between 1 and ${MAX_COPIES_PER_UNIT}` });
       }
       if (seen.has(unitId)) {
-        throw new BadRequestException('Each unit may appear only once in a label job');
+        throw new BadRequestException({ code: 'LABEL_UNIT_REPEATED', message: 'Each unit may appear only once in a label job' });
       }
       seen.add(unitId);
       specs.push({ unitId, copies });
     }
     const total = specs.reduce((sum, spec) => sum + spec.copies, 0);
     if (total > MAX_LABELS_PER_JOB) {
-      throw new BadRequestException(`A label job cannot exceed ${MAX_LABELS_PER_JOB} labels`);
+      throw new BadRequestException({ code: 'LABEL_JOB_TOO_BIG', message: `A label job cannot exceed ${MAX_LABELS_PER_JOB} labels` });
     }
     return specs;
   }
@@ -107,7 +107,7 @@ export class BarcodeLabelsService {
       where: { id: itemId, companyId, deletedAt: null },
       include: { units: true },
     });
-    if (!item) throw new BadRequestException('The item does not exist');
+    if (!item) throw new BadRequestException({ code: 'LABEL_ITEM_MISSING', message: 'The item does not exist' });
     return item;
   }
 
@@ -132,12 +132,10 @@ export class BarcodeLabelsService {
     for (const spec of specs) {
       const unit = item.units.find((candidate) => candidate.id === spec.unitId);
       if (!unit) {
-        throw new BadRequestException('One of the chosen units does not belong to this item');
+        throw new BadRequestException({ code: 'LABEL_UNIT_OTHER_ITEM', message: 'One of the chosen units does not belong to this item' });
       }
       if (!unit.barcode || unit.barcode.trim() === '') {
-        throw new BadRequestException(
-          `Unit "${unit.unit}" has no barcode. Assign one before printing labels.`,
-        );
+        throw new BadRequestException({ code: 'LABEL_UNIT_NO_BARCODE', message: `Unit "${unit.unit}" has no barcode. Assign one before printing labels.` });
       }
       const price = options.showPrice
         ? defaultUnitPrice('sale', unit, new Prisma.Decimal(item.salePrice.toString())).toFixed(2)
