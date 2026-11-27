@@ -390,19 +390,19 @@ const Map<String, List<String>> wordedRefusals = {
     'تعذّر توزيع تكاليف الشحن والجمارك على أسطر الفاتورة. راجع مبلغ التكاليف وأسطر الفاتورة، ثم أعد المحاولة. لم يُحفظ شيء.',
     'The shipping and customs costs could not be spread over the invoice lines. Check the cost amount and the invoice lines, then try again. Nothing was saved.',
   ],
-  'APPROVAL_LEVEL_PERMISSION': [
+  'APPROVAL_DECIDE_NEEDS_PERMISSION': [
     'هذا المستوى من الاعتماد يتطلب الصلاحية {permission} وليست لديك. اطلب من مدير النظام منح دورك هذه الصلاحية، أو اطلب من شخص لديه الصلاحية أن يعتمد. لم يتغير شيء.',
     'This approval level requires the permission {permission}, which you do not have. Ask the system administrator to give your role this permission, or ask a person who has it to approve. Nothing changed.',
   ],
-  'APPROVAL_LEVEL_ROLE': [
+  'APPROVAL_DECIDE_ROLE': [
     'هذا المستوى من الاعتماد مخصص للدور {role} فقط وليس هذا دورك. اطلب من صاحب هذا الدور أن يعتمد، أو اطلب من مدير النظام مراجعة سلسلة الاعتماد. لم يتغير شيء.',
     'This approval level is only for the role {role}, and that is not your role. Ask a person with that role to approve, or ask the system administrator to review the approval chain. Nothing changed.',
   ],
-  'APPROVAL_SELF_DECISION': [
+  'APPROVAL_DECIDE_SELF': [
     'لا يمكنك اتخاذ قرار في طلب اعتماد أنشأته أنت. اطلب من شخص آخر لديه صلاحية الاعتماد أن يقرر. لم يتغير شيء.',
     'You cannot decide on an approval request you created yourself. Ask another person with approval permission to decide. Nothing changed.',
   ],
-  'APPROVAL_ALREADY_DECIDED': [
+  'APPROVAL_DECIDE_REPEAT': [
     'سبق أن اتخذت قرارك في هذا المستوى من الاعتماد ولا يمكن تكراره. حدّث الصفحة لرؤية الحالة الحالية. لم يتغير شيء.',
     'You have already decided on this approval level and cannot decide again. Refresh the page to see the current status. Nothing changed.',
   ],

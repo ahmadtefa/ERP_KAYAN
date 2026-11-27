@@ -233,19 +233,19 @@ export function mayDecide(
   context: { requesterId: string; decisions: RecordedDecision[] },
 ): { allowed: true } | { allowed: false; reason: string; code: string; params?: Record<string, string> } {
   if (!actor.permissions.includes(level.permission) && !actor.permissions.includes('*')) {
-    return { allowed: false, reason: `This level requires ${level.permission}`, code: 'APPROVAL_LEVEL_PERMISSION', params: { permission: level.permission } };
+    return { allowed: false, reason: `This level requires ${level.permission}`, code: 'APPROVAL_DECIDE_NEEDS_PERMISSION', params: { permission: level.permission } };
   }
   if (level.roleCode && !actor.roles.includes(level.roleCode)) {
-    return { allowed: false, reason: `This level is restricted to the ${level.roleCode} role`, code: 'APPROVAL_LEVEL_ROLE', params: { role: level.roleCode } };
+    return { allowed: false, reason: `This level is restricted to the ${level.roleCode} role`, code: 'APPROVAL_DECIDE_ROLE', params: { role: level.roleCode } };
   }
   if (actor.userId === context.requesterId) {
-    return { allowed: false, reason: 'The requester cannot decide their own approval', code: 'APPROVAL_SELF_DECISION' };
+    return { allowed: false, reason: 'The requester cannot decide their own approval', code: 'APPROVAL_DECIDE_SELF' };
   }
   const already = context.decisions.some(
     (decision) => decision.level === level.level && decision.actorId === actor.userId,
   );
   if (already) {
-    return { allowed: false, reason: 'You have already decided this level', code: 'APPROVAL_ALREADY_DECIDED' };
+    return { allowed: false, reason: 'You have already decided this level', code: 'APPROVAL_DECIDE_REPEAT' };
   }
   void chain;
   return { allowed: true };
