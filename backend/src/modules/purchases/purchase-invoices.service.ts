@@ -1431,9 +1431,11 @@ export class PurchaseInvoicesService {
       allocated = allocateLandedCostAmounts(weights, landedCostAmount.toFixed(MONEY_SCALE));
       allocatedTax = allocateLandedCostAmounts(weights, landedCostTax.toFixed(MONEY_SCALE));
     } catch (error) {
-      throw new BadRequestException(
-        error instanceof Error ? error.message : 'Landed costs could not be allocated',
-      );
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException({
+        code: 'LANDED_ALLOCATION_FAILED',
+        message: error instanceof Error ? error.message : 'Landed costs could not be allocated',
+      });
     }
 
     const lines = discounted.map((line, index) => {

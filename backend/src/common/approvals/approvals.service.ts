@@ -455,7 +455,7 @@ export class ApprovalsService {
       { userId: actor.userId, permissions: actor.permissions, roles: actor.roles },
       { requesterId: params.requesterId, decisions: existing },
     );
-    if (!verdict.allowed) throw new ForbiddenException(verdict.reason);
+    if (!verdict.allowed) throw new ForbiddenException({ code: verdict.code, message: verdict.reason, ...(verdict.params ? { params: verdict.params } : {}) });
     const roleCode = actor.roles.find((role) => !level.roleCode || role === level.roleCode) ?? null;
     // Frozen with the decision: a later policy edit cannot change what this one was.
     const lastRule = chain.levels[chain.levels.length - 1];

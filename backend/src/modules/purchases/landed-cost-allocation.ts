@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 const MONEY_SCALE = 4;
 const MONEY_UNITS = 10_000n;
 
@@ -16,20 +17,20 @@ export function allocateLandedCostAmounts(
   const totalUnits = toMoneyUnits(totalAmount);
   const valueUnits = lineValues.map(toMoneyUnits);
   if (valueUnits.some((value) => value < 0n)) {
-    throw new Error('Line values used for landed-cost allocation cannot be negative');
+    throw new BadRequestException({ code: 'LANDED_LINE_NEGATIVE', message: 'Line values used for landed-cost allocation cannot be negative' });
   }
   if (totalUnits < 0n) {
-    throw new Error('Landed costs cannot be negative');
+    throw new BadRequestException({ code: 'LANDED_COST_NEGATIVE', message: 'Landed costs cannot be negative' });
   }
   if (valueUnits.length === 0) {
     if (totalUnits === 0n) return [];
-    throw new Error('A landed cost cannot be allocated without invoice lines');
+    throw new BadRequestException({ code: 'LANDED_NO_LINES', message: 'A landed cost cannot be allocated without invoice lines' });
   }
   if (totalUnits === 0n) return valueUnits.map(() => '0.0000');
 
   const subtotalUnits = valueUnits.reduce((sum, value) => sum + value, 0n);
   if (subtotalUnits === 0n) {
-    throw new Error('A positive landed cost needs a positive invoice line value to allocate against');
+    throw new BadRequestException({ code: 'LANDED_NO_LINE_VALUE', message: 'A positive landed cost needs a positive invoice line value to allocate against' });
   }
 
   const portions = valueUnits.map((value, index) => {

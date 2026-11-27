@@ -370,6 +370,42 @@ const Map<String, List<String>> wordedRefusals = {
     'لا تملك صلاحية {actionAr} هذا المخزن. اطلب من مدير النظام منحك صلاحية الوصول إلى هذا المخزن، أو استخدم مخزنًا مصرّحًا لك به. لم يتغير شيء.',
     'You do not have permission to {actionEn} this warehouse. Ask the system administrator to give you access to this warehouse, or use a warehouse you are allowed to use. Nothing was changed.',
   ],
+  'LANDED_LINE_NEGATIVE': [
+    'قيمة أحد أسطر الفاتورة سالبة، فلا يمكن توزيع تكاليف الشحن والجمارك عليها. راجع الكميات والأسعار والخصومات في الأسطر، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The value of one invoice line is negative, so the shipping and customs costs cannot be spread over the lines. Check the quantities, prices and discounts on the lines, then try again. Nothing was saved.',
+  ],
+  'LANDED_COST_NEGATIVE': [
+    'تكاليف الشحن والجمارك لا يمكن أن تكون سالبة. اكتب مبلغًا من صفر فأكثر، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'Shipping and customs costs cannot be negative. Enter an amount of zero or more, then try again. Nothing was saved.',
+  ],
+  'LANDED_NO_LINES': [
+    'لا يمكن توزيع تكاليف الشحن والجمارك لأن الفاتورة بلا أسطر. أضف سطرًا واحدًا على الأقل، أو اجعل التكاليف صفرًا، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'Shipping and customs costs cannot be spread because the invoice has no lines. Add at least one line, or set the costs to zero, then try again. Nothing was saved.',
+  ],
+  'LANDED_NO_LINE_VALUE': [
+    'لا يمكن توزيع تكاليف الشحن والجمارك لأن قيمة أسطر الفاتورة صفر. أدخل أسعارًا وكميات للأسطر، أو اجعل التكاليف صفرًا، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'Shipping and customs costs cannot be spread because the invoice lines have a total value of zero. Enter prices and quantities on the lines, or set the costs to zero, then try again. Nothing was saved.',
+  ],
+  'LANDED_ALLOCATION_FAILED': [
+    'تعذّر توزيع تكاليف الشحن والجمارك على أسطر الفاتورة. راجع مبلغ التكاليف وأسطر الفاتورة، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The shipping and customs costs could not be spread over the invoice lines. Check the cost amount and the invoice lines, then try again. Nothing was saved.',
+  ],
+  'APPROVAL_LEVEL_PERMISSION': [
+    'هذا المستوى من الاعتماد يتطلب الصلاحية {permission} وليست لديك. اطلب من مدير النظام منح دورك هذه الصلاحية، أو اطلب من شخص لديه الصلاحية أن يعتمد. لم يتغير شيء.',
+    'This approval level requires the permission {permission}, which you do not have. Ask the system administrator to give your role this permission, or ask a person who has it to approve. Nothing changed.',
+  ],
+  'APPROVAL_LEVEL_ROLE': [
+    'هذا المستوى من الاعتماد مخصص للدور {role} فقط وليس هذا دورك. اطلب من صاحب هذا الدور أن يعتمد، أو اطلب من مدير النظام مراجعة سلسلة الاعتماد. لم يتغير شيء.',
+    'This approval level is only for the role {role}, and that is not your role. Ask a person with that role to approve, or ask the system administrator to review the approval chain. Nothing changed.',
+  ],
+  'APPROVAL_SELF_DECISION': [
+    'لا يمكنك اتخاذ قرار في طلب اعتماد أنشأته أنت. اطلب من شخص آخر لديه صلاحية الاعتماد أن يقرر. لم يتغير شيء.',
+    'You cannot decide on an approval request you created yourself. Ask another person with approval permission to decide. Nothing changed.',
+  ],
+  'APPROVAL_ALREADY_DECIDED': [
+    'سبق أن اتخذت قرارك في هذا المستوى من الاعتماد ولا يمكن تكراره. حدّث الصفحة لرؤية الحالة الحالية. لم يتغير شيء.',
+    'You have already decided on this approval level and cannot decide again. Refresh the page to see the current status. Nothing changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
