@@ -98,6 +98,7 @@ export class YearEndCloseService {
       const blockers = await this.blockers(companyId, period, tx);
       if (blockers.length > 0) {
         throw new BadRequestException({
+          code: 'YEAR_END_BLOCKED',
           message: 'The year cannot be closed yet',
           errors: { blockers },
         });

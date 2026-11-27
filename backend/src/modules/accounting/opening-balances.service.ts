@@ -235,6 +235,7 @@ export class OpeningBalancesService {
       }
       if (!totalDebit.equals(totalCredit)) {
         throw new BadRequestException({
+          code: 'OPENING_BALANCE_UNBALANCED',
           message: 'The opening balance does not balance',
           errors: {
             totalDebit: totalDebit.toFixed(MONEY_SCALE),
@@ -242,6 +243,7 @@ export class OpeningBalancesService {
             difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
             hint: 'Send autoBalanceToEquity to put the difference on the opening-balance equity account.',
           },
+          params: { totalDebit: totalDebit.toFixed(MONEY_SCALE), totalCredit: totalCredit.toFixed(MONEY_SCALE), difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE) },
         });
       }
 

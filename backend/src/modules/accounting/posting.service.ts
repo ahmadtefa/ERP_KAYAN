@@ -135,12 +135,14 @@ export class PostingService {
 
     if (!totalDebit.equals(totalCredit)) {
       throw new BadRequestException({
+        code: 'POSTING_UNBALANCED',
         message: 'The document does not balance, so it was not posted',
         errors: {
           totalDebit: totalDebit.toFixed(MONEY_SCALE),
           totalCredit: totalCredit.toFixed(MONEY_SCALE),
           difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
         },
+        params: { totalDebit: totalDebit.toFixed(MONEY_SCALE), totalCredit: totalCredit.toFixed(MONEY_SCALE), difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE) },
       });
     }
 

@@ -474,12 +474,14 @@ export class CostCentersService {
 
     if (!total.equals(lineAmount)) {
       throw new BadRequestException({
+        code: 'COSTCENTER_ALLOC_MISMATCH',
         message: 'The allocations do not add up to the line amount',
         errors: {
           lineAmount: lineAmount.toFixed(MONEY_SCALE),
           allocated: total.toFixed(MONEY_SCALE),
           difference: total.minus(lineAmount).toFixed(MONEY_SCALE),
         },
+        params: { lineAmount: lineAmount.toFixed(MONEY_SCALE), allocated: total.toFixed(MONEY_SCALE), difference: total.minus(lineAmount).toFixed(MONEY_SCALE) },
       });
     }
 

@@ -128,12 +128,14 @@ export class JournalEntriesService {
 
     if (!totalDebit.equals(totalCredit)) {
       throw new BadRequestException({
+        code: 'JOURNAL_CREATE_UNBALANCED',
         message: 'Journal entry is not balanced',
         errors: {
           totalDebit: totalDebit.toFixed(MONEY_SCALE),
           totalCredit: totalCredit.toFixed(MONEY_SCALE),
           difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
         },
+        params: { totalDebit: totalDebit.toFixed(MONEY_SCALE), totalCredit: totalCredit.toFixed(MONEY_SCALE), difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE) },
       });
     }
 

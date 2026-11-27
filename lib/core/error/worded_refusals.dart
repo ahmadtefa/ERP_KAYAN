@@ -254,6 +254,26 @@ const Map<String, List<String>> wordedRefusals = {
     'أُوقفت الاستعادة قبل استبدال أي شيء لأن نسخة الأمان لم تُكتب. تأكد من وجود مساحة كافية في مجلد النسخ الاحتياطية، ثم أعد المحاولة. بياناتك الحالية كما هي.',
     'The restore was stopped before anything was replaced because the safety backup could not be written. Make sure the backup folder has enough free space, then try again. Your current data is untouched.',
   ],
+  'COSTCENTER_ALLOC_MISMATCH': [
+    'توزيع مراكز التكلفة لا يساوي مبلغ السطر: مبلغ السطر {lineAmount} والموزَّع {allocated} والفرق {difference}. عدّل نسب أو مبالغ التوزيع حتى يصبح مجموعها مساويًا لمبلغ السطر، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The cost center allocation does not equal the line amount: the line amount is {lineAmount}, the allocated amount is {allocated}, and the difference is {difference}. Adjust the allocation so it adds up to the line amount, then try again. Nothing was saved.',
+  ],
+  'JOURNAL_CREATE_UNBALANCED': [
+    'القيد غير متوازن: إجمالي المدين {totalDebit} وإجمالي الدائن {totalCredit} والفرق {difference}. عدّل الأسطر حتى يتساوى المدين والدائن، ثم احفظ. لم يُحفظ القيد.',
+    'The journal entry is not balanced: total debit is {totalDebit}, total credit is {totalCredit}, and the difference is {difference}. Adjust the lines so debit equals credit, then save. The entry was not saved.',
+  ],
+  'OPENING_BALANCE_UNBALANCED': [
+    'الأرصدة الافتتاحية غير متوازنة: إجمالي المدين {totalDebit} وإجمالي الدائن {totalCredit} والفرق {difference}. صحّح الأرصدة، أو اختر ترحيل الفرق إلى حساب حقوق الملكية للأرصدة الافتتاحية، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The opening balances are not balanced: total debit is {totalDebit}, total credit is {totalCredit}, and the difference is {difference}. Correct the balances, or choose to post the difference to the opening-balance equity account, then try again. Nothing was saved.',
+  ],
+  'POSTING_UNBALANCED': [
+    'لم يُرحَّل المستند لأن القيد الناتج غير متوازن: إجمالي المدين {totalDebit} وإجمالي الدائن {totalCredit} والفرق {difference}. راجع الإجماليات وإعداد الحسابات، أو اطلب المساعدة من مسؤول الحسابات، ثم أعد المحاولة. لم يتغير شيء.',
+    'The document was not posted because its journal entry does not balance: total debit is {totalDebit}, total credit is {totalCredit}, and the difference is {difference}. Review the totals and account setup, or ask the accountant for help, then try again. Nothing changed.',
+  ],
+  'YEAR_END_BLOCKED': [
+    'لا يمكن إقفال السنة الآن لأن هناك أمورًا لم تُنجز بعد. افتح معاينة الإقفال وعالج كل بند ظاهر فيها، ثم أعد محاولة الإقفال. لم يتغير شيء.',
+    'The year cannot be closed yet because some items are still open. Open the closing preview, resolve each item listed there, then try closing again. Nothing changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
