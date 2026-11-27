@@ -217,13 +217,13 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     showDataDialog<void>(
       context,
       storageKey: 'stock-ledger',
-      title: '${text(row, 'itemCode')} — ${text(row, 'itemNameEn')}',
+      title: '${text(row, 'itemCode')} — ${Localizations.localeOf(context).languageCode == 'ar' ? text(row, 'itemNameAr', fallback: text(row, 'itemNameEn')) : text(row, 'itemNameEn')}',
       icon: Icons.receipt_long_outlined,
       initialSize: const Size(1000, 620),
       child: _LedgerDialog(
         itemId: itemId,
         row: row,
-        title: '${text(row, 'itemCode')} — ${text(row, 'itemNameEn')}',
+        title: '${text(row, 'itemCode')} — ${Localizations.localeOf(context).languageCode == 'ar' ? text(row, 'itemNameAr', fallback: text(row, 'itemNameEn')) : text(row, 'itemNameEn')}',
       ),
     );
   }

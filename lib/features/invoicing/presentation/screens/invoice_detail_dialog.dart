@@ -250,7 +250,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       l10n.item,
                       flex: 2,
                       value: (r) =>
-                          '${text(r, 'itemCode')} ${text(r, 'itemNameEn')}'
+                          '${text(r, 'itemCode')} ${Localizations.localeOf(context).languageCode == 'ar' ? text(r, 'itemNameAr', fallback: text(r, 'itemNameEn')) : text(r, 'itemNameEn')}'
                               .trim(),
                     ),
                     ColumnSpec(
