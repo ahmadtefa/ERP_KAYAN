@@ -298,6 +298,22 @@ const Map<String, List<String>> wordedRefusals = {
     'لم يكتمل طلب تغيير الحساب الأب. حدّث الصفحة ثم أعد اختيار الحساب الأب الجديد، وإن تكرر ذلك فأبلغ مدير النظام. لم يتغير شيء.',
     'The request to change the parent account was incomplete. Refresh the page and choose the new parent again, and if it keeps happening tell the system administrator. Nothing changed.',
   ],
+  'LOT_NUMBER_REQUIRED': [
+    'هذا الصنف يتطلب رقم دفعة ولم يُدخل رقمها. اكتب رقم الدفعة، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'This item requires a lot number and none was entered. Enter the lot number, then try again. Nothing was saved.',
+  ],
+  'LOT_PRODUCTION_DATE_REQUIRED': [
+    'هذا الصنف يتطلب تاريخ إنتاج ولم يُدخل. اكتب تاريخ الإنتاج، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'This item requires a production date and none was entered. Enter the production date, then try again. Nothing was saved.',
+  ],
+  'LOT_EXPIRY_DATE_REQUIRED': [
+    'هذا الصنف يتطلب تاريخ صلاحية ولم يُدخل. اكتب تاريخ الصلاحية، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'This item requires an expiry date and none was entered. Enter the expiry date, then try again. Nothing was saved.',
+  ],
+  'LOT_EXPIRY_BEFORE_PRODUCTION': [
+    'تاريخ الصلاحية يسبق تاريخ الإنتاج. راجع التاريخين وصحّح الخطأ، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The expiry date is before the production date. Check both dates and correct the mistake, then try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

@@ -18,7 +18,7 @@ import {
   issueAtAverage,
   movingAverage,
   normalizeExpiryDays,
-  receiptProblems,
+  receiptProblems, receiptProblemCode,
   selectLotsFefo,
 } from '../../common/warehouse/batch-policy';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
@@ -456,7 +456,7 @@ export class BatchesService {
       policy,
     );
     if (problems.length > 0) {
-      throw new BadRequestException(problems.join(' '));
+      throw new BadRequestException({ code: receiptProblemCode({ batchNumber: input.batchNumber, productionDate: input.productionDate, expiryDate: input.expiryDate }, policy) ?? 'LOT_NUMBER_REQUIRED', message: problems.join(' ') });
     }
     if (input.storageLocationId) {
       await this.requireLocation(companyId, warehouse.id, input.storageLocationId);
@@ -533,7 +533,7 @@ export class BatchesService {
       policy,
     );
     if (problems.length > 0) {
-      throw new BadRequestException(problems.join(' '));
+      throw new BadRequestException({ code: receiptProblemCode({ batchNumber: lot.batchNumber, productionDate: lot.productionDate, expiryDate: lot.expiryDate }, policy) ?? 'LOT_NUMBER_REQUIRED', message: problems.join(' ') });
     }
 
     const batchNumber = (lot.batchNumber ?? '').trim();

@@ -334,3 +334,26 @@ export function receiptProblems(
   }
   return problems;
 }
+
+/// The first receipt problem as a reviewed code, so the app can show its own
+/// sentence. One correction at a time: the person fixes it and posts again.
+export function receiptProblemCode(
+  input: {
+    batchNumber?: string | null;
+    productionDate?: Date | string | null;
+    expiryDate?: Date | string | null;
+  },
+  policy: BatchPolicy,
+): string | null {
+  if (policy.requiresBatch && !input.batchNumber?.trim()) return 'LOT_NUMBER_REQUIRED';
+  if (policy.requiresProductionDate && !input.productionDate) return 'LOT_PRODUCTION_DATE_REQUIRED';
+  if (policy.requiresExpiryDate && !input.expiryDate) return 'LOT_EXPIRY_DATE_REQUIRED';
+  if (
+    input.productionDate &&
+    input.expiryDate &&
+    dayOnly(input.expiryDate).getTime() < dayOnly(input.productionDate).getTime()
+  ) {
+    return 'LOT_EXPIRY_BEFORE_PRODUCTION';
+  }
+  return null;
+}
