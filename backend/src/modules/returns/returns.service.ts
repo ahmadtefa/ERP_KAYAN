@@ -262,23 +262,23 @@ export class ReturnsService {
       where: { id: originalInvoiceId, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
-    if (!original) throw new BadRequestException('The original sales invoice does not exist');
+    if (!original) throw new BadRequestException({ code: 'RETURN_INVOICE_MISSING', message: 'The original sales invoice does not exist' });
     if (original.status !== InvoiceStatus.POSTED) {
-      throw new BadRequestException('Only a posted sales invoice can be returned');
+      throw new BadRequestException({ code: 'RETURN_INVOICE_NOT_POSTED', message: 'Only a posted sales invoice can be returned' });
     }
     if (original.documentType !== InvoiceDocumentType.INVOICE) {
-      throw new BadRequestException('A return document cannot itself be returned');
+      throw new BadRequestException({ code: 'RETURN_OF_RETURN', message: 'A return document cannot itself be returned' });
     }
     if (original.branchId !== branchId) {
-      throw new BadRequestException('A return must be recorded in the branch that issued the original invoice');
+      throw new BadRequestException({ code: 'RETURN_OTHER_BRANCH', message: 'A return must be recorded in the branch that issued the original invoice' });
     }
     if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
-      throw new BadRequestException('A return needs at least one line');
+      throw new BadRequestException({ code: 'RETURN_NO_LINES', message: 'A return needs at least one line' });
     }
 
     const date = this.date(dto.returnDate, 'returnDate');
     if (date < original.invoiceDate) {
-      throw new BadRequestException('The return date cannot be before the invoice date');
+      throw new BadRequestException({ code: 'RETURN_DATE_BEFORE_INVOICE', message: 'The return date cannot be before the invoice date' });
     }
 
     const prepared: Array<{
@@ -305,10 +305,10 @@ export class ReturnsService {
       );
       const originalLine = original.lines.find((line) => line.id === originalLineId);
       if (!originalLine) {
-        throw new BadRequestException(`Line ${index + 1}: that line does not belong to the invoice`);
+        throw new BadRequestException({ code: 'RETURN_LINE_NOT_ON_INVOICE', message: `Line ${index + 1}: that line does not belong to the invoice` });
       }
       if (seenOriginalLineIds.has(originalLine.id)) {
-        throw new BadRequestException(`Line ${index + 1}: an invoice line may appear only once in a return`);
+        throw new BadRequestException({ code: 'RETURN_LINE_REPEATED', message: `Line ${index + 1}: an invoice line may appear only once in a return` });
       }
       seenOriginalLineIds.add(originalLine.id);
       // The return follows the original document's unit. The entered quantity
@@ -318,10 +318,8 @@ export class ReturnsService {
       const remaining = originalLine.quantity.minus(originalLine.returnedQuantity);
       const quantity = unit.baseQuantity;
       if (quantity.greaterThan(remaining)) {
-        throw new BadRequestException(
-          `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
-            `is still returnable, ${quantity.toFixed(MONEY_SCALE)} was requested.`,
-        );
+        throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
+            `is still returnable, ${quantity.toFixed(MONEY_SCALE)} was requested.` });
       }
 
       const unitPrice =
@@ -347,11 +345,9 @@ export class ReturnsService {
         !unitPrice.equals(originalLine.unitPrice) &&
         !unitPrice.equals(netUnitPrice)
       ) {
-        throw new BadRequestException(
-          `Line ${index + 1}: a sales return uses the original invoice unit price ` +
+        throw new BadRequestException({ code: 'RETURN_PRICE_MISMATCH', message: `Line ${index + 1}: a sales return uses the original invoice unit price ` +
             `(${originalLine.unitPrice.toFixed(MONEY_SCALE)}) or the discounted price actually paid ` +
-            `(${netUnitPrice.toFixed(MONEY_SCALE)})`,
-        );
+            `(${netUnitPrice.toFixed(MONEY_SCALE)})` });
       }
       const taxAmount = this.allocateReturnedCost(
         originalLine.taxAmount,
@@ -700,15 +696,13 @@ export class ReturnsService {
     });
     if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.CREDIT_NOTE) {
-      throw new BadRequestException('Only a sales credit note can be posted as a sales return.');
+      throw new BadRequestException({ code: 'RETURN_WRONG_DOCUMENT_KIND', message: 'Only a sales credit note can be posted as a sales return.' });
     }
     if (document.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft return can be posted (current status: ${document.status})`,
-      );
+      throw new BadRequestException({ code: 'RETURN_NOT_DRAFT', message: `Only a draft return can be posted (current status: ${document.status})` });
     }
     if (!document.originalInvoiceId) {
-      throw new BadRequestException('A return must name the invoice it returns');
+      throw new BadRequestException({ code: 'RETURN_NO_INVOICE', message: 'A return must name the invoice it returns' });
     }
 
     let postedTotalAmount = document.totalAmount;
@@ -726,7 +720,7 @@ export class ReturnsService {
       `);
       if (source.length !== 1 || source[0].status !== InvoiceStatus.POSTED ||
           source[0].documentType !== InvoiceDocumentType.INVOICE) {
-        throw new BadRequestException('The source sales invoice is no longer posted; this return cannot be posted.');
+        throw new BadRequestException({ code: 'RETURN_SOURCE_NOT_POSTED', message: 'The source sales invoice is no longer posted; this return cannot be posted.' });
       }
 
       const claimed = await tx.salesInvoice.updateMany({
@@ -734,7 +728,7 @@ export class ReturnsService {
         data: { status: InvoiceStatus.POSTED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This return has just been posted by someone else.');
+        throw new BadRequestException({ code: 'RETURN_CHANGED_ELSEWHERE', message: 'This return has just been posted by someone else.' });
       }
 
       const accounts = await this.accounts.resolve(tx, companyId, [
@@ -776,10 +770,8 @@ export class ReturnsService {
         );
         const remaining = matching.quantity.minus(matching.returnedQuantity);
         if (line.quantity.greaterThan(remaining)) {
-          throw new BadRequestException(
-            `${remaining.toFixed(MONEY_SCALE)} of "${matching.description}" is still returnable; ` +
-              `this return asks for ${line.quantity.toFixed(MONEY_SCALE)}. Somebody has returned it already.`,
-          );
+          throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `${remaining.toFixed(MONEY_SCALE)} of "${matching.description}" is still returnable; ` +
+              `this return asks for ${line.quantity.toFixed(MONEY_SCALE)}. Somebody has returned it already.` });
         }
 
         const returnedLineTotal = this.allocateReturnedCost(
@@ -836,9 +828,9 @@ export class ReturnsService {
             where: { id: line.itemId, companyId, deletedAt: null },
             select: { id: true, isStockTracked: true },
           });
-          if (!item) throw new BadRequestException('A sales-return item no longer exists');
+          if (!item) throw new BadRequestException({ code: 'RETURN_ITEM_GONE', message: 'A sales-return item no longer exists' });
           if (!item.isStockTracked && !returnedCost.isZero()) {
-            throw new BadRequestException('A sales-return item is no longer tracked in stock');
+            throw new BadRequestException({ code: 'RETURN_ITEM_GONE', message: 'A sales-return item is no longer tracked in stock' });
           }
           if (item.isStockTracked) {
             // The goods came out of named lots when the invoice was posted, so
@@ -1182,23 +1174,23 @@ export class ReturnsService {
       where: { id: originalInvoiceId, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
-    if (!original) throw new BadRequestException('The original purchase invoice does not exist');
+    if (!original) throw new BadRequestException({ code: 'RETURN_INVOICE_MISSING', message: 'The original purchase invoice does not exist' });
     if (original.status !== InvoiceStatus.POSTED) {
-      throw new BadRequestException('Only a posted purchase invoice can be returned');
+      throw new BadRequestException({ code: 'RETURN_INVOICE_NOT_POSTED', message: 'Only a posted purchase invoice can be returned' });
     }
     if (original.documentType !== InvoiceDocumentType.INVOICE) {
-      throw new BadRequestException('A return document cannot itself be returned');
+      throw new BadRequestException({ code: 'RETURN_OF_RETURN', message: 'A return document cannot itself be returned' });
     }
     if (original.branchId !== branchId) {
-      throw new BadRequestException('A return must be recorded in the branch that issued the original invoice');
+      throw new BadRequestException({ code: 'RETURN_OTHER_BRANCH', message: 'A return must be recorded in the branch that issued the original invoice' });
     }
     if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
-      throw new BadRequestException('A return needs at least one line');
+      throw new BadRequestException({ code: 'RETURN_NO_LINES', message: 'A return needs at least one line' });
     }
 
     const date = this.date(dto.returnDate, 'returnDate');
     if (date < original.invoiceDate) {
-      throw new BadRequestException('The return date cannot be before the invoice date');
+      throw new BadRequestException({ code: 'RETURN_DATE_BEFORE_INVOICE', message: 'The return date cannot be before the invoice date' });
     }
 
     const prepared: Array<{
@@ -1224,10 +1216,10 @@ export class ReturnsService {
       );
       const originalLine = original.lines.find((line) => line.id === originalLineId);
       if (!originalLine) {
-        throw new BadRequestException(`Line ${index + 1}: that line does not belong to the invoice`);
+        throw new BadRequestException({ code: 'RETURN_LINE_NOT_ON_INVOICE', message: `Line ${index + 1}: that line does not belong to the invoice` });
       }
       if (seenOriginalLineIds.has(originalLine.id)) {
-        throw new BadRequestException(`Line ${index + 1}: an invoice line may appear only once in a return`);
+        throw new BadRequestException({ code: 'RETURN_LINE_REPEATED', message: `Line ${index + 1}: an invoice line may appear only once in a return` });
       }
       seenOriginalLineIds.add(originalLine.id);
       // Follow the original document's unit; convert the entered quantity into
@@ -1236,10 +1228,8 @@ export class ReturnsService {
       const remaining = originalLine.quantity.minus(originalLine.returnedQuantity);
       const quantity = unit.baseQuantity;
       if (quantity.greaterThan(remaining)) {
-        throw new BadRequestException(
-          `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
-            `is still returnable, ${quantity.toFixed(MONEY_SCALE)} was requested.`,
-        );
+        throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
+            `is still returnable, ${quantity.toFixed(MONEY_SCALE)} was requested.` });
       }
       const unitPrice =
         raw.unitPrice === undefined
@@ -1261,11 +1251,9 @@ export class ReturnsService {
         !unitPrice.equals(originalLine.unitPrice) &&
         !unitPrice.equals(netUnitPrice)
       ) {
-        throw new BadRequestException(
-          `Line ${index + 1}: a purchase return uses the original invoice unit price ` +
+        throw new BadRequestException({ code: 'RETURN_PRICE_MISMATCH', message: `Line ${index + 1}: a purchase return uses the original invoice unit price ` +
             `(${originalLine.unitPrice.toFixed(MONEY_SCALE)}) or the discounted price actually paid ` +
-            `(${netUnitPrice.toFixed(MONEY_SCALE)})`,
-        );
+            `(${netUnitPrice.toFixed(MONEY_SCALE)})` });
       }
       const taxAmount = this.allocateReturnedCost(
         originalLine.taxAmount,
@@ -1288,7 +1276,7 @@ export class ReturnsService {
       );
       const landedCostAmount = inventoryCostTotal.minus(lineTotal);
       if (landedCostAmount.isNegative()) {
-        throw new BadRequestException(`Line ${index + 1}: allocated inventory cost is below the returned invoice value`);
+        throw new BadRequestException({ code: 'RETURN_COST_BELOW_INVOICE', message: `Line ${index + 1}: allocated inventory cost is below the returned invoice value` });
       }
 
       prepared.push({
@@ -1378,15 +1366,13 @@ export class ReturnsService {
     });
     if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.DEBIT_NOTE) {
-      throw new BadRequestException('Only a purchase debit note can be posted as a purchase return.');
+      throw new BadRequestException({ code: 'RETURN_WRONG_DOCUMENT_KIND', message: 'Only a purchase debit note can be posted as a purchase return.' });
     }
     if (document.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only a draft return can be posted (current status: ${document.status})`,
-      );
+      throw new BadRequestException({ code: 'RETURN_NOT_DRAFT', message: `Only a draft return can be posted (current status: ${document.status})` });
     }
     if (!document.originalInvoiceId) {
-      throw new BadRequestException('A return must name the invoice it returns');
+      throw new BadRequestException({ code: 'RETURN_NO_INVOICE', message: 'A return must name the invoice it returns' });
     }
 
     let postedTotalAmount = document.totalAmount;
@@ -1402,7 +1388,7 @@ export class ReturnsService {
       `);
       if (source.length !== 1 || source[0].status !== InvoiceStatus.POSTED ||
           source[0].documentType !== InvoiceDocumentType.INVOICE) {
-        throw new BadRequestException('The source purchase invoice is no longer posted; this return cannot be posted.');
+        throw new BadRequestException({ code: 'RETURN_SOURCE_NOT_POSTED', message: 'The source purchase invoice is no longer posted; this return cannot be posted.' });
       }
 
       const claimed = await tx.purchaseInvoice.updateMany({
@@ -1410,7 +1396,7 @@ export class ReturnsService {
         data: { status: InvoiceStatus.POSTED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This return has just been posted by someone else.');
+        throw new BadRequestException({ code: 'RETURN_CHANGED_ELSEWHERE', message: 'This return has just been posted by someone else.' });
       }
 
       await this.lockItems(
@@ -1451,10 +1437,8 @@ export class ReturnsService {
         );
         const remaining = matching.quantity.minus(matching.returnedQuantity);
         if (line.quantity.greaterThan(remaining)) {
-          throw new BadRequestException(
-            `${remaining.toFixed(MONEY_SCALE)} of "${matching.description}" is still returnable; ` +
-              `this return asks for ${line.quantity.toFixed(MONEY_SCALE)}.`,
-          );
+          throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `${remaining.toFixed(MONEY_SCALE)} of "${matching.description}" is still returnable; ` +
+              `this return asks for ${line.quantity.toFixed(MONEY_SCALE)}.` });
         }
 
         const lineTotal = this.allocateReturnedCost(
@@ -1479,9 +1463,7 @@ export class ReturnsService {
         const unitCost = returnedCost.div(line.quantity).toDecimalPlaces(MONEY_SCALE);
         const returnedLandedCost = returnedCost.minus(lineTotal);
         if (returnedLandedCost.isNegative()) {
-          throw new BadRequestException(
-            `Return line ${line.lineNumber}: allocated inventory cost is below the returned invoice value.`,
-          );
+          throw new BadRequestException({ code: 'RETURN_COST_BELOW_INVOICE', message: `Return line ${line.lineNumber}: allocated inventory cost is below the returned invoice value.` });
         }
         const returnedTax = this.allocateReturnedCost(
           matching.taxAmount,
@@ -1525,7 +1507,7 @@ export class ReturnsService {
             select: { id: true, isStockTracked: true },
           });
           if (!item || !item.isStockTracked) {
-            throw new BadRequestException('A purchase-return item is no longer tracked in stock');
+            throw new BadRequestException({ code: 'RETURN_ITEM_GONE', message: 'A purchase-return item is no longer tracked in stock' });
           }
 
           const lockedBalances = await tx.$queryRaw<
@@ -1541,16 +1523,12 @@ export class ReturnsService {
           const balance = lockedBalances[0] ?? null;
           const onHand = balance?.quantity ?? new Prisma.Decimal(0);
           if (onHand.lessThan(line.quantity)) {
-            throw new BadRequestException(
-              `Cannot return ${line.quantity.toFixed(MONEY_SCALE)} to the supplier: ` +
-                `${onHand.toFixed(MONEY_SCALE)} is available in stock.`,
-            );
+            throw new BadRequestException({ code: 'RETURN_STOCK_SHORT', message: `Cannot return ${line.quantity.toFixed(MONEY_SCALE)} to the supplier: ` +
+                `${onHand.toFixed(MONEY_SCALE)} is available in stock.` });
           }
           if (balance && balance.value.lessThan(returnedCost)) {
-            throw new BadRequestException(
-              `Cannot reverse ${returnedCost.toFixed(MONEY_SCALE)} of inventory cost; ` +
-                `${balance.value.toFixed(MONEY_SCALE)} is currently valued in stock.`,
-            );
+            throw new BadRequestException({ code: 'RETURN_STOCK_VALUE_SHORT', message: `Cannot reverse ${returnedCost.toFixed(MONEY_SCALE)} of inventory cost; ` +
+                `${balance.value.toFixed(MONEY_SCALE)} is currently valued in stock.` });
           }
 
           // Same warehouse-level rule as sales: returning goods to a supplier
@@ -1715,10 +1693,10 @@ export class ReturnsService {
       });
       if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
       if (document.documentType !== InvoiceDocumentType.CREDIT_NOTE) {
-        throw new BadRequestException('Only a sales credit note can be reversed as a sales return.');
+        throw new BadRequestException({ code: 'RETURN_WRONG_DOCUMENT_KIND', message: 'Only a sales credit note can be reversed as a sales return.' });
       }
       if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
-        throw new BadRequestException('Only a posted return can be reversed');
+        throw new BadRequestException({ code: 'RETURN_NOT_POSTED_REVERSE', message: 'Only a posted return can be reversed' });
       }
 
       await this.prisma.$transaction(async (tx) => {
@@ -1727,7 +1705,7 @@ export class ReturnsService {
           data: { status: InvoiceStatus.REVERSED },
         });
         if (claimed.count !== 1) {
-          throw new BadRequestException('This return has just been changed by someone else.');
+          throw new BadRequestException({ code: 'RETURN_CHANGED_ELSEWHERE', message: 'This return has just been changed by someone else.' });
         }
 
         // The goods leave again, at the same cost they came back in at, and
@@ -1762,7 +1740,7 @@ export class ReturnsService {
             where: { id: line.itemId, companyId, deletedAt: null },
             select: { id: true, isStockTracked: true },
           });
-          if (!item) throw new BadRequestException('A sales-return item no longer exists');
+          if (!item) throw new BadRequestException({ code: 'RETURN_ITEM_GONE', message: 'A sales-return item no longer exists' });
           // A stock-tracked free item still needs its returned quantity removed;
           // zero value is not a reason to skip the movement on reversal.
           if (!item.isStockTracked) continue;
@@ -1779,16 +1757,12 @@ export class ReturnsService {
           const balance = lockedBalances[0] ?? null;
           const onHand = balance?.quantity ?? new Prisma.Decimal(0);
           if (onHand.lessThan(line.quantity)) {
-            throw new BadRequestException(
-              `Cannot reverse this return: ${onHand.toFixed(MONEY_SCALE)} is available in stock, ` +
-                `${line.quantity.toFixed(MONEY_SCALE)} is required.`,
-            );
+            throw new BadRequestException({ code: 'RETURN_STOCK_SHORT', message: `Cannot reverse this return: ${onHand.toFixed(MONEY_SCALE)} is available in stock, ` +
+                `${line.quantity.toFixed(MONEY_SCALE)} is required.` });
           }
           if (balance && balance.value.lessThan(line.costTotal)) {
-            throw new BadRequestException(
-              `Cannot reverse this return: ${balance.value.toFixed(MONEY_SCALE)} of inventory value ` +
-                `is available, ${line.costTotal.toFixed(MONEY_SCALE)} is required.`,
-            );
+            throw new BadRequestException({ code: 'RETURN_STOCK_VALUE_SHORT', message: `Cannot reverse this return: ${balance.value.toFixed(MONEY_SCALE)} of inventory value ` +
+                `is available, ${line.costTotal.toFixed(MONEY_SCALE)} is required.` });
           }
 
           await this.lockItems(tx, warehouseId, [line.itemId]);
@@ -1855,10 +1829,10 @@ export class ReturnsService {
     });
     if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.DEBIT_NOTE) {
-      throw new BadRequestException('Only a purchase debit note can be reversed as a purchase return.');
+      throw new BadRequestException({ code: 'RETURN_WRONG_DOCUMENT_KIND', message: 'Only a purchase debit note can be reversed as a purchase return.' });
     }
     if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
-      throw new BadRequestException('Only a posted return can be reversed');
+      throw new BadRequestException({ code: 'RETURN_NOT_POSTED_REVERSE', message: 'Only a posted return can be reversed' });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -1867,7 +1841,7 @@ export class ReturnsService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This return has just been changed by someone else.');
+        throw new BadRequestException({ code: 'RETURN_CHANGED_ELSEWHERE', message: 'This return has just been changed by someone else.' });
       }
 
       const warehouseId = await this.warehouses.resolveForReversal(
@@ -1999,7 +1973,7 @@ export class ReturnsService {
        FOR UPDATE
     `);
     if (rows.length === 0) {
-      throw new BadRequestException('The original invoice line could not be found');
+      throw new BadRequestException({ code: 'RETURN_LINE_NOT_ON_INVOICE', message: 'The original invoice line could not be found' });
     }
     return rows[0];
   }
@@ -2036,7 +2010,7 @@ export class ReturnsService {
        FOR UPDATE
     `);
     if (rows.length === 0) {
-      throw new BadRequestException('The original invoice line could not be found');
+      throw new BadRequestException({ code: 'RETURN_LINE_NOT_ON_INVOICE', message: 'The original invoice line could not be found' });
     }
     return rows[0];
   }
@@ -2072,15 +2046,15 @@ export class ReturnsService {
     field: string,
   ): Prisma.Decimal {
     if (originalTotal.isNegative() || alreadyReturned.isNegative()) {
-      throw new BadRequestException(`${field} has an invalid negative amount`);
+      throw new BadRequestException({ code: 'RETURN_QUANTITY_INVALID', message: `${field} has an invalid negative amount` });
     }
     const remainingQuantity = originalQuantity.minus(alreadyReturnedQuantity);
     const remainingAmount = originalTotal.minus(alreadyReturned);
     if (remainingQuantity.lessThanOrEqualTo(0) || remainingAmount.isNegative()) {
-      throw new BadRequestException(`${field} is already fully returned or inconsistent`);
+      throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `${field} is already fully returned or inconsistent` });
     }
     if (quantity.greaterThan(remainingQuantity)) {
-      throw new BadRequestException(`${field} exceeds the original line's remaining quantity`);
+      throw new BadRequestException({ code: 'RETURN_OVER_RETURNABLE', message: `${field} exceeds the original line's remaining quantity` });
     }
     if (quantity.equals(remainingQuantity)) return remainingAmount;
     return remainingAmount
@@ -2118,10 +2092,10 @@ export class ReturnsService {
     unitQuantity: Prisma.Decimal | null;
   } {
     const entered = parseDocumentQuantity(raw.quantity, `${field} quantity`);
-    if (entered.lessThanOrEqualTo(0)) throw new BadRequestException(`${field} quantity must be greater than zero`);
+    if (entered.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'RETURN_QUANTITY_INVALID', message: `${field} quantity must be greater than zero` });
     // Unit ids are not frozen on historical invoice lines; they cannot be
     // trusted as evidence of the original conversion factor.
-    if (raw.unitId) throw new BadRequestException(`${field}: unit id cannot be verified against the original invoice`);
+    if (raw.unitId) throw new BadRequestException({ code: 'RETURN_UNIT_MISMATCH', message: `${field}: unit id cannot be verified against the original invoice` });
     const hasSnapshot =
       originalLine.unitFactor !== null && originalLine.unitFactor !== undefined;
 
@@ -2129,7 +2103,7 @@ export class ReturnsService {
       const requested = String(raw.unitName ?? '').trim().toLowerCase();
       const base = String(originalLine.item?.unit ?? '').trim().toLowerCase();
       if (requested && (!base || requested !== base)) {
-        throw new BadRequestException(`${field}: legacy invoice has no trusted conversion for the requested unit`);
+        throw new BadRequestException({ code: 'RETURN_UNIT_MISMATCH', message: `${field}: legacy invoice has no trusted conversion for the requested unit` });
       }
       return { baseQuantity: entered, unitName: null, unitFactor: null, unitQuantity: null };
     }
@@ -2138,9 +2112,7 @@ export class ReturnsService {
       const asked = String(raw.unitName).trim().toLowerCase();
       const stored = String(originalLine.unitName ?? '').trim().toLowerCase();
       if (asked !== stored) {
-        throw new BadRequestException(
-          `${field}: a return must use the original document's unit (${originalLine.unitName})`,
-        );
+        throw new BadRequestException({ code: 'RETURN_UNIT_MISMATCH', message: `${field}: a return must use the original document's unit (${originalLine.unitName})` });
       }
     }
 
@@ -2159,7 +2131,7 @@ export class ReturnsService {
     try {
       decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+      throw new BadRequestException({ code: 'RETURN_NUMBER_INVALID', message: `${field} is not a valid number` });
     }
     if (decimal.lessThanOrEqualTo(0)) {
       throw new BadRequestException({ code: 'FIELD_POSITIVE', message: `${field} must be greater than zero`, field });
@@ -2172,7 +2144,7 @@ export class ReturnsService {
     try {
       decimal = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+      throw new BadRequestException({ code: 'RETURN_NUMBER_INVALID', message: `${field} is not a valid number` });
     }
     if (decimal.isNegative()) {
       throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
