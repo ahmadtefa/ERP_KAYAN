@@ -114,7 +114,7 @@ export class BudgetsService {
       where: { id, companyId },
       include: this.relations,
     });
-    if (!budget) throw new NotFoundException('Budget not found');
+    if (!budget) throw new NotFoundException({ code: 'BUDGET_NOT_FOUND', message: 'Budget not found' });
     return this.toResponse(budget);
   }
 
@@ -180,7 +180,7 @@ export class BudgetsService {
       where: { id, companyId, deletedAt: null },
       include: this.relations,
     });
-    if (!before) throw new NotFoundException('Budget not found');
+    if (!before) throw new NotFoundException({ code: 'BUDGET_NOT_FOUND', message: 'Budget not found' });
     if (before.deletedAt) {
       throw new BadRequestException('A retired budget cannot be edited');
     }
@@ -266,7 +266,7 @@ export class BudgetsService {
       where: { id, companyId },
       include: this.relations,
     });
-    if (!before) throw new NotFoundException('Budget not found');
+    if (!before) throw new NotFoundException({ code: 'BUDGET_NOT_FOUND', message: 'Budget not found' });
     // Retiring twice is a no-op, so a double click cannot fail the screen.
     if (before.deletedAt) return this.toResponse(before);
 

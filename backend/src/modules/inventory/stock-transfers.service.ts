@@ -66,7 +66,7 @@ export class StockTransfersService {
         sourceWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         destinationWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } } },
     });
-    if (!transfer) throw new NotFoundException('Stock transfer not found');
+    if (!transfer) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
     return transfer;
   }
 
@@ -97,7 +97,7 @@ export class StockTransfersService {
         tx.warehouse.findFirst({ where: { id: input.destinationWarehouseId, companyId, deletedAt: null, isActive: true, isTransit: false }, include: { branch: { select: { id: true } } } }),
       ]);
       if (!source || !destination) throw new BadRequestException('Source and destination warehouses must be active warehouses in this company');
-      if (allowedBranches && (!allowedBranches.includes(source.branch.id) || !allowedBranches.includes(destination.branch.id))) throw new NotFoundException('Warehouse not found');
+      if (allowedBranches && (!allowedBranches.includes(source.branch.id) || !allowedBranches.includes(destination.branch.id))) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
       if (source.id === destination.id) throw new BadRequestException('Choose two different warehouses');
       const normalized = [] as Array<{ itemId: string; quantity: Prisma.Decimal; enteredQuantity: Prisma.Decimal; unitFactor: Prisma.Decimal; batchId: string | null; unitName: string; notes: string | null }>;
       for (const [idx, line] of input.lines.entries()) {
@@ -434,7 +434,7 @@ export class StockTransfersService {
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
-        if (!current) throw new NotFoundException('Stock transfer not found');
+        if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
         const currentAction = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
         if (currentAction) { if (currentAction.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different dispatch quantities'); return; }
         if (!['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot dispatch a transfer in ${current.status}`);
@@ -514,7 +514,7 @@ export class StockTransfersService {
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
-        if (!current) throw new NotFoundException('Stock transfer not found');
+        if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
         const prior = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey: actionKey } });
         if (prior) { if (prior.requestHash !== actionHash) throw new ConflictException('Idempotency key was reused with different receipt quantities'); return; }
         if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot receive a transfer in ${current.status}`);
@@ -592,7 +592,7 @@ export class StockTransfersService {
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId } });
-        if (!current) throw new NotFoundException('Stock transfer not found');
+        if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
         if (!['DISPATCHED', 'PARTIALLY_DISPATCHED', 'RECEIVED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new ConflictException(`Cannot settle a transfer in ${current.status}`);
         await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey, requestHash, action: 'SETTLE', resultVersion: current.version + 1 } });
         await tx.stockTransfer.update({ where: { id }, data: { status: 'SETTLING', version: { increment: 1 } } });
@@ -669,7 +669,7 @@ export class StockTransfersService {
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
-      if (!current) throw new NotFoundException('Stock transfer not found');
+      if (!current) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
       // Same key first, under the lock: a committed first call is a replay even
       // if the transfer moved on (SETTLED or PARTIALLY_RECEIVED) since.
       if (settlementKey) {
@@ -892,7 +892,7 @@ export class StockTransfersService {
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
       const row = await tx.stockTransfer.findFirst({ where: { id, companyId } });
-      if (!row) throw new NotFoundException('Stock transfer not found');
+      if (!row) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
       const previous = await tx.stockTransferAction.findFirst({ where: { transferId: id, requestKey } });
       if (previous) { if (previous.requestHash !== hash) throw new ConflictException('Idempotency key was reused with a different action'); return; }
       if (!allowed.includes(row.status)) throw new ConflictException(`Cannot transition transfer from ${row.status} to ${status}`);

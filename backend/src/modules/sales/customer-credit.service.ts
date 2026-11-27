@@ -116,7 +116,7 @@ export class CustomerCreditService {
         SELECT id FROM sales_invoices
          WHERE id = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`);
       const check = await this.evaluatePeriod(tx, companyId, invoiceId);
-      if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException('Draft sales invoice not found');
+      if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });
       if (check.overdueCount === 0) throw new BadRequestException('This invoice does not need payment-period approval');
       if (check.createdBy && check.createdBy === userId) {
         throw new ForbiddenException('The person who created the invoice cannot approve its payment-period exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لمدة السداد.');
@@ -207,7 +207,7 @@ export class CustomerCreditService {
     if (text.length < 3) throw new BadRequestException('A written reason is required');
     return this.prisma.$transaction(async (tx) => {
       const check = await this.evaluate(tx, companyId, invoiceId, true);
-      if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException('Draft sales invoice not found');
+      if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });
       if (!check.exceeds) {
         throw new BadRequestException('This invoice does not need credit approval');
       }

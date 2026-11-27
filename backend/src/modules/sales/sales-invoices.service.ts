@@ -223,7 +223,7 @@ export class SalesInvoicesService {
         },
       },
     });
-    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
 
     return {
       ...this.toSummary(invoice, mayReadCost),
@@ -432,7 +432,7 @@ export class SalesInvoicesService {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as sales invoices');
@@ -565,12 +565,12 @@ export class SalesInvoicesService {
         SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (lockedOrder.length !== 1) throw new NotFoundException('Sales order not found');
+      if (lockedOrder.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const lockedInvoice = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM sales_invoices WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (lockedInvoice.length !== 1) throw new NotFoundException('Sales invoice not found');
+      if (lockedInvoice.length !== 1) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
       const invoice = await tx.salesInvoice.findFirst({
         where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
@@ -668,7 +668,7 @@ export class SalesInvoicesService {
         where: { id, companyId, branchId, deletedAt: null },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!invoice) throw new NotFoundException('Sales invoice not found');
+      if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
       if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
         throw new BadRequestException('Only a draft invoice can be cancelled');
       }
@@ -871,7 +871,7 @@ export class SalesInvoicesService {
       where: { id, companyId, deletedAt: null },
       select: { status: true },
     });
-    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only draft invoices can be posted (current status: ${invoice.status})`,
@@ -909,7 +909,7 @@ export class SalesInvoicesService {
           customer: { select: { code: true, nameEn: true } },
         },
       });
-      if (!invoice) throw new NotFoundException('Sales invoice not found');
+      if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsReceivable',
@@ -1267,7 +1267,7 @@ export class SalesInvoicesService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException('Only posted invoices can be reversed');
     }

@@ -76,7 +76,7 @@ export class InventoryReportsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const units = await this.prisma.itemUnit.findMany({
       where: { itemId },
@@ -125,12 +125,12 @@ export class InventoryReportsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const unit = await this.prisma.itemUnit.findFirst({
       where: { id: unitId, itemId },
     });
-    if (!unit) throw new NotFoundException('Unit not found');
+    if (!unit) throw new NotFoundException({ code: 'UNIT_NOT_FOUND', message: 'Unit not found' });
     const isBase = unit.unit === item.unit;
     if (!unit.isActive &&
         (dto.isDefaultSale === true || dto.isDefaultPurchase === true)) {
@@ -240,10 +240,10 @@ export class InventoryReportsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
-    if (!unit) throw new NotFoundException('Unit not found');
+    if (!unit) throw new NotFoundException({ code: 'UNIT_NOT_FOUND', message: 'Unit not found' });
     if (unit.unit === item.unit || unit.factor.equals(1)) {
       throw new BadRequestException(
         'The base unit cannot be removed; it is the unit stock is counted in.',
@@ -344,9 +344,9 @@ export class InventoryReportsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
-    if (!unit) throw new NotFoundException('Unit not found');
+    if (!unit) throw new NotFoundException({ code: 'UNIT_NOT_FOUND', message: 'Unit not found' });
     return { item, unit };
   }
 
@@ -378,7 +378,7 @@ export class InventoryReportsService {
       where: { id: unitId, item: { id: itemId, companyId, deletedAt: null } },
       include: { item: { select: { code: true } } },
     });
-    if (!unit) throw new NotFoundException('Unit not found');
+    if (!unit) throw new NotFoundException({ code: 'UNIT_NOT_FOUND', message: 'Unit not found' });
 
     let barcode = String(requested ?? '').trim();
     if (barcode) {
@@ -478,7 +478,7 @@ export class InventoryReportsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, unit: true, code: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const unit = String(dto.unit ?? '').trim();
     if (!unit) throw new BadRequestException('unit is required');

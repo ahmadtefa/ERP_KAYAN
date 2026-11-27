@@ -164,7 +164,7 @@ export class PurchaseInvoicesService {
         },
       },
     });
-    if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
 
     return {
       ...this.toSummary(invoice, mayReadCost),
@@ -367,7 +367,7 @@ export class PurchaseInvoicesService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as purchase invoices');
@@ -511,12 +511,12 @@ export class PurchaseInvoicesService {
         SELECT id FROM purchase_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (lockedOrder.length !== 1) throw new NotFoundException('Purchase order not found');
+      if (lockedOrder.length !== 1) throw new NotFoundException({ code: 'PURCHASE_ORDER_NOT_FOUND', message: 'Purchase order not found' });
       const lockedInvoice = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM purchase_invoices WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (lockedInvoice.length !== 1) throw new NotFoundException('Purchase invoice not found');
+      if (lockedInvoice.length !== 1) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
       const invoice = await tx.purchaseInvoice.findFirst({
         where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
@@ -615,7 +615,7 @@ export class PurchaseInvoicesService {
         where: { id, companyId, branchId, deletedAt: null },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!invoice) throw new NotFoundException('Purchase invoice not found');
+      if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
       if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
         throw new BadRequestException('Only a draft invoice can be cancelled');
       }
@@ -654,7 +654,7 @@ export class PurchaseInvoicesService {
       where: { id, companyId, deletedAt: null },
       select: { status: true },
     });
-    if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only draft invoices can be posted (current status: ${invoice.status})`,
@@ -684,7 +684,7 @@ export class PurchaseInvoicesService {
           supplier: { select: { code: true, nameEn: true } },
         },
       });
-      if (!invoice) throw new NotFoundException('Purchase invoice not found');
+      if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsPayable',
@@ -890,7 +890,7 @@ export class PurchaseInvoicesService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException('Only posted invoices can be reversed');
     }

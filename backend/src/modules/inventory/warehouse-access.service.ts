@@ -70,7 +70,7 @@ export class WarehouseAccessService {
       },
       select: { id: true, username: true, fullNameEn: true, fullNameAr: true },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
 
     const grantScope = scope === null
       ? { companyId, userId }
@@ -150,7 +150,7 @@ export class WarehouseAccessService {
       },
       select: { id: true, isSuperAdmin: true },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
 
     const cleaned = grants ?? [];
     for (const grant of cleaned) {

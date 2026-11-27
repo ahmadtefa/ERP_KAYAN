@@ -34,7 +34,7 @@ export class QuotationBackgroundsController {
     @Res() response: Response,
   ) {
     const png = await this.service.preview(user.companyId, id);
-    if (!png) throw new NotFoundException('Background not found');
+    if (!png) throw new NotFoundException({ code: 'BACKGROUND_NOT_FOUND', message: 'Background not found' });
     // The artwork zones the printed text keeps clear of, so the in-app preview
     // can leave the same room.
     const meta = await this.service.meta(user.companyId, id);

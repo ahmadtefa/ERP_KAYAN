@@ -33,9 +33,9 @@ export class ProfilePhotoService {
       const users = await tx.$queryRaw<Array<{id:string}>>`
         SELECT id FROM users WHERE id=${userId}::uuid AND "companyId"=${companyId}::uuid
           AND "isActive"=true AND "deletedAt" IS NULL FOR UPDATE`;
-      if (!users.length) throw new NotFoundException('User not found');
+      if (!users.length) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
       const existing = await tx.userProfilePhoto.findUnique({where:{userId},select:{companyId:true}});
-      if (existing && existing.companyId !== companyId) throw new NotFoundException('User photo not found');
+      if (existing && existing.companyId !== companyId) throw new NotFoundException({ code: 'USER_PHOTO_NOT_FOUND', message: 'User photo not found' });
       await tx.userProfilePhoto.upsert({where:{userId},
         create:{userId,companyId,data:photo.data,mime:photo.mime},
         update:{data:photo.data,mime:photo.mime}});
@@ -59,7 +59,7 @@ export class ProfilePhotoService {
       const users = await tx.$queryRaw<Array<{id:string}>>`
         SELECT id FROM users WHERE id=${userId}::uuid AND "companyId"=${companyId}::uuid
           AND "isActive"=true AND "deletedAt" IS NULL FOR UPDATE`;
-      if (!users.length) throw new NotFoundException('User not found');
+      if (!users.length) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
       const result = await tx.userProfilePhoto.deleteMany({where:{companyId,userId}});
       if (result.count) await this.audit.recordRequired({companyId,userId:actorId,action:'PROFILE_PHOTO_REMOVE',entity:'users',entityId:userId},tx);
     });

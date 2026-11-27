@@ -224,7 +224,7 @@ export class StockService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, nameEn: true, nameAr: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const movements = await this.prisma.stockMovement.findMany({
       where: {

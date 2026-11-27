@@ -125,7 +125,7 @@ export class DocumentsService {
       include: { toWarehouse:true, costCenter:true, branch:true,
         lines:{orderBy:{lineNumber:'asc'},include:{item:true}} },
     });
-    if (!doc) throw new NotFoundException('Stock voucher not found');
+    if (!doc) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
     const name = (row:{nameAr:string;nameEn:string} | null) =>
       row ? (lang === 'ar' ? row.nameAr || row.nameEn : row.nameEn || row.nameAr) : '';
     return {
@@ -181,7 +181,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     const party = invoice.customer;
     const partyName = lang === 'ar' ? party?.nameAr || party?.nameEn : party?.nameEn;
     return this.lineDocument({
@@ -242,7 +242,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     const party = invoice.supplier;
     const partyName = lang === 'ar' ? party?.nameAr || party?.nameEn : party?.nameEn;
     return this.lineDocument({
@@ -300,7 +300,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!order) throw new NotFoundException('Sales order not found');
+    if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
     return this.lineDocument({
       slug: 'sales-order',
       titleEn: `Sales order ${order.orderNumber}`,
@@ -349,7 +349,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!order) throw new NotFoundException('Purchase order not found');
+    if (!order) throw new NotFoundException({ code: 'PURCHASE_ORDER_NOT_FOUND', message: 'Purchase order not found' });
     return this.lineDocument({
       slug: 'purchase-order',
       titleEn: `Purchase order ${order.orderNumber}`,
@@ -408,7 +408,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
 
     const layout = normalizeColumns(quotation.columns).filter((column) => column.visible);
     const columns: TableColumn[] = [
@@ -532,7 +532,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!voucher) throw new NotFoundException('Cash voucher not found');
+    if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
     const party =
       voucher.customer
         ? `${voucher.customer.code} ${lang === 'ar' ? voucher.customer.nameAr || voucher.customer.nameEn : voucher.customer.nameEn}`
@@ -592,7 +592,7 @@ export class DocumentsService {
         },
       },
     });
-    if (!entry) throw new NotFoundException('Journal entry not found');
+    if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     return {
       slug: 'journal-entry',
       titleEn: `Journal ${entry.entryNumber}`,

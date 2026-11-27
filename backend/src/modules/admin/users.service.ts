@@ -131,7 +131,7 @@ export class UsersService {
         },
       },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     return this.toResponse(user);
   }
 
@@ -236,7 +236,7 @@ export class UsersService {
     const before = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('User not found');
+    if (!before) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (before.isSuperAdmin && !isSuperAdmin) {
       throw new ForbiddenException('Only a super administrator can modify a super administrator account');
     }
@@ -269,7 +269,7 @@ export class UsersService {
       // checking snapshots, and recheck the protected identity under lock.
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
       const lockedBefore = await tx.user.findFirst({where:{id,companyId,deletedAt:null}});
-      if (!lockedBefore) throw new NotFoundException('User not found');
+      if (!lockedBefore) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
       if (lockedBefore.isSuperAdmin && !isSuperAdmin) {
         throw new ForbiddenException('Only a super administrator can modify a super administrator account');
       }
@@ -361,7 +361,7 @@ export class UsersService {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (user.isSuperAdmin && !actorIsSuperAdmin) {
       throw new ForbiddenException('Only a super administrator can reset a super administrator password');
     }
@@ -407,7 +407,7 @@ export class UsersService {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     if (user.id === actorId) {
       throw new BadRequestException('You cannot deactivate your own account');
     }
@@ -615,7 +615,7 @@ export class UsersService {
         userPermissions: { include: { permission: { select: { code: true } } } },
       },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     const effective = resolveEffectivePermissions(
       user.userRoles,
       user.userPermissions,
@@ -645,7 +645,7 @@ export class UsersService {
           userPermissions: { include: { permission: { select: { code: true } } } },
         },
       });
-      if (!stored) throw new NotFoundException('User not found');
+      if (!stored) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
       roleIds ??= stored.userRoles.map((row) => row.roleId);
       grants ??= stored.userPermissions
         .filter((row) => !row.isDenied)

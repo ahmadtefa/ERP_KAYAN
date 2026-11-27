@@ -120,7 +120,7 @@ export class ApprovalsService {
       where: { id, companyId: actor.companyId },
       include: { levels: true },
     });
-    if (!existing) throw new NotFoundException('Approval policy not found');
+    if (!existing) throw new NotFoundException({ code: 'APPROVAL_POLICY_NOT_FOUND', message: 'Approval policy not found' });
     const clean = this.validatePolicy({ ...input, operation: existing.operation });
     // Levels are replaced wholesale inside one transaction: a chain with a
     // half-updated sequence would be a rule nobody wrote.
@@ -165,7 +165,7 @@ export class ApprovalsService {
     const existing = await this.prisma.approvalPolicy.findFirst({
       where: { id, companyId: actor.companyId },
     });
-    if (!existing) throw new NotFoundException('Approval policy not found');
+    if (!existing) throw new NotFoundException({ code: 'APPROVAL_POLICY_NOT_FOUND', message: 'Approval policy not found' });
     // Decisions keep their recorded history; the policy link is nulled by the
     // foreign key rather than taking the history with it.
     await this.prisma.approvalPolicy.delete({ where: { id } });
@@ -541,7 +541,7 @@ export class ApprovalsService {
       // Same rule as the transfer screens: every branch of the document must be
       // inside the caller's scope. Unknown types are hidden from branch staff.
       if (!owners || owners.length === 0 || !owners.every((id) => branchScope.includes(id))) {
-        throw new NotFoundException('Approval history not found');
+        throw new NotFoundException({ code: 'APPROVAL_HISTORY_NOT_FOUND', message: 'Approval history not found' });
       }
     }
     const rows = await this.prisma.approvalDecision.findMany({

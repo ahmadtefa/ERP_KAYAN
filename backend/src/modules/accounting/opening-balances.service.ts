@@ -109,7 +109,7 @@ export class OpeningBalancesService {
         },
       },
     });
-    if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!document) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
 
     const hasRestrictedCosts = !mayReadCost && document.lines.some(line => line.itemId !== null);
     return {
@@ -266,7 +266,7 @@ export class OpeningBalancesService {
           where: { id: draftId, companyId, deletedAt: null },
           select: { id: true, branchId: true, status: true, updatedAt: true },
         });
-        if (!existing) throw new NotFoundException('Opening balance document not found');
+        if (!existing) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
         if (!mayReadCost && await tx.openingBalanceLine.count({
           where: { openingBalanceId: draftId, itemId: { not: null } },
         })) {
@@ -358,7 +358,7 @@ export class OpeningBalancesService {
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!document) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
     if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
       throw new ForbiddenException('Stock opening balances require inventory cost permission');
     }
@@ -588,7 +588,7 @@ export class OpeningBalancesService {
       where: { id, companyId, branchId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!document) throw new NotFoundException('Opening balance document not found');
+    if (!document) throw new NotFoundException({ code: 'OPENING_BALANCE_DOCUMENT_NOT_FOUND', message: 'Opening balance document not found' });
     if (!mayReadCost && document.lines.some(line => line.itemId !== null)) {
       throw new ForbiddenException('Stock opening balances require inventory cost permission');
     }

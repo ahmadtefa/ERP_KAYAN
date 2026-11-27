@@ -79,7 +79,7 @@ export class CompaniesController {
     @Res() response: Response,
   ) {
     if (user.companyId !== companyId) {
-      throw new NotFoundException('Company logo not found');
+      throw new NotFoundException({ code: 'COMPANY_LOGO_NOT_FOUND', message: 'Company logo not found' });
     }
     return this.sendLogo(companyId, response, true);
   }
@@ -132,7 +132,7 @@ export class CompaniesController {
     privateToMember = false,
   ) {
     const logo = await this.companies.getLogo(companyId);
-    if (!logo) throw new NotFoundException('Company logo not found');
+    if (!logo) throw new NotFoundException({ code: 'COMPANY_LOGO_NOT_FOUND', message: 'Company logo not found' });
     response.setHeader('Content-Type', logo.mime);
     // A member's copy is never kept by a shared cache.
     response.setHeader(

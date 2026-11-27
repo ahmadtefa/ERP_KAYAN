@@ -135,7 +135,7 @@ export class SalesOrdersService {
         invoices: { where: { deletedAt: null }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true } },
       },
     });
-    if (!order) throw new NotFoundException('Sales order not found');
+    if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
 
     return {
       ...this.summary(order),
@@ -293,7 +293,7 @@ export class SalesOrdersService {
         SELECT id FROM sales_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const previous = await tx.$queryRaw<Array<{ orderId: string; requestHash: string }>>(Prisma.sql`
         SELECT "orderId", "requestHash" FROM order_creation_requests
         WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid
@@ -308,7 +308,7 @@ export class SalesOrdersService {
       const order = await tx.salesOrder.findFirst({
         where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!order) throw new NotFoundException('Sales order not found');
+      if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       if (approved ? (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.PARTIALLY_FULFILLED)
         : order.status !== OrderStatus.DRAFT) {
         throw new BadRequestException(approved ? 'Only approved or partially fulfilled orders can be amended' : 'Only draft orders can be edited');
@@ -374,12 +374,12 @@ export class SalesOrdersService {
         SELECT id FROM sales_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const order = await tx.salesOrder.findFirst({
         where: { id, companyId, deletedAt: null },
         select: { id: true, status: true, createdBy: true, orderNumber: true },
       });
-      if (!order) throw new NotFoundException('Sales order not found');
+      if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       if (order.status !== OrderStatus.DRAFT) {
         throw new BadRequestException(`Only a draft order can be approved (it is ${order.status})`);
       }
@@ -426,9 +426,9 @@ export class SalesOrdersService {
         SELECT id FROM sales_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const order = await tx.salesOrder.findFirst({ where: { id, companyId, deletedAt: null } });
-      if (!order) throw new NotFoundException('Sales order not found');
+      if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('This order is already cancelled');
       const activeInvoices = await tx.salesInvoice.count({
         where: { companyId, salesOrderId: id, deletedAt: null, status: { not: 'REVERSED' } },
@@ -477,12 +477,12 @@ export class SalesOrdersService {
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL
         FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const order = await tx.salesOrder.findFirst({
         where: { id, companyId, branchId, deletedAt: null },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!order) throw new NotFoundException('Sales order not found');
+      if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
     // Never infer unselected quantities: an omitted line is not an instruction
     // to invoice its outstanding balance. Quantities are base-unit amounts.
     // Compute the identity without consulting mutable order lines so an exact

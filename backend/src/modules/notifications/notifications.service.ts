@@ -497,10 +497,10 @@ export class NotificationsService {
     const row = await this.prisma.notification.findFirst({
       where: { id, companyId: user.companyId, ...this.visibleTo(user) },
     });
-    if (!row) throw new NotFoundException('Notification not found');
+    if (!row) throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND', message: 'Notification not found' });
     if (!this.maySee(user, row.permission)) {
       // Not theirs to know about: reported as missing rather than forbidden.
-      throw new NotFoundException('Notification not found');
+      throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND', message: 'Notification not found' });
     }
     return row;
   }

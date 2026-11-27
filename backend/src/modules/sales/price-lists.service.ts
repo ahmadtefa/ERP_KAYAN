@@ -69,7 +69,7 @@ export class PriceListsService {
         suppliers: { select: { id: true, code: true, nameEn: true } },
       },
     });
-    if (!list) throw new NotFoundException('Price list not found');
+    if (!list) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     return {
       id: list.id,
@@ -142,7 +142,7 @@ export class PriceListsService {
     const before = await this.prisma.priceList.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('Price list not found');
+    if (!before) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     const data: Prisma.PriceListUpdateInput = {};
     if (dto.nameEn !== undefined) data.nameEn = this.text(dto.nameEn, 'nameEn');
@@ -180,7 +180,7 @@ export class PriceListsService {
     const before = await this.prisma.priceList.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('Price list not found');
+    if (!before) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     await this.prisma.priceList.update({ where: { id }, data: { isActive: false } });
     await this.audit.record({
@@ -202,7 +202,7 @@ export class PriceListsService {
       where: { id, companyId, deletedAt: null },
       select: { id: true },
     });
-    if (!list) throw new NotFoundException('Price list not found');
+    if (!list) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     const itemId = this.text(dto.itemId, 'itemId');
     const item = await this.prisma.item.findFirst({
@@ -248,7 +248,7 @@ export class PriceListsService {
       where: { id, companyId, deletedAt: null },
       select: { id: true },
     });
-    if (!list) throw new NotFoundException('Price list not found');
+    if (!list) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     const deleted = await this.prisma.priceListItem.deleteMany({
       where: { priceListId: id, itemId, ...(unit ? { unit } : {}) },
@@ -272,7 +272,7 @@ export class PriceListsService {
       where: { id, companyId, deletedAt: null },
       select: { id: true, code: true },
     });
-    if (!list) throw new NotFoundException('Price list not found');
+    if (!list) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
 
     const kind = String(dto.kind ?? '').toUpperCase();
     const partyId = this.text(dto.partyId, 'partyId');
@@ -385,7 +385,7 @@ export class PriceListsService {
       where: { id, companyId, deletedAt: null },
       select: { isActive: true, validTo: true, code: true },
     });
-    if (!list) throw new NotFoundException('Price list not found');
+    if (!list) throw new NotFoundException({ code: 'PRICE_LIST_NOT_FOUND', message: 'Price list not found' });
     if (!list.isActive) throw new BadRequestException(`Price list ${list.code} is inactive`);
     if (list.validTo && new Date() > list.validTo) {
       throw new BadRequestException(`Price list ${list.code} expired`);

@@ -107,7 +107,7 @@ export class CompanyService {
       where: { id: companyId },
     });
     if (!company || company.deletedAt) {
-      throw new NotFoundException('Company not found');
+      throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
     }
     return this.toProfile(company);
   }
@@ -152,7 +152,7 @@ export class CompanyService {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
     });
-    if (!company) throw new NotFoundException('Company not found');
+    if (!company) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
     return {
       nameEn: company.nameEn,
       nameAr: company.nameAr,
@@ -170,7 +170,7 @@ export class CompanyService {
         where: { id: companyId },
       });
       if (!before || before.deletedAt) {
-        throw new NotFoundException('Company not found');
+        throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
       }
 
       if (
@@ -245,7 +245,7 @@ export class CompanyService {
         select: { id: true, logoPath: true, deletedAt: true },
       });
       if (!before || before.deletedAt) {
-        throw new NotFoundException('Company not found');
+        throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
       }
 
       await tx.company.update({
@@ -314,7 +314,7 @@ export class CompanyService {
         where: { id: companyId },
         select: { id: true, logoPath: true },
       });
-      if (!before) throw new NotFoundException('Company not found');
+      if (!before) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
 
       await tx.company.update({
         where: { id: companyId },
@@ -666,7 +666,7 @@ export class CompanyService {
     const branch = await client.branch.findFirst({
       where: { id: branchId, companyId, deletedAt: null },
     });
-    if (!branch) throw new NotFoundException('Branch not found');
+    if (!branch) throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Branch not found' });
     return branch;
   }
 

@@ -113,7 +113,7 @@ export class WithholdingService {
   /** A rate that already served a voucher keeps its percent and account: only names and the active flag change. */
   async updateRate(companyId: string, userId: string, id: string, input: RateInput) {
     const [current] = await this.rateRows(companyId, Prisma.sql`AND r.id = ${id}::uuid`);
-    if (!current) throw new NotFoundException('Withholding rate not found');
+    if (!current) throw new NotFoundException({ code: 'WITHHOLDING_RATE_NOT_FOUND', message: 'Withholding rate not found' });
     const [{ used }] = await this.prisma.$queryRaw<{ used: number }[]>(Prisma.sql`
       SELECT count(*)::int AS used FROM voucher_withholdings WHERE "rateId" = ${id}::uuid`);
     const nameAr = input.nameAr !== undefined ? this.text(input.nameAr, 'nameAr', 160) : current.nameAr;
@@ -144,7 +144,7 @@ export class WithholdingService {
     }[]>(Prisma.sql`
       SELECT id, kind::text AS kind, amount, status::text AS status, "customerId", "supplierId" FROM cash_vouchers
        WHERE id = ${voucherId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL`);
-    if (!v) throw new NotFoundException('Voucher not found');
+    if (!v) throw new NotFoundException({ code: 'VOUCHER_NOT_FOUND', message: 'Voucher not found' });
     if (v.status !== 'DRAFT') {
       throw new ConflictException({ code: 'WITHHOLDING_VOUCHER_POSTED', message: 'The voucher is already posted, so its withholding can no longer change' });
     }

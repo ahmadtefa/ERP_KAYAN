@@ -74,7 +74,7 @@ export class RolesService {
         _count: { select: { userRoles: { where: { user: { deletedAt: null } } } } },
       },
     });
-    if (!role) throw new NotFoundException('Role not found');
+    if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
     return { ...this.toResponse(role), userCount: role._count.userRoles };
   }
 
@@ -188,7 +188,7 @@ export class RolesService {
     const role = await this.prisma.role.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!role) throw new NotFoundException('Role not found');
+    if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
     if (role.isSystem && (dto.nameEn || dto.nameAr)) {
       throw new BadRequestException('A system role cannot be renamed');
     }
@@ -277,7 +277,7 @@ export class RolesService {
     const role = await this.prisma.role.findFirst({
       where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
     });
-    if (!role) throw new NotFoundException('Role not found');
+    if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
     // A role that belongs to no company is shared by every tenant: letting one
     // company's role manager edit it would change permissions for the others.
     // A company's own seeded roles are theirs to tune - the escalation check
@@ -297,7 +297,7 @@ export class RolesService {
       const lockedRole = await tx.role.findFirst({
         where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
       });
-      if (!lockedRole) throw new NotFoundException('Role not found');
+      if (!lockedRole) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
       if (lockedRole.companyId === null && !isSuperAdmin) {
         throw new ForbiddenException('Only a super administrator can change permissions on a global system role');
       }
@@ -328,7 +328,7 @@ export class RolesService {
       where: { id, companyId, deletedAt: null },
       include: { _count: { select: { userRoles: { where: { user: { deletedAt: null } } } } } },
     });
-    if (!role) throw new NotFoundException('Role not found');
+    if (!role) throw new NotFoundException({ code: 'ROLE_NOT_FOUND', message: 'Role not found' });
     if (role.isSystem) throw new BadRequestException('A system role cannot be removed');
     if (role._count.userRoles > 0) {
       throw new BadRequestException(

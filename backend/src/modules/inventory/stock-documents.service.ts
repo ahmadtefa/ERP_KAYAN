@@ -248,7 +248,7 @@ export class StockDocumentsService {
       },
     });
     if (!document || (document.voucherKind && voucherBranchId !== undefined && document.branchId !== voucherBranchId)) {
-      throw new NotFoundException('Stock document not found');
+      throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
     }
 
     // The paper names who raised and who posted it, so the detail resolves the
@@ -771,9 +771,9 @@ export class StockDocumentsService {
         SELECT id FROM stock_documents WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       const document = await tx.stockDocument.findUniqueOrThrow({ where: { id }, include: { lines: true } });
-      if (!document.voucherKind) throw new NotFoundException('Stock voucher not found');
+      if (!document.voucherKind) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       const previous = await tx.$queryRaw<Array<{ documentId: string; requestHash: string; resultVersion: number }>>(Prisma.sql`
         SELECT "documentId", "requestHash", "resultVersion" FROM stock_voucher_edit_requests
         WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid AND "requestKey" = ${identity.key}
@@ -896,7 +896,7 @@ export class StockDocumentsService {
         SELECT id FROM stock_documents WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
       `);
-      if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
+      if (locked.length !== 1) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       const document = await tx.stockDocument.findUniqueOrThrow({ where: { id } });
       if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
       if (expectedVersion !== undefined && document.editVersion !== expectedVersion) throw new ConflictException('The voucher has changed; reload the latest version');
@@ -989,7 +989,7 @@ export class StockDocumentsService {
         approvedBy: true,
       },
     });
-    if (!document) throw new NotFoundException('Stock document not found');
+    if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
     if (document.kind !== StockDocumentKind.WRITE_OFF) {
       throw new BadRequestException('Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.');
     }
@@ -1039,8 +1039,8 @@ export class StockDocumentsService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!initialDocument) throw new NotFoundException('Stock document not found');
-    if (initialDocument.voucherKind && initialDocument.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+    if (!initialDocument) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
+    if (initialDocument.voucherKind && initialDocument.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
     if (initialDocument.voucherKind && requireVoucherVersion && (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 0)) {
       throw new BadRequestException('expectedVersion is required for posting a stock voucher');
     }
@@ -1098,8 +1098,8 @@ export class StockDocumentsService {
           })
         : Promise.resolve(null));
       const document = reloaded ?? initialDocument;
-      if (!document) throw new NotFoundException('Stock document not found');
-      if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+      if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
+      if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       if (document.voucherKind && expectedVersion !== undefined && document.editVersion !== expectedVersion) {
         throw new ConflictException('The voucher has changed; reload the latest version');
       }
@@ -1631,8 +1631,8 @@ export class StockDocumentsService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!document) throw new NotFoundException('Stock document not found');
-    if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+    if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
+    if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
     if (document.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException('Only a posted stock document can be reversed');
     }
@@ -2304,7 +2304,7 @@ export class StockDocumentsService {
         where: { id, companyId, deletedAt: null },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!document) throw new NotFoundException('Stock document not found');
+      if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
       if (document.status !== InvoiceStatus.DRAFT) {
         throw bad('STOCK_DOC_NOT_DRAFT', 'لا يمكن تعديل مواقع مستند تم ترحيله. استخدم العكس ثم أنشئ مستندًا جديدًا.', 'The locations of a posted document cannot be edited. Reverse it and create a new one.');
       }

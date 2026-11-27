@@ -218,7 +218,7 @@ export class StorageLocationsService {
     const existing = await this.prisma.storageLocation.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!existing) throw new NotFoundException('Storage location not found');
+    if (!existing) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
       throw new ForbiddenException('You cannot manage locations in this warehouse');
     }
@@ -317,7 +317,7 @@ export class StorageLocationsService {
     const existing = await this.prisma.storageLocation.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!existing) throw new NotFoundException('Storage location not found');
+    if (!existing) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (warehouseIds !== undefined && !warehouseIds.includes(existing.warehouseId)) {
       throw new ForbiddenException('You cannot manage locations in this warehouse');
     }
@@ -402,7 +402,7 @@ export class StorageLocationsService {
         where: { id: input.toLocationId, companyId, deletedAt: null },
       }),
     ]);
-    if (!from || !to) throw new NotFoundException('Storage location not found');
+    if (!from || !to) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (from.warehouseId !== to.warehouseId) {
       throw new BadRequestException(
         'المواقعتين في مخزنين مختلفين؛ استخدم تحويل الدفعات. / ' +
@@ -426,7 +426,7 @@ export class StorageLocationsService {
       where: { id: input.itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const result = await this.prisma.$transaction(async (tx) => {
       // The availability check runs under the same per-item lock as issues,
@@ -544,7 +544,7 @@ export class StorageLocationsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     const rows = await this.prisma.$queryRaw<
       Array<{
@@ -676,7 +676,7 @@ export class StorageLocationsService {
     const to = await this.prisma.storageLocation.findFirst({
       where: { id: input.toLocationId, companyId, deletedAt: null },
     });
-    if (!to) throw new NotFoundException('Storage location not found');
+    if (!to) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (to.warehouseId !== input.warehouseId) {
       throw new BadRequestException(
         'الموقع ليس في هذا المخزن. / The location is not in that warehouse.',
@@ -696,7 +696,7 @@ export class StorageLocationsService {
       where: { id: input.itemId, companyId, deletedAt: null },
       select: { id: true, code: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     const batchId = input.batchId ?? null;
     if (batchId) {
       const batch = await this.prisma.itemBatch.findFirst({
@@ -840,7 +840,7 @@ export class StorageLocationsService {
       where: { id: input.itemId, companyId, deletedAt: null },
       select: { id: true, code: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     const batchId = input.batchId ?? null;
 
     return this.prisma.$transaction(async (tx) => {
@@ -939,7 +939,7 @@ export class StorageLocationsService {
       where: { id: warehouseId, companyId, deletedAt: null },
       select: { id: true, branchId: true, code: true },
     });
-    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
       throw new ForbiddenException('This warehouse belongs to another branch');
     }

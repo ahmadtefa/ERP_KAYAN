@@ -92,7 +92,7 @@ export class QuotationColumnTemplatesService {
          AND "deletedAt" IS NULL
       RETURNING id, name, columns, "isDefault", "isActive", "createdAt", "updatedAt"
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation column template not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_COLUMN_TEMPLATE_NOT_FOUND', message: 'Quotation column template not found' });
     if (dto.isDefault === true) {
       await this.prisma.$executeRaw(Prisma.sql`
         UPDATE quotation_column_templates
@@ -144,7 +144,7 @@ export class QuotationColumnTemplatesService {
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          AND "deletedAt" IS NULL
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation column template not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_COLUMN_TEMPLATE_NOT_FOUND', message: 'Quotation column template not found' });
     return {
       ...rows[0],
       columns: normalizeColumns(rows[0].columns),

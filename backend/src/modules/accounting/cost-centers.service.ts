@@ -126,7 +126,7 @@ export class CostCentersService {
     const costCenter = await this.prisma.costCenter.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!costCenter) throw new NotFoundException('Cost center not found');
+    if (!costCenter) throw new NotFoundException({ code: 'COST_CENTER_NOT_FOUND', message: 'Cost center not found' });
 
     const [children, usage] = await Promise.all([
       this.prisma.costCenter.findMany({
@@ -197,7 +197,7 @@ export class CostCentersService {
     const before = await this.prisma.costCenter.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('Cost center not found');
+    if (!before) throw new NotFoundException({ code: 'COST_CENTER_NOT_FOUND', message: 'Cost center not found' });
 
     const data: Prisma.CostCenterUncheckedUpdateInput = { updatedBy: userId };
     if (dto.nameEn !== undefined) data.nameEn = this.text(dto.nameEn, 'nameEn');
@@ -241,7 +241,7 @@ export class CostCentersService {
     const costCenter = await this.prisma.costCenter.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!costCenter) throw new NotFoundException('Cost center not found');
+    if (!costCenter) throw new NotFoundException({ code: 'COST_CENTER_NOT_FOUND', message: 'Cost center not found' });
 
     const children = await this.prisma.costCenter.count({
       where: { companyId, parentId: id, deletedAt: null },

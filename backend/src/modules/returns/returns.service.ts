@@ -151,7 +151,7 @@ export class ReturnsService {
           lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } } },
         },
       });
-      if (!invoice) throw new NotFoundException('Return document not found');
+      if (!invoice) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
       return {
         ...this.toSummary(invoice, mayReadCost),
         journalEntryId: invoice.journalEntryId,
@@ -195,7 +195,7 @@ export class ReturnsService {
         lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } } },
       },
     });
-    if (!invoice) throw new NotFoundException('Return document not found');
+    if (!invoice) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     return {
       ...this.toSummary(invoice, mayReadCost),
       journalEntryId: invoice.journalEntryId,
@@ -698,7 +698,7 @@ export class ReturnsService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } }, originalInvoice: true },
     });
-    if (!document) throw new NotFoundException('Return document not found');
+    if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.CREDIT_NOTE) {
       throw new BadRequestException('Only a sales credit note can be posted as a sales return.');
     }
@@ -1376,7 +1376,7 @@ export class ReturnsService {
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } }, originalInvoice: true },
     });
-    if (!document) throw new NotFoundException('Return document not found');
+    if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.DEBIT_NOTE) {
       throw new BadRequestException('Only a purchase debit note can be posted as a purchase return.');
     }
@@ -1713,7 +1713,7 @@ export class ReturnsService {
         where: { id, companyId, deletedAt: null },
         include: { lines: true },
       });
-      if (!document) throw new NotFoundException('Return document not found');
+      if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
       if (document.documentType !== InvoiceDocumentType.CREDIT_NOTE) {
         throw new BadRequestException('Only a sales credit note can be reversed as a sales return.');
       }
@@ -1853,7 +1853,7 @@ export class ReturnsService {
       where: { id, companyId, deletedAt: null },
       include: { lines: true },
     });
-    if (!document) throw new NotFoundException('Return document not found');
+    if (!document) throw new NotFoundException({ code: 'RETURN_DOCUMENT_NOT_FOUND', message: 'Return document not found' });
     if (document.documentType !== InvoiceDocumentType.DEBIT_NOTE) {
       throw new BadRequestException('Only a purchase debit note can be reversed as a purchase return.');
     }

@@ -243,7 +243,7 @@ export class SerialsService {
     if (!note) fail('note', 'A short reason is required');
     const updated = await this.prisma.$transaction(async (tx) => {
       const [r] = await tx.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM serial_units WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`);
-      if (!r) throw new NotFoundException('Serial number not found');
+      if (!r) throw new NotFoundException({ code: 'SERIAL_NUMBER_NOT_FOUND', message: 'Serial number not found' });
       let to: SerialStatus;
       try {
         to = nextSerialStatus(r.status, action);

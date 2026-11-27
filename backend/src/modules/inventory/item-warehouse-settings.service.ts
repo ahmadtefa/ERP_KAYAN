@@ -123,10 +123,10 @@ export class ItemWarehouseSettingsService {
         select: { id: true, code: true },
       }),
     ]);
-    if (!warehouse) throw new NotFoundException('Warehouse not found');
-    if (!item) throw new NotFoundException('Item not found');
+    if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
-      throw new NotFoundException('Warehouse not found');
+      throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     }
 
     const min = new Prisma.Decimal(input.minQuantity ?? 0);

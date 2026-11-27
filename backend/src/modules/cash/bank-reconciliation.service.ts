@@ -51,7 +51,7 @@ export class BankReconciliationService {
         },
       },
     });
-    if (!reconciliation) throw new NotFoundException('Reconciliation not found');
+    if (!reconciliation) throw new NotFoundException({ code: 'RECONCILIATION_NOT_FOUND', message: 'Reconciliation not found' });
 
     return {
       ...this.toResponse(reconciliation),

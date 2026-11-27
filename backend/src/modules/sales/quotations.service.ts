@@ -194,7 +194,7 @@ export class QuotationsService {
       where: { id, companyId, deletedAt: null, ...branchWhere(branchScope) },
       include: QUOTATION_INCLUDE,
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     return this.toResponse(quotation, true);
   }
 
@@ -436,13 +436,13 @@ export class QuotationsService {
       });
       if (claim.count !== 1) {
         const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
-        if (!existing) throw new NotFoundException('Quotation not found');
+        if (!existing) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
         throw new BadRequestException('Only a draft quotation can be issued');
       }
       const quotation = await tx.quotation.findFirst({
         where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
       });
-      if (!quotation) throw new NotFoundException('Quotation not found');
+      if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
       const content = await this.snapshotContent(companyId, quotation, tx);
       const now = new Date();
       await tx.quotation.update({
@@ -492,7 +492,7 @@ export class QuotationsService {
       });
       if (claim.count !== 1) {
         const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { status: true } });
-        if (!existing) throw new NotFoundException('Quotation not found');
+        if (!existing) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
         if (existing.status === QuotationStatus.CONVERTED) {
           throw new BadRequestException('A converted quotation can no longer change status');
         }
@@ -501,7 +501,7 @@ export class QuotationsService {
       const quotation = await tx.quotation.findFirst({
         where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
       });
-      if (!quotation) throw new NotFoundException('Quotation not found');
+      if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
       const snapshot = quotation.contentSnapshot ??
         ((await this.snapshotContent(companyId, quotation, tx)) as unknown as Prisma.InputJsonValue);
       const now = new Date();
@@ -541,7 +541,7 @@ export class QuotationsService {
       where: { id, companyId, deletedAt: null },
       include: QUOTATION_INCLUDE,
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status === QuotationStatus.DRAFT) {
       throw new BadRequestException('A draft is edited directly; revision is for issued quotations');
     }
@@ -648,7 +648,7 @@ export class QuotationsService {
       where: { id, companyId, deletedAt: null },
       select: { id: true },
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     await this.prisma.quotationEvent.create({
       data: {
         quotationId: id,
@@ -716,7 +716,7 @@ export class QuotationsService {
       where: { id, companyId, deletedAt: null },
       include: { tables: { orderBy: { sortOrder: 'asc' }, include: { lines: { orderBy: { lineNumber: 'asc' } } } } },
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status === QuotationStatus.CONVERTED || quotation.convertedInvoiceId) {
       throw new BadRequestException('This quotation has already been converted to an invoice');
     }
@@ -862,7 +862,7 @@ export class QuotationsService {
       where: { id, companyId, deletedAt: null },
       include: QUOTATION_INCLUDE,
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     const company = await this.companyHeader(companyId);
     const stored =
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
@@ -920,7 +920,7 @@ export class QuotationsService {
         currency: true,
       },
     });
-    if (!company) throw new NotFoundException('Company not found');
+    if (!company) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND', message: 'Company not found' });
     return company;
   }
 
@@ -966,7 +966,7 @@ export class QuotationsService {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status !== QuotationStatus.DRAFT) {
       throw new BadRequestException(
         'This quotation has been issued and can no longer be edited. Start a revision instead.',

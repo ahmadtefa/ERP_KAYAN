@@ -95,7 +95,7 @@ export class QuotationTermsService {
          AND "deletedAt" IS NULL
       RETURNING id, title, body, "sortOrder", "isActive", "createdAt", "updatedAt"
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation term not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_TERM_NOT_FOUND', message: 'Quotation term not found' });
     const term = this.present(rows[0]);
     await this.audit.record({
       companyId,
@@ -138,7 +138,7 @@ export class QuotationTermsService {
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          AND "deletedAt" IS NULL
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation term not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_TERM_NOT_FOUND', message: 'Quotation term not found' });
     return rows[0];
   }
 

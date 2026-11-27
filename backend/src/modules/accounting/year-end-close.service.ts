@@ -197,7 +197,7 @@ export class YearEndCloseService {
 
   private async requirePeriod(companyId: string, periodId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
     const period = await db.fiscalPeriod.findFirst({ where: { id: periodId, companyId } });
-    if (!period) throw new NotFoundException('Fiscal period not found');
+    if (!period) throw new NotFoundException({ code: 'FISCAL_PERIOD_NOT_FOUND', message: 'Fiscal period not found' });
     return period;
   }
 

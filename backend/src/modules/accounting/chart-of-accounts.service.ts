@@ -368,7 +368,7 @@ export class ChartOfAccountsService {
     const account = await client.account.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!account) throw new NotFoundException('Account not found');
+    if (!account) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: 'Account not found' });
     return account;
   }
 

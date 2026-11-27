@@ -103,7 +103,7 @@ export class StockTakesService {
         },
       },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
 
     const shelfIds = [...new Set(session.lines.map((l) => (l as { storageLocationId?: string | null }).storageLocationId).filter((x): x is string => !!x))];
     const shelves = shelfIds.length
@@ -262,7 +262,7 @@ export class StockTakesService {
       where: { id: dto.warehouseId, companyId, deletedAt: null, isActive: true },
       select: { id: true, branchId: true },
     });
-    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
       throw new BadRequestException('This warehouse belongs to a branch you cannot access.');
     }
@@ -488,7 +488,7 @@ export class StockTakesService {
       where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
       select: { id: true, warehouseId: true },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (!dto?.itemId || !dto?.storageLocationId) {
       throw new BadRequestException('اختر الصنف وموقع التخزين. / Choose the item and the storage location.');
     }
@@ -592,7 +592,7 @@ export class StockTakesService {
       where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
       select: { id: true, status: true, warehouseId: true },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status !== 'COUNTING') {
       throw new BadRequestException(
         `This session is no longer open for counting (status: ${session.status}).`,
@@ -773,7 +773,7 @@ export class StockTakesService {
       where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
       select: { id: true, status: true, code: true, createdBy: true },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status === 'APPROVED' || session.status === 'POSTED') {
       throw new BadRequestException(
         `This count was already approved (status: ${session.status}). / تم اعتماد هذا الجرد مسبقًا.`,
@@ -821,7 +821,7 @@ export class StockTakesService {
       where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
       include: { lines: true },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status !== 'APPROVED') {
       throw new BadRequestException(
         session.status === 'POSTED'
@@ -950,7 +950,7 @@ export class StockTakesService {
       where: { id, companyId, ...(scope !== null ? { branchId: { in: scope } } : {}) },
       select: { id: true, status: true, code: true },
     });
-    if (!session) throw new NotFoundException('Stock-take session not found');
+    if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status === 'POSTED') {
       throw new BadRequestException('A posted count cannot be cancelled; reverse its document.');
     }

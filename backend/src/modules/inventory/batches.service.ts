@@ -360,7 +360,7 @@ export class BatchesService {
         },
       },
     });
-    if (!row) throw new NotFoundException('Batch not found');
+    if (!row) throw new NotFoundException({ code: 'BATCH_NOT_FOUND', message: 'Batch not found' });
     return row;
   }
 
@@ -1959,7 +1959,7 @@ export class BatchesService {
       where: { id: warehouseId, companyId, deletedAt: null, isActive: true },
       select: { id: true, branchId: true, code: true, kind: true, parentId: true },
     });
-    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
       throw new ForbiddenException(
         'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.',
@@ -1984,7 +1984,7 @@ export class BatchesService {
         expiredIssueNeedsApproval: true,
       },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     if (!item.isStockTracked) {
       throw new BadRequestException(
         `الصنف ${item.code} غير مخزني. / Item ${item.code} is not stock-tracked.`,

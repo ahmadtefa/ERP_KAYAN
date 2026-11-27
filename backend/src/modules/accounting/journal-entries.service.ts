@@ -94,7 +94,7 @@ export class JournalEntriesService {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
       },
     });
-    if (!entry) throw new NotFoundException('Journal entry not found');
+    if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     return this.toResponse(entry);
   }
 
@@ -258,7 +258,7 @@ export class JournalEntriesService {
       where: { id, companyId },
       include: { lines: true },
     });
-    if (!entry) throw new NotFoundException('Journal entry not found');
+    if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (entry.status !== JournalStatus.DRAFT && entry.status !== JournalStatus.APPROVED) {
       throw new BadRequestException(
         `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
@@ -565,7 +565,7 @@ export class JournalEntriesService {
       where: { id, companyId },
       select: { id: true, status: true, createdBy: true, approvedBy: true },
     });
-    if (!entry) throw new NotFoundException('Journal entry not found');
+    if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (!allowed.includes(entry.status)) {
       throw new BadRequestException(
         `This action is not allowed while the entry is ${entry.status}. Allowed from: ${allowed.join(', ')}.`,
@@ -598,7 +598,7 @@ export class JournalEntriesService {
       where: { id, companyId },
       include: { lines: { include: { allocations: true } } },
     });
-    if (!original) throw new NotFoundException('Journal entry not found');
+    if (!original) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (original.status !== JournalStatus.POSTED) {
       throw new BadRequestException('Only posted entries can be reversed');
     }

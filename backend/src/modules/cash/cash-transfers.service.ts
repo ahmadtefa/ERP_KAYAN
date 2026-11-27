@@ -72,7 +72,7 @@ export class CashTransfersService {
         toCashAccount: { select: { code: true, nameEn: true, nameAr: true } },
       },
     });
-    if (!transfer) throw new NotFoundException('Transfer not found');
+    if (!transfer) throw new NotFoundException({ code: 'TRANSFER_NOT_FOUND', message: 'Transfer not found' });
     return this.toResponse(transfer);
   }
 
@@ -188,7 +188,7 @@ export class CashTransfersService {
         toCashAccount: { select: { accountId: true, isActive: true, code: true } },
       },
     });
-    if (!transfer) throw new NotFoundException('Transfer not found');
+    if (!transfer) throw new NotFoundException({ code: 'TRANSFER_NOT_FOUND', message: 'Transfer not found' });
     if (transfer.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft transfer can be posted (current status: ${transfer.status})`,
@@ -258,7 +258,7 @@ export class CashTransfersService {
     const transfer = await this.prisma.cashTransfer.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!transfer) throw new NotFoundException('Transfer not found');
+    if (!transfer) throw new NotFoundException({ code: 'TRANSFER_NOT_FOUND', message: 'Transfer not found' });
     if (transfer.status !== InvoiceStatus.POSTED || !transfer.journalEntryId) {
       throw new BadRequestException('Only a posted transfer can be reversed');
     }

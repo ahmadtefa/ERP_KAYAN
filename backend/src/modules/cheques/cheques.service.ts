@@ -200,7 +200,7 @@ export class ChequesService {
 
   async findOne(companyId: string, id: string) {
     const [row] = await this.rows(companyId, Prisma.sql`AND q.id = ${id}::uuid`);
-    if (!row) throw new NotFoundException('Cheque not found');
+    if (!row) throw new NotFoundException({ code: 'CHEQUE_NOT_FOUND', message: 'Cheque not found' });
     const events = await this.prisma.$queryRaw<Array<{ action: string; fromStatus: string | null; toStatus: string; note: string | null; voucherId: string | null; at: Date }>>(
       Prisma.sql`SELECT action,"fromStatus","toStatus",note,"voucherId","at" FROM cheque_events WHERE "chequeId" = ${id}::uuid ORDER BY "at" ASC`);
     return { ...view(row, new Date().toISOString().slice(0, 10)), events: events.map((e) => ({ ...e, at: e.at.toISOString() })) };
@@ -248,7 +248,7 @@ export class ChequesService {
     options: { discloseBalance?: boolean } = {},
   ) {
     const [current] = await this.rows(companyId, Prisma.sql`AND q.id = ${id}::uuid`);
-    if (!current) throw new NotFoundException('Cheque not found');
+    if (!current) throw new NotFoundException({ code: 'CHEQUE_NOT_FOUND', message: 'Cheque not found' });
     let target: ChequeStatus;
     try {
       target = nextChequeStatus(current.direction, current.status, action);

@@ -59,7 +59,7 @@ export class QuotationDesignTemplatesService {
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
       RETURNING id, name, design, "isActive", "createdAt", "updatedAt"
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation design template not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_DESIGN_TEMPLATE_NOT_FOUND', message: 'Quotation design template not found' });
     const template = this.present(rows[0]);
     await this.audit.record({
       companyId, userId, action: 'update', entity: 'QuotationDesignTemplate',
@@ -89,7 +89,7 @@ export class QuotationDesignTemplatesService {
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
        LIMIT 1
     `);
-    if (!rows[0]) throw new NotFoundException('Quotation design template not found');
+    if (!rows[0]) throw new NotFoundException({ code: 'QUOTATION_DESIGN_TEMPLATE_NOT_FOUND', message: 'Quotation design template not found' });
     return this.present(rows[0]);
   }
 

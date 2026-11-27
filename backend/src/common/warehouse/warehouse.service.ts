@@ -93,7 +93,7 @@ export class WarehouseService {
     });
     // A warehouse outside the caller's branches is reported as missing rather
     // than forbidden: it is not theirs to know about.
-    if (!row) throw new NotFoundException('Warehouse not found');
+    if (!row) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     return this.toResponse(row);
   }
 
@@ -181,7 +181,7 @@ export class WarehouseService {
     const before = await this.prisma.warehouse.findFirst({
       where: { id, companyId, deletedAt: null, isTransit: false },
     });
-    if (!before) throw new NotFoundException('Warehouse not found');
+    if (!before) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     this.assertInScope(scope, before.branchId);
     if (dto.branchId !== undefined) {
       this.assertInScope(
@@ -257,7 +257,7 @@ export class WarehouseService {
     const before = await this.prisma.warehouse.findFirst({
       where: { id, companyId, deletedAt: null, isTransit: false },
     });
-    if (!before) throw new NotFoundException('Warehouse not found');
+    if (!before) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     this.assertInScope(scope, before.branchId);
     if (before.isDefault) {
       throw new BadRequestException(
@@ -292,7 +292,7 @@ export class WarehouseService {
     const before = await this.prisma.warehouse.findFirst({
       where: { id, companyId, deletedAt: null, isTransit: false },
     });
-    if (!before) throw new NotFoundException('Warehouse not found');
+    if (!before) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     this.assertInScope(scope, before.branchId);
 
     await this.prisma.warehouse.update({ where: { id }, data: { isActive: true } });
@@ -695,7 +695,7 @@ export class WarehouseService {
       },
       include: { branch: { select: { code: true, nameEn: true, nameAr: true } } },
     });
-    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
 
     const asOf = query.asOf ? new Date(`${query.asOf.slice(0, 10)}T23:59:59.999Z`) : new Date();
     const rows = await this.prisma.$queryRaw<

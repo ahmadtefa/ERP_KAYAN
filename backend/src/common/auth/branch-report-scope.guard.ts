@@ -46,7 +46,7 @@ export class BranchReportScopeGuard implements CanActivate {
     const query = stable;
     const requested = typeof query.branchId === 'string' ? query.branchId.trim() : '';
     if (requested) {
-      if (!scope.includes(requested)) throw new NotFoundException('Report not found');
+      if (!scope.includes(requested)) throw new NotFoundException({ code: 'REPORT_NOT_FOUND', message: 'Report not found' });
       return true;
     }
 

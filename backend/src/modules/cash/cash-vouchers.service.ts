@@ -113,7 +113,7 @@ export class CashVouchersService {
         },
       },
     });
-    if (!voucher) throw new NotFoundException('Cash voucher not found');
+    if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
 
     /// The other half of the chain. A receipt that settled two invoices is
     /// still one entry, and a reversed voucher has its mirror beside it; both
@@ -350,7 +350,7 @@ export class CashVouchersService {
         cashAccount: { select: { id: true, accountId: true, isActive: true, code: true } },
       },
     });
-    if (!voucher) throw new NotFoundException('Cash voucher not found');
+    if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
     if (voucher.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft voucher can be posted (current status: ${voucher.status})`,
@@ -635,7 +635,7 @@ export class CashVouchersService {
       where: { id, companyId, deletedAt: null },
       include: { allocations: true },
     });
-    if (!voucher) throw new NotFoundException('Cash voucher not found');
+    if (!voucher) throw new NotFoundException({ code: 'CASH_VOUCHER_NOT_FOUND', message: 'Cash voucher not found' });
     if (voucher.status !== InvoiceStatus.POSTED || !voucher.journalEntryId) {
       throw new BadRequestException('Only a posted voucher can be reversed');
     }

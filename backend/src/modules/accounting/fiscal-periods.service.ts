@@ -94,7 +94,7 @@ export class FiscalPeriodsService {
       await this.lockRanges(tx, companyId);
       await this.lockPeriod(tx, companyId, id);
       const period = await tx.fiscalPeriod.findFirst({ where: { id, companyId } });
-      if (!period) throw new NotFoundException('Fiscal period not found');
+      if (!period) throw new NotFoundException({ code: 'FISCAL_PERIOD_NOT_FOUND', message: 'Fiscal period not found' });
       if (period.status === PeriodStatus.CLOSED) {
         throw new BadRequestException('A closed period cannot be changed');
       }
@@ -176,7 +176,7 @@ export class FiscalPeriodsService {
     return this.prisma.$transaction(async (tx) => {
       await this.lockPeriod(tx, companyId, id);
       const period = await tx.fiscalPeriod.findFirst({ where: { id, companyId } });
-      if (!period) throw new NotFoundException('Fiscal period not found');
+      if (!period) throw new NotFoundException({ code: 'FISCAL_PERIOD_NOT_FOUND', message: 'Fiscal period not found' });
       if (period.status === PeriodStatus.CLOSED) {
         throw new BadRequestException('This period is already closed');
       }

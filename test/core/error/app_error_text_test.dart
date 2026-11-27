@@ -1,5 +1,6 @@
 import 'package:erp_kayan/core/error/app_error_text.dart';
 import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/error/not_found_entities.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The screen must never show a sentence written for a programmer.
@@ -26,6 +27,27 @@ void main() {
     expect(typed.businessMessage,contains('حدّث المستند'));
     expect(typed.businessMessage,isNot(contains('synthetic raw')));
     expect(resolver.resolve(const ApiFailure('synthetic raw',statusCode:503)).businessMessage,isNull);
+  });
+
+  test('a missing record is explained from its code in both languages, never from the server text', () {
+    for (final entry in notFoundEntities.entries) {
+      final failure = ApiFailure('synthetic raw ${entry.key}', statusCode: 404, code: entry.key);
+      final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure);
+      final en = const AppErrorMessageResolver(isArabic: false).resolve(failure);
+      expect(ar.reason, AppErrorReason.notFound);
+      expect(ar.businessMessage, contains(entry.value[0]));
+      expect(ar.businessMessage, contains('حدّث الشاشة'));
+      expect(en.businessMessage, contains(entry.value[1]));
+      expect(en.businessMessage, contains('Reload the screen'));
+      expect(en.businessMessage, isNot(contains('synthetic raw')));
+      expect(ar.businessMessage, isNot(contains('synthetic raw')));
+    }
+  });
+
+  test('an unlisted not-found code falls back to the generic sentence, not the server text', () {
+    final text = const AppErrorMessageResolver(isArabic: true).resolve(const ApiFailure('synthetic raw', statusCode: 404, code: 'SOMETHING_NEW_NOT_FOUND'));
+    expect(text.reason, AppErrorReason.notFound);
+    expect(text.businessMessage ?? '', isNot(contains('synthetic raw')));
   });
 
   test('cheque conflicts are explained in both languages without the server text', () {

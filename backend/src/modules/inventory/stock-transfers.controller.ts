@@ -42,7 +42,7 @@ export class StockTransfersController {
   async one(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const row = await this.service.findOne(user.companyId, id);
     const branches = warehouseScopeOf(user);
-    if (branches && (!branches.includes(row.sourceBranchId) || !branches.includes(row.destinationBranchId))) throw new NotFoundException('Stock transfer not found');
+    if (branches && (!branches.includes(row.sourceBranchId) || !branches.includes(row.destinationBranchId))) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
     assertWarehouseAccess(user, row.sourceWarehouseId, 'view');
     assertWarehouseAccess(user, row.destinationWarehouseId, 'view');
     return this.present(user, row);
@@ -218,7 +218,7 @@ export class StockTransfersController {
   private async assertPair(user: AuthUser, id: string, action: 'view'|'receive'|'transfer'|'approve') {
     const row = await this.service.findOne(user.companyId, id);
     const branches = warehouseScopeOf(user);
-    if (branches && (!branches.includes(row.sourceBranchId) || !branches.includes(row.destinationBranchId))) throw new NotFoundException('Stock transfer not found');
+    if (branches && (!branches.includes(row.sourceBranchId) || !branches.includes(row.destinationBranchId))) throw new NotFoundException({ code: 'STOCK_TRANSFER_NOT_FOUND', message: 'Stock transfer not found' });
     assertWarehouseAccess(user, row.sourceWarehouseId, action === 'receive' ? 'view' : action);
     assertWarehouseAccess(user, row.destinationWarehouseId, action === 'transfer' ? 'view' : action);
     return row;

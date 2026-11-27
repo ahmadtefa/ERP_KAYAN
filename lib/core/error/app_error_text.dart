@@ -1,4 +1,5 @@
 import 'failure.dart';
+import 'not_found_entities.dart';
 
 /// What kind of problem the user is being told about.
 ///
@@ -424,6 +425,13 @@ class AppErrorMessageResolver {
           businessMessage: isArabic
             ? 'استغرقت العملية وقتًا أطول من المسموح وأُلغيت تغييراتها. حدّث المستند وتحقق من حالته قبل المحاولة مرة أخرى.'
             : 'The operation took too long and its changes were rolled back. Reload the document and check its state before trying again.');
+      }
+
+      if (error is ApiFailure && error.statusCode == 404) {
+        final sentence = notFoundSentence(error.code, isArabic: isArabic);
+        if (sentence != null) {
+          return AppErrorText(reason: AppErrorReason.notFound, severity: AppErrorSeverity.error, businessMessage: sentence);
+        }
       }
 
       if (error is ApiFailure && error.statusCode == 409 && error.code == 'CHEQUE_DUPLICATE') {

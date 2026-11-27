@@ -127,7 +127,7 @@ export class QuotationBackgroundsService {
       UPDATE quotation_backgrounds SET "deletedAt" = now()
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
     `);
-    if (!n) throw new NotFoundException('Background not found');
+    if (!n) throw new NotFoundException({ code: 'BACKGROUND_NOT_FOUND', message: 'Background not found' });
     return { deleted: true };
   }
 }

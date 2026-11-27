@@ -75,7 +75,7 @@ export class ItemImageService {
          WHERE id = ${itemId}::uuid AND "companyId" = ${companyId}::uuid
            AND "deletedAt" IS NULL
          FOR UPDATE`;
-      if (!rows.length) throw new NotFoundException('Item not found');
+      if (!rows.length) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
       await tx.itemImage.upsert({
         where: { itemId },
@@ -116,7 +116,7 @@ export class ItemImageService {
         where: { id: itemId, companyId, deletedAt: null },
         select: { id: true },
       });
-      if (!items) throw new NotFoundException('Item not found');
+      if (!items) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
       const result = await tx.itemImage.deleteMany({ where: { companyId, itemId } });
       if (result.count) {

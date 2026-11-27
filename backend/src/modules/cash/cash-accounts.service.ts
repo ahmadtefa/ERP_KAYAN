@@ -62,7 +62,7 @@ export class CashAccountsService {
         branch: { select: { code: true } },
       },
     });
-    if (!row) throw new NotFoundException('Cash account not found');
+    if (!row) throw new NotFoundException({ code: 'CASH_ACCOUNT_NOT_FOUND', message: 'Cash account not found' });
     return this.toResponse(row);
   }
 
@@ -148,7 +148,7 @@ export class CashAccountsService {
     const before = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('Cash account not found');
+    if (!before) throw new NotFoundException({ code: 'CASH_ACCOUNT_NOT_FOUND', message: 'Cash account not found' });
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
       const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
@@ -200,7 +200,7 @@ export class CashAccountsService {
     const row = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!row) throw new NotFoundException('Cash account not found');
+    if (!row) throw new NotFoundException({ code: 'CASH_ACCOUNT_NOT_FOUND', message: 'Cash account not found' });
 
     const updated = await this.prisma.cashAccount.update({
       where: { id },
@@ -267,7 +267,7 @@ export class CashAccountsService {
       where: { id, companyId, deletedAt: null },
       include: { account: { select: { code: true, nameEn: true, nameAr: true } } },
     });
-    if (!cashAccount) throw new NotFoundException('Cash account not found');
+    if (!cashAccount) throw new NotFoundException({ code: 'CASH_ACCOUNT_NOT_FOUND', message: 'Cash account not found' });
 
     const to = query.to ? new Date(`${query.to.slice(0, 10)}T23:59:59.999Z`) : new Date();
     const from = query.from

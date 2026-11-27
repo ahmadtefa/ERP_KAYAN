@@ -74,7 +74,7 @@ export class ItemsService {
       where: { id, companyId, deletedAt: null },
       include: { units: { orderBy: [{ factor: 'asc' }, { createdAt: 'asc' }] } },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     return this.toResponse(item, mayReadCost);
   }
 
@@ -158,7 +158,7 @@ export class ItemsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, barcode: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     let barcode = String(requested ?? '').trim();
     if (barcode) {
@@ -664,7 +664,7 @@ export class ItemsService {
     const before = await this.prisma.item.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!before) throw new NotFoundException('Item not found');
+    if (!before) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
 
     // Validate the effective pair, including unchanged names on partial edits.
     // A blank field is allowed if the other language has a name.
@@ -794,7 +794,7 @@ export class ItemsService {
       where: { id, companyId, deletedAt: null },
       include: { stockBalances: true },
     });
-    if (!item) throw new NotFoundException('Item not found');
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item not found' });
     if (!item.isActive) return this.toResponse(item, mayReadCost);
 
     const onHand = item.stockBalances.reduce(

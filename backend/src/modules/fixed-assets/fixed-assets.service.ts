@@ -311,7 +311,7 @@ export class FixedAssetsService {
 
   async findOne(companyId: string, id: string, branchScope: string[] | null = null) {
     const asset = await this.get(companyId, id);
-    if (branchScope && !branchScope.includes(asset.branchId)) throw new NotFoundException('Fixed asset not found');
+    if (branchScope && !branchScope.includes(asset.branchId)) throw new NotFoundException({ code: 'FIXED_ASSET_NOT_FOUND', message: 'Fixed asset not found' });
     const rows = await this.prisma.assetDepreciation.findMany({
       where: { assetId: id, companyId },
       orderBy: { periodKey: 'asc' },
@@ -478,7 +478,7 @@ export class FixedAssetsService {
       });
       if (claim.count !== 1) {
         const asset = await tx.fixedAsset.findFirst({ where: { id, companyId } });
-        if (!asset) throw new NotFoundException('Fixed asset not found');
+        if (!asset) throw new NotFoundException({ code: 'FIXED_ASSET_NOT_FOUND', message: 'Fixed asset not found' });
         throw new BadRequestException(
           `Only a draft asset can be activated (current status: ${asset.status})`,
         );
@@ -894,7 +894,7 @@ export class FixedAssetsService {
       const asset = await tx.fixedAsset.findFirst({
         where: { id, companyId, deletedAt: null },
       });
-      if (!asset) throw new NotFoundException('Fixed asset not found');
+      if (!asset) throw new NotFoundException({ code: 'FIXED_ASSET_NOT_FOUND', message: 'Fixed asset not found' });
       if (
         asset.status !== FixedAssetStatus.ACTIVE &&
         asset.status !== FixedAssetStatus.FULLY_DEPRECIATED
@@ -1265,7 +1265,7 @@ export class FixedAssetsService {
     const asset = await this.prisma.fixedAsset.findFirst({
       where: { id, companyId, deletedAt: null },
     });
-    if (!asset) throw new NotFoundException('Fixed asset not found');
+    if (!asset) throw new NotFoundException({ code: 'FIXED_ASSET_NOT_FOUND', message: 'Fixed asset not found' });
     return asset;
   }
 
