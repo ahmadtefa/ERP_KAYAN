@@ -254,7 +254,7 @@ export class PurchaseInvoicesService {
     orderUnits?: readonly TrustedOrderUnit[],
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
 
     const supplier = await tx.supplier.findFirst({
@@ -361,7 +361,7 @@ export class PurchaseInvoicesService {
     mayReadCost = true,
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -495,7 +495,7 @@ export class PurchaseInvoicesService {
 
   /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
   async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>, mayReadCost = true) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const before = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { purchaseOrderId: true },
     });
@@ -609,7 +609,7 @@ export class PurchaseInvoicesService {
 
   /** Cancel a draft without deleting its historical identity or retry key. */
   async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     await this.prisma.$transaction(async (tx) => {
       let invoice = await tx.purchaseInvoice.findFirst({
         where: { id, companyId, branchId, deletedAt: null },

@@ -470,7 +470,7 @@ export class StockTransfersService {
       if (!currentAction) throw new ConflictException('Dispatch reservation was lost');
       if (currentAction.stockDocumentId) return;
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
-      if (!current || current.status !== 'DISPATCHING') throw new ConflictException('Transfer changed while dispatching');
+      if (!current || current.status !== 'DISPATCHING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while dispatching' });
       for (const [index, entry] of quantities.entries()) {
         const old = current.lines.find(x => x.id === entry.line.id)!;
         const docLine = doc.lines[index] as { unitCost?: string } | undefined;
@@ -541,7 +541,7 @@ export class StockTransfersService {
       if (!currentAction) throw new ConflictException('Receipt reservation was lost');
       if (currentAction.stockDocumentId) return;
       const current = await tx.stockTransfer.findFirst({ where: { id, companyId }, include: { lines: true } });
-      if (!current || current.status !== 'RECEIVING') throw new ConflictException('Transfer changed while receiving');
+      if (!current || current.status !== 'RECEIVING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while receiving' });
       for (const { line, quantity } of quantities) await tx.stockTransferLine.update({ where: { id: line.id }, data: { receivedQuantity: line.receivedQuantity.add(quantity) } });
       const linesNow = await tx.stockTransferLine.findMany({ where: { transferId: id } });
       const allReceived = linesNow.every(x => x.dispatchedQuantity.gte(x.requestedQuantity) && x.receivedQuantity.add(x.returnedQuantity).add(x.writtenOffQuantity).gte(x.dispatchedQuantity));
@@ -626,7 +626,7 @@ export class StockTransfersService {
       const previous = await tx.stockTransferAction.findFirst({ where: { companyId, transferId: id, requestKey } });
       if (!previous || previous.requestHash !== requestHash) throw new ConflictException('Settlement reservation was lost or changed');
       const currentTransfer = await tx.stockTransfer.findFirst({ where: { id, companyId } });
-      if (!currentTransfer || currentTransfer.status !== 'SETTLING') throw new ConflictException('Transfer changed while settlement was processing');
+      if (!currentTransfer || currentTransfer.status !== 'SETTLING') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed while settlement was processing' });
       for (const {line,quantity} of returns) await tx.stockTransferLine.update({ where: { id: line.id }, data: { returnedQuantity: { increment: quantity } } });
       for (const {line,shortage,damage,reason} of writeOffs) await tx.stockTransferLine.update({ where: { id: line.id }, data: { reportedShortage: { increment: shortage }, reportedDamage: { increment: damage }, differenceReason: reason } });
       if (returnDocumentId) await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: `RETURN:${this.key(key)}`, requestHash, action: 'RETURN', stockDocumentId: returnDocumentId, resultVersion: transfer.version + 1 } });
@@ -687,7 +687,7 @@ export class StockTransfersService {
           return;
         }
         if (current.status === 'SETTLED') return;
-        throw new ConflictException('Transfer settlement has changed');
+        throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer settlement has changed' });
       }
       for (const line of current.lines) {
         const remainingDifference = line.reportedShortage.add(line.reportedDamage).sub(line.writtenOffQuantity);
@@ -708,7 +708,7 @@ export class StockTransfersService {
     const row = await this.findOne(companyId, id);
     if (!['RECEIVED', 'SETTLED'].includes(row.status)) throw new ConflictException('A transfer may close only after receipts and differences are reconciled');
     const outstanding = row.lines.some(x => x.dispatchedQuantity.lt(x.requestedQuantity) || x.dispatchedQuantity.gt(x.receivedQuantity.add(x.returnedQuantity).add(x.writtenOffQuantity)));
-    if (outstanding) throw new ConflictException('Unresolved goods remain in transit; receive, return or approve a write-off before closing');
+    if (outstanding) throw new ConflictException({ code: 'TRANSIT_UNRESOLVED', message: 'Unresolved goods remain in transit; receive, return or approve a write-off before closing' });
     return this.transition(companyId, userId, id, key, [row.status], 'CLOSED', { closedBy: userId, closedAt: new Date() });
   }
 
@@ -855,7 +855,7 @@ export class StockTransfersService {
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM stock_transfers WHERE id=${id}::uuid AND "companyId"=${companyId}::uuid FOR UPDATE`);
         const current = await tx.stockTransfer.findFirst({ where: { id, companyId } });
-        if (!current || current.status === 'CLOSED') throw new ConflictException('Transfer changed and cannot be cancelled');
+        if (!current || current.status === 'CLOSED') throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed and cannot be cancelled' });
         if (current.status !== 'CANCELLED') await tx.stockTransfer.update({ where: { id }, data: { status: 'CANCELLED', cancelledBy: userId, cancelledAt: new Date(), version: { increment: 1 } } });
         const old = await tx.stockTransferAction.findFirst({ where: { transferId: id, requestKey: actionKey } });
         if (!old) await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey: actionKey, requestHash: actionHash, action: 'CANCEL', resultVersion: current.version + 1 } });
@@ -897,7 +897,7 @@ export class StockTransfersService {
       if (previous) { if (previous.requestHash !== hash) throw new ConflictException('Idempotency key was reused with a different action'); return; }
       if (!allowed.includes(row.status)) throw new ConflictException(`Cannot transition transfer from ${row.status} to ${status}`);
       const updated = await tx.stockTransfer.updateMany({ where: { id, companyId, status: row.status, version: row.version }, data: { status, version: { increment: 1 }, ...extra } as never });
-      if (updated.count !== 1) throw new ConflictException('Transfer changed; reload and retry');
+      if (updated.count !== 1) throw new ConflictException({ code: 'TRANSFER_CHANGED_RELOAD', message: 'Transfer changed; reload and retry' });
       await tx.stockTransferAction.create({ data: { companyId, transferId: id, requestKey, requestHash: hash, action: status, resultVersion: row.version + 1 } });
     });
     await this.audit.record({ companyId, userId, action: status, entity: 'stock_transfers', entityId: id });

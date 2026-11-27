@@ -343,7 +343,7 @@ export class StockDocumentsService {
       ? mayReadCostOrOptions
       : optionsArg;
     const targetBranch = dto.branchId ?? dto.toBranchId ?? branchId;
-    if (!targetBranch) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!targetBranch) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const idempotencyKey = String(options.idempotencyKey ?? dto.idempotencyKey ?? '').trim() || null;
     const identity = idempotencyKey
       ? orderCreationIdentity({ ...dto, idempotencyKey } as unknown as Record<string, unknown>)
@@ -382,7 +382,7 @@ export class StockDocumentsService {
       }
       if (voucherKind) {
         const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.toWarehouseId, companyId, branchId: targetBranch, deletedAt: null, isActive: true }, select: { id: true } });
-        if (!warehouse) throw new BadRequestException('The voucher warehouse does not belong to this branch or is inactive');
+        if (!warehouse) throw new BadRequestException({ code: 'VOUCHER_WAREHOUSE_INVALID', message: 'The voucher warehouse does not belong to this branch or is inactive' });
       }
       if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
         throw new BadRequestException('A stock document needs at least one line');
@@ -402,7 +402,7 @@ export class StockDocumentsService {
              AND "requestKey" = ${identity.key}
         `);
         if (previous.length) {
-          if (previous[0].requestHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+          if (previous[0].requestHash !== identity.hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
           return { id: previous[0].documentId };
         }
         // Older rows may have the document key but predate the request-hash
@@ -646,7 +646,7 @@ export class StockDocumentsService {
 
       // Issue vouchers require an explicit beneficiary.
       if (voucherKind === 'ISSUE' && !costCenterId) {
-        throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
+        throw new BadRequestException({ code: 'COST_CENTER_REQUIRED_ISSUE', message: 'A cost center is required when issuing stock from a warehouse.' });
       }
 
       const fromWarehouseId = dto.fromWarehouseId ? String(dto.fromWarehouseId) : null;
@@ -756,7 +756,7 @@ export class StockDocumentsService {
     dto: { idempotencyKey?: string; expectedVersion: number; documentDate: string; toWarehouseId: string;
       counterpartyName: string; reason: string; notes?: string | null; costCenterId?: string | null;
       lines: StockDocumentLineInput[] }, mayReadCost = true) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
     if (!identity) throw new BadRequestException('idempotencyKey is required');
     if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 0) {
@@ -780,7 +780,7 @@ export class StockDocumentsService {
       `);
       if (previous.length) {
         if (previous[0].documentId !== id || previous[0].requestHash !== identity.hash) {
-          throw new ConflictException('The idempotency key was used for a different request');
+          throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
         }
         if (document.editVersion !== previous[0].resultVersion || document.status !== InvoiceStatus.DRAFT) {
           throw new ConflictException('The voucher has changed since this request; reload the latest version');
@@ -788,7 +788,7 @@ export class StockDocumentsService {
         return;
       }
       if (document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be edited');
-      if (document.editVersion !== dto.expectedVersion) throw new ConflictException('The voucher has changed; reload the latest version');
+      if (document.editVersion !== dto.expectedVersion) throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed; reload the latest version' });
       if (typeof dto.reason !== 'string' || !dto.reason.trim() || typeof dto.counterpartyName !== 'string' ||
           !dto.counterpartyName.trim() || dto.counterpartyName.trim().length > 200 || typeof dto.toWarehouseId !== 'string') {
         throw new BadRequestException('A stock voucher needs a warehouse, reason and counterparty');
@@ -799,7 +799,7 @@ export class StockDocumentsService {
       }
       const date = this.date(dto.documentDate, 'documentDate');
       const warehouse = await tx.warehouse.findFirst({ where: { id: dto.toWarehouseId, companyId, branchId, deletedAt: null, isActive: true }, select: { id: true } });
-      if (!warehouse) throw new BadRequestException('The voucher warehouse does not belong to this branch or is inactive');
+      if (!warehouse) throw new BadRequestException({ code: 'VOUCHER_WAREHOUSE_INVALID', message: 'The voucher warehouse does not belong to this branch or is inactive' });
       const costCenterId = dto.costCenterId ? String(dto.costCenterId).trim() : null;
       if (costCenterId) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) throw new BadRequestException('costCenterId must be a UUID');
@@ -862,7 +862,7 @@ export class StockDocumentsService {
         lines.push({ id: old?.id ?? randomUUID(), itemId: item.id, lineNumber: index + 1, quantity, unitCost, unitName, unitFactor, unitQuantity, notes: raw.notes ?? null });
       }
       if (document.voucherKind === 'ISSUE' && !costCenterId) {
-        throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
+        throw new BadRequestException({ code: 'COST_CENTER_REQUIRED_ISSUE', message: 'A cost center is required when issuing stock from a warehouse.' });
       }
       await tx.stockDocumentLine.deleteMany({ where: { documentId: id } });
       await tx.stockDocumentLine.createMany({ data: lines.map(line => ({ ...line, documentId: id })) });
@@ -890,7 +890,7 @@ export class StockDocumentsService {
   /** Review and approval are idempotent and atomic with their audit record. */
   async transitionVoucher(companyId: string, branchId: string | null, userId: string, id: string,
     stage: 'REVIEW' | 'APPROVE', mayReadCost = true, expectedVersion?: number) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     await this.prisma.$transaction(async tx => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM stock_documents WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
@@ -899,7 +899,7 @@ export class StockDocumentsService {
       if (locked.length !== 1) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       const document = await tx.stockDocument.findUniqueOrThrow({ where: { id } });
       if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
-      if (expectedVersion !== undefined && document.editVersion !== expectedVersion) throw new ConflictException('The voucher has changed; reload the latest version');
+      if (expectedVersion !== undefined && document.editVersion !== expectedVersion) throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed; reload the latest version' });
       if (stage === 'REVIEW') {
         if (document.reviewedAt) return;
         await tx.stockDocument.update({ where: { id }, data: { reviewedAt: new Date(), reviewedBy: userId, editVersion: { increment: 1 } } });
@@ -1011,7 +1011,7 @@ export class StockDocumentsService {
       data: { approvedAt: new Date(), approvedBy: userId },
     });
     if (claimed.count !== 1) {
-      throw new BadRequestException('This write-off was approved by someone else a moment ago.');
+      throw new BadRequestException({ code: 'WRITEOFF_ALREADY_APPROVED', message: 'This write-off was approved by someone else a moment ago.' });
     }
 
     await this.audit.record({
@@ -1050,7 +1050,7 @@ export class StockDocumentsService {
       );
     }
     if (initialDocument.voucherKind && (!initialDocument.reviewedAt || !initialDocument.approvedAt)) {
-      throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
+      throw new BadRequestException({ code: 'VOUCHER_NOT_APPROVED', message: 'Stock voucher must be reviewed and approved before posting' });
     }
     // A loss is approved before it is posted, by somebody other than the person
     // who wrote it down - enforced here, on every posting route, so no
@@ -1073,7 +1073,7 @@ export class StockDocumentsService {
     }
     if (initialDocument.kind === StockDocumentKind.TRANSFER &&
         initialDocument.lines.some((line) => !line.quantity.greaterThan(0))) {
-      throw new BadRequestException('Transfer quantities must be positive before posting');
+      throw new BadRequestException({ code: 'TRANSFER_QTY_NOT_POSITIVE', message: 'Transfer quantities must be positive before posting' });
     }
     const settings = await this.settings.get(companyId);
 
@@ -1101,17 +1101,17 @@ export class StockDocumentsService {
       if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
       if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
       if (document.voucherKind && expectedVersion !== undefined && document.editVersion !== expectedVersion) {
-        throw new ConflictException('The voucher has changed; reload the latest version');
+        throw new ConflictException({ code: 'VOUCHER_CHANGED_RELOAD', message: 'The voucher has changed; reload the latest version' });
       }
       if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
-        throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
+        throw new BadRequestException({ code: 'VOUCHER_NOT_APPROVED', message: 'Stock voucher must be reviewed and approved before posting' });
       }
       if (document.kind === StockDocumentKind.WRITE_OFF && (!document.approvedAt || !document.approvedBy)) {
         throw new BadRequestException('A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.');
       }
       if (document.voucherKind === 'ISSUE') {
         if (!document.costCenterId) {
-          throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
+          throw new BadRequestException({ code: 'COST_CENTER_REQUIRED_ISSUE', message: 'A cost center is required when issuing stock from a warehouse.' });
         }
         // Hold a shared row lock through commit. Cost-centre UPDATE/DELETE
         // must either finish before our validation (so we see its new state)
@@ -1125,7 +1125,7 @@ export class StockDocumentsService {
       }
       if (document.kind === StockDocumentKind.TRANSFER &&
           document.lines.some((line) => !line.quantity.greaterThan(0))) {
-        throw new BadRequestException('Transfer quantities must be positive before posting');
+        throw new BadRequestException({ code: 'TRANSFER_QTY_NOT_POSITIVE', message: 'Transfer quantities must be positive before posting' });
       }
 
       // Where the goods are: named on the document, or the branch's default

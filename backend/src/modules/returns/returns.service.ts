@@ -252,7 +252,7 @@ export class ReturnsService {
     mayReadCost = true,
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     // An absent id is not a wildcard: Prisma reads `undefined` as "no filter",
     // so leaving it out used to select an arbitrary invoice. The request must
@@ -1175,7 +1175,7 @@ export class ReturnsService {
     mayReadCost = true,
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     const originalInvoiceId = this.requiredId(dto.originalInvoiceId, 'originalInvoiceId');
     const original = await this.prisma.purchaseInvoice.findFirst({

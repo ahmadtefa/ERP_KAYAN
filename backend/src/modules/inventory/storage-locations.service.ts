@@ -391,7 +391,7 @@ export class StorageLocationsService {
     }
     const quantity = new Prisma.Decimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('Quantity must be positive');
+      throw new BadRequestException({ code: 'QUANTITY_NOT_POSITIVE', message: 'Quantity must be positive' });
     }
 
     const [from, to] = await Promise.all([
@@ -672,7 +672,7 @@ export class StorageLocationsService {
     transferWarehouseIds?: string[],
   ) {
     const quantity = new Prisma.Decimal(input.quantity);
-    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException('Quantity must be positive');
+    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'QUANTITY_NOT_POSITIVE', message: 'Quantity must be positive' });
     const to = await this.prisma.storageLocation.findFirst({
       where: { id: input.toLocationId, companyId, deletedAt: null },
     });
@@ -815,7 +815,7 @@ export class StorageLocationsService {
     transferWarehouseIds?: string[],
   ) {
     const quantity = new Prisma.Decimal(input.quantity);
-    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException('Quantity must be positive');
+    if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'QUANTITY_NOT_POSITIVE', message: 'Quantity must be positive' });
     if ((input.reason ?? '').trim().length < 3) {
       throw new BadRequestException(
         'اكتب سبب التصحيح (3 أحرف على الأقل). / Write the reason for this correction (at least 3 characters).',

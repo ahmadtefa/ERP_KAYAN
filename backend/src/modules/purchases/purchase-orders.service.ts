@@ -180,7 +180,7 @@ export class PurchaseOrdersService {
   }
 
   async create(companyId: string, branchId: string | null, userId: string, dto: Record<string, unknown>) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const identity = orderCreationIdentity(dto);
     const findReplay = async (): Promise<string | null> => {
       if (!identity) return null;
@@ -191,7 +191,7 @@ export class PurchaseOrdersService {
       `);
       const previous = rows[0];
       if (!previous) return null;
-      if (previous.requestHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+      if (previous.requestHash !== identity.hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
       return previous.orderId;
     };
     const previousId = await findReplay();
@@ -284,7 +284,7 @@ export class PurchaseOrdersService {
 
   private async updateOrder(companyId: string, branchId: string | null, userId: string, id: string,
     dto: Record<string, unknown>, approved: boolean) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const identity = orderCreationIdentity({ ...dto, orderId: id });
     if (!identity) throw new BadRequestException('idempotencyKey is required');
     const operation = approved ? 'p-amend' : 'p-edit';
@@ -301,7 +301,7 @@ export class PurchaseOrdersService {
       `);
       if (previous.length) {
         if (previous[0].orderId !== id || previous[0].requestHash !== identity.hash) {
-          throw new ConflictException('The idempotency key was used for a different request');
+          throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
         }
         return;
       }
@@ -350,7 +350,7 @@ export class PurchaseOrdersService {
         VALUES (${companyId}::uuid, ${branchId}::uuid, ${operation}, ${identity.key}, ${identity.hash}, ${id}::uuid)
         ON CONFLICT ("companyId", "branchId", kind, "requestKey") DO NOTHING RETURNING "orderId"
       `);
-      if (inserted.length !== 1) throw new ConflictException('The idempotency key was used for a different request');
+      if (inserted.length !== 1) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
       await this.audit.recordRequired({ companyId, userId, action: approved ? 'AMEND' : 'UPDATE', entity: 'purchase_orders', entityId: id,
         before: { total: order.totalAmount.toFixed(MONEY_SCALE), status: order.status, updatedAt: order.updatedAt.toISOString(),
           lines: order.lines.map(line => ({ id: line.id, quantity: line.quantity.toFixed(MONEY_SCALE),
@@ -466,7 +466,7 @@ export class PurchaseOrdersService {
     dto: Record<string, unknown> = {},
     mayReadCost = true,
   ) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const invoiceId = await this.prisma.$transaction(async (tx) => {
       // Serialize both identical retries and competing allocations for the
       // same order before reading its current quantities or state.
@@ -492,7 +492,7 @@ export class PurchaseOrdersService {
       where: { companyId, purchaseOrderId: id, orderConversionKey: identity.key },
     });
     if (previous) {
-      if (previous.orderConversionHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+      if (previous.orderConversionHash !== identity.hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
       if (previous.deletedAt || previous.status === 'REVERSED') throw new ConflictException('The invoice for this idempotency key is no longer active');
       return previous.id;
     }

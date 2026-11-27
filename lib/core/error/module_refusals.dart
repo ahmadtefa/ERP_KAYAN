@@ -219,6 +219,46 @@ const Map<String, List<String>> moduleRefusals = {
     'أحد الحسابين غير صالح للقيد: المصروف يجب أن يكون حساب مصروفات، والصرف حساب صندوق أو بنك أو دائنين، وكلاهما فعّال وقابل للترحيل. اختر حسابًا صحيحًا. لم يُسجَّل صرف.',
     'One of the two accounts cannot take this entry: the expense must be an expense account, the paying account a cash, bank or payable account, and both active and postable. Choose a valid account. No payout was recorded.',
   ],
+  'QUANTITY_NOT_POSITIVE': [
+    'الكمية يجب أن تكون أكبر من صفر. اكتب كمية صحيحة ثم أعد المحاولة. لم يتغير شيء.',
+    'The quantity must be above zero. Enter a valid quantity and try again. Nothing changed.',
+  ],
+  'VOUCHER_CHANGED_RELOAD': [
+    'المستند تغيّر بعد أن فتحته (ربما عدّله مستخدم آخر). حدّث الشاشة وراجع آخر نسخة ثم أعد المحاولة. لم يُحفظ تعديلك.',
+    'The document changed after you opened it, possibly by someone else. Reload the screen, check the latest version and try again. Your change was not saved.',
+  ],
+  'VOUCHER_NOT_APPROVED': [
+    'لا يُرحَّل مستند المخزون قبل مراجعته واعتماده. اطلب الاعتماد من المسؤول ثم رحّله. لم يتغير شيء.',
+    'A stock document cannot be posted before it is reviewed and approved. Ask the approver to approve it, then post it. Nothing changed.',
+  ],
+  'TRANSFER_CHANGED_RELOAD': [
+    'حالة التحويل تغيّرت أثناء العملية (ربما بواسطة مستخدم آخر). حدّث الشاشة وراجع حالته الحالية ثم أعد المحاولة إن لزم. لم تُسجَّل هذه الخطوة.',
+    'The transfer changed while this step was running, possibly by someone else. Reload the screen, check its current state and try again if needed. This step was not recorded.',
+  ],
+  'COST_CENTER_REQUIRED_ISSUE': [
+    'صرف البضاعة من المخزن يحتاج مركز تكلفة. اختر مركز التكلفة في المستند ثم أعد المحاولة. لم يتغير شيء.',
+    'Issuing goods from a warehouse needs a cost center. Choose the cost center on the document and try again. Nothing changed.',
+  ],
+  'TRANSFER_QTY_NOT_POSITIVE': [
+    'كميات التحويل يجب أن تكون أكبر من صفر قبل الترحيل. صحّح الكميات أو احذف السطر الفارغ ثم أعد الترحيل. لم يتغير شيء.',
+    'Transfer quantities must be above zero before posting. Correct the quantities or remove the empty line, then post again. Nothing changed.',
+  ],
+  'REQUEST_KEY_REUSED': [
+    'هذا الطلب أُرسل من قبل بمحتوى مختلف. افتح السجل السابق لتراجعه، أو ابدأ طلبًا جديدًا. لم يُنشأ شيء جديد.',
+    'This request was already sent with different content. Open the earlier record to review it, or start a new request. Nothing new was created.',
+  ],
+  'VOUCHER_WAREHOUSE_INVALID': [
+    'مخزن المستند لا يتبع فرعك أو أنه متوقف. اختر مخزنًا فعّالًا من فرعك ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The document warehouse does not belong to your branch or is inactive. Choose an active warehouse of your branch and try again. Nothing was saved.',
+  ],
+  'TRANSIT_UNRESOLVED': [
+    'ما زالت بضاعة في الطريق لم تُحسم. استلمها أو أرجعها أو اعتمد إعدامها ثم أغلق التحويل. لم يُغلق التحويل.',
+    'Goods are still in transit and not settled. Receive them, return them or approve a write-off, then close the transfer. The transfer was not closed.',
+  ],
+  'WRITEOFF_ALREADY_APPROVED': [
+    'اعتمد مستخدم آخر هذا الإعدام قبل لحظات. حدّث الشاشة وراجع حالته. لم تتكرر الموافقة.',
+    'Someone else approved this write-off a moment ago. Reload the screen and check its status. Your approval was not repeated.',
+  ],
 };
 
 /// Arabic names of the inputs these refusals point at, for the generic

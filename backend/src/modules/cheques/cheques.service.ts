@@ -111,7 +111,7 @@ export class ChequesService {
   }
 
   async create(companyId: string, branchId: string | null, userId: string, input: CreateChequeInput) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const direction = String(input.direction ?? '').toUpperCase() as ChequeDirection;
     if (direction !== 'RECEIVED' && direction !== 'ISSUED') {
       throw new BadRequestException({ code: 'VALIDATION', message: 'direction must be RECEIVED or ISSUED', field: 'direction' });

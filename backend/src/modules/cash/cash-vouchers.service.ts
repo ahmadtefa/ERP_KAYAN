@@ -186,7 +186,7 @@ export class CashVouchersService {
     options: { discloseBalance?: boolean } = {},
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
 
     const kind = String(dto.kind ?? '').toUpperCase() as CashVoucherKind;
