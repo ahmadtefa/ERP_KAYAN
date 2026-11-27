@@ -87,6 +87,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['withholding.manage', 'Set up withholding tax rates', 'إعداد نسب ضريبة الخصم والإضافة', 'cash'],
   ['serials.read', 'View serial numbers and warranty', 'عرض الأرقام التسلسلية والضمان', 'inventory'],
   ['serials.manage', 'Register, sell, return and scrap serial numbers', 'تسجيل وبيع وإرجاع وإعدام الأرقام التسلسلية', 'inventory'],
+  ['commissions.read', 'View sales reps and commissions', 'عرض مندوبي المبيعات والعمولات', 'sales'],
+  ['commissions.manage', 'Manage sales reps, assign commissions and pay them out', 'إدارة المندوبين وتسجيل العمولات وصرفها', 'sales'],
   ['reports.vat-return.read', 'View VAT return', 'عرض إقرار ضريبة القيمة المضافة', 'reports'],
   ['reports.expenses.read', 'View expenses report', 'عرض تقرير expenses', 'reports'],
   ['reports.income.read', 'View income report', 'عرض تقرير income', 'reports'],
