@@ -123,7 +123,7 @@ export class DatabaseMaintenanceBarrier implements OnModuleDestroy {
       // Waiting for a lease timed out: the server is busy. Anything else
       // (cannot reach the database) keeps the original refusal.
       if (/timeout exceeded when trying to connect/i.test(text)) {
-        throw new ServiceUnavailableException(BARRIER_BUSY_MESSAGE);
+        throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_BUSY', message: BARRIER_BUSY_MESSAGE });
       }
       throw new ServiceUnavailableException({ code: 'DATABASE_BARRIER_ADMIT_E018', message: 'The database is under maintenance or recovery is required.' });
     }

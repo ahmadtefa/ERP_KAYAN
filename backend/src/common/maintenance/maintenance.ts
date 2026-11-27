@@ -27,11 +27,11 @@ export class MaintenanceService {
   get coordinatesProcesses(): boolean { return Boolean(this.barrier); }
 
   async admitBusinessRequest(): Promise<() => void> {
-    if (this.active) throw new ServiceUnavailableException('The database is in maintenance mode.');
+    if (this.active) throw new ServiceUnavailableException({ code: 'MAINTENANCE_INTERCEPT_E023', message: 'The database is in maintenance mode.' });
     const releaseDatabase = await this.barrier?.admit();
     if (this.active) {
       await releaseDatabase?.();
-      throw new ServiceUnavailableException('The database is in maintenance mode.');
+      throw new ServiceUnavailableException({ code: 'MAINTENANCE_INTERCEPT_E023', message: 'The database is in maintenance mode.' });
     }
     const releaseLocal = this.trackBusinessRequest();
     return () => {

@@ -202,6 +202,10 @@ const Map<String, List<String>> wordedRefusals = {
     'نسبة الخصم {percent}% أعلى من الحد الأقصى المسموح للشركة وهو {maximum}%. خفّض الخصم إلى {maximum}% أو أقل، أو اطلب من مدير النظام رفع الحد، ثم أعد المحاولة. لم يُحفظ شيء.',
     'The discount of {percent}% is above the maximum the company allows, which is {maximum}%. Lower the discount to {maximum}% or less, or ask the system administrator to raise the limit, then try again. Nothing was saved.',
   ],
+  'DATABASE_BARRIER_BUSY': [
+    'الخادم مشغول بعملية أخرى في هذه اللحظة. انتظر قليلًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The server is busy with another operation right now. Wait a moment, then try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
