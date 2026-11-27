@@ -24,11 +24,11 @@ const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
 export function parseRate(value: unknown): Prisma.Decimal {
   const text = String(value ?? '').trim();
   if (!/^\d{1,3}(\.\d{1,4})?$/.test(text)) {
-    throw new WithholdingError('The rate must be a number such as 1 or 5 or 0.5');
+    throw new WithholdingError('The rate must be a number such as 1 or 5 or 0.5', 'WITHHOLDING_RATE_FORMAT');
   }
   const rate = D(text);
   if (rate.lessThanOrEqualTo(0) || rate.greaterThan(100)) {
-    throw new WithholdingError('The rate must be above 0 and at most 100');
+    throw new WithholdingError('The rate must be above 0 and at most 100', 'WITHHOLDING_RATE_RANGE');
   }
   return rate;
 }
@@ -36,7 +36,7 @@ export function parseRate(value: unknown): Prisma.Decimal {
 /** Tax withheld on a gross amount, to the piastre, halves rounded up. */
 export function withheldAmount(gross: Prisma.Decimal.Value, ratePercent: Prisma.Decimal.Value): Prisma.Decimal {
   const base = D(gross);
-  if (base.lessThanOrEqualTo(0)) throw new WithholdingError('The voucher amount must be above zero');
+  if (base.lessThanOrEqualTo(0)) throw new WithholdingError('The voucher amount must be above zero', 'WITHHOLDING_AMOUNT_NOT_POSITIVE');
   const tax = base.times(D(ratePercent)).dividedBy(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
   if (tax.lessThanOrEqualTo(0)) throw new WithholdingError('At this rate the tax on this amount rounds to zero', 'WITHHOLDING_TAX_ZERO');
   if (tax.greaterThanOrEqualTo(base)) throw new WithholdingError('The tax cannot be as large as the voucher', 'WITHHOLDING_TAX_TOO_BIG');

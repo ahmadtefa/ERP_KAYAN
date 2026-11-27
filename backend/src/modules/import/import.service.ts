@@ -519,7 +519,7 @@ export class ImportService {
         : readCsv(file.buffer);
     } catch (error) {
       if (error instanceof ImportFormatError) {
-        throw new BadRequestException(error.message);
+        throw new BadRequestException({ code: error.code, message: error.message });
       }
       throw error;
     }
@@ -564,8 +564,12 @@ export class ImportService {
         !(codeField.aliases ?? []).some((alias) => headerKeys.includes(alias))) {
       throw new BadRequestException(
         headerKeys.length === 0
-          ? 'The file has no readable column headers. Start from the template on this screen.'
-          : `The file has no "${codeField.labelEn}" column. Add one (or use the template) - without it a row cannot be matched to a record.`,
+          ? { code: 'IMPORT_NO_HEADERS', message: 'The file has no readable column headers. Start from the template on this screen.' }
+          : {
+              code: 'IMPORT_NO_CODE_COLUMN',
+              message: `The file has no "${codeField.labelEn}" column. Add one (or use the template) - without it a row cannot be matched to a record.`,
+              params: { column: codeField.labelAr },
+            },
       );
     }
 

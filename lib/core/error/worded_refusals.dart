@@ -314,6 +314,42 @@ const Map<String, List<String>> wordedRefusals = {
     'تاريخ الصلاحية يسبق تاريخ الإنتاج. راجع التاريخين وصحّح الخطأ، ثم أعد المحاولة. لم يُحفظ شيء.',
     'The expiry date is before the production date. Check both dates and correct the mistake, then try again. Nothing was saved.',
   ],
+  'WITHHOLDING_RATE_FORMAT': [
+    'نسبة الخصم من المنبع ليست رقمًا مقبولًا. اكتب رقمًا مثل 1 أو 5 أو 0.5، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The withholding rate is not an accepted number. Enter a number such as 1, 5 or 0.5, then try again. Nothing was saved.',
+  ],
+  'WITHHOLDING_RATE_RANGE': [
+    'نسبة الخصم من المنبع يجب أن تكون أكبر من صفر ولا تزيد على 100. اكتب نسبة ضمن هذا النطاق، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The withholding rate must be above zero and no more than 100. Enter a rate in that range, then try again. Nothing was saved.',
+  ],
+  'WITHHOLDING_AMOUNT_NOT_POSITIVE': [
+    'مبلغ السند يجب أن يكون أكبر من صفر حتى يُحسب عليه الخصم من المنبع. اكتب مبلغًا صحيحًا، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The voucher amount must be above zero for withholding to be calculated. Enter a valid amount, then try again. Nothing was saved.',
+  ],
+  'IMPORT_FILE_UNREADABLE': [
+    'تعذّرت قراءة الملف المرفوع. تأكد أنه ملف إكسل بصيغة xlsx أو ملف CSV سليم، ثم ارفعه من جديد. لم يُستورد شيء.',
+    'The uploaded file could not be read. Check that it is a valid xlsx or CSV file, then upload it again. Nothing was imported.',
+  ],
+  'IMPORT_NOT_XLSX': [
+    'تعذّرت قراءة الملف كمصنف إكسل. إن كان محفوظًا بصيغة xls فافتحه واحفظه بصيغة xlsx أولًا، ثم ارفعه من جديد. لم يُستورد شيء.',
+    'The file could not be read as an Excel workbook. If it was saved as .xls, open it and save it as .xlsx first, then upload it again. Nothing was imported.',
+  ],
+  'IMPORT_NO_SHEETS': [
+    'مصنف الإكسل لا يحتوي على أي ورقة. أضف ورقة بالبيانات أو ابدأ من النموذج الموجود في هذه الشاشة، ثم ارفعه من جديد. لم يُستورد شيء.',
+    'The workbook has no sheets. Add a sheet with the data or start from the template on this screen, then upload it again. Nothing was imported.',
+  ],
+  'IMPORT_EMPTY_FILE': [
+    'الملف فارغ. أضف البيانات أو ابدأ من النموذج الموجود في هذه الشاشة، ثم ارفعه من جديد. لم يُستورد شيء.',
+    'The file is empty. Add the data or start from the template on this screen, then upload it again. Nothing was imported.',
+  ],
+  'IMPORT_NO_HEADERS': [
+    'لا توجد في الملف عناوين أعمدة يمكن قراءتها. ابدأ من النموذج الموجود في هذه الشاشة ثم ارفع الملف من جديد. لم يُستورد شيء.',
+    'The file has no readable column headers. Start from the template on this screen, then upload the file again. Nothing was imported.',
+  ],
+  'IMPORT_NO_CODE_COLUMN': [
+    'الملف لا يحتوي على عمود «{column}»، ولا يمكن مطابقة أي صف بسجله بدونه. أضف العمود أو استخدم النموذج الموجود في هذه الشاشة، ثم ارفع الملف من جديد. لم يُستورد شيء.',
+    'The file has no "{column}" column, and without it a row cannot be matched to its record. Add the column or use the template on this screen, then upload the file again. Nothing was imported.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

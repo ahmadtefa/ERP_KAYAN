@@ -14,7 +14,11 @@ export interface Sheet {
   unknownColumns: string[];
 }
 
-export class ImportFormatError extends Error {}
+export class ImportFormatError extends Error {
+  constructor(message: string, readonly code: string = 'IMPORT_FILE_UNREADABLE') {
+    super(message);
+  }
+}
 
 /// `.xlsx` files arrive as a zip. The signature is checked so a renamed file
 /// produces a clear message instead of a confusing parse failure.
@@ -31,11 +35,12 @@ export async function readXlsx(buffer: Buffer): Promise<Sheet> {
   } catch {
     throw new ImportFormatError(
       'The file could not be read as an Excel workbook. If it was saved as .xls, open it and save it as .xlsx first.',
+      'IMPORT_NOT_XLSX',
     );
   }
 
   const sheet = workbook.worksheets[0];
-  if (!sheet) throw new ImportFormatError('The workbook has no sheets.');
+  if (!sheet) throw new ImportFormatError('The workbook has no sheets.', 'IMPORT_NO_SHEETS');
 
   const grid: string[][] = [];
   sheet.eachRow({ includeEmpty: false }, (row) => {
@@ -94,7 +99,7 @@ function gridToSheet(grid: string[][]): Sheet {
     row.some((cell) => cell.trim() !== ''),
   );
   if (headerRowIndex === -1) {
-    throw new ImportFormatError('The file is empty.');
+    throw new ImportFormatError('The file is empty.', 'IMPORT_EMPTY_FILE');
   }
 
   const headers = grid[headerRowIndex].map((cell) => cell.trim());

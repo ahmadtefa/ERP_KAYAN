@@ -546,7 +546,7 @@ export class CashVouchersService {
             withholding.accountId,
           );
         } catch (error) {
-          if (error instanceof WithholdingError) throw new BadRequestException(error.message);
+          if (error instanceof WithholdingError) throw new BadRequestException({ code: error.code ?? 'WITHHOLDING_NOT_APPLICABLE', message: error.message });
           throw error;
         }
       }
