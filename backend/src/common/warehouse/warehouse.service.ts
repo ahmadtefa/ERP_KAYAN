@@ -116,7 +116,7 @@ export class WarehouseService {
     const code = this.text(dto.code, 'code');
     const enteredEn = String(dto.nameEn ?? '').trim();
     const enteredAr = String(dto.nameAr ?? '').trim();
-    if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English warehouse name');
+    if (!enteredEn && !enteredAr) throw new BadRequestException({ code: 'WAREHOUSE_NAME_REQUIRED', message: 'Provide an Arabic or English warehouse name' });
     const nameEn = enteredEn || enteredAr;
     const nameAr = enteredAr || enteredEn;
     const branchId = await this.branch(companyId, this.text(dto.branchId, 'branchId'));
@@ -194,7 +194,7 @@ export class WarehouseService {
     if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
       const enteredEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const enteredAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
-      if (!enteredEn && !enteredAr) throw new BadRequestException('Provide an Arabic or English warehouse name');
+      if (!enteredEn && !enteredAr) throw new BadRequestException({ code: 'WAREHOUSE_NAME_REQUIRED', message: 'Provide an Arabic or English warehouse name' });
       data.nameEn = enteredEn || enteredAr;
       data.nameAr = enteredAr || enteredEn;
     }
@@ -208,14 +208,10 @@ export class WarehouseService {
 
     const makeDefault = dto.isDefault === true;
     if (before.isDefault && dto.isDefault === false) {
-      throw new BadRequestException(
-        'A branch must keep a default warehouse; name another one instead',
-      );
+      throw new BadRequestException({ code: 'WAREHOUSE_DEFAULT_KEEP', message: 'A branch must keep a default warehouse; name another one instead' });
     }
     if (dto.isActive === false && before.isDefault) {
-      throw new BadRequestException(
-        'The default warehouse of a branch cannot be deactivated; make another one the default first',
-      );
+      throw new BadRequestException({ code: 'WAREHOUSE_DEFAULT_KEEP', message: 'The default warehouse of a branch cannot be deactivated; make another one the default first' });
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -260,9 +256,7 @@ export class WarehouseService {
     if (!before) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     this.assertInScope(scope, before.branchId);
     if (before.isDefault) {
-      throw new BadRequestException(
-        'The default warehouse of a branch cannot be deactivated; make another one the default first',
-      );
+      throw new BadRequestException({ code: 'WAREHOUSE_DEFAULT_KEEP', message: 'The default warehouse of a branch cannot be deactivated; make another one the default first' });
     }
 
     await this.prisma.warehouse.update({ where: { id }, data: { isActive: false } });
@@ -532,7 +526,7 @@ export class WarehouseService {
         where: { id: warehouseId, companyId, deletedAt: null },
         select: { id: true, branchId: true, isActive: true, code: true },
       });
-      if (!named) throw new BadRequestException('The warehouse does not exist in this company');
+      if (!named) throw new BadRequestException({ code: 'WAREHOUSE_MISSING', message: 'The warehouse does not exist in this company' });
       if (named.branchId !== branchId) {
         throw new BadRequestException(
           `Warehouse ${named.code} belongs to another branch; a document cannot move goods across branches`,
@@ -593,9 +587,7 @@ export class WarehouseService {
       select: { id: true },
     });
     if (!historical) {
-      throw new BadRequestException(
-        'The warehouse recorded on the original document is no longer available in this company and branch.',
-      );
+      throw new BadRequestException({ code: 'WAREHOUSE_ORIGINAL_UNAVAILABLE', message: 'The warehouse recorded on the original document is no longer available in this company and branch.' });
     }
     return historical.id;
   }
@@ -749,7 +741,7 @@ export class WarehouseService {
       where: { id: branchId, companyId, deletedAt: null },
       select: { id: true },
     });
-    if (!branch) throw new BadRequestException('The branch does not exist in this company');
+    if (!branch) throw new BadRequestException({ code: 'BRANCH_MISSING', message: 'The branch does not exist in this company' });
     return branch.id;
   }
 

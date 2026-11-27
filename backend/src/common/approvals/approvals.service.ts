@@ -183,31 +183,29 @@ export class ApprovalsService {
   private validatePolicy(input: PolicyInput) {
     const operation = String(input.operation ?? '').trim().toUpperCase();
     if (!APPROVAL_OPERATIONS.includes(operation as ApprovalOperation)) {
-      throw new BadRequestException(
-        `Operation must be one of ${APPROVAL_OPERATIONS.join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'APPROVAL_OPERATION_UNKNOWN', message: `Operation must be one of ${APPROVAL_OPERATIONS.join(', ')}` });
     }
     const nameEn = String(input.nameEn ?? '').trim();
     const nameAr = String(input.nameAr ?? '').trim();
-    if (!nameEn || !nameAr) throw new BadRequestException('A policy name is required in both languages');
-    if (nameEn.length > 120 || nameAr.length > 120) throw new BadRequestException('A policy name may be at most 120 characters');
+    if (!nameEn || !nameAr) throw new BadRequestException({ code: 'APPROVAL_POLICY_NAME', message: 'A policy name is required in both languages' });
+    if (nameEn.length > 120 || nameAr.length > 120) throw new BadRequestException({ code: 'APPROVAL_POLICY_NAME', message: 'A policy name may be at most 120 characters' });
     const priority = input.priority === undefined ? 100 : Number(input.priority);
     if (!Number.isInteger(priority) || priority < 0 || priority > 100000) {
-      throw new BadRequestException('Priority must be a whole number between 0 and 100000');
+      throw new BadRequestException({ code: 'APPROVAL_PRIORITY_RANGE', message: 'Priority must be a whole number between 0 and 100000' });
     }
     const levelsInput = Array.isArray(input.levels) ? input.levels : [];
-    if (levelsInput.length > 10) throw new BadRequestException('A policy may have at most 10 levels');
+    if (levelsInput.length > 10) throw new BadRequestException({ code: 'APPROVAL_TOO_MANY_LEVELS', message: 'A policy may have at most 10 levels' });
     const seen = new Set<number>();
     const levels = levelsInput.map((level, index) => {
       const number = level.level === undefined ? index + 1 : Number(level.level);
       if (!Number.isInteger(number) || number < 1 || number > 10) {
-        throw new BadRequestException('Levels must be numbered 1 to 10');
+        throw new BadRequestException({ code: 'APPROVAL_LEVELS_NUMBERING', message: 'Levels must be numbered 1 to 10' });
       }
-      if (seen.has(number)) throw new BadRequestException(`Level ${number} is repeated`);
+      if (seen.has(number)) throw new BadRequestException({ code: 'APPROVAL_LEVEL_REPEATED', message: `Level ${number} is repeated` });
       seen.add(number);
       const permission = String(level.permission ?? '').trim();
-      if (!permission) throw new BadRequestException(`Level ${number} needs a permission`);
-      if (permission.length > 120) throw new BadRequestException(`Level ${number}: permission code is too long`);
+      if (!permission) throw new BadRequestException({ code: 'APPROVAL_LEVEL_PERMISSION', message: `Level ${number} needs a permission` });
+      if (permission.length > 120) throw new BadRequestException({ code: 'APPROVAL_LEVEL_PERMISSION', message: `Level ${number}: permission code is too long` });
       const levelNameEn = String(level.nameEn ?? '').trim() || `Level ${number}`;
       const levelNameAr = String(level.nameAr ?? '').trim() || `المستوى ${number}`;
       return {
@@ -231,9 +229,9 @@ export class ApprovalsService {
       try {
         parsed = new Prisma.Decimal(String(value));
       } catch {
-        throw new BadRequestException(`${label} must be numeric`);
+        throw new BadRequestException({ code: 'APPROVAL_NUMBER_INVALID', message: `${label} must be numeric` });
       }
-      if (!parsed.isFinite() || parsed.lessThan(0)) throw new BadRequestException(`${label} must not be negative`);
+      if (!parsed.isFinite() || parsed.lessThan(0)) throw new BadRequestException({ code: 'APPROVAL_NUMBER_INVALID', message: `${label} must not be negative` });
       return parsed;
     };
     return {
@@ -407,15 +405,15 @@ export class ApprovalsService {
   ) {
     const { decision, entityType, entityId, chain } = params;
     if (!['APPROVE', 'REJECT', 'RETURN'].includes(decision)) {
-      throw new BadRequestException('Decision must be APPROVE, REJECT or RETURN');
+      throw new BadRequestException({ code: 'APPROVAL_DECISION_UNKNOWN', message: 'Decision must be APPROVE, REJECT or RETURN' });
     }
     const reason = params.reason?.trim() || null;
     if ((decision === 'REJECT' || decision === 'RETURN') && !reason) {
-      throw new BadRequestException('A rejection or return needs a reason');
+      throw new BadRequestException({ code: 'APPROVAL_REASON_REQUIRED', message: 'A rejection or return needs a reason' });
     }
-    if (reason && reason.length > 2000) throw new BadRequestException('A reason may be at most 2000 characters');
+    if (reason && reason.length > 2000) throw new BadRequestException({ code: 'APPROVAL_REASON_LONG', message: 'A reason may be at most 2000 characters' });
     if (chain.source === 'LEGACY') {
-      throw new ConflictException('This document does not use a configured approval chain');
+      throw new ConflictException({ code: 'APPROVAL_NO_CHAIN', message: 'This document does not use a configured approval chain' });
     }
     const requestKey = params.requestKey ? String(params.requestKey).slice(0, 160) : null;
     // Everything the caller chose is part of the key's fingerprint: a retry with
@@ -431,7 +429,7 @@ export class ApprovalsService {
       const prior = await this.keyedDecision(actor.companyId, entityType, entityId, requestKey);
       if (prior) {
         if (prior.actorId !== actor.userId || prior.decision !== decision || prior.requestHash !== fingerprint) {
-          throw new ConflictException('Idempotency key was reused for a different approval decision');
+          throw new ConflictException({ code: 'APPROVAL_KEY_REUSED', message: 'Idempotency key was reused for a different approval decision' });
         }
         const replayState = await this.stateFor(actor.companyId, chain, entityType, entityId, params.since ?? null);
         return { decision: prior, ...replayState, replayed: true };
@@ -444,15 +442,15 @@ export class ApprovalsService {
     );
     const cycle = everything.filter((item) => item.decision === 'RETURN').length + 1;
     const state = foldDecisions(chain, existing);
-    if (state.stopped) throw new ConflictException('This approval chain has already been decided');
-    if (state.isComplete) throw new ConflictException('This approval chain is already complete');
+    if (state.stopped) throw new ConflictException({ code: 'APPROVAL_ALREADY_DECIDED', message: 'This approval chain has already been decided' });
+    if (state.isComplete) throw new ConflictException({ code: 'APPROVAL_ALREADY_DECIDED', message: 'This approval chain is already complete' });
     const levelNumber = state.pendingLevel;
-    if (!levelNumber) throw new ConflictException('There is no level awaiting a decision');
+    if (!levelNumber) throw new ConflictException({ code: 'APPROVAL_NO_PENDING_LEVEL', message: 'There is no level awaiting a decision' });
     if (params.expectedLevel !== undefined && params.expectedLevel !== null && params.expectedLevel !== levelNumber) {
-      throw new ConflictException(`Level ${params.expectedLevel} is no longer the pending level; level ${levelNumber} is`);
+      throw new ConflictException({ code: 'APPROVAL_LEVEL_MOVED', message: `Level ${params.expectedLevel} is no longer the pending level; level ${levelNumber} is` });
     }
     const level = chain.levels.find((candidate) => candidate.level === levelNumber);
-    if (!level) throw new ConflictException('The pending level is missing from the policy');
+    if (!level) throw new ConflictException({ code: 'APPROVAL_NO_PENDING_LEVEL', message: 'The pending level is missing from the policy' });
     const verdict = mayDecide(
       chain,
       level,
@@ -499,12 +497,10 @@ export class ApprovalsService {
           const replayState = await this.stateFor(actor.companyId, chain, entityType, entityId, params.since ?? null);
           return { decision: winner, ...replayState, replayed: true };
         }
-        if (winner) throw new ConflictException('Idempotency key was reused for a different approval decision');
+        if (winner) throw new ConflictException({ code: 'APPROVAL_KEY_REUSED', message: 'Idempotency key was reused for a different approval decision' });
       }
       if (uniqueViolation && decision === 'APPROVE') {
-        throw new ConflictException(
-          'This level was approved by somebody else a moment ago; reload the request',
-        );
+        throw new ConflictException({ code: 'APPROVAL_LEVEL_DECIDED_ELSEWHERE', message: 'This level was approved by somebody else a moment ago; reload the request' });
       }
       throw error;
     }
