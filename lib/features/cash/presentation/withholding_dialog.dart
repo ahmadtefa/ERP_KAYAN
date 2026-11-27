@@ -6,7 +6,6 @@ import '../../../core/json/json_utils.dart';
 import '../../../shared/widgets/form_sheet.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
-import '../../withholding/presentation/withholding_screen.dart';
 
 /// Whether a voucher can carry withholding tax at all: a payment to a supplier
 /// or a receipt from a customer.
