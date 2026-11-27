@@ -24,6 +24,7 @@ import { BackupModule } from './modules/backup/backup.module';
 import { CashModule } from './modules/cash/cash.module';
 import { ChequesModule } from './modules/cheques/cheques.module';
 import { WithholdingModule } from './modules/withholding/withholding.module';
+import { SerialsModule } from './modules/serials/serials.module';
 import { FixedAssetsModule } from './modules/fixed-assets/fixed-assets.module';
 import { CompanyModule } from './modules/company/company.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -62,6 +63,7 @@ import { SearchModule } from './modules/search/search.module';
     CashModule,
     ChequesModule,
     WithholdingModule,
+    SerialsModule,
     FixedAssetsModule,
     AdminModule,
     PartiesModule,
