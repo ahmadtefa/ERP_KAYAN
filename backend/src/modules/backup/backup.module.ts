@@ -5,6 +5,7 @@ import { AuditModule } from '../../common/audit/audit.module';
 import { BackupController } from './backup.controller';
 import { BackupScheduleController } from './backup-schedule.controller';
 import { BackupScheduleService } from './backup-schedule.service';
+import { BackupDestinationService } from './backup-destination';
 import { BackupService } from './backup.service';
 import { FullBackupController } from './full-backup.controller';
 import { FullBackupService } from './full-backup.service';
@@ -40,6 +41,7 @@ import { PersistentRestoreState } from './system/restore-state';
     BackupService,
     FullBackupService,
     BackupScheduleService,
+    BackupDestinationService,
     CompleteBackupService,
     SystemRestoreService,
     DumpRecoveryCoordinator,

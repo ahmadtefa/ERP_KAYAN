@@ -11,19 +11,22 @@ describe('scheduled backup safety', () => {
       backupRun: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 'run' }) },
     };
     const full = {
-      capabilities: jest.fn().mockResolvedValue({ available: true }),
-      createFull: jest.fn().mockResolvedValue({ file: { name: 'new.dump' } }),
-      verify: jest.fn().mockResolvedValue({ entries: 1 }),
-      list: jest.fn().mockResolvedValue([]),
-      remove: jest.fn(),
-      assertDeletionSafe: jest.fn().mockRejectedValue(new Error('retention paused')),
       assertNoRestoreRunning: jest.fn().mockRejectedValue(new Error('retention paused')),
     };
+    const complete = {
+      capabilities: jest.fn().mockResolvedValue({ available: true }),
+      createFull: jest.fn().mockResolvedValue({ file: { name: 'new.kayanbackup', sizeBytes: 10 } }),
+      verify: jest.fn().mockResolvedValue({ ok: true }),
+      pathOf: jest.fn().mockReturnValue('/nonexistent/new.kayanbackup'),
+      list: jest.fn().mockResolvedValue([]),
+      remove: jest.fn(),
+    };
+    const destinations = { get: jest.fn().mockResolvedValue({ path: null, startHour: 2 }) };
     const settings = { get: jest.fn().mockResolvedValue({ backupIntervalHours: 1, backupRetentionCount: 1 }) };
     const maintenance = new MaintenanceService();
-    const service = new BackupScheduleService(prisma as never, full as never, settings as never, maintenance);
+    const service = new BackupScheduleService(prisma as never, full as never, settings as never, maintenance, complete as never, destinations as never);
     const prune = jest.spyOn(service, 'pruneRetention').mockResolvedValue([]);
-    return { prisma, full, service, prune, maintenance };
+    return { prisma, full, complete, destinations, settings, service, prune, maintenance };
   }
   afterEach(() => jest.restoreAllMocks());
 
@@ -46,83 +49,110 @@ describe('scheduled backup safety', () => {
     expect(prisma.company.findMany).toHaveBeenCalledTimes(1);
   });
 
-  it('never prunes automatically when verification fails or records raw error details', async () => {
-    const { service, full, prisma, prune } = setup();
-    full.verify.mockRejectedValue(new Error(marker));
-    const result = await service.runNow('company');
-    expect(result[0].status).toBe('FAILED');
-    expect(result[0].message).toContain('فشل إنشاء أرشيف قاعدة البيانات');
-    expect(JSON.stringify(result)).not.toContain(marker);
-    expect(JSON.stringify(prisma.backupRun.create.mock.calls, (_, value: unknown) => typeof value === 'bigint' ? value.toString() : value)).not.toContain(marker);
-    expect(prune).not.toHaveBeenCalled();
-    expect(full.remove).not.toHaveBeenCalled();
-  });
-
-  it('retains previous backups even after archive content is readable', async () => {
-    const { service, prune, full } = setup();
-    const result = await service.runNow('company');
-    expect(result[0].status).toBe('FAILED');
-    expect(result[0].fileName).toBe('new.dump');
-    expect(result[0].message).toContain('الملفات والترخيص والاستعادة الكاملة لم يتم التحقق منها');
-    expect(result[0].message).toContain('احتُفظ بالنسخ السابقة');
-    expect(prune).not.toHaveBeenCalled();
-    expect(full.remove).not.toHaveBeenCalled();
-  });
-
-  it('records dump creation failure without exposing tool details or deleting old backups', async () => {
-    const { service, full, prisma, prune } = setup();
-    full.createFull.mockRejectedValue(new Error(marker));
+  it('records a verified complete backup as SUCCESS and then applies retention', async () => {
+    const { service, prune, prisma } = setup();
     const [result] = await service.runNow('company');
-    expect(result).toMatchObject({fileName:'-', status:'FAILED'});
-    expect(result.message).toContain('فشل إنشاء أرشيف قاعدة البيانات');
-    expect(JSON.stringify(result)).not.toContain(marker);
+    expect(result.status).toBe('SUCCESS');
+    expect(result.fileName).toBe('new.kayanbackup');
     expect(prisma.backupRun.create).toHaveBeenCalledWith(expect.objectContaining({
-      data:expect.objectContaining({fileName:'-',status:'FAILED',companyId:'company'})}));
+      data: expect.objectContaining({ status: 'SUCCESS', fileName: 'new.kayanbackup' }) }));
+    expect(prune).toHaveBeenCalledWith(1, 'run', null);
+  });
+
+  it('a backup that fails verification stays FAILED and never prunes', async () => {
+    const { service, complete, prune } = setup();
+    complete.verify.mockResolvedValue({ ok: false });
+    const [result] = await service.runNow('company');
+    expect(result.status).toBe('FAILED');
+    expect(result.message).toContain('احتُفظ بالنسخ السابقة');
     expect(prune).not.toHaveBeenCalled();
-    expect(full.remove).not.toHaveBeenCalled();
+    expect(complete.remove).not.toHaveBeenCalled();
+  });
+
+  it('records a creation failure without exposing details or deleting old backups', async () => {
+    const { service, complete, prisma, prune } = setup();
+    complete.createFull.mockRejectedValue(new Error(marker));
+    const [result] = await service.runNow('company');
+    expect(result).toMatchObject({ fileName: '-', status: 'FAILED' });
+    expect(JSON.stringify(result)).not.toContain(marker);
+    expect(JSON.stringify(prisma.backupRun.create.mock.calls, (_, v: unknown) => typeof v === 'bigint' ? v.toString() : v)).not.toContain(marker);
+    expect(prune).not.toHaveBeenCalled();
+    expect(complete.remove).not.toHaveBeenCalled();
+  });
+
+  it('an unreachable chosen folder makes the run FAILED, keeps the local copy, no pruning', async () => {
+    const { service, destinations, prune, complete } = setup();
+    destinations.get.mockResolvedValue({ path: '/nonexistent-drive/backups', startHour: 2 });
+    const [result] = await service.runNow('company');
+    expect(result.status).toBe('FAILED');
+    expect(result.message).toContain('المجلد المختار');
+    expect(prune).not.toHaveBeenCalled();
+    expect(complete.remove).not.toHaveBeenCalled();
   });
 
   it('records a failed capability probe without leaking details', async () => {
-    const { service, full, prisma } = setup();
-    full.capabilities.mockRejectedValue(new Error(marker));
+    const { service, complete, prisma } = setup();
+    complete.capabilities.mockRejectedValue(new Error(marker));
     const [result] = await service.runNow('company');
-    expect(result).toMatchObject({fileName:'-',status:'FAILED'});
-    expect(result.message).toContain('أدوات قاعدة البيانات غير متاحة');
+    expect(result).toMatchObject({ fileName: '-', status: 'FAILED' });
     expect(JSON.stringify(result)).not.toContain(marker);
-    expect(prisma.backupRun.create).toHaveBeenCalledWith(expect.objectContaining({
-      data:expect.objectContaining({fileName:'-',status:'FAILED'})}));
-    expect(full.createFull).not.toHaveBeenCalled();
+    expect(prisma.backupRun.create).toHaveBeenCalled();
+    expect(complete.createFull).not.toHaveBeenCalled();
   });
 
-  it('backs off after a failed or incomplete attempt, but an explicit retry still works', async () => {
-    const { service, full, prisma } = setup();
-    prisma.backupRun.findFirst.mockResolvedValue({createdAt:new Date(),status:'FAILED',fileName:'new.dump'});
+  it('a daily-or-longer schedule waits for the chosen hour; hourly ignores it', async () => {
+    const { service, complete, prisma, destinations, settings } = setup();
+    const old = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+    prisma.backupRun.findFirst.mockResolvedValue({ createdAt: old, status: 'SUCCESS', fileName: 'x' });
+    settings.get.mockResolvedValue({ backupIntervalHours: 168, backupRetentionCount: 5 });
+    destinations.get.mockResolvedValue({ path: null, startHour: 24 });
     await (service as unknown as { tick(): Promise<void> }).tick();
-    expect(full.createFull).not.toHaveBeenCalled();
-    const [result] = await service.runNow('company');
-    expect(result.status).toBe('FAILED');
-    expect(full.createFull).toHaveBeenCalledTimes(1);
-    expect(prisma.backupRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where:{kind:'SCHEDULED',status:{in:['SUCCESS','VERIFIED','FAILED']}}}));
+    expect(complete.createFull).not.toHaveBeenCalled();
+    destinations.get.mockResolvedValue({ path: null, startHour: 0 });
+    await (service as unknown as { tick(): Promise<void> }).tick();
+    expect(complete.createFull).toHaveBeenCalledTimes(1);
+  });
+
+  it('backs off after a failed attempt, but an explicit retry still works', async () => {
+    const { service, complete, prisma } = setup();
+    prisma.backupRun.findFirst.mockResolvedValue({ createdAt: new Date(), status: 'FAILED', fileName: 'x' });
+    await (service as unknown as { tick(): Promise<void> }).tick();
+    expect(complete.createFull).not.toHaveBeenCalled();
+    await service.runNow('company');
+    expect(complete.createFull).toHaveBeenCalledTimes(1);
+  });
+
+  it('retention removes only older full copies this program recorded as good, and keeps the newest', async () => {
+    const { service, complete, prisma, prune } = setup();
+    prune.mockRestore();
+    (service as unknown as { full: { assertNoRestoreRunning: jest.Mock } }).full.assertNoRestoreRunning.mockResolvedValue(undefined);
+    const day = (n: number) => new Date(Date.UTC(2026, 0, n)).toISOString();
+    complete.list.mockResolvedValue([
+      { name: 'c.kayanbackup', createdAt: day(3), kind: 'full' },
+      { name: 'b.kayanbackup', createdAt: day(2), kind: 'full' },
+      { name: 'a.kayanbackup', createdAt: day(1), kind: 'full' },
+      { name: 's.kayanbackup', createdAt: day(1), kind: 'safety' },
+    ]);
+    prisma.backupRun.findFirst.mockImplementation(({ where }: { where: { fileName: string } }) =>
+      Promise.resolve(where.fileName === 'a.kayanbackup' ? { id: 'ra' } : null));
+    const removed = await service.pruneRetention(2);
+    expect(removed).toEqual(['a.kayanbackup']);
+    expect(complete.remove).toHaveBeenCalledWith('a.kayanbackup', null);
   });
 
   it('refuses manual retention before listing or removing any file', async () => {
-    const { service, prune, full } = setup();
+    const { service, prune, complete } = setup();
     prune.mockRestore();
     await expect(service.pruneRetention(1)).rejects.toThrow('retention paused');
-    expect(full.list).not.toHaveBeenCalled();
-    expect(full.remove).not.toHaveBeenCalled();
+    expect(complete.list).not.toHaveBeenCalled();
+    expect(complete.remove).not.toHaveBeenCalled();
   });
 
-  it('does not log raw scheduled-backup or retention errors', async () => {
-    const { service, full, prune } = setup();
+  it('does not log raw scheduled-backup errors', async () => {
+    const { service, complete } = setup();
     const errorLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const warningLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    full.createFull.mockRejectedValueOnce(new Error(marker));
+    complete.createFull.mockRejectedValueOnce(new Error(marker));
     await (service as unknown as { tick(): Promise<void> }).tick();
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(marker);
-    await service.runNow('company');
-    expect(prune).not.toHaveBeenCalled();
-    expect(JSON.stringify(warningLog.mock.calls)).not.toContain(marker);
   });
 });

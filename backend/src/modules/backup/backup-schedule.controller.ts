@@ -4,6 +4,9 @@ import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { BackupScheduleService } from './backup-schedule.service';
+import { BackupDestinationService, checkBackupDestination } from './backup-destination';
+import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { AuditService } from '../../common/audit/audit.service';
 
 /**
  * The scheduled backup: what it will do, what it has done, and a button to
@@ -18,7 +21,60 @@ import { BackupScheduleService } from './backup-schedule.service';
 @RequirePermissions('admin.backup')
 @UseGuards(AuditedSuperAdminGuard)
 export class BackupScheduleController {
-  constructor(private readonly schedule: BackupScheduleService) {}
+  constructor(
+    private readonly schedule: BackupScheduleService,
+    private readonly destinations: BackupDestinationService,
+    private readonly settings: CompanySettingsService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /// The administrator's choices: folder, hour of day, interval, copies kept.
+  @Get('settings')
+  async getSettings(@CurrentUser() user: AuthUser) {
+    const [dest, s] = await Promise.all([
+      this.destinations.get(user.companyId),
+      this.settings.get(user.companyId),
+    ]);
+    return {
+      intervalHours: s.backupIntervalHours,
+      retentionCount: s.backupRetentionCount,
+      destinationPath: dest.path,
+      startHour: dest.startHour,
+    };
+  }
+
+  /// Checks a folder without saving it: writes and reads back a test file.
+  @Post('check-folder')
+  checkFolder(@Body() body: { path?: string }) {
+    return checkBackupDestination(body?.path ?? '');
+  }
+
+  @Post('settings')
+  async saveSettings(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { intervalHours?: number; retentionCount?: number; destinationPath?: string | null; startHour?: number },
+  ) {
+    const before = await this.getSettings(user);
+    const dest = await this.destinations.set(user.companyId, user.userId, {
+      path: body?.destinationPath,
+      startHour: body?.startHour,
+    });
+    const patch: Record<string, unknown> = {};
+    if (body?.intervalHours !== undefined) patch.backupIntervalHours = body.intervalHours;
+    if (body?.retentionCount !== undefined) patch.backupRetentionCount = body.retentionCount;
+    if (Object.keys(patch).length > 0) await this.settings.update(user.companyId, user.userId, patch);
+    const after = await this.getSettings(user);
+    await this.audit.record({
+      action: 'UPDATE',
+      entity: 'backup_schedule',
+      entityId: user.companyId,
+      before,
+      after,
+      userId: user.userId,
+      companyId: user.companyId,
+    });
+    return { ...after, check: dest.check };
+  }
 
   /// When the next backup is due, and how many copies are being kept.
   @Get()

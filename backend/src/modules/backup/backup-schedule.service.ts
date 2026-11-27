@@ -1,10 +1,14 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { FullBackupService } from './full-backup.service';
+import { BackupDestinationService, copyArchiveVerified } from './backup-destination';
+import { CompleteBackupService } from './system/complete-backup.service';
 
 /// How often the timer wakes up to ask whether a backup is due. The interval
 /// itself is a per-company setting; this is only how promptly the setting is
@@ -37,6 +41,8 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     private readonly full: FullBackupService,
     private readonly settings: CompanySettingsService,
     private readonly maintenance: MaintenanceService,
+    private readonly complete: CompleteBackupService,
+    private readonly destinations: BackupDestinationService,
   ) {}
 
   onModuleInit(): void {
@@ -197,55 +203,76 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
     });
+    const dest = await this.destinations.get(company.id);
     const dueAt = lastRun
       ? new Date(lastRun.createdAt.getTime() + intervalHours * 3600 * 1000)
       : new Date(0);
-    if (!force && dueAt > new Date()) return null;
+    if (!force) {
+      const now = new Date();
+      if (dueAt > now) return null;
+      // A daily-or-longer schedule starts from the chosen hour of the day, so
+      // it does not dump the database in the middle of the working day.
+      if (lastRun && intervalHours >= 24 && now.getHours() < dest.startHour) return null;
+    }
 
     let toolsAvailable = false;
     try {
-      toolsAvailable = (await this.full.capabilities()).available;
+      toolsAvailable = (await this.complete.capabilities()).available;
     } catch {
       // An inaccessible tool or directory must be recorded as a failure too.
     }
     if (!toolsAvailable) {
       const message = 'فشل النسخ: أدوات قاعدة البيانات غير متاحة. لم تُحذف أي نسخة سابقة.';
-      await this.record({
-        kind: 'SCHEDULED',
-        fileName: '-',
-        status: 'FAILED',
-        message,
-      });
+      await this.record({ kind: 'SCHEDULED', fileName: '-', status: 'FAILED', message, companyId: company.id });
       return { fileName: '-', status: 'FAILED', message };
     }
 
     let fileName = '-';
     let message: string;
+    let status = 'FAILED';
+    let sizeBytes = 0;
     try {
-      const result = await this.full.createFull(null);
+      const result = await this.complete.createFull(null);
       fileName = result.file.name;
-      await this.full.verify(fileName);
-      // A readable PostgreSQL dump is useful, but it does not include or
-      // verify the external files and device-bound licence. It must not be
-      // reported as a successful FULL backup or authorize retention.
-      message = 'فشل اكتمال النسخة: أُنشئ أرشيف قاعدة البيانات وقُرئ، لكن الملفات والترخيص والاستعادة الكاملة لم يتم التحقق منها. احتُفظ بالنسخ السابقة.';
+      sizeBytes = result.file.sizeBytes;
+      // A copy counts as good only after the archive has been read back and
+      // every checksum has matched.
+      const report = await this.complete.verify(fileName);
+      if (!report.ok) {
+        message = 'فشل التحقق من النسخة: أُنشئت النسخة لكنها لم تجتز الفحص. احتُفظ بالنسخ السابقة.';
+      } else if (dest.path) {
+        try {
+          await copyArchiveVerified(this.complete.pathOf(fileName), dest.path, fileName);
+          status = 'SUCCESS';
+          message = 'نجحت النسخة الاحتياطية الكاملة وتم التحقق منها ونسخها إلى المجلد المختار.';
+        } catch {
+          message = 'تمت النسخة وتم التحقق منها في مجلد البرنامج، لكن تعذّر نسخها إلى المجلد المختار. تحقق من وصول الجهاز أو القرص إلى المجلد.';
+        }
+      } else {
+        status = 'SUCCESS';
+        message = 'نجحت النسخة الاحتياطية الكاملة وتم التحقق منها.';
+      }
     } catch {
       // Never disclose tool stderr, paths or database contents to clients.
-      message = 'فشل إنشاء أرشيف قاعدة البيانات أو التحقق منه. احتُفظ بالنسخ السابقة.';
+      message = 'فشل إنشاء النسخة الاحتياطية أو التحقق منها. احتُفظ بالنسخ السابقة.';
     }
-    const status = 'FAILED';
 
-    await this.record({
+    const saved = await this.record({
       kind: 'SCHEDULED',
       fileName,
       status,
       message,
       companyId: company.id,
+      sizeBytes,
     });
 
-    // Both failures and incomplete archives remain visible and never trigger
-    // retention. The scheduler counts failed attempts when calculating the
-    // next due time to avoid creating a new incomplete dump every tick.
+    if (status === 'SUCCESS') {
+      try {
+        await this.pruneRetention(settings.backupRetentionCount, saved.id, dest.path);
+      } catch {
+        this.logger.warn('Retention could not be applied after a successful backup.');
+      }
+    }
     return { fileName, status, message };
   }
 
@@ -257,11 +284,11 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
    * has to be on record. A file an operator dropped into the folder by hand
    * is left alone, because deleting somebody else's copy is not retention.
    */
-  async pruneRetention(count: number, keepRunId?: string): Promise<string[]> {
+  async pruneRetention(count: number, keepRunId?: string, destinationDir?: string | null): Promise<string[]> {
     if (count <= 0) return [];
     await this.full.assertNoRestoreRunning();
 
-    const files = await this.full.list();
+    const files = (await this.complete.list()).filter((f) => f.kind === 'full');
     const ordered = [...files].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
@@ -270,14 +297,16 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
 
     const newestName = ordered[0]?.name;
     for (const file of doomed) {
-      // Never prune the copy the user was just told about, and never prune the
-      // newest file even if the count is 1.
       if (file.name === newestName) continue;
       const run = await this.prisma.backupRun.findFirst({
         where: { fileName: file.name, status: { in: ['SUCCESS', 'VERIFIED'] } },
       });
       if (!run || run.id === keepRunId) continue;
-      await this.full.remove(file.name, null);
+      await this.complete.remove(file.name, null);
+      if (destinationDir) {
+        // The copy this program wrote into the chosen folder goes with it.
+        await rm(join(destinationDir, file.name), { force: true }).catch(() => undefined);
+      }
       removed.push(file.name);
     }
     return removed;
@@ -289,13 +318,14 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     status: string;
     message: string | null;
     companyId?: string;
+    sizeBytes?: number;
   }) {
     return this.prisma.backupRun.create({
       data: {
         companyId: data.companyId ?? null,
         kind: data.kind,
         fileName: data.fileName,
-        sizeBytes: BigInt(0),
+        sizeBytes: BigInt(data.sizeBytes ?? 0),
         status: data.status,
         message: data.message,
       },

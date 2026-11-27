@@ -756,8 +756,9 @@ model CompanySetting {
   /// archives them elsewhere.
   backupRetentionCount Int @default(14)
 
-  /// How many days between scheduled backups. 0 turns the schedule off.
-  backupIntervalHours Int @default(24)
+  /// How many hours between scheduled backups. 0 turns the schedule off.
+  /// New installations start weekly (168); existing rows keep their value.
+  backupIntervalHours Int @default(168)
 
   /// Largest discount a sales line may carry, in percent.
   maxDiscountPercent Decimal @default(100) @db.Decimal(9, 4)
