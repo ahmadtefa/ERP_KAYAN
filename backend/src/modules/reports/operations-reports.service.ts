@@ -37,7 +37,7 @@ export class OperationsReportsService {
       ? new Date(`${query.from.slice(0, 10)}T00:00:00.000Z`)
       : new Date(Date.UTC(to.getUTCFullYear(), 0, 1));
     if (from.getTime() > to.getTime()) {
-      throw new BadRequestException('"from" must not be after "to"');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: '"from" must not be after "to"' });
     }
     return { from, to };
   }

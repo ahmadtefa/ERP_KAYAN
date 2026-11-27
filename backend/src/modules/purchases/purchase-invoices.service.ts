@@ -368,7 +368,7 @@ export class PurchaseInvoicesService {
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
-    if (invoice.purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
+    if (invoice.purchaseOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as purchase invoices');
     }
@@ -416,12 +416,10 @@ export class PurchaseInvoicesService {
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
-        throw new BadRequestException(
-          'This invoice was posted or changed by someone else. Reload it before editing.',
-        );
+        throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'This invoice was posted or changed by someone else. Reload it before editing.' });
       }
 
-      if (locked[0].purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
+      if (locked[0].purchaseOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
 
       await tx.purchaseInvoice.update({
         where: { id },
@@ -499,7 +497,7 @@ export class PurchaseInvoicesService {
     const before = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { purchaseOrderId: true },
     });
-    if (!before?.purchaseOrderId) throw new BadRequestException('Invoice is not linked to an order');
+    if (!before?.purchaseOrderId) throw new BadRequestException({ code: 'INVOICE_NO_ORDER', message: 'Invoice is not linked to an order' });
     const orderId = before.purchaseOrderId;
     if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
       throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'expectedUpdatedAt is required', field: 'expectedUpdatedAt' });
@@ -523,7 +521,7 @@ export class PurchaseInvoicesService {
       const order = await tx.purchaseOrder.findFirst({
         where: { id: orderId, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!invoice || !order || invoice.purchaseOrderId !== orderId) throw new BadRequestException('Order allocation changed; reload');
+      if (!invoice || !order || invoice.purchaseOrderId !== orderId) throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Order allocation changed; reload' });
       const requested = selectedOrderLineQuantities(dto.lines, order.lines);
       const identity = orderConversionIdentity(dto, requested);
       const hash = createHash('sha256').update(JSON.stringify({ selection: identity.hash, expectedUpdatedAt })).digest('hex');
@@ -533,23 +531,23 @@ export class PurchaseInvoicesService {
       });
       if (previous) {
         const after = previous.afterJson as { amendmentHash?: string } | null;
-        if (after?.amendmentHash !== hash) throw new ConflictException('The idempotency key was used for a different amendment');
-        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('The amended invoice is no longer a draft');
+        if (after?.amendmentHash !== hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different amendment' });
+        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'The amended invoice is no longer a draft' });
         return;
       }
       if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
-        throw new BadRequestException('Only an active draft invoice can be amended');
+        throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'Only an active draft invoice can be amended' });
       }
       if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
-      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException({ code: 'ORDER_NOT_AMENDABLE', message: 'Related order cannot be amended' });
       if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero() || !invoice.landedCostAmount.isZero()) {
-        throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
+        throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'This invoice has additional charges or discounts; manual review required' });
       }
       const counters = planOrderReallocation(order.lines, invoice.lines, requested);
       const prior = new Map<string, typeof invoice.lines[number]>();
       for (const old of invoice.lines) {
         if (!old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero() || !old.landedCostAmount.isZero() || !old.inventoryCostTotal.equals(old.lineTotal)) {
-          throw new BadRequestException('Historical invoice lines require manual review');
+          throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Historical invoice lines require manual review' });
         }
         prior.set(old.orderLineId, old);
       }
@@ -557,7 +555,7 @@ export class PurchaseInvoicesService {
       const units: TrustedOrderUnit[] = [];
       const rawLines = selected.map((line) => {
         const existing = prior.get(line.id);
-        if (existing && existing.itemId !== line.itemId) throw new BadRequestException('Historical order item changed; manual review required');
+        if (existing && existing.itemId !== line.itemId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Historical order item changed; manual review required' });
         // Existing lines keep the invoice snapshot even if the order was
         // changed later. Newly selected lines use the agreed order snapshot.
         const source = existing ?? line;
@@ -628,13 +626,13 @@ export class PurchaseInvoicesService {
           SELECT id FROM purchase_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
             AND "deletedAt" IS NULL FOR UPDATE
         `);
-        if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+        if (locked.length !== 1) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Related order is missing; manual review required' });
         invoice = await tx.purchaseInvoice.findFirst({
           where: { id, companyId, branchId, deletedAt: null },
           include: { lines: { orderBy: { lineNumber: 'asc' } } },
         });
         if (!invoice || invoice.purchaseOrderId !== orderId || invoice.status !== InvoiceStatus.DRAFT) {
-          throw new BadRequestException('Invoice was posted or cancelled concurrently');
+          throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Invoice was posted or cancelled concurrently' });
         }
         await releaseOrderAllocations(tx, 'purchase', companyId, orderId, invoice.lines);
       }
@@ -642,7 +640,7 @@ export class PurchaseInvoicesService {
         where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { deletedAt: new Date() },
       });
-      if (claimed.count !== 1) throw new BadRequestException('Invoice was posted or cancelled concurrently');
+      if (claimed.count !== 1) throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Invoice was posted or cancelled concurrently' });
       await this.audit.recordRequired({ companyId, userId, action: 'CANCEL_DRAFT',
         entity: 'purchase_invoices', entityId: id, after: { invoiceNumber: invoice.invoiceNumber } }, tx);
     });
@@ -656,9 +654,7 @@ export class PurchaseInvoicesService {
     });
     if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only draft invoices can be posted (current status: ${invoice.status})`,
-      );
+      throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_POST', message: `Only draft invoices can be posted (current status: ${invoice.status})` });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -669,9 +665,7 @@ export class PurchaseInvoicesService {
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException(
-          'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
-        );
+        throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'This invoice was posted by someone else a moment ago. Reload it to see the current state.' });
       }
 
       // The draft may have been edited while this request waited for the row
@@ -732,7 +726,7 @@ export class PurchaseInvoicesService {
             allowExpiredIssue: true, expiredIssueNeedsApproval: true,
           },
         });
-        if (!item) throw new BadRequestException('An invoice line references a missing item');
+        if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: 'An invoice line references a missing item' });
         if (!item.isStockTracked) {
           throw new BadRequestException(
             `Item ${item.code} is not stock-tracked, so it cannot be purchased through a ` +
@@ -892,10 +886,10 @@ export class PurchaseInvoicesService {
     });
     if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
     if (invoice.status !== InvoiceStatus.POSTED) {
-      throw new BadRequestException('Only posted invoices can be reversed');
+      throw new BadRequestException({ code: 'ONLY_POSTED_REVERSE', message: 'Only posted invoices can be reversed' });
     }
     if (!invoice.journalEntryId) {
-      throw new BadRequestException('This invoice has no journal entry to reverse');
+      throw new BadRequestException({ code: 'INVOICE_NO_JOURNAL', message: 'This invoice has no journal entry to reverse' });
     }
 
     const original = await this.prisma.journalEntry.findFirst({
@@ -909,7 +903,7 @@ export class PurchaseInvoicesService {
     });
     if (!original) throw new NotFoundException('The original journal entry is missing');
     if (original.status === JournalStatus.REVERSED) {
-      throw new BadRequestException('This invoice has already been reversed');
+      throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -921,7 +915,7 @@ export class PurchaseInvoicesService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimedInvoice.count !== 1) {
-        throw new BadRequestException('This invoice has already been reversed');
+        throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
       }
       const activeReturns = await tx.purchaseInvoice.count({
         where: {
@@ -1292,14 +1286,14 @@ export class PurchaseInvoicesService {
         },
       });
       if (!item) {
-        throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
+        throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: `Line ${index + 1}: the item does not exist` });
       }
       if (!item.isActive) {
-        throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
+        throw new BadRequestException({ code: 'LINE_ITEM_INACTIVE', message: `Line ${index + 1}: the item is inactive` });
       }
 
       const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
-      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'LINE_QTY_POSITIVE', message: `Line ${index + 1} quantity must be greater than zero` });
 
       // Resolve the chosen unit. The entered quantity is expressed in it; the
       // base quantity is what is received into stock and drives unit cost.
@@ -1366,14 +1360,10 @@ export class PurchaseInvoicesService {
           select: { id: true, isActive: true, code: true },
         });
         if (!center) {
-          throw new BadRequestException(
-            `Line ${index + 1}: the cost center does not exist`,
-          );
+          throw new BadRequestException({ code: 'COST_CENTER_MISSING', message: `Line ${index + 1}: the cost center does not exist` });
         }
         if (!center.isActive) {
-          throw new BadRequestException(
-            `Line ${index + 1}: cost center ${center.code} is inactive`,
-          );
+          throw new BadRequestException({ code: 'COST_CENTER_INACTIVE', message: `Line ${index + 1}: cost center ${center.code} is inactive` });
         }
       }
 

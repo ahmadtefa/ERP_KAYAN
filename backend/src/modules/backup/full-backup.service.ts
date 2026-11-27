@@ -1406,7 +1406,7 @@ export class FullBackupService {
       throw new BadRequestException('The backup file is empty.');
     }
     if (buffer.length > MAX_UPLOAD_BYTES) {
-      throw new BadRequestException('The backup file is larger than 2 GB.');
+      throw new BadRequestException({ code: 'BACKUP_TOO_LARGE', message: 'The backup file is larger than 2 GB.' });
     }
     const isJson = buffer[0] === 0x7b /* '{' */ || label.toLowerCase().endsWith('.json');
     if (isJson) {

@@ -159,10 +159,10 @@ export class BackupController {
 
   private parse(file: UploadedBackup | undefined): BackupFile {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No file was uploaded.');
+      throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'No file was uploaded.' });
     }
     if (file.size > 64 * 1024 * 1024) {
-      throw new BadRequestException('The backup file is larger than 64 MB.');
+      throw new BadRequestException({ code: 'BACKUP_TOO_LARGE', message: 'The backup file is larger than 64 MB.' });
     }
     if (
       file.buffer.subarray(0, 5).toString('latin1') === 'PGDMP' ||

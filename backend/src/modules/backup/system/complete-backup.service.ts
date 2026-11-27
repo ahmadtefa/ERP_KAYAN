@@ -577,9 +577,9 @@ export class CompleteBackupService {
     buffer: Buffer,
     label: string,
   ): Promise<SystemBackupReport> {
-    if (!buffer?.length) throw new BadRequestException('No file was uploaded.');
+    if (!buffer?.length) throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'No file was uploaded.' });
     if (buffer.length > MAX_UPLOAD_BYTES) {
-      throw new BadRequestException('The backup file is larger than 2 GB.');
+      throw new BadRequestException({ code: 'BACKUP_TOO_LARGE', message: 'The backup file is larger than 2 GB.' });
     }
     const dir = await ensureDirectory(backupDirectory());
     const temporary = join(dir, `.inspect-${Date.now()}-${process.pid}${ARCHIVE_EXTENSION}`);

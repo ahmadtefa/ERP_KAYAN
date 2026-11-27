@@ -15,7 +15,7 @@ export async function releaseOrderAllocations(
   const locked = kind === 'sales'
     ? await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`)
     : await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM purchase_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`);
-  if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+  if (locked.length !== 1) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Related order is missing; manual review required' });
   if (allocations.length === 0) throw new BadRequestException('Order invoice has no allocations; manual review required');
   const totals = new Map<string, Prisma.Decimal>();
   for (const line of allocations) {

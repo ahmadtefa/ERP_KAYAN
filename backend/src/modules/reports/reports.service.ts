@@ -55,7 +55,7 @@ export class ReportsService {
       ? this.parseDate(query.from, 'from')
       : new Date(Date.UTC(to.getUTCFullYear(), 0, 1));
     if (from > to) {
-      throw new BadRequestException('"from" must not be after "to"');
+      throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: '"from" must not be after "to"' });
     }
     return { from, to };
   }

@@ -602,11 +602,11 @@ export class SalesOrdersService {
         where: { id: itemId, companyId, deletedAt: null },
         select: { id: true, code: true, nameEn: true, unit: true, isActive: true, salePrice: true, taxRate: true, units: true },
       });
-      if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
+      if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: `Line ${index + 1}: the item does not exist` });
       if (!item.isActive) throw new BadRequestException(`Line ${index + 1}: item ${item.code} is inactive`);
 
       const enteredQuantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
-      if (enteredQuantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
+      if (enteredQuantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'LINE_QTY_POSITIVE', message: `Line ${index + 1} quantity must be greater than zero` });
       const resolved = resolveUnitSelection({
         lineLabel: `Line ${index + 1}`,
         requestedUnitId: raw.unitId,

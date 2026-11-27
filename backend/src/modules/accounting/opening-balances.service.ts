@@ -848,7 +848,7 @@ export class OpeningBalancesService {
           where: { id: raw.itemId, companyId, deletedAt: null },
           select: { id: true, code: true, isStockTracked: true, requiresBatch: true, requiresProductionDate: true, requiresExpiryDate: true },
         });
-        if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
+        if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: `Line ${index + 1}: the item does not exist` });
         if (item.isStockTracked) {
           this.assertNoLotControl(item, index + 1);
           const previousLine = seenStockItems.get(item.id);

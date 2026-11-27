@@ -110,7 +110,7 @@ export class CustomerCreditService {
   /** One approval for one draft invoice whose customer is past the payment period. */
   async approvePeriod(companyId: string, userId: string, invoiceId: string, reason: string, branchScope: string[] | null = null) {
     const text = (reason ?? '').trim();
-    if (text.length < 3) throw new BadRequestException('A written reason is required');
+    if (text.length < 3) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A written reason is required' });
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`
         SELECT id FROM sales_invoices
@@ -204,7 +204,7 @@ export class CustomerCreditService {
   /** One approval, for one draft invoice, with a written reason. */
   async approve(companyId: string, userId: string, invoiceId: string, reason: string, branchScope: string[] | null = null) {
     const text = (reason ?? '').trim();
-    if (text.length < 3) throw new BadRequestException('A written reason is required');
+    if (text.length < 3) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A written reason is required' });
     return this.prisma.$transaction(async (tx) => {
       const check = await this.evaluate(tx, companyId, invoiceId, true);
       if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });

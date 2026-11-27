@@ -130,7 +130,7 @@ export class StockDocumentsController {
     @Body() body: Record<string, unknown>,
   ) {
     const document = await this.assertDocumentAccess(user, id, 'view');
-    if (!document.voucherKind) throw new BadRequestException('This is not a warehouse voucher');
+    if (!document.voucherKind) throw new BadRequestException({ code: 'VOUCHER_NOT_WAREHOUSE', message: 'This is not a warehouse voucher' });
     assertWarehouseAccess(
       user,
       document.toWarehouseId ?? '',
@@ -150,7 +150,7 @@ export class StockDocumentsController {
   @RequirePermissions('inventory.stock.voucher.post')
   async postVoucherForStorekeeper(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
     const document = await this.assertDocumentAccess(user, id, 'post');
-    if (!document.voucherKind) throw new BadRequestException('This is not a warehouse voucher');
+    if (!document.voucherKind) throw new BadRequestException({ code: 'VOUCHER_NOT_WAREHOUSE', message: 'This is not a warehouse voucher' });
     return this.service.post(
       user.companyId,
       user.userId,
@@ -166,7 +166,7 @@ export class StockDocumentsController {
   @RequirePermissions('inventory.stock.voucher.post')
   async reverseVoucherForStorekeeper(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const document = await this.assertDocumentAccess(user, id, 'reverse');
-    if (!document.voucherKind) throw new BadRequestException('This is not a warehouse voucher');
+    if (!document.voucherKind) throw new BadRequestException({ code: 'VOUCHER_NOT_WAREHOUSE', message: 'This is not a warehouse voucher' });
     return this.service.reverse(
       user.companyId,
       user.userId,

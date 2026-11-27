@@ -459,7 +459,7 @@ export class StockDocumentsService {
           where: { id: raw.itemId, companyId, deletedAt: null },
           select: { id: true, isStockTracked: true, code: true, unit: true, units: true },
         });
-        if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
+        if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: `Line ${index + 1}: the item does not exist` });
         if (!item.isStockTracked) {
           throw new BadRequestException(`Line ${index + 1}: item ${item.code} is not stock-tracked`);
         }

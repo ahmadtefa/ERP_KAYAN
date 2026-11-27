@@ -433,7 +433,7 @@ export class SalesInvoicesService {
       where: { id, companyId, deletedAt: null },
     });
     if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
-    if (invoice.salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
+    if (invoice.salesOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException({ code: 'INVOICE_RETURN_NOT_EDITABLE', message: 'Return documents cannot be edited as sales invoices' });
     }
@@ -473,12 +473,10 @@ export class SalesInvoicesService {
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
-        throw new BadRequestException(
-          'This invoice was posted or changed by someone else. Reload it before editing.',
-        );
+        throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'This invoice was posted or changed by someone else. Reload it before editing.' });
       }
 
-      if (locked[0].salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
+      if (locked[0].salesOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
 
       await this.assertStockCovers(tx, companyId, branchId, dto.warehouseId ?? invoice.warehouseId, lines, stockView.mayReadStock);
 
@@ -553,7 +551,7 @@ export class SalesInvoicesService {
     const before = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { salesOrderId: true },
     });
-    if (!before?.salesOrderId) throw new BadRequestException('Invoice is not linked to an order');
+    if (!before?.salesOrderId) throw new BadRequestException({ code: 'INVOICE_NO_ORDER', message: 'Invoice is not linked to an order' });
     const orderId = before.salesOrderId;
     if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
       throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'expectedUpdatedAt is required', field: 'expectedUpdatedAt' });
@@ -577,7 +575,7 @@ export class SalesInvoicesService {
       const order = await tx.salesOrder.findFirst({
         where: { id: orderId, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (!invoice || !order || invoice.salesOrderId !== orderId) throw new BadRequestException('Order allocation changed; reload');
+      if (!invoice || !order || invoice.salesOrderId !== orderId) throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Order allocation changed; reload' });
       const requested = selectedOrderLineQuantities(dto.lines, order.lines);
       const identity = orderConversionIdentity(dto, requested);
       const hash = createHash('sha256').update(JSON.stringify({ selection: identity.hash, expectedUpdatedAt })).digest('hex');
@@ -587,23 +585,23 @@ export class SalesInvoicesService {
       });
       if (previous) {
         const after = previous.afterJson as { amendmentHash?: string } | null;
-        if (after?.amendmentHash !== hash) throw new ConflictException('The idempotency key was used for a different amendment');
-        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('The amended invoice is no longer a draft');
+        if (after?.amendmentHash !== hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different amendment' });
+        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'The amended invoice is no longer a draft' });
         return;
       }
       if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
-        throw new BadRequestException('Only an active draft invoice can be amended');
+        throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'Only an active draft invoice can be amended' });
       }
       if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException({ code: 'INVOICE_CHANGED_RELOAD', message: 'The invoice changed; reload before editing' });
-      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException({ code: 'ORDER_NOT_AMENDABLE', message: 'Related order cannot be amended' });
       if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero()) {
-        throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
+        throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'This invoice has additional charges or discounts; manual review required' });
       }
       const counters = planOrderReallocation(order.lines, invoice.lines, requested);
       const prior = new Map<string, typeof invoice.lines[number]>();
       for (const old of invoice.lines) {
         if (old.isAdditionalCharge || !old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero()) {
-          throw new BadRequestException('Historical invoice lines require manual review');
+          throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Historical invoice lines require manual review' });
         }
         prior.set(old.orderLineId, old);
       }
@@ -611,7 +609,7 @@ export class SalesInvoicesService {
       const units: TrustedOrderUnit[] = [];
       const rawLines = selected.map((line) => {
         const existing = prior.get(line.id);
-        if (existing && existing.itemId !== line.itemId) throw new BadRequestException('Historical order item changed; manual review required');
+        if (existing && existing.itemId !== line.itemId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Historical order item changed; manual review required' });
         // Existing lines keep the invoice snapshot even if the order was
         // changed later. Newly selected lines use the agreed order snapshot.
         const source = existing ?? line;
@@ -681,13 +679,13 @@ export class SalesInvoicesService {
           SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
             AND "deletedAt" IS NULL FOR UPDATE
         `);
-        if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+        if (locked.length !== 1) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Related order is missing; manual review required' });
         invoice = await tx.salesInvoice.findFirst({
           where: { id, companyId, branchId, deletedAt: null },
           include: { lines: { orderBy: { lineNumber: 'asc' } } },
         });
         if (!invoice || invoice.salesOrderId !== orderId || invoice.status !== InvoiceStatus.DRAFT) {
-          throw new BadRequestException('Invoice was posted or cancelled concurrently');
+          throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Invoice was posted or cancelled concurrently' });
         }
         await releaseOrderAllocations(tx, 'sales', companyId, orderId, invoice.lines);
       }
@@ -695,7 +693,7 @@ export class SalesInvoicesService {
         where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { deletedAt: new Date() },
       });
-      if (claimed.count !== 1) throw new BadRequestException('Invoice was posted or cancelled concurrently');
+      if (claimed.count !== 1) throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'Invoice was posted or cancelled concurrently' });
       await this.audit.recordRequired({ companyId, userId, action: 'CANCEL_DRAFT',
         entity: 'sales_invoices', entityId: id, after: { invoiceNumber: invoice.invoiceNumber } }, tx);
     });
@@ -873,9 +871,7 @@ export class SalesInvoicesService {
     });
     if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only draft invoices can be posted (current status: ${invoice.status})`,
-      );
+      throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_POST', message: `Only draft invoices can be posted (current status: ${invoice.status})` });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -894,9 +890,7 @@ export class SalesInvoicesService {
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException(
-          'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
-        );
+        throw new BadRequestException({ code: 'INVOICE_CHANGED_RELOAD', message: 'This invoice was posted by someone else a moment ago. Reload it to see the current state.' });
       }
 
       // The draft may have been edited while this request waited for the row
@@ -978,7 +972,7 @@ export class SalesInvoicesService {
             expiredIssueNeedsApproval: true,
           },
         });
-        if (!item) throw new BadRequestException('An invoice line references a missing item');
+        if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: 'An invoice line references a missing item' });
         if (!item.isStockTracked) continue;
 
         // The branch balance is still checked first, because it is the figure
@@ -1269,10 +1263,10 @@ export class SalesInvoicesService {
     });
     if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.status !== InvoiceStatus.POSTED) {
-      throw new BadRequestException('Only posted invoices can be reversed');
+      throw new BadRequestException({ code: 'ONLY_POSTED_REVERSE', message: 'Only posted invoices can be reversed' });
     }
     if (!invoice.journalEntryId) {
-      throw new BadRequestException('This invoice has no journal entry to reverse');
+      throw new BadRequestException({ code: 'INVOICE_NO_JOURNAL', message: 'This invoice has no journal entry to reverse' });
     }
 
     const original = await this.prisma.journalEntry.findFirst({
@@ -1286,7 +1280,7 @@ export class SalesInvoicesService {
     });
     if (!original) throw new NotFoundException('The original journal entry is missing');
     if (original.status === JournalStatus.REVERSED) {
-      throw new BadRequestException('This invoice has already been reversed');
+      throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -1298,7 +1292,7 @@ export class SalesInvoicesService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimedInvoice.count !== 1) {
-        throw new BadRequestException('This invoice has already been reversed');
+        throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
       }
       const activeReturns = await tx.salesInvoice.count({
         where: {
@@ -1560,7 +1554,7 @@ export class SalesInvoicesService {
         throw new BadRequestException('Additional charges cannot be linked to an item or an order');
       }
       const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
-      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'LINE_QTY_POSITIVE', message: `Line ${index + 1} quantity must be greater than zero` });
 
       if (isAdditionalCharge && (!quantity.equals(1) || raw.discountType ||
           raw.discountAmount || raw.discountPercent)) {
@@ -1598,9 +1592,9 @@ export class SalesInvoicesService {
             units: true,
           },
         });
-        if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
+        if (!item) throw new BadRequestException({ code: 'LINE_ITEM_MISSING', message: `Line ${index + 1}: the item does not exist` });
         if (!(item as any).isActive) {
-          throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
+          throw new BadRequestException({ code: 'LINE_ITEM_INACTIVE', message: `Line ${index + 1}: the item is inactive` });
         }
       }
 
@@ -1704,14 +1698,10 @@ export class SalesInvoicesService {
           select: { id: true, isActive: true, code: true },
         });
         if (!center) {
-          throw new BadRequestException(
-            `Line ${index + 1}: the cost center does not exist`,
-          );
+          throw new BadRequestException({ code: 'COST_CENTER_MISSING', message: `Line ${index + 1}: the cost center does not exist` });
         }
         if (!center.isActive) {
-          throw new BadRequestException(
-            `Line ${index + 1}: cost center ${center.code} is inactive`,
-          );
+          throw new BadRequestException({ code: 'COST_CENTER_INACTIVE', message: `Line ${index + 1}: cost center ${center.code} is inactive` });
         }
       }
 

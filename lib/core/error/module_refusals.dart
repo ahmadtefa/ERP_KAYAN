@@ -319,6 +319,66 @@ const Map<String, List<String>> moduleRefusals = {
     'حساب واحد أو أكثر غير موجود في دليل الحسابات. اختر الحسابات من القائمة ثم أعد المحاولة. لم يُسجَّل شيء.',
     'One or more accounts do not exist in the chart of accounts. Choose the accounts from the list and try again. Nothing was recorded.',
   ],
+  'INVOICE_NO_JOURNAL': [
+    'هذه الفاتورة ليس لها قيد يومية لعكسه، فلا حاجة لعكسها. راجع حالتها في سجل الفواتير. لم يتغير شيء.',
+    'This invoice has no journal entry to reverse, so there is nothing to undo. Check its status in the invoices list. Nothing changed.',
+  ],
+  'ORDER_REVIEW_REQUIRED': [
+    'هذه الفاتورة مرتبطة بأمر بيع ولا يمكن تعديلها تلقائيًا من هنا. راجعها يدويًا مع المحاسب، أو أنشئ فاتورة جديدة من الأمر. لم يتغير شيء.',
+    'This invoice is tied to a sales order and cannot be changed automatically here. Review it by hand with an accountant, or create a new invoice from the order. Nothing changed.',
+  ],
+  'INVOICE_NO_ORDER': [
+    'هذه الفاتورة غير مرتبطة بأمر بيع، فلا يمكن تعديل توزيعها على أمر. عدّلها كفاتورة عادية. لم يتغير شيء.',
+    'This invoice is not linked to a sales order, so its order allocation cannot be amended. Edit it as an ordinary invoice. Nothing changed.',
+  ],
+  'ORDER_NOT_AMENDABLE': [
+    'أمر البيع المرتبط ملغي أو مسودة فلا يمكن التعديل عليه. افتح الأمر وراجع حالته. لم يتغير شيء.',
+    'The related sales order is cancelled or a draft, so it cannot be amended. Open the order and check its status. Nothing changed.',
+  ],
+  'REASON_REQUIRED': [
+    'اكتب سببًا مكتوبًا (3 أحرف على الأقل) ثم أعد المحاولة. لم يتغير شيء.',
+    'Write a short reason (at least 3 characters) and try again. Nothing changed.',
+  ],
+  'FILE_REQUIRED': [
+    'لم يصل أي ملف. اختر الملف ثم أعد المحاولة. لم يتغير شيء.',
+    'No file was received. Choose the file and try again. Nothing changed.',
+  ],
+  'ADMIN_CANNOT_DEACTIVATE': [
+    'لا يمكن تعطيل مدير النظام الأساسي. اترك حسابه فعّالًا أو أنشئ مديرًا آخر أولًا.',
+    'The main system administrator cannot be deactivated. Keep the account active or create another administrator first.',
+  ],
+  'VOUCHER_NOT_WAREHOUSE': [
+    'هذا المستند ليس سند مخزن، فلا تُطبَّق عليه هذه الخطوة. افتح السند من شاشته الصحيحة. لم يتغير شيء.',
+    'This is not a warehouse voucher, so this step does not apply. Open it from its own screen. Nothing changed.',
+  ],
+  'INVOICE_NOT_DRAFT_POST': [
+    'لا تُرحَّل إلا الفاتورة المسودة. هذه الفاتورة رُحّلت أو أُلغيت من قبل. حدّث الشاشة وراجع حالتها. لم يتغير شيء.',
+    'Only a draft invoice can be posted. This one was already posted or cancelled. Reload the screen and check its status. Nothing changed.',
+  ],
+  'LINE_QTY_POSITIVE': [
+    'كمية أحد السطور صفر أو أقل. اكتب كمية أكبر من صفر في كل سطر أو احذف السطر الفارغ ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line quantity is zero or less. Enter a quantity above zero on every line or remove the empty line, then try again. Nothing was saved.',
+  ],
+  'LINE_ITEM_MISSING': [
+    'أحد سطور المستند يشير إلى صنف غير موجود. اختر الصنف من القائمة في كل سطر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line points to an item that does not exist. Choose the item from the list on every line and try again. Nothing was saved.',
+  ],
+  'LINE_ITEM_INACTIVE': [
+    'أحد سطور المستند فيه صنف متوقف. فعّل الصنف من شاشة الأصناف أو اختر صنفًا آخر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line uses an inactive item. Activate the item in the Items screen or choose another one, then try again. Nothing was saved.',
+  ],
+  'COST_CENTER_MISSING': [
+    'مركز التكلفة في أحد السطور غير موجود. اختره من القائمة أو اتركه فارغًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line names a cost center that does not exist. Choose it from the list or leave it empty, then try again. Nothing was saved.',
+  ],
+  'COST_CENTER_INACTIVE': [
+    'مركز التكلفة في أحد السطور متوقف. فعّله من شاشة مراكز التكلفة أو اختر غيره ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line uses an inactive cost center. Activate it in the Cost Centers screen or choose another, then try again. Nothing was saved.',
+  ],
+  'BACKUP_TOO_LARGE': [
+    'ملف النسخة الاحتياطية أكبر من الحد المسموح. استخدم ملفًا أصغر أو نسخة أحدث ثم أعد المحاولة. لم يُستعد شيء.',
+    'The backup file is larger than the allowed size. Use a smaller or a newer file and try again. Nothing was restored.',
+  ],
 };
 
 /// Arabic names of the inputs these refusals point at, for the generic

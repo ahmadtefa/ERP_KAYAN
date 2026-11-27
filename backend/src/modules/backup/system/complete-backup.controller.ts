@@ -108,7 +108,7 @@ export class CompleteBackupController {
   )
   inspect(@UploadedFile() file: UploadedArchive | undefined) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No file was uploaded.');
+      throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'No file was uploaded.' });
     }
     return this.backups.inspectUpload(file.buffer, file.originalname || 'uploaded archive');
   }

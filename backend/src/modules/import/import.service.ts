@@ -511,7 +511,7 @@ export class ImportService {
       );
     }
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No file was uploaded.');
+      throw new BadRequestException({ code: 'FILE_REQUIRED', message: 'No file was uploaded.' });
     }
 
     let sheet: Sheet;

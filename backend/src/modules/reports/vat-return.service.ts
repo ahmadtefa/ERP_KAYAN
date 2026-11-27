@@ -63,7 +63,7 @@ export class VatReturnService {
     const to = query.to ? query.to.slice(0, 10) : now.toISOString().slice(0, 10);
     const from = query.from ? query.from.slice(0, 10) : `${now.getUTCFullYear()}-01-01`;
     if (!iso.test(from) || !iso.test(to)) throw new BadRequestException('Dates must be YYYY-MM-DD');
-    if (from > to) throw new BadRequestException('"from" must not be after "to"');
+    if (from > to) throw new BadRequestException({ code: 'DATE_RANGE_REVERSED', message: '"from" must not be after "to"' });
     return { from, to };
   }
 

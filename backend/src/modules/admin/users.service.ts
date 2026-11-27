@@ -241,7 +241,7 @@ export class UsersService {
       throw new ForbiddenException('Only a super administrator can modify a super administrator account');
     }
     if (before.username === SYSTEM_USERNAME && dto.isActive === false) {
-      throw new BadRequestException('The system administrator cannot be deactivated');
+      throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
     }
 
     await this.assertRolesAssignable(
@@ -274,7 +274,7 @@ export class UsersService {
         throw new ForbiddenException('Only a super administrator can modify a super administrator account');
       }
       if (lockedBefore.username === SYSTEM_USERNAME && dto.isActive === false) {
-        throw new BadRequestException('The system administrator cannot be deactivated');
+        throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
       }
       // The sets are read after prior updates of this user commit. A conflict
       // must abort the whole transaction, including identity field updates.
@@ -415,7 +415,7 @@ export class UsersService {
       throw new ForbiddenException('Only a super administrator can deactivate a super administrator account');
     }
     if (user.username === SYSTEM_USERNAME) {
-      throw new BadRequestException('The system administrator cannot be deactivated');
+      throw new BadRequestException({ code: 'ADMIN_CANNOT_DEACTIVATE', message: 'The system administrator cannot be deactivated' });
     }
 
     await this.prisma.$transaction([

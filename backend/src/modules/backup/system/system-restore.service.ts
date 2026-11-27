@@ -247,7 +247,7 @@ export class SystemRestoreService implements OnModuleInit {
 
     if (input.uploaded?.buffer?.length) {
       if (input.uploaded.buffer.length > MAX_UPLOAD_BYTES) {
-        throw new BadRequestException('The backup file is larger than 2 GB.');
+        throw new BadRequestException({ code: 'BACKUP_TOO_LARGE', message: 'The backup file is larger than 2 GB.' });
       }
       label = input.uploaded.originalName || 'uploaded backup';
       uploadedTemporary = join(dir, `.restore-upload-${Date.now()}-${process.pid}.kayanbackup`);
