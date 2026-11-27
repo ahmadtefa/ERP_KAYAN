@@ -105,4 +105,8 @@ const Map<String, List<String>> backupRefusals = {
     'ملف نسخة القوائم غير صالح: ليس نسخة من البرنامج أو إصداره غير مدعوم أو فيه سجل غير صحيح. اختر الملف الأصلي الذي نزّلته من البرنامج. لم يتغير شيء.',
     'The list backup file is not valid: it is not a program backup, its version is unsupported or it has a bad record. Choose the original file you downloaded from the program. Nothing changed.',
   ],
+  'SYSTEM_RESTORE_RUNNING': [
+    'هناك عملية استعادة أو تعافٍ تعمل الآن على قاعدة البيانات. انتظر حتى تنتهي ثم أعد المحاولة. لم يتغير شيء.',
+    'A restore or recovery is already running on the database. Wait until it finishes, then try again. Nothing changed.',
+  ],
 };

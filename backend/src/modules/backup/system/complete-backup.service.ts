@@ -520,9 +520,7 @@ export class CompleteBackupService {
 
   pathOf(name: string): string {
     if (!NAME_PATTERN.test(name)) {
-      throw new BadRequestException(
-        'That is not a complete-backup file name. Choose one from the list.',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_NAME_INVALID', message: 'That is not a complete-backup file name. Choose one from the list.' });
     }
     return safeBackupPath(name, this.roots());
   }
@@ -530,7 +528,7 @@ export class CompleteBackupService {
   async read(name: string): Promise<{ data: Buffer; name: string }> {
     const path = this.pathOf(name);
     if (!existsSync(path)) {
-      throw new NotFoundException(`No backup file named "${name}" on this server`);
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `No backup file named "${name}" on this server` });
     }
     try {
       return { data: await readFile(path), name };
@@ -545,7 +543,7 @@ export class CompleteBackupService {
   async remove(name: string, userId: string | null): Promise<void> {
     const path = this.pathOf(name);
     if (!existsSync(path)) {
-      throw new NotFoundException(`No backup file named "${name}" on this server`);
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `No backup file named "${name}" on this server` });
     }
     try {
       await unlink(path);
@@ -567,7 +565,7 @@ export class CompleteBackupService {
   async verify(name: string): Promise<SystemBackupReport> {
     const path = this.pathOf(name);
     if (!existsSync(path)) {
-      throw new NotFoundException(`No backup file named "${name}" on this server`);
+      throw new NotFoundException({ code: 'FULL_BACKUP_FILE_MISSING', message: `No backup file named "${name}" on this server` });
     }
     return this.verifyPath(path, name);
   }

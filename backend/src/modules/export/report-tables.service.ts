@@ -388,9 +388,7 @@ export class ReportTablesService {
     lang: 'ar' | 'en',
   ) {
     if (!query.accountId) {
-      throw new BadRequestException(
-        'The account ledger needs an account: pass accountId.',
-      );
+      throw new BadRequestException({ code: 'EXPORT_NEEDS_ACCOUNT', message: 'The account ledger needs an account: pass accountId.' });
     }
     const data = await this.reports.accountLedger(
       companyId,
@@ -1004,9 +1002,7 @@ export class ReportTablesService {
     query: PeriodQueryDto & { partyId?: string; kind?: string },
   ) {
     if (!query.partyId) {
-      throw new BadRequestException(
-        'A party statement needs a partner: pass partyId and kind.',
-      );
+      throw new BadRequestException({ code: 'EXPORT_NEEDS_PARTY', message: 'A party statement needs a partner: pass partyId and kind.' });
     }
     const kind = query.kind === 'supplier' ? 'supplier' : 'customer';
     const data = await this.parties.statement(companyId, kind, query.partyId, {

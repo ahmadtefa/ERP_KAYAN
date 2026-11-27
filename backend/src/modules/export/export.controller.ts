@@ -240,9 +240,7 @@ export class ExportController {
       return;
     }
     if (query.format && query.format !== 'xlsx') {
-      throw new BadRequestException(
-        `Unknown format "${query.format}". Use format=xlsx or format=csv.`,
-      );
+      throw new BadRequestException({ code: 'EXPORT_FORMAT_UNKNOWN', message: `Unknown format "${query.format}". Use format=xlsx or format=csv.` });
     }
 
     this.send(
@@ -382,9 +380,7 @@ export class ExportController {
     }
 
     if (wanted !== 'xlsx') {
-      throw new BadRequestException(
-        `Unknown format "${wanted}". Use format=xlsx or format=csv.`,
-      );
+      throw new BadRequestException({ code: 'EXPORT_FORMAT_UNKNOWN', message: `Unknown format "${wanted}". Use format=xlsx or format=csv.` });
     }
 
     const body = await toXlsx(table, lang, header.name, { logo: header.logo, companyDetails: header.details });
@@ -468,9 +464,7 @@ export class ExportController {
 
   private known(report: string): ExportableReport {
     if (!EXPORTABLE_REPORTS.includes(report as ExportableReport)) {
-      throw new BadRequestException(
-        `Unknown report "${report}". Known reports: ${EXPORTABLE_REPORTS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'EXPORT_REPORT_UNKNOWN', message: `Unknown report "${report}". Known reports: ${EXPORTABLE_REPORTS.join(', ')}.` });
     }
     return report as ExportableReport;
   }

@@ -215,9 +215,7 @@ export class SystemRestoreService implements OnModuleInit {
 
     // 2. The typed confirmation.
     if (!input.confirm) {
-      throw new BadRequestException(
-        'A complete restore replaces the whole database. Send confirm=true once you have read the warning.',
-      );
+      throw new BadRequestException({ code: 'FULL_RESTORE_CONFIRM', message: 'A complete restore replaces the whole database. Send confirm=true once you have read the warning.' });
     }
     if ((input.confirmPhrase ?? '').trim().toUpperCase() !== 'RESTORE') {
       throw new BadRequestException(
@@ -226,9 +224,7 @@ export class SystemRestoreService implements OnModuleInit {
     }
 
     if (this.running || this.maintenance.isActive) {
-      throw new ConflictException(
-        'A restore is already running. Wait for it to finish before starting another one.',
-      );
+      throw new ConflictException({ code: 'SYSTEM_RESTORE_RUNNING', message: 'A restore is already running. Wait for it to finish before starting another one.' });
     }
 
     const existing = await this.journals.read();
@@ -257,12 +253,10 @@ export class SystemRestoreService implements OnModuleInit {
       label = input.fileName;
       sourcePath = this.backups.pathOf(input.fileName);
       if (!existsSync(sourcePath)) {
-        throw new BadRequestException(`There is no backup named "${input.fileName}" on this server.`);
+        throw new BadRequestException({ code: 'FULL_BACKUP_FILE_MISSING', message: `There is no backup named "${input.fileName}" on this server.` });
       }
     } else {
-      throw new BadRequestException(
-        'Choose a backup to restore: upload one or name one already on this server.',
-      );
+      throw new BadRequestException({ code: 'FULL_RESTORE_CHOOSE_FILE', message: 'Choose a backup to restore: upload one or name one already on this server.' });
     }
 
     if (input.uploaded?.buffer?.length && input.uploaded.buffer.subarray(0, 5).toString('latin1') === 'PGDMP') {
@@ -280,7 +274,7 @@ export class SystemRestoreService implements OnModuleInit {
     try {
       lock = await this.holdAdvisoryLock();
       if (authority) await assertRestoreAuthority(this.prisma, authority, true);
-      if (this.running) throw new ConflictException('A restore or recovery is already running.');
+      if (this.running) throw new ConflictException({ code: 'SYSTEM_RESTORE_RUNNING', message: 'A restore or recovery is already running.' });
       const current = await this.journals.read();
       if (isUnfinished(current)) {
         throw new ServiceUnavailableException('An interrupted restore must be recovered before starting another.');
@@ -335,9 +329,7 @@ export class SystemRestoreService implements OnModuleInit {
       });
       const dumpPath = join(stagingDir, ARCHIVE_PATHS.databaseDump);
       if (!(await hasCustomMagic(dumpPath))) {
-        throw new BadRequestException(
-          'The database dump inside this archive is not a PostgreSQL archive. Nothing was changed.',
-        );
+        throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: 'The database dump inside this archive is not a PostgreSQL archive. Nothing was changed.' });
       }
       journal = await this.journals.advance(journal, 'validated', {
         checks: [
@@ -373,12 +365,10 @@ export class SystemRestoreService implements OnModuleInit {
         }
         rehearsed = true;
       } catch (error) {
-        throw new BadRequestException(
-          'This backup did not restore cleanly into a test database, so the current data was ' +
+        throw new BadRequestException({ code: 'FULL_BACKUP_UNREADABLE', message: 'This backup did not restore cleanly into a test database, so the current data was ' +
             `not touched. It may be damaged, or made by a different PostgreSQL version. Details: ${String(
               (error as Error).message ?? error,
-            ).slice(0, 400)}`,
-        );
+            ).slice(0, 400)}` });
       } finally {
         await dropDatabaseIfExists(scratchName).catch(() => {});
       }
@@ -393,7 +383,7 @@ export class SystemRestoreService implements OnModuleInit {
       // Otherwise a successful write between the snapshot and replacement could
       // be lost on either restore or rollback.
       if (this.maintenance.isActive) {
-        throw new ConflictException('Another maintenance operation started during restore rehearsal. The database was not changed.');
+        throw new ConflictException({ code: 'FULL_RESTORE_BUSY', message: 'Another maintenance operation started during restore rehearsal. The database was not changed.' });
       }
       this.maintenance.begin(
         `Restoring the system from ${label}. The program will be back shortly.`,
@@ -611,7 +601,7 @@ export class SystemRestoreService implements OnModuleInit {
     detail: string;
   }> {
     if (this.running) {
-      throw new ConflictException('A restore or recovery is already running.');
+      throw new ConflictException({ code: 'SYSTEM_RESTORE_RUNNING', message: 'A restore or recovery is already running.' });
     }
     this.running = true;
     let lock: Client | null = null;

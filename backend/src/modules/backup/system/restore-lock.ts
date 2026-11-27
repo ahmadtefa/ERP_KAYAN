@@ -20,7 +20,7 @@ export async function acquireRestoreLock(options: { recovery?: boolean } = {}): 
       'SELECT pg_try_advisory_lock($1) AS locked', [RESTORE_LOCK_KEY],
     );
     if (!result.rows[0]?.locked) {
-      throw new ConflictException('Another process is already restoring this database.');
+      throw new ConflictException({ code: 'SYSTEM_RESTORE_RUNNING', message: 'Another process is already restoring this database.' });
     }
     // PostgreSQL queues this exclusive lock behind business requests admitted
     // by every API process. Never take a safety snapshot until they finish.

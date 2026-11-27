@@ -74,9 +74,7 @@ export class DocumentsService {
 
   spec(kind: string): DocumentSpec {
     if (!DOCUMENT_KINDS.includes(kind as DocumentKind)) {
-      throw new BadRequestException(
-        `Unknown document "${kind}". Known: ${DOCUMENT_KINDS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'EXPORT_DOC_UNKNOWN', message: `Unknown document "${kind}". Known: ${DOCUMENT_KINDS.join(', ')}.` });
     }
     return DOCUMENT_SPECS[kind as DocumentKind];
   }

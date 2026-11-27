@@ -95,9 +95,7 @@ export class ListTablesService {
   known(slug: string): ListSpec {
     const spec = SPECS.find((entry) => entry.slug === slug);
     if (!spec) {
-      throw new BadRequestException(
-        `Unknown list "${slug}". Known lists: ${LIST_SLUGS.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'EXPORT_LIST_UNKNOWN', message: `Unknown list "${slug}". Known lists: ${LIST_SLUGS.join(', ')}.` });
     }
     return spec;
   }
@@ -167,15 +165,13 @@ export class ListTablesService {
   /// history is exported in full instead of being clipped to the visible part.
   async stockLedger(companyId: string, query: ListQuery): Promise<ReportTable> {
     if (!query.itemId) {
-      throw new BadRequestException(
-        'The stock ledger needs itemId, the item whose movements are wanted.',
-      );
+      throw new BadRequestException({ code: 'EXPORT_NEEDS_ITEM', message: 'The stock ledger needs itemId, the item whose movements are wanted.' });
     }
     const item = await this.prisma.item.findFirst({
       where: { id: query.itemId, companyId, deletedAt: null },
       select: { code: true, nameEn: true, nameAr: true, unit: true },
     });
-    if (!item) throw new BadRequestException('The item does not exist');
+    if (!item) throw new BadRequestException({ code: 'EXPORT_ITEM_MISSING', message: 'The item does not exist' });
 
     const balances = await this.prisma.stockBalance.findMany({
       where: {

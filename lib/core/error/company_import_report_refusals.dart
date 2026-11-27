@@ -77,4 +77,36 @@ const Map<String, List<String>> companyImportReportRefusals = {
     'الحساب غير موجود في هذه الشركة. اخترْه من الدليل المحاسبي ثم أعد التقرير.',
     'The account does not exist in this company. Choose it from the chart of accounts and run the report again.',
   ],
+  'EXPORT_DOC_UNKNOWN': [
+    'نوع المستند المطلوب غير معروف. اختر المستند من القائمة في الشاشة.',
+    'The document type you asked for is not recognised. Choose the document from the list on the screen.',
+  ],
+  'EXPORT_FORMAT_UNKNOWN': [
+    'صيغة الملف غير معروفة. اختر Excel أو CSV.',
+    'The file format is not recognised. Choose Excel or CSV.',
+  ],
+  'EXPORT_REPORT_UNKNOWN': [
+    'التقرير المطلوب تصديره غير معروف. اختر تقريرًا من القائمة في الشاشة.',
+    'The report you asked to export is not recognised. Choose a report from the list on the screen.',
+  ],
+  'EXPORT_LIST_UNKNOWN': [
+    'القائمة المطلوبة غير معروفة. افتح القائمة من شاشتها ثم صدّرها.',
+    'The list you asked for is not recognised. Open the list from its own screen and export it.',
+  ],
+  'EXPORT_NEEDS_ITEM': [
+    'كارت الصنف يحتاج صنفًا. اختر الصنف ثم أعد التقرير.',
+    'The stock ledger needs an item. Choose the item and run the report again.',
+  ],
+  'EXPORT_ITEM_MISSING': [
+    'الصنف غير موجود. حدّث الشاشة واختر الصنف من القائمة ثم أعد التقرير.',
+    'The item does not exist. Reload the screen, choose the item from the list and run the report again.',
+  ],
+  'EXPORT_NEEDS_ACCOUNT': [
+    'كشف الحساب يحتاج حسابًا. اختر الحساب ثم أعد التقرير.',
+    'The account ledger needs an account. Choose the account and run the report again.',
+  ],
+  'EXPORT_NEEDS_PARTY': [
+    'كشف الطرف يحتاج عميلًا أو موردًا. اختر الطرف ونوعه ثم أعد التقرير.',
+    'A party statement needs a customer or supplier. Choose the party and its type and run the report again.',
+  ],
 };
