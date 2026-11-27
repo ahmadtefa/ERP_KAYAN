@@ -187,7 +187,7 @@ class _Waiting extends StatelessWidget {
               SizedBox(height: 20),
               Text('جارٍ تشغيل البرنامج…', style: TextStyle(fontSize: 16)),
               SizedBox(height: 6),
-              Text('Starting KAYAN ERP…', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              Text('Starting Al-Marwa ERP…', style: TextStyle(fontSize: 13, color: Colors.grey)),
             ],
           ),
         ),

@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
-  /// **'KAYAN ERP'**
+  /// **'Al-Marwa ERP'**
   String get appTitle;
 
   /// No description provided for @signIn.
@@ -359,13 +359,13 @@ abstract class AppLocalizations {
   /// No description provided for @aboutDescription.
   ///
   /// In en, this message translates to:
-  /// **'KAYAN: one system for sales, purchasing, inventory and accounting.'**
+  /// **'Al-Marwa: one system for sales, purchasing, inventory and accounting.'**
   String get aboutDescription;
 
   /// No description provided for @aboutBody.
   ///
   /// In en, this message translates to:
-  /// **'KAYAN covers the whole working cycle: quotations, invoices and collection; purchase orders and supplier invoices; stock movements, transfers between branches and warehouses, and stock counts; journal entries and financial reports. It supports several branches and warehouses with per-user permissions, data export and backups to protect your company data, in Arabic and English.'**
+  /// **'Al-Marwa covers the whole working cycle: quotations, invoices and collection; purchase orders and supplier invoices; stock movements, transfers between branches and warehouses, and stock counts; journal entries and financial reports. It supports several branches and warehouses with per-user permissions, data export and backups to protect your company data, in Arabic and English.'**
   String get aboutBody;
 
   /// No description provided for @aboutTechnicalDetails.

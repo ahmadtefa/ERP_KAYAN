@@ -75,7 +75,7 @@ void main() {
     final about = find.byIcon(Icons.info_outline);
     await tester.ensureVisible(about);
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.textContaining('يجمع كيان دورة العمل'), findsOneWidget);
+    expect(find.textContaining('يجمع المروه دورة العمل'), findsOneWidget);
     await tester.runAsync(() async {
       final b = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final img = await b.toImage();
