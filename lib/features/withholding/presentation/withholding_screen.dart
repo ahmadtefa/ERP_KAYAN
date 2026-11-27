@@ -320,15 +320,13 @@ class _WithholdingScreenState extends ConsumerState<WithholdingScreen> {
         FieldSpec('from', _arabic ? 'من' : 'From', kind: FieldKind.date, required: true),
         FieldSpec('to', _arabic ? 'إلى' : 'To', kind: FieldKind.date, required: true),
       ],
-      onSubmit: (values) async {
-        if (text(values, 'from').compareTo(text(values, 'to')) > 0) {
-          throw ArgumentError(_arabic ? 'تاريخ البداية بعد تاريخ النهاية.' : 'The start date is after the end date.');
-        }
-      },
     );
     if (values == null || !mounted) return;
-    _from = text(values, 'from');
-    _to = text(values, 'to');
+    final a = text(values, 'from');
+    final b = text(values, 'to');
+    // A reversed range is read as the same two days the other way round.
+    _from = a.compareTo(b) <= 0 ? a : b;
+    _to = a.compareTo(b) <= 0 ? b : a;
     _loadReport();
   }
 }
