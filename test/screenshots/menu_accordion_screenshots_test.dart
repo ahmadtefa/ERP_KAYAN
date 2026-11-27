@@ -321,6 +321,9 @@ void main() {
     await _pumpShell(tester);
 
     await _tapGroup(tester, 'nav-group-inventory');
+    // A tall window, so the whole open section is built and on screen.
+    tester.view.physicalSize = const Size(1440, 2200);
+    await tester.pumpAndSettle();
     for (final heading in const [
       'الأصناف والأرصدة',
       'المستودعات والمواقع',
