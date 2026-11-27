@@ -404,6 +404,14 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         accentOverride: SectionAccents.cash,
       ),
       _NavItem(
+        AppRoutes.withholding,
+        Icons.percent_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'ضريبة الخصم والإضافة' : 'Withholding tax',
+        permissions: const ['withholding.read'],
+        group: _NavGroup.accounting,
+        accentOverride: SectionAccents.cash,
+      ),
+      _NavItem(
         AppRoutes.journalEntries,
         Icons.menu_book_outlined,
         l10n.journalEntries,

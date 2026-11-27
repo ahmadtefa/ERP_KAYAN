@@ -23,6 +23,7 @@ import '../../../data/presentation/widgets/document_export_actions.dart';
 import '../../voucher_allocation.dart';
 import '../providers/cash_providers.dart';
 import '../widgets/voucher_details_view.dart';
+import '../withholding_dialog.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
 ///
@@ -727,6 +728,15 @@ class _CashScreenState extends ConsumerState<CashScreen>
                     ),
                   ),
                 ),
+                if (text(row, 'status').toUpperCase() == 'DRAFT' &&
+                    voucherTakesWithholding(row) &&
+                    (ref.watch(currentUserProvider)?.can('withholding.read') ?? false))
+                  IconButton(
+                    key: ValueKey('voucher-withholding-${text(row, 'id')}'),
+                    tooltip: isArabic ? 'ضريبة الخصم' : 'Withholding tax',
+                    icon: const Icon(Icons.percent_outlined, size: 20),
+                    onPressed: _busy ? null : () => showVoucherWithholding(context, ref, row),
+                  ),
                 if (text(row, 'status').toUpperCase() == 'DRAFT')
                   IconButton(
                     tooltip: l10n.post,
