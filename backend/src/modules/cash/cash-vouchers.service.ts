@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
+import { applyWithholdingToLines, WithholdingError } from '../withholding/withholding-rules';
 
 const MONEY_SCALE = 4;
 
@@ -556,6 +557,28 @@ export class CashVouchersService {
         description: voucher.kind === CashVoucherKind.RECEIPT ? 'Receipt' : 'Payment',
       });
 
+      // Withholding tax set on this draft: the cash side carries only the net,
+      // and the tax goes to the account its rate names. The voucher amount and
+      // the invoices it settles stay gross.
+      const [withholding] = await tx.$queryRaw<
+        { amount: Prisma.Decimal; direction: 'PAYABLE' | 'RECEIVABLE'; accountId: string }[]
+      >(Prisma.sql`SELECT amount, direction, "accountId" FROM voucher_withholdings WHERE "voucherId" = ${voucher.id}::uuid`);
+      let journalLines = lines;
+      if (withholding) {
+        try {
+          journalLines = applyWithholdingToLines(
+            lines,
+            voucher.cashAccount.accountId,
+            withholding.direction,
+            new Prisma.Decimal(withholding.amount),
+            withholding.accountId,
+          );
+        } catch (error) {
+          if (error instanceof WithholdingError) throw new BadRequestException(error.message);
+          throw error;
+        }
+      }
+
       const journal = await this.posting.post(tx, {
         companyId,
         branchId: voucher.branchId,
@@ -568,7 +591,7 @@ export class CashVouchersService {
         sourceId: voucher.id,
         sourceNumber: voucher.voucherNumber,
         currency: voucher.currency,
-        lines,
+        lines: journalLines,
         discloseBalance: options.discloseBalance,
       });
 

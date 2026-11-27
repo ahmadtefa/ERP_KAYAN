@@ -83,6 +83,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['cheques.read', 'View cheques', 'عرض الشيكات', 'cheques'],
   ['cheques.create', 'Register cheques', 'تسجيل الشيكات', 'cheques'],
   ['cheques.manage', 'Deposit, collect, return and cancel cheques', 'إيداع وتحصيل وإرجاع وإلغاء الشيكات', 'cheques'],
+  ['withholding.read', 'View withholding tax and its report', 'عرض ضريبة الخصم والإضافة وتقريرها', 'cash'],
+  ['withholding.manage', 'Set up withholding tax rates', 'إعداد نسب ضريبة الخصم والإضافة', 'cash'],
   ['reports.vat-return.read', 'View VAT return', 'عرض إقرار ضريبة القيمة المضافة', 'reports'],
   ['reports.expenses.read', 'View expenses report', 'عرض تقرير expenses', 'reports'],
   ['reports.income.read', 'View income report', 'عرض تقرير income', 'reports'],

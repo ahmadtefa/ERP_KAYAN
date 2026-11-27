@@ -50,6 +50,7 @@ describe('CashVouchersService allocation validation', () => {
     purchaseInvoices?: any[];
   } = {}) {
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       cashVoucher: {
         create: jest.fn().mockResolvedValue({ id: 'voucher-1', voucherNumber: 'RC-0001' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
