@@ -11,6 +11,7 @@ import { CompanySettingsService } from '../../common/settings/company-settings.m
 import { AccountingSettingsController } from '../accounting/settings.controller';
 import { BackupScheduleController } from '../backup/backup-schedule.controller';
 import { BackupScheduleService } from '../backup/backup-schedule.service';
+import { BackupDestinationService } from '../backup/backup-destination';
 
 const companyService = {
   updateProfile: jest.fn().mockResolvedValue({ updated: true }),
@@ -29,7 +30,7 @@ const companySettingsService = {update:jest.fn().mockResolvedValue({updated:true
 @Module({
   controllers: [CompanyController, CompaniesController, AccountingSettingsController, BackupScheduleController],
   providers: [AuditedSuperAdminGuard, {provide:AuditService,useValue:deniedAudit}, {provide:PrismaService,useValue:{}}, { provide: CompanyService, useValue: companyService },
-    {provide:CompanySettingsService,useValue:companySettingsService}, {provide:BackupScheduleService,useValue:schedule}],
+    {provide:CompanySettingsService,useValue:companySettingsService}, {provide:BackupScheduleService,useValue:schedule}, {provide:BackupDestinationService,useValue:{}}],
 })
 class FixtureModule {}
 
