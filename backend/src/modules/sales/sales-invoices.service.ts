@@ -315,15 +315,15 @@ export class SalesInvoicesService {
     options: SalesInvoicePreparationOptions = {},
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
 
     const customer = await tx.customer.findFirst({
       where: { id: dto.customerId, companyId, deletedAt: null },
       select: { id: true, nameEn: true, isActive: true },
     });
-    if (!customer) throw new BadRequestException('The customer does not exist');
-    if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+    if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
+    if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
 
     const prepared = await this.prepareLines(
       companyId,
@@ -426,7 +426,7 @@ export class SalesInvoicesService {
     stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
 
     const invoice = await this.prisma.salesInvoice.findFirst({
@@ -435,21 +435,21 @@ export class SalesInvoicesService {
     if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
     if (invoice.salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
-      throw new BadRequestException('Return documents cannot be edited as sales invoices');
+      throw new BadRequestException({ code: 'INVOICE_RETURN_NOT_EDITABLE', message: 'Return documents cannot be edited as sales invoices' });
     }
     if (invoice.status !== InvoiceStatus.DRAFT) {
-      throw new BadRequestException('Only a draft sales invoice can be edited');
+      throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_EDIT', message: 'Only a draft sales invoice can be edited' });
     }
     if (invoice.branchId !== branchId) {
-      throw new BadRequestException('A draft can only be edited from its assigned branch');
+      throw new BadRequestException({ code: 'INVOICE_OTHER_BRANCH', message: 'A draft can only be edited from its assigned branch' });
     }
 
     const customer = await this.prisma.customer.findFirst({
       where: { id: dto.customerId, companyId, deletedAt: null },
       select: { id: true, isActive: true },
     });
-    if (!customer) throw new BadRequestException('The customer does not exist');
-    if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+    if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
+    if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
 
     const prepared = await this.prepareLines(
       companyId,
@@ -549,7 +549,7 @@ export class SalesInvoicesService {
    */
   /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
   async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     const before = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, branchId, deletedAt: null }, select: { salesOrderId: true },
     });
@@ -594,7 +594,7 @@ export class SalesInvoicesService {
       if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
         throw new BadRequestException('Only an active draft invoice can be amended');
       }
-      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
+      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException({ code: 'INVOICE_CHANGED_RELOAD', message: 'The invoice changed; reload before editing' });
       if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
       if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero()) {
         throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
@@ -662,7 +662,7 @@ export class SalesInvoicesService {
 
   /** Cancel a draft without deleting its historical identity or retry key. */
   async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
-    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    if (!branchId) throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     await this.prisma.$transaction(async (tx) => {
       let invoice = await tx.salesInvoice.findFirst({
         where: { id, companyId, branchId, deletedAt: null },
@@ -670,7 +670,7 @@ export class SalesInvoicesService {
       });
       if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
       if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
-        throw new BadRequestException('Only a draft invoice can be cancelled');
+        throw new BadRequestException({ code: 'INVOICE_NOT_DRAFT_CANCEL', message: 'Only a draft invoice can be cancelled' });
       }
       if (invoice.salesOrderId) {
         // An amendment can commit while we wait for the order lock. Reload

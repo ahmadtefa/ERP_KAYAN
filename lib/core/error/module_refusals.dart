@@ -151,6 +151,62 @@ const Map<String, List<String>> moduleRefusals = {
     'ضريبة الخصم تخص دفعة لمورد أو قبضًا من عميل فقط. اختر سندًا من هذين النوعين.',
     'Withholding applies to a payment to a supplier or a receipt from a customer only. Choose a voucher of one of those kinds.',
   ],
+  'USER_NO_BRANCH': [
+    'حسابك غير مرتبط بفرع، فلا يمكن إتمام العملية. اطلب من المدير ربط حسابك بفرع ثم سجّل الدخول من جديد.',
+    'Your account is not assigned to a branch, so this cannot be done. Ask an administrator to assign your account to a branch, then sign in again.',
+  ],
+  'CUSTOMER_MISSING': [
+    'العميل المختار غير موجود. اختر العميل من القائمة أو أضفه أولًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The chosen customer does not exist. Pick the customer from the list or add them first, then try again. Nothing was saved.',
+  ],
+  'CUSTOMER_INACTIVE': [
+    'العميل المختار متوقف. فعّله من شاشة العملاء أو اختر عميلًا آخر. لم يُحفظ شيء.',
+    'The chosen customer is inactive. Activate them in the Customers screen or choose another customer. Nothing was saved.',
+  ],
+  'INVOICE_NOT_DRAFT_EDIT': [
+    'لا يمكن تعديل الفاتورة بعد ترحيلها أو إلغائها. لتصحيحها أنشئ مرتجعًا أو إشعارًا ثم فاتورة جديدة.',
+    'An invoice cannot be edited once it is posted or cancelled. To correct it, record a return or credit note and issue a new invoice.',
+  ],
+  'INVOICE_RETURN_NOT_EDITABLE': [
+    'مستند المرتجع لا يُعدَّل من شاشة الفواتير. افتحه من شاشة المرتجعات أو أنشئ مرتجعًا جديدًا.',
+    'A return document cannot be edited as a sales invoice. Open it from the Returns screen or create a new return.',
+  ],
+  'INVOICE_OTHER_BRANCH': [
+    'هذه المسودة تتبع فرعًا آخر، ولا تُعدَّل إلا من فرعها. سجّل الدخول بحساب ذلك الفرع أو أنشئ مسودة جديدة.',
+    'This draft belongs to another branch and can only be edited from that branch. Sign in with an account of that branch or create a new draft.',
+  ],
+  'INVOICE_CHANGED_RELOAD': [
+    'الفاتورة رُحّلت أو تغيّرت بواسطة مستخدم آخر. حدّث الشاشة وراجع آخر حالة ثم أعد التعديل. لم يُحفظ تعديلك.',
+    'The invoice was posted or changed by someone else. Reload the screen, check its latest state and edit again. Your change was not saved.',
+  ],
+  'INVOICE_NOT_DRAFT_CANCEL': [
+    'لا يُلغى إلا الفاتورة المسودة. الفاتورة المرحّلة تُصحَّح بمرتجع أو إشعار دائن.',
+    'Only a draft invoice can be cancelled. A posted invoice is corrected with a return or credit note.',
+  ],
+  'QUOTE_NOT_DRAFT_EDIT': [
+    'لا يمكن تعديل عرض السعر بعد إصداره. أنشئ مراجعة جديدة منه ثم عدّلها.',
+    'A quotation cannot be edited once it is issued. Create a new revision of it and edit that.',
+  ],
+  'QUOTE_NOT_DRAFT_ISSUE': [
+    'هذا العرض صدر من قبل أو أُغلق. لا حاجة لإصداره مرة أخرى. حدّث الشاشة لترى حالته.',
+    'This quotation was already issued or closed, so it cannot be issued again. Reload the screen to see its status.',
+  ],
+  'QUOTE_NOT_DRAFT_DELETE': [
+    'لا يُحذف إلا عرض السعر المسودة. العرض الصادر يُغلق أو يُرفض بدل الحذف.',
+    'Only a draft quotation can be deleted. An issued quotation is closed or rejected instead.',
+  ],
+  'QUOTE_ALREADY_CONVERTED': [
+    'هذا العرض تحوّل إلى فاتورة بالفعل، ربما بواسطة مستخدم آخر. افتح الفاتورة من سجل الفواتير بدل التحويل مرة أخرى.',
+    'This quotation was already converted to an invoice, possibly by someone else. Open that invoice from the invoices list instead of converting again.',
+  ],
+  'QUOTE_NO_LINES': [
+    'عرض السعر بلا بنود فلا يمكن تحويله إلى فاتورة. أضف بندًا واحدًا على الأقل ثم أعد التحويل.',
+    'The quotation has no lines, so it cannot be converted to an invoice. Add at least one line and convert again.',
+  ],
+  'CURRENCY_CODE_INVALID': [
+    'رمز العملة غير صحيح. اكتب ثلاثة أحرف مثل EGP أو USD.',
+    'The currency code is not valid. Enter three letters such as EGP or USD.',
+  ],
 };
 
 /// Arabic names of the inputs these refusals point at, for the generic

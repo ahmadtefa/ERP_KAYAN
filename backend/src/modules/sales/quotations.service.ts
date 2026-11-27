@@ -207,13 +207,13 @@ export class QuotationsService {
     dto: CreateQuotationDto,
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     const customer = await this.activeCustomer(companyId, dto.customerId);
     const settings = await this.settings.get(companyId);
     const currency = (dto.currency ?? customer.currency ?? 'EGP').toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) {
-      throw new BadRequestException('The currency must be a three-letter code');
+      throw new BadRequestException({ code: 'CURRENCY_CODE_INVALID', message: 'The currency must be a three-letter code' });
     }
 
     const prepared = await this.prepare(
@@ -322,7 +322,7 @@ export class QuotationsService {
     const settings = await this.settings.get(companyId);
     const currency = (dto.currency ?? customer.currency ?? quotation.currency).toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) {
-      throw new BadRequestException('The currency must be a three-letter code');
+      throw new BadRequestException({ code: 'CURRENCY_CODE_INVALID', message: 'The currency must be a three-letter code' });
     }
     const prepared = await this.prepare(
       companyId,
@@ -362,7 +362,7 @@ export class QuotationsService {
         },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('Only a draft quotation can be edited');
+        throw new BadRequestException({ code: 'QUOTE_NOT_DRAFT_EDIT', message: 'Only a draft quotation can be edited' });
       }
 
       // The line set is replaced wholesale: it is a draft, and a partial edit
@@ -437,7 +437,7 @@ export class QuotationsService {
       if (claim.count !== 1) {
         const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
         if (!existing) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
-        throw new BadRequestException('Only a draft quotation can be issued');
+        throw new BadRequestException({ code: 'QUOTE_NOT_DRAFT_ISSUE', message: 'Only a draft quotation can be issued' });
       }
       const quotation = await tx.quotation.findFirst({
         where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
@@ -535,7 +535,7 @@ export class QuotationsService {
   /// and its status; the new version points back at it.
   async revise(companyId: string, branchId: string | null, userId: string, id: string) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -670,7 +670,7 @@ export class QuotationsService {
         data: { deletedAt: new Date(), updatedBy: userId },
       });
       if (deleted.count !== 1) {
-        throw new BadRequestException('Only a draft quotation can be deleted');
+        throw new BadRequestException({ code: 'QUOTE_NOT_DRAFT_DELETE', message: 'Only a draft quotation can be deleted' });
       }
       await this.audit.recordRequired({
         companyId,
@@ -709,7 +709,7 @@ export class QuotationsService {
     stockView: { mayReadStock: boolean } = { mayReadStock: false },
   ) {
     if (!branchId) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
+      throw new BadRequestException({ code: 'USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
     await this.expireOverdue(companyId);
     const quotation = await this.prisma.quotation.findFirst({
@@ -718,7 +718,7 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status === QuotationStatus.CONVERTED || quotation.convertedInvoiceId) {
-      throw new BadRequestException('This quotation has already been converted to an invoice');
+      throw new BadRequestException({ code: 'QUOTE_ALREADY_CONVERTED', message: 'This quotation has already been converted to an invoice' });
     }
     if (quotation.status !== QuotationStatus.ACCEPTED) {
       throw new BadRequestException(
@@ -726,7 +726,7 @@ export class QuotationsService {
       );
     }
     if (quotation.tables.length === 0) {
-      throw new BadRequestException('This quotation has no lines to convert');
+      throw new BadRequestException({ code: 'QUOTE_NO_LINES', message: 'This quotation has no lines to convert' });
     }
 
     const lines: Array<{
@@ -774,7 +774,7 @@ export class QuotationsService {
 
     // Free-text lines are allowed on a quotation, and on a sales invoice
     // too; an item-less line is described by its text.
-    if (lines.length === 0) throw new BadRequestException('This quotation has no lines to convert');
+    if (lines.length === 0) throw new BadRequestException({ code: 'QUOTE_NO_LINES', message: 'This quotation has no lines to convert' });
 
     // Claim, create the draft invoice, link it, and write both audit records
     // under one database transaction. In particular, do not release the
@@ -785,7 +785,7 @@ export class QuotationsService {
         data: { status: QuotationStatus.CONVERTED, convertedAt: new Date(), updatedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This quotation was converted by someone else a moment ago');
+        throw new BadRequestException({ code: 'QUOTE_ALREADY_CONVERTED', message: 'This quotation was converted by someone else a moment ago' });
       }
       const invoice = await this.invoices.createInTransaction(companyId, branchId, userId, {
         invoiceDate: dto.invoiceDate ? this.date(dto.invoiceDate, 'invoiceDate').toISOString() : new Date().toISOString(),
@@ -990,8 +990,8 @@ export class QuotationsService {
         isActive: true,
       },
     });
-    if (!customer) throw new BadRequestException('The customer does not exist');
-    if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+    if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
+    if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
 
     // The offer's currency is the company's unless somebody chose another;
     // there is no per-customer currency column to guess from.
