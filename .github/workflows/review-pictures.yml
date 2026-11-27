@@ -1,0 +1,32 @@
+name: Review pictures (synthetic, menu and credit-period dropdown)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pictures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Render the pictures
+        env:
+          KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/review-pictures
+        run: flutter test test/screenshots/review_pictures_test.dart --reporter expanded
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: review-pictures-${{ github.sha }}
+          path: build/review-pictures/*.png
+          if-no-files-found: error
+          retention-days: 14
