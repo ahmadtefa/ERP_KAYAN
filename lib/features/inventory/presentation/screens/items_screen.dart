@@ -236,18 +236,19 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       title: isEdit ? l10n.editItem : l10n.newItem,
       fields: [
         if (!isEdit)
-          FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
-        FieldSpec('nameEn', openingArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200),
+          FieldSpec('code', l10n.accountCode, maxLength: 30, required: true, section: openingArabic ? 'بيانات الصنف' : 'Item details'),
+        FieldSpec('nameEn', openingArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200, section: isEdit ? (openingArabic ? 'بيانات الصنف' : 'Item details') : null),
         FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
         FieldSpec('unit', l10n.unit, maxLength: 20),
         FieldSpec('barcode', openingArabic ? 'الباركود' : 'Barcode', maxLength: 60, nullWhenEmpty: isEdit),
         if (canManageSalePrice)
-          FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
+          FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal, section: openingArabic ? 'الأسعار والضريبة' : 'Prices and tax'),
         if (canManagePurchasePrice)
           FieldSpec(
             'purchasePrice',
             l10n.unitsBarcodesFieldPurchasePrice,
             kind: FieldKind.decimal,
+            section: canManageSalePrice ? null : (openingArabic ? 'الأسعار والضريبة' : 'Prices and tax'),
           ),
         FieldSpec(
           'taxRate',
@@ -255,11 +256,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           kind: FieldKind.decimal,
           emptyValue: '0',
           helper: '0 - 100',
+          section: (canManageSalePrice || canManagePurchasePrice) ? null : (openingArabic ? 'الأسعار والضريبة' : 'Prices and tax'),
         ),
         FieldSpec(
           'isStockTracked',
           l10n.isStockTracked,
           kind: FieldKind.toggle,
+          section: openingArabic ? 'المخزون' : 'Stock',
           helper: openingArabic
               ? 'تتبّع المخزون لا يضيف كمية. الرصيد الافتتاحي أدناه يُرحّل عند الحفظ.'
               : 'Tracking adds no stock. Opening stock below posts when you save.',

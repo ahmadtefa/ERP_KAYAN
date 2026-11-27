@@ -56,7 +56,12 @@ class FieldSpec {
     this.optionsBy = const {},
     this.showWhenField,
     this.showWhenValues = const {},
+    this.section,
   });
+
+  /// A heading shown above this field, to group a long form into a few parts.
+  /// It is display only: it adds no value to the form.
+  final String? section;
 
   /// Additional source-grounded domain constraints, applied before submit.
   final String? Function(String value)? validator;
@@ -490,7 +495,21 @@ class _FormSheetState extends State<_FormSheet> {
                         ),
                       ),
                     for (final field in widget.fields)
-                      if (_visible(field)) _buildField(field),
+                      if (_visible(field)) ...[
+                        if (field.section != null)
+                          Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
+                              child: Text(
+                                field.section!,
+                                key: ValueKey('form-section-${field.key}'),
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                            ),
+                          ),
+                        _buildField(field),
+                      ],
                   ],
                 ),
               ),
