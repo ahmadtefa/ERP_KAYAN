@@ -47,8 +47,8 @@ const Map<String, List<String>> wordedRefusals = {
     'The restore permission changed while waiting. Ask the system administrator to grant the permission again, then try again. No data was changed.',
   ],
   'SYSTEM_RESTORE_RESTORE_E100': [
-    'اكتب كلمة RESTORE لتأكيد أنك تريد استبدال كل البيانات.',
-    'Type the word RESTORE to confirm that you want to replace all data.',
+    'لم تُكتب كلمة التأكيد. اكتب كلمة RESTORE لتأكيد أنك تريد استبدال كل البيانات.',
+    'The confirmation word is missing. Type the word RESTORE to confirm that you want to replace all data.',
   ],
   'SYSTEM_RESTORE_RESTORE_E102': [
     'هذا الملف أرشيف قاعدة بيانات فقط وليس نسخة نظام كاملة. استخدم قسم استعادة أرشيف قاعدة البيانات.',
@@ -135,8 +135,8 @@ const Map<String, List<String>> wordedRefusals = {
     'The lot changed while the transfer was being posted. Try again.',
   ],
   'STOCK_TAKES_ADD_LOCATION_E148': [
-    'اختر الصنف وموقع التخزين، ثم أعد المحاولة.',
-    'Choose the item and the storage location, then try again.',
+    'لم تختر الصنف أو موقع التخزين. اختر الاثنين ثم أعد المحاولة.',
+    'The item or the storage location is missing. Choose both and try again.',
   ],
   'STOCK_TAKES_RECORD_E150': [
     'الكمية المعدودة لا يمكن أن تكون سالبة. أدخل صفرًا أو رقمًا موجبًا.',
