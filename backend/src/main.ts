@@ -11,6 +11,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { coordinateBusinessStartup } from './common/maintenance/startup-coordination';
 import { validationExceptionFactory } from './common/validation/field-errors';
+import { jsonCompression } from './common/http/json-compression';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { isCorsOriginAllowed } from './common/security/cors-origin';
 import {
@@ -33,6 +34,8 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '6mb' });
   app.useBodyParser('urlencoded', { extended: true, limit: '1mb' });
   app.setGlobalPrefix('api/v1');
+  // Smaller JSON on slow links, and every read revalidated so no figure is shown stale.
+  app.use(jsonCompression());
 
   // Reject unknown properties so a typo cannot silently create a half-formed
   // financial document.
