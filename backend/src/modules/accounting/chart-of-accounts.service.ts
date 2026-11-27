@@ -9,7 +9,7 @@ import { AccountType, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
-  eightDigitViolation,
+  eightDigitViolationDetail,
   loadAccountCodeScheme,
   nextEightDigitChildCode,
   normalizeAccountCode,
@@ -116,7 +116,7 @@ export class ChartOfAccountsService {
     if (input.parentIsEightDigit) {
       throw new BadRequestException({ code: 'ACCOUNT_LAST_LEVEL', message: 'An 8-digit account is the last level and cannot have sub-accounts' });
     }
-    const problem = eightDigitViolation(input);
+    const problem = eightDigitViolationDetail(input);
     if (problem) throw new BadRequestException(problem);
   }
 
@@ -234,7 +234,7 @@ export class ChartOfAccountsService {
     dto: UpdateAccountDto,
   ): Promise<AccountResponse> {
     if (dto.expectedParentId !== undefined && dto.parentId === undefined) {
-      throw new BadRequestException('The expected parent requires a requested parent change');
+      throw new BadRequestException({ code: 'ACCOUNT_EXPECTED_PARENT_ONLY', message: 'The expected parent requires a requested parent change' });
     }
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockChart(tx, companyId);

@@ -57,34 +57,53 @@ export function eightDigitLevel(code: string): 1 | 2 | 3 | 4 | null {
  * Returns the reason a code/parent/postable combination breaks the eight
  * digit rule, or null when it is valid.
  */
+export interface EightDigitViolation {
+  code: string;
+  message: string;
+  params?: Record<string, string>;
+}
+
+export function eightDigitViolationDetail(input: {
+  code: string;
+  parentCode: string | null;
+  isPostable: boolean;
+}): EightDigitViolation | null {
+  const { code, parentCode, isPostable } = input;
+  const level = eightDigitLevel(code);
+  if (level === null) {
+    return { code: 'ACCOUNT_CODE_FORMAT', message: 'The account code must be numeric with 2, 4, 6 or 8 digits (each level adds two digits to its parent code)' };
+  }
+  if (level === 1 && parentCode) {
+    return { code: 'ACCOUNT_TOP_LEVEL_NO_PARENT', message: 'A 2-digit account is a top-level account and cannot have a parent' };
+  }
+  if (level > 1) {
+    if (!parentCode) {
+      return {
+        code: 'ACCOUNT_PARENT_REQUIRED',
+        message: `A ${code.length}-digit account needs a parent account with the first ${code.length - 2} digits of its code`,
+        params: { digits: String(code.length), parentDigits: String(code.length - 2) },
+      };
+    }
+    if (parentCode.length !== code.length - 2 || !code.startsWith(parentCode)) {
+      return {
+        code: 'ACCOUNT_PARENT_MISMATCH',
+        message: `The account code ${code} must start with its parent's code and add exactly two digits (parent is ${parentCode})`,
+        params: { code, parent: parentCode },
+      };
+    }
+  }
+  if (isPostable && level !== 4) {
+    return { code: 'ACCOUNT_POSTABLE_LEVEL', message: 'Only an 8-digit account can receive entries; shorter codes are totals' };
+  }
+  return null;
+}
+
 export function eightDigitViolation(input: {
   code: string;
   parentCode: string | null;
   isPostable: boolean;
 }): string | null {
-  const { code, parentCode, isPostable } = input;
-  const level = eightDigitLevel(code);
-  if (level === null) {
-    return 'The account code must be numeric with 2, 4, 6 or 8 digits (each level adds two digits to its parent code)';
-  }
-  if (level === 1 && parentCode) {
-    return 'A 2-digit account is a top-level account and cannot have a parent';
-  }
-  if (level > 1) {
-    if (!parentCode) {
-      return `A ${code.length}-digit account needs a parent account with the first ${code.length - 2} digits of its code`;
-    }
-    if (parentCode.length !== code.length - 2 || !code.startsWith(parentCode)) {
-      return `The account code ${code} must start with its parent's code and add exactly two digits (parent is ${parentCode})`;
-    }
-  }
-  if (isPostable && level !== 4) {
-    return 'Only an 8-digit account can receive entries; shorter codes are totals';
-  }
-  if (!isPostable && level === 4) {
-    return null; // an 8-digit account may be switched off from posting, harmless
-  }
-  return null;
+  return eightDigitViolationDetail(input)?.message ?? null;
 }
 
 /** Next free child code under a parent, in the eight digit scheme. */

@@ -274,6 +274,30 @@ const Map<String, List<String>> wordedRefusals = {
     'لا يمكن إقفال السنة الآن لأن هناك أمورًا لم تُنجز بعد. افتح معاينة الإقفال وعالج كل بند ظاهر فيها، ثم أعد محاولة الإقفال. لم يتغير شيء.',
     'The year cannot be closed yet because some items are still open. Open the closing preview, resolve each item listed there, then try closing again. Nothing changed.',
   ],
+  'ACCOUNT_CODE_FORMAT': [
+    'رمز الحساب غير مطابق لنظام الترميز: يجب أن يكون أرقامًا فقط من 2 أو 4 أو 6 أو 8 خانات، وكل مستوى يضيف خانتين إلى رمز الحساب الأب. صحّح الرمز، ثم احفظ. لم يُحفظ الحساب.',
+    'The account code does not follow the numbering scheme: it must be digits only, with 2, 4, 6 or 8 digits, and each level adds two digits to its parent code. Correct the code, then save. The account was not saved.',
+  ],
+  'ACCOUNT_TOP_LEVEL_NO_PARENT': [
+    'الحساب ذو الخانتين حساب رئيسي ولا يكون له حساب أب. أزل الحساب الأب أو اجعل الرمز أطول، ثم احفظ. لم يُحفظ الحساب.',
+    'A 2-digit account is a top-level account and cannot have a parent. Remove the parent or use a longer code, then save. The account was not saved.',
+  ],
+  'ACCOUNT_PARENT_REQUIRED': [
+    'الحساب ذو {digits} خانات يحتاج إلى حساب أب رمزه هو أول {parentDigits} خانات من رمزه. اختر الحساب الأب، ثم احفظ. لم يُحفظ الحساب.',
+    'An account with {digits} digits needs a parent account whose code is the first {parentDigits} digits of its code. Choose the parent account, then save. The account was not saved.',
+  ],
+  'ACCOUNT_PARENT_MISMATCH': [
+    'الرمز {code} يجب أن يبدأ برمز الحساب الأب ويضيف خانتين فقط، والحساب الأب المختار رمزه {parent}. صحّح الرمز أو اختر الحساب الأب المناسب، ثم احفظ. لم يُحفظ الحساب.',
+    'The code {code} must start with its parent account code and add exactly two digits, and the chosen parent has the code {parent}. Correct the code or choose the right parent, then save. The account was not saved.',
+  ],
+  'ACCOUNT_POSTABLE_LEVEL': [
+    'الحساب ذو الثماني خانات فقط هو الذي يقبل القيود، أما الأقصر فهو حساب إجمالي. اختر رمزًا من 8 خانات أو أوقف خيار قبول القيود، ثم احفظ. لم يُحفظ الحساب.',
+    'Only an 8-digit account can receive entries; shorter codes are totals. Use an 8-digit code or turn off the option to receive entries, then save. The account was not saved.',
+  ],
+  'ACCOUNT_EXPECTED_PARENT_ONLY': [
+    'لم يكتمل طلب تغيير الحساب الأب. حدّث الصفحة ثم أعد اختيار الحساب الأب الجديد، وإن تكرر ذلك فأبلغ مدير النظام. لم يتغير شيء.',
+    'The request to change the parent account was incomplete. Refresh the page and choose the new parent again, and if it keeps happening tell the system administrator. Nothing changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

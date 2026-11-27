@@ -1068,11 +1068,11 @@ export class SalesInvoicesService {
           new Prisma.Decimal(0),
         );
         if (allocations?.length && !allocated.equals(line.quantity)) {
-          throw new BadRequestException(
-            `السطر ${line.lineNumber}: مجموع المواقع ${allocated.toFixed(MONEY_SCALE)} لا يساوي الكمية ${line.quantity.toFixed(MONEY_SCALE)}. ` +
-              'عدّل السطر ثم رحّل. / ' +
-              `Line ${line.lineNumber}: locations add up to ${allocated.toFixed(MONEY_SCALE)} but the quantity is ${line.quantity.toFixed(MONEY_SCALE)}. Edit the line, then post again.`,
-          );
+          throw new BadRequestException({
+            code: 'SALES_INVOICES_POST_E201',
+            message: `Line ${line.lineNumber}: locations add up to ${allocated.toFixed(MONEY_SCALE)} but the quantity is ${line.quantity.toFixed(MONEY_SCALE)}. Edit the line, then post again.`,
+            params: { line: line.lineNumber, allocated: allocated.toFixed(MONEY_SCALE), quantity: line.quantity.toFixed(MONEY_SCALE) },
+          });
         }
 
         const issueFrom = async (storageLocationId: string | null, quantity: Prisma.Decimal) =>
