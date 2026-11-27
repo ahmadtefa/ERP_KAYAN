@@ -834,6 +834,17 @@ jobs:
           path: build/stockdoc-pictures/*.png
           if-no-files-found: warn
           retention-days: 14
+      - name: Render administration screen pictures
+        env:
+          KAYAN_VISUAL_OUTPUT: ${{ github.workspace }}/build/admin-pictures
+        run: python scripts/ci-diagnose.py flutter test test/screenshots/admin_pictures_test.dart --reporter expanded
+      - name: Upload administration screen pictures
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-pictures-${{ github.sha }}
+          path: build/admin-pictures/*.png
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload design screenshots
         uses: actions/upload-artifact@v4
         with:
