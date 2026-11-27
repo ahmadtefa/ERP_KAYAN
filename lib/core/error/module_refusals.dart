@@ -426,6 +426,11 @@ const Map<String, List<String>> moduleRefusals = {
 /// "check this field" sentence.
 const Map<String, String> moduleFieldLabelsAr = {
   'discountPercent': 'نسبة الخصم',
+  'salePrice': 'سعر البيع',
+  'purchasePrice': 'سعر الشراء',
+  'minQuantity': 'الحد الأدنى',
+  'reorderQuantity': 'كمية إعادة الطلب',
+  'maxQuantity': 'الحد الأقصى',
   'discountAmount': 'مبلغ الخصم',
   'serials': 'الأرقام التسلسلية',
   'serial': 'الرقم التسلسلي',

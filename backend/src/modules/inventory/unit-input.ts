@@ -89,7 +89,7 @@ function flag(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
-function optionalAmount(value: unknown, label: string): Prisma.Decimal | null {
+function optionalAmount(value: unknown, field: string, label: string): Prisma.Decimal | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   if (text === '') return null;
@@ -97,14 +97,10 @@ function optionalAmount(value: unknown, label: string): Prisma.Decimal | null {
   try {
     parsed = new Prisma.Decimal(text);
   } catch {
-    throw new BadRequestException(
-      `${label}: "${text}" is not a number / ليست قيمة رقمية صحيحة`,
-    );
+    throw new BadRequestException({ code: 'FIELD_BAD_NUMBER', message: `${label}: "${text}" is not a number`, field });
   }
   if (parsed.isNegative()) {
-    throw new BadRequestException(
-      `${label} cannot be negative / لا يمكن أن تكون سالبة`,
-    );
+    throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${label} cannot be negative`, field });
   }
   return parsed.toDecimalPlaces(MONEY_SCALE);
 }
@@ -185,9 +181,10 @@ export function parseUnitRows(
       unit,
       factor,
       barcode: barcodeText === '' ? null : barcodeText,
-      salePrice: optionalAmount(row.salePrice, `Sale price of "${label}"`),
+      salePrice: optionalAmount(row.salePrice, 'salePrice', `Sale price of "${label}"`),
       purchasePrice: optionalAmount(
         row.purchasePrice,
+        'purchasePrice',
         `Purchase price of "${label}"`,
       ),
       abbreviation: String(row.abbreviation ?? '').trim() || null,

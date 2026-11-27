@@ -662,7 +662,7 @@ export class ItemsService {
       const nameEn = String(dto.nameEn ?? '').trim() || before.nameEn.trim();
       const nameAr = String(dto.nameAr ?? '').trim() || before.nameAr.trim();
       if (!nameEn && !nameAr) {
-        throw new BadRequestException('Provide an Arabic or English item name');
+        throw new BadRequestException({ code: 'ITEMS_CREATE_E125', message: 'Provide an Arabic or English item name' });
       }
       dto.nameEn = nameEn || nameAr;
       dto.nameAr = nameAr || nameEn;

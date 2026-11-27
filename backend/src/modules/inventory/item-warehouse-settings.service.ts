@@ -132,15 +132,13 @@ export class ItemWarehouseSettingsService {
     const min = new Prisma.Decimal(input.minQuantity ?? 0);
     const reorder = new Prisma.Decimal(input.reorderQuantity ?? 0);
     const max = new Prisma.Decimal(input.maxQuantity ?? 0);
-    for (const [label, value] of [
-      ['minimum', min],
-      ['reorder', reorder],
-      ['maximum', max],
+    for (const [field, value] of [
+      ['minQuantity', min],
+      ['reorderQuantity', reorder],
+      ['maxQuantity', max],
     ] as const) {
       if (value.lessThan(0)) {
-        throw new BadRequestException(
-          `الحد ${label} لا يكون سالبًا. / The ${label} cannot be negative.`,
-        );
+        throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
       }
     }
     if (max.greaterThan(0) && max.lessThan(min)) {
