@@ -239,6 +239,47 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
 
 /// Inline bilingual label, the house pattern for newer accounting chrome
 /// that has no generated key yet.
+/// The close preview sentences come from the server in English; known
+/// shapes are shown in the user's language with the next step, and the
+/// numbers are carried over untouched. Unknown sentences are shown as is.
+String _yearEndSentence(BuildContext context, String raw) {
+  final drafts = <(String, String, String)>[
+    ('draft sales invoice', 'فواتير بيع مسودة', 'draft sales invoices'),
+    ('draft purchase invoice', 'فواتير شراء مسودة', 'draft purchase invoices'),
+    ('draft cash voucher', 'سندات نقدية مسودة', 'draft cash vouchers'),
+    ('draft cash transfer', 'تحويلات نقدية مسودة', 'draft cash transfers'),
+    ('draft stock document', 'مستندات مخزون مسودة', 'draft stock documents'),
+    ('draft opening balance', 'أرصدة افتتاحية مسودة', 'draft opening balances'),
+  ];
+  for (final d in drafts) {
+    final m = RegExp('^(\\d+) ${d.$1}').firstMatch(raw);
+    if (m != null) {
+      return _t(
+        context,
+        'يوجد ${m.group(1)} من ${d.$2} داخل هذه الفترة. رحّلها أو احذفها ثم أعد المحاولة.',
+        'There are ${m.group(1)} ${d.$3} inside this period. Post or delete them, then try again.',
+      );
+    }
+  }
+  final j = RegExp(r'^(\d+) journal entr\(ies\) with status (\w+)').firstMatch(raw);
+  if (j != null) {
+    return _t(
+      context,
+      'يوجد ${j.group(1)} قيد يومية غير مرحّل داخل هذه الفترة. رحّله أو احذفه ثم أعد المحاولة.',
+      'There are ${j.group(1)} journal entries that are not posted inside this period. Post or delete them, then try again.',
+    );
+  }
+  final c = RegExp(r'^(\d+) account\(s\) with cash movements').firstMatch(raw);
+  if (c != null) {
+    return _t(
+      context,
+      'يوجد ${c.group(1)} حساب له حركة نقدية بلا تصنيف للتدفقات النقدية. سيظهر في قائمة التدفقات النقدية تحت بند غير مصنّف، ويمكنك تصنيفه من دليل الحسابات.',
+      '${c.group(1)} accounts with cash movements have no cash-flow class. They will show as unclassified on the cash-flow statement, and you can classify them in the chart of accounts.',
+    );
+  }
+  return raw;
+}
+
 String _t(BuildContext context, String ar, String en) =>
     Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 
@@ -524,7 +565,7 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            '• $b',
+                            '• ${_yearEndSentence(context, b)}',
                             style: TextStyle(color: AppTone.danger.foreground),
                           ),
                         ),
@@ -545,7 +586,7 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                       for (final w in warnings)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
-                          child: Text('• $w'),
+                          child: Text('• ${_yearEndSentence(context, w)}'),
                         ),
                     ],
                     const SizedBox(height: 16),
