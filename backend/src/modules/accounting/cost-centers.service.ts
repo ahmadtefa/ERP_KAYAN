@@ -48,9 +48,7 @@ export class CostCentersService {
     if (!query.includeInactive) where.isActive = true;
     if (query.type) {
       if (!TYPES.has(query.type)) {
-        throw new BadRequestException(
-          `type must be one of ${[...TYPES].join(', ')}`,
-        );
+        throw new BadRequestException({ code: 'CC_TYPE_UNKNOWN', message: `type must be one of ${[...TYPES].join(', ')}` });
       }
       where.type = query.type as CostCenterType;
     }
@@ -247,17 +245,13 @@ export class CostCentersService {
       where: { companyId, parentId: id, deletedAt: null },
     });
     if (children > 0) {
-      throw new BadRequestException(
-        `This cost center has ${children} child centre(s). Move or deactivate them first.`,
-      );
+      throw new BadRequestException({ code: 'CC_HAS_CHILDREN', message: `This cost center has ${children} child centre(s). Move or deactivate them first.` });
     }
 
     const used = await this.usage(companyId, id);
     if (used.journalLines > 0 || used.allocatedLines > 0) {
-      throw new BadRequestException(
-        `This cost center is used by ${used.journalLines} journal line(s) and ` +
-          `${used.allocatedLines} allocation(s), so it cannot be deleted. Deactivate it instead.`,
-      );
+      throw new BadRequestException({ code: 'CC_IN_USE', message: `This cost center is used by ${used.journalLines} journal line(s) and ` +
+          `${used.allocatedLines} allocation(s), so it cannot be deleted. Deactivate it instead.` });
     }
 
     await this.prisma.costCenter.update({
@@ -309,9 +303,7 @@ export class CostCentersService {
     }
     const raw = String(value).trim().toUpperCase();
     if (!TYPES.has(raw)) {
-      throw new BadRequestException(
-        `type must be one of ${[...TYPES].join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'CC_TYPE_UNKNOWN', message: `type must be one of ${[...TYPES].join(', ')}` });
     }
     return raw as CostCenterType;
   }
@@ -355,7 +347,7 @@ export class CostCentersService {
     if (value === undefined || value === null || value === '') return null;
     const parentId = String(value);
     if (id && parentId === id) {
-      throw new BadRequestException('A cost center cannot be its own parent');
+      throw new BadRequestException({ code: 'CC_OWN_PARENT', message: 'A cost center cannot be its own parent' });
     }
 
     const parent = await this.prisma.costCenter.findFirst({
@@ -363,12 +355,10 @@ export class CostCentersService {
       select: { id: true, parentId: true, isActive: true },
     });
     if (!parent) {
-      throw new BadRequestException('The parent cost center does not exist');
+      throw new BadRequestException({ code: 'CC_PARENT_MISSING', message: 'The parent cost center does not exist' });
     }
     if (!parent.isActive) {
-      throw new BadRequestException(
-        'The parent cost center is inactive; activate it or choose another parent',
-      );
+      throw new BadRequestException({ code: 'CC_PARENT_INACTIVE', message: 'The parent cost center is inactive; activate it or choose another parent' });
     }
 
     if (id) {
@@ -379,20 +369,14 @@ export class CostCentersService {
       let depth = 1;
       while (cursor) {
         if (cursor === id) {
-          throw new BadRequestException(
-            'That parent is a descendant of this cost center, so the move would create a cycle',
-          );
+          throw new BadRequestException({ code: 'CC_CYCLE', message: 'That parent is a descendant of this cost center, so the move would create a cycle' });
         }
         if (seen.has(cursor)) {
-          throw new BadRequestException(
-            'The existing cost center hierarchy already contains a cycle and must be repaired first',
-          );
+          throw new BadRequestException({ code: 'CC_CYCLE', message: 'The existing cost center hierarchy already contains a cycle and must be repaired first' });
         }
         seen.add(cursor);
         if (++depth > MAX_DEPTH) {
-          throw new BadRequestException(
-            `Cost centers can be nested at most ${MAX_DEPTH} levels deep`,
-          );
+          throw new BadRequestException({ code: 'CC_TOO_DEEP', message: `Cost centers can be nested at most ${MAX_DEPTH} levels deep` });
         }
         const next: { parentId: string | null } | null =
           await this.prisma.costCenter.findFirst({
@@ -461,12 +445,10 @@ export class CostCentersService {
     for (const allocation of allocations) {
       const costCenterId = String(allocation.costCenterId ?? '').trim();
       if (!costCenterId) {
-        throw new BadRequestException('Every allocation needs a cost center');
+        throw new BadRequestException({ code: 'CC_ALLOC_NEEDS_CENTER', message: 'Every allocation needs a cost center' });
       }
       if (seen.has(costCenterId)) {
-        throw new BadRequestException(
-          'The same cost center appears twice in one line; combine the two amounts',
-        );
+        throw new BadRequestException({ code: 'CC_ALLOC_REPEATED', message: 'The same cost center appears twice in one line; combine the two amounts' });
       }
       seen.add(costCenterId);
 
@@ -478,15 +460,13 @@ export class CostCentersService {
             : allocation.amount?.toString() ?? '0',
         );
       } catch {
-        throw new BadRequestException('An allocation amount is not a number');
+        throw new BadRequestException({ code: 'CC_ALLOC_AMOUNT', message: 'An allocation amount is not a number' });
       }
       if (amount.decimalPlaces() > MONEY_SCALE) {
-        throw new BadRequestException(
-          `Allocation amounts carry at most ${MONEY_SCALE} decimal places`,
-        );
+        throw new BadRequestException({ code: 'CC_ALLOC_AMOUNT', message: `Allocation amounts carry at most ${MONEY_SCALE} decimal places` });
       }
       if (!amount.greaterThan(0)) {
-        throw new BadRequestException('Allocation amounts must be greater than zero');
+        throw new BadRequestException({ code: 'CC_ALLOC_AMOUNT', message: 'Allocation amounts must be greater than zero' });
       }
       total = total.plus(amount);
       normalised.push({ costCenterId, amount });
@@ -526,9 +506,7 @@ export class CostCentersService {
       },
     });
     if (rows.length !== unique.length) {
-      throw new BadRequestException(
-        'One or more cost centers do not exist in this company',
-      );
+      throw new BadRequestException({ code: 'CC_MISSING', message: 'One or more cost centers do not exist in this company' });
     }
     const day = entryDate.toISOString().slice(0, 10);
     for (const row of rows) {

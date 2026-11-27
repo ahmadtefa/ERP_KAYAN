@@ -90,9 +90,7 @@ export class PostingService {
         const amount = debit.plus(credit);
         const hasAllocations = (l.allocations?.length ?? 0) > 0;
         if (hasAllocations && l.costCenterId) {
-          throw new BadRequestException(
-            'A journal line cannot name one cost center and also be split between several',
-          );
+          throw new BadRequestException({ code: 'JOURNAL_COST_CENTER_SPLIT', message: 'A journal line cannot name one cost center and also be split between several' });
         }
         const allocations = hasAllocations
           ? CostCentersService.validateAllocations(amount, l.allocations!)
@@ -123,9 +121,7 @@ export class PostingService {
       .filter((l) => !l.debit.isZero() || !l.credit.isZero());
 
     if (lines.length < 2) {
-      throw new BadRequestException(
-        'A posting needs at least one debit and one credit',
-      );
+      throw new BadRequestException({ code: 'POSTING_NEEDS_BOTH_SIDES', message: 'A posting needs at least one debit and one credit' });
     }
 
     const totalDebit = lines.reduce(
@@ -167,9 +163,7 @@ export class PostingService {
       select: { entryNumber: true },
     });
     if (alreadyPosted) {
-      throw new BadRequestException(
-        `Document ${request.sourceNumber} has already been posted as journal entry ${alreadyPosted.entryNumber}`,
-      );
+      throw new BadRequestException({ code: 'POSTING_ALREADY_POSTED', message: `Document ${request.sourceNumber} has already been posted as journal entry ${alreadyPosted.entryNumber}` });
     }
 
     // Accounts must exist, be postable and belong to this company. A document
@@ -194,9 +188,7 @@ export class PostingService {
     }
     const invalid = accounts.filter((a) => !a.isPostable || !a.isActive);
     if (invalid.length > 0) {
-      throw new BadRequestException(
-        `Accounts cannot receive postings: ${invalid.map((a) => a.code).join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'JOURNAL_ACCOUNT_GROUPING', message: `Accounts cannot receive postings: ${invalid.map((a) => a.code).join(', ')}` });
     }
     // Every cost centre named here must be this company's, active, and valid
     // on the entry date. The foreign key alone would let another company's
@@ -309,13 +301,13 @@ export class PostingService {
       },
     });
     if (!original) {
-      throw new BadRequestException('The journal entry to reverse was not found');
+      throw new BadRequestException({ code: 'POSTING_ENTRY_MISSING', message: 'The journal entry to reverse was not found' });
     }
     if (original.status === JournalStatus.REVERSED) {
       throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This journal entry has already been reversed' });
     }
     if (original.status !== JournalStatus.POSTED) {
-      throw new BadRequestException('Only a posted journal entry can be reversed');
+      throw new BadRequestException({ code: 'POSTING_NOT_POSTED_REVERSE', message: 'Only a posted journal entry can be reversed' });
     }
 
     // The mirror's number decides where it lands in the cash statement's
@@ -656,11 +648,11 @@ export class PostingService {
     try {
       const d = new Prisma.Decimal(value).toDecimalPlaces(MONEY_SCALE);
       if (d.isNegative()) {
-        throw new BadRequestException('Posting amounts cannot be negative');
+        throw new BadRequestException({ code: 'POSTING_AMOUNT_INVALID', message: 'Posting amounts cannot be negative' });
       }
       return d;
     } catch {
-      throw new BadRequestException(`Invalid posting amount: ${String(value)}`);
+      throw new BadRequestException({ code: 'POSTING_AMOUNT_INVALID', message: `Invalid posting amount: ${String(value)}` });
     }
   }
 }

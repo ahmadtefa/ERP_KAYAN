@@ -93,7 +93,7 @@ export class YearEndCloseService {
         select: { id: true },
       });
       if (overlap) {
-        throw new BadRequestException('This fiscal period overlaps another period; correct the ranges before closing.');
+        throw new BadRequestException({ code: 'PERIOD_OVERLAP', message: 'This fiscal period overlaps another period; correct the ranges before closing.' });
       }
       const blockers = await this.blockers(companyId, period, tx);
       if (blockers.length > 0) {
@@ -136,7 +136,7 @@ export class YearEndCloseService {
         select: { id: true },
       });
       if (!branch) {
-        throw new BadRequestException('This company has no active branch to post the closing entry to');
+        throw new BadRequestException({ code: 'YEAR_CLOSE_NO_BRANCH', message: 'This company has no active branch to post the closing entry to' });
       }
       const lines: Array<{
         accountId: string;

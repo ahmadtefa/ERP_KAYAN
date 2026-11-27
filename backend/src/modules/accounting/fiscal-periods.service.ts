@@ -75,7 +75,7 @@ export class FiscalPeriodsService {
     return this.prisma.$transaction(async (tx) => {
       await this.lockRanges(tx, companyId);
       const existing = await tx.fiscalPeriod.findFirst({ where: { companyId, code } });
-      if (existing) throw new ConflictException('A period with that code already exists');
+      if (existing) throw new ConflictException({ code: 'PERIOD_CODE_DUPLICATE', message: 'A period with that code already exists' });
       await this.assertNoOverlap(tx, companyId, startDate, endDate);
       const created = await tx.fiscalPeriod.create({
         data: { companyId, code, nameEn: dto.nameEn.trim(), nameAr: dto.nameAr.trim(),
@@ -96,7 +96,7 @@ export class FiscalPeriodsService {
       const period = await tx.fiscalPeriod.findFirst({ where: { id, companyId } });
       if (!period) throw new NotFoundException({ code: 'FISCAL_PERIOD_NOT_FOUND', message: 'Fiscal period not found' });
       if (period.status === PeriodStatus.CLOSED) {
-        throw new BadRequestException('A closed period cannot be changed');
+        throw new BadRequestException({ code: 'PERIOD_CLOSED_EDIT', message: 'A closed period cannot be changed' });
       }
       const startDate = dto.startDate ? this.date(dto.startDate, 'startDate') : period.startDate;
       const endDate = dto.endDate ? this.date(dto.endDate, 'endDate') : period.endDate;
@@ -153,7 +153,7 @@ export class FiscalPeriodsService {
       tx.openingBalance.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(asOfDate => ({ asOfDate })) } }),
     ]);
     if (journal + movements + sales + purchases + vouchers + transfers + stock + opening > 0) {
-      throw new BadRequestException('The changed dates contain posted history; the fiscal period boundaries cannot be changed.');
+      throw new BadRequestException({ code: 'PERIOD_HAS_HISTORY', message: 'The changed dates contain posted history; the fiscal period boundaries cannot be changed.' });
     }
   }
 
@@ -189,7 +189,7 @@ export class FiscalPeriodsService {
         select: { id: true },
       });
       if (overlap) {
-        throw new BadRequestException('This fiscal period overlaps another period; correct the ranges before closing.');
+        throw new BadRequestException({ code: 'PERIOD_OVERLAP', message: 'This fiscal period overlaps another period; correct the ranges before closing.' });
       }
       const date = { gte: period.startDate, lte: period.endDate };
       const [entries, sales, purchases, vouchers, transfers, stock, opening] = await Promise.all([
@@ -203,7 +203,7 @@ export class FiscalPeriodsService {
       ]);
       const drafts = entries + sales + purchases + vouchers + transfers + stock + opening;
       if (drafts > 0) {
-        throw new BadRequestException(`${drafts} draft document(s) fall inside this period. Post or delete them before closing.`);
+        throw new BadRequestException({ code: 'PERIOD_HAS_DRAFTS', message: `${drafts} draft document(s) fall inside this period. Post or delete them before closing.` });
       }
       const closed = await tx.fiscalPeriod.update({
         where: { id }, data: { status: PeriodStatus.CLOSED, closedAt: new Date(), closedBy: userId },

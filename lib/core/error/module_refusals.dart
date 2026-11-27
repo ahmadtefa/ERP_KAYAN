@@ -1,3 +1,4 @@
+import 'accounting_refusals.dart';
 import 'cash_refusals.dart';
 import 'purchase_refusals.dart';
 import 'return_refusals.dart';
@@ -8,6 +9,7 @@ import 'sales_refusals.dart';
 /// text is never shown. Each is `[Arabic, English]` and says what is wrong and
 /// what to do next.
 const Map<String, List<String>> moduleRefusals = {
+  ...accountingRefusals,
   ...cashRefusals,
   ...purchaseRefusals,
   ...salesRefusals,

@@ -114,7 +114,7 @@ export class ChartOfAccountsService {
     parentIsEightDigit?: boolean;
   }): void {
     if (input.parentIsEightDigit) {
-      throw new BadRequestException('An 8-digit account is the last level and cannot have sub-accounts');
+      throw new BadRequestException({ code: 'ACCOUNT_LAST_LEVEL', message: 'An 8-digit account is the last level and cannot have sub-accounts' });
     }
     const problem = eightDigitViolation(input);
     if (problem) throw new BadRequestException(problem);
@@ -178,7 +178,7 @@ export class ChartOfAccountsService {
       const candidate = prefix + String(n).padStart(siblingWidth, '0');
       if (!taken.has(candidate)) return { code: candidate };
     }
-    throw new BadRequestException('No free code left under this parent');
+    throw new BadRequestException({ code: 'ACCOUNT_NO_FREE_CODE', message: 'No free code left under this parent' });
   }
 
   async create(
@@ -188,7 +188,7 @@ export class ChartOfAccountsService {
   ): Promise<AccountResponse> {
     const nameEn = String(dto.nameEn ?? '').trim();
     const nameAr = String(dto.nameAr ?? '').trim();
-    if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English account name');
+    if (!nameEn && !nameAr) throw new BadRequestException({ code: 'ACCOUNT_NAME_REQUIRED', message: 'Provide an Arabic or English account name' });
     const type = (dto.type ?? 'EXPENSE') as AccountType;
     const parentId = dto.parentId ?? null;
     const created = await this.prisma.$transaction(async (tx) => {
@@ -244,15 +244,15 @@ export class ChartOfAccountsService {
       if (dto.nameEn !== undefined || dto.nameAr !== undefined) {
         const nameEn = String(dto.nameEn ?? '').trim() || account.nameEn.trim();
         const nameAr = String(dto.nameAr ?? '').trim() || account.nameAr.trim();
-        if (!nameEn && !nameAr) throw new BadRequestException('Provide an Arabic or English account name');
+        if (!nameEn && !nameAr) throw new BadRequestException({ code: 'ACCOUNT_NAME_REQUIRED', message: 'Provide an Arabic or English account name' });
         dto.nameEn = nameEn || nameAr;
         dto.nameAr = nameAr || nameEn;
       }
       if (dto.expectedParentId !== undefined && dto.expectedParentId !== account.parentId) {
-        throw new ConflictException('The account parent changed since it was loaded. Refresh and review it before saving.');
+        throw new ConflictException({ code: 'ACCOUNT_PARENT_CHANGED', message: 'The account parent changed since it was loaded. Refresh and review it before saving.' });
       }
       const parentChanged = dto.parentId !== undefined && dto.parentId !== account.parentId;
-      if (parentChanged && dto.parentId === id) throw new BadRequestException('An account cannot be its own parent');
+      if (parentChanged && dto.parentId === id) throw new BadRequestException({ code: 'ACCOUNT_OWN_PARENT', message: 'An account cannot be its own parent' });
       if (parentChanged && dto.parentId) {
         await this.assertParentUsable(companyId, dto.parentId, account.type as AccountType, id, tx);
       }
@@ -262,7 +262,7 @@ export class ChartOfAccountsService {
       }
       if (dto.isActive === false && account.isActive) {
         const activeChildren = await tx.account.count({where:{parentId:id,companyId,deletedAt:null,isActive:true}});
-        if (activeChildren > 0) throw new BadRequestException('Deactivate active subaccounts before deactivating their parent');
+        if (activeChildren > 0) throw new BadRequestException({ code: 'ACCOUNT_ACTIVE_CHILDREN', message: 'Deactivate active subaccounts before deactivating their parent' });
       }
       const scheme = await this.schemeOf(companyId, tx);
       if (scheme === 'EIGHT_DIGIT' && dto.code !== undefined) dto.code = normalizeAccountCode(dto.code);
@@ -274,7 +274,7 @@ export class ChartOfAccountsService {
           : null;
         const children = await tx.account.count({ where: { parentId: id, companyId, deletedAt: null } });
         if (nextCode !== account.code && children > 0) {
-          throw new BadRequestException('This account has sub-accounts whose codes start with its code. Its code cannot be changed.');
+          throw new BadRequestException({ code: 'ACCOUNT_CODE_LOCKED_CHILDREN', message: 'This account has sub-accounts whose codes start with its code. Its code cannot be changed.' });
         }
         this.assertEightDigitRule({
           code: nextCode,
@@ -288,12 +288,12 @@ export class ChartOfAccountsService {
         // already part of journal history.
         await this.lockSubtree(tx, companyId, id);
         if (await tx.journalLine.count({where:{accountId:id}})) {
-          throw new BadRequestException('This account already has journal movements. Its code cannot be changed — deactivate it and create a new account instead.');
+          throw new BadRequestException({ code: 'ACCOUNT_CODE_LOCKED_MOVEMENTS', message: 'This account already has journal movements. Its code cannot be changed — deactivate it and create a new account instead.' });
         }
         await this.assertCodeFree(companyId, dto.code, id, tx);
       }
       if (dto.isPostable === true && await tx.account.count({where:{parentId:id,companyId,deletedAt:null}})) {
-        throw new BadRequestException('This account has sub-accounts, so it is a grouping account and cannot receive postings. Remove the sub-accounts first.');
+        throw new BadRequestException({ code: 'ACCOUNT_GROUPING', message: 'This account has sub-accounts, so it is a grouping account and cannot receive postings. Remove the sub-accounts first.' });
       }
       if (parentChanged) {
         // Report groups are calculated from the current tree. Changing the
@@ -303,7 +303,7 @@ export class ChartOfAccountsService {
         // between the check and the move. Chart writers use lockChart first.
         const descendants = await this.lockSubtree(tx, companyId, id);
         if (await tx.journalLine.count({where:{accountId:{in:descendants}}})) {
-          throw new BadRequestException('An account or its subaccounts have journal movements; moving them would change historical reports.');
+          throw new BadRequestException({ code: 'ACCOUNT_MOVE_HISTORY', message: 'An account or its subaccounts have journal movements; moving them would change historical reports.' });
         }
       }
       // Only the fields the request names: an undefined field must leave the
@@ -412,20 +412,14 @@ export class ChartOfAccountsService {
       where: { id: parentId, companyId, deletedAt: null },
     });
     if (!parent) {
-      throw new BadRequestException(
-        'The parent account does not exist in this company',
-      );
+      throw new BadRequestException({ code: 'ACCOUNT_PARENT_MISSING', message: 'The parent account does not exist in this company' });
     }
     if (!parent.isActive) {
-      throw new BadRequestException(
-        'The parent account is inactive. Activate it before adding sub-accounts under it.',
-      );
+      throw new BadRequestException({ code: 'ACCOUNT_PARENT_INACTIVE', message: 'The parent account is inactive. Activate it before adding sub-accounts under it.' });
     }
     if (parent.type !== type) {
-      throw new BadRequestException(
-        `A sub-account must have the same type as its parent ` +
-          `(parent is ${parent.type}, this account is ${type})`,
-      );
+      throw new BadRequestException({ code: 'ACCOUNT_PARENT_TYPE', message: `A sub-account must have the same type as its parent ` +
+          `(parent is ${parent.type}, this account is ${type})` });
     }
 
     if (movingId) {
@@ -435,12 +429,10 @@ export class ChartOfAccountsService {
       const seen = new Set<string>([parent.id]);
       while (cursor) {
         if (cursor === movingId) {
-          throw new BadRequestException(
-            'This would make the account its own ancestor. Choose another parent.',
-          );
+          throw new BadRequestException({ code: 'ACCOUNT_CYCLE', message: 'This would make the account its own ancestor. Choose another parent.' });
         }
         if (seen.has(cursor)) {
-          throw new BadRequestException('The proposed parent has a circular hierarchy and cannot be used');
+          throw new BadRequestException({ code: 'ACCOUNT_CYCLE', message: 'The proposed parent has a circular hierarchy and cannot be used' });
         }
         seen.add(cursor);
         const next = await client.account.findUnique({

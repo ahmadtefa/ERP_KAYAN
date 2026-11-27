@@ -182,7 +182,7 @@ export class BudgetsService {
     });
     if (!before) throw new NotFoundException({ code: 'BUDGET_NOT_FOUND', message: 'Budget not found' });
     if (before.deletedAt) {
-      throw new BadRequestException('A retired budget cannot be edited');
+      throw new BadRequestException({ code: 'BUDGET_RETIRED', message: 'A retired budget cannot be edited' });
     }
     const company = await this.company(companyId);
 
@@ -321,9 +321,7 @@ export class BudgetsService {
       type &&
       !['DEPARTMENT', 'ADMINISTRATIVE_UNIT', 'PROJECT'].includes(type)
     ) {
-      throw new BadRequestException(
-        'type must be DEPARTMENT, ADMINISTRATIVE_UNIT or PROJECT',
-      );
+      throw new BadRequestException({ code: 'BUDGET_TYPE_UNKNOWN', message: 'type must be DEPARTMENT, ADMINISTRATIVE_UNIT or PROJECT' });
     }
 
     const budgets = await this.prisma.budget.findMany({
@@ -495,7 +493,7 @@ export class BudgetsService {
       where: { id: companyId },
       select: { currency: true },
     });
-    if (!company) throw new BadRequestException('The company does not exist');
+    if (!company) throw new BadRequestException({ code: 'BUDGET_COMPANY_MISSING', message: 'The company does not exist' });
     return company;
   }
 
@@ -511,9 +509,7 @@ export class BudgetsService {
       select: { id: true, code: true, isActive: true },
     });
     if (!center) {
-      throw new BadRequestException(
-        'costCenterId does not name a cost center of this company',
-      );
+      throw new BadRequestException({ code: 'BUDGET_COST_CENTER_MISSING', message: 'costCenterId does not name a cost center of this company' });
     }
     if (requireActive && !center.isActive) {
       throw new BadRequestException(
@@ -536,9 +532,7 @@ export class BudgetsService {
       },
     });
     if (!account) {
-      throw new BadRequestException(
-        'accountId does not name an account of this company',
-      );
+      throw new BadRequestException({ code: 'BUDGET_ACCOUNT_MISSING', message: 'accountId does not name an account of this company' });
     }
     if (!account.isPostable) {
       throw new BadRequestException(
@@ -577,9 +571,7 @@ export class BudgetsService {
       select: { id: true },
     });
     if (duplicate) {
-      throw new ConflictException(
-        'A budget for this cost center, account and period already exists',
-      );
+      throw new ConflictException({ code: 'BUDGET_DUPLICATE', message: 'A budget for this cost center, account and period already exists' });
     }
   }
 
@@ -588,9 +580,7 @@ export class BudgetsService {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      return new ConflictException(
-        'A budget for this cost center, account and period already exists',
-      );
+      return new ConflictException({ code: 'BUDGET_DUPLICATE', message: 'A budget for this cost center, account and period already exists' });
     }
     return error;
   }
@@ -599,9 +589,7 @@ export class BudgetsService {
     const text = String(value ?? '').trim();
     if (!text) throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'amount is required', field: 'amount' });
     if (!MONEY_PATTERN.test(text)) {
-      throw new BadRequestException(
-        'amount must be a positive number with at most four decimal places',
-      );
+      throw new BadRequestException({ code: 'BUDGET_AMOUNT_INVALID', message: 'amount must be a positive number with at most four decimal places' });
     }
     const amount = new Prisma.Decimal(text);
     if (amount.isNegative()) {
@@ -613,13 +601,11 @@ export class BudgetsService {
   private currency(value: unknown, companyCurrency: string): string {
     const currency = String(value ?? companyCurrency).trim().toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) {
-      throw new BadRequestException('currency must be a three-letter code');
+      throw new BadRequestException({ code: 'BUDGET_CURRENCY_INVALID', message: 'currency must be a three-letter code' });
     }
     if (currency !== companyCurrency.toUpperCase()) {
-      throw new BadRequestException(
-        `A budget is kept in the company currency (${companyCurrency}); ` +
-          'this program has no exchange-rate conversion.',
-      );
+      throw new BadRequestException({ code: 'BUDGET_CURRENCY_COMPANY', message: `A budget is kept in the company currency (${companyCurrency}); ` +
+          'this program has no exchange-rate conversion.' });
     }
     return currency;
   }
@@ -627,11 +613,11 @@ export class BudgetsService {
   private date(value: unknown, field: string): Date {
     const text = String(value ?? '').trim();
     if (!DATE_PATTERN.test(text)) {
-      throw new BadRequestException(`${field} must be a date (YYYY-MM-DD)`);
+      throw new BadRequestException({ code: 'BUDGET_DATE_INVALID', message: `${field} must be a date (YYYY-MM-DD)` });
     }
     const parsed = new Date(`${text}T00:00:00.000Z`);
     if (Number.isNaN(parsed.getTime()) || this.day(parsed) !== text) {
-      throw new BadRequestException(`${field} is not a real date`);
+      throw new BadRequestException({ code: 'BUDGET_DATE_INVALID', message: `${field} is not a real date` });
     }
     return parsed;
   }
@@ -641,7 +627,7 @@ export class BudgetsService {
     const text = String(value).trim();
     if (!text) return null;
     if (text.length > 500) {
-      throw new BadRequestException('notes cannot exceed 500 characters');
+      throw new BadRequestException({ code: 'BUDGET_NOTES_LONG', message: 'notes cannot exceed 500 characters' });
     }
     return text;
   }

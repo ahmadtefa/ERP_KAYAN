@@ -112,9 +112,7 @@ export class JournalEntriesService {
     dto: CreateJournalEntryDto,
   ) {
     if (!branchId) {
-      throw new BadRequestException(
-        'The signed-in user is not assigned to a branch',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_USER_NO_BRANCH', message: 'The signed-in user is not assigned to a branch' });
     }
 
     const lines = dto.lines.map((l) => this.normaliseLine(l));
@@ -151,17 +149,13 @@ export class JournalEntriesService {
     }
     const notPostable = accounts.filter((a) => !a.isPostable);
     if (notPostable.length > 0) {
-      throw new BadRequestException(
-        `Accounts cannot receive postings (grouping accounts): ${notPostable
+      throw new BadRequestException({ code: 'JOURNAL_ACCOUNT_GROUPING', message: `Accounts cannot receive postings (grouping accounts): ${notPostable
           .map((a) => a.code)
-          .join(', ')}`,
-      );
+          .join(', ')}` });
     }
     const inactive = accounts.filter((a) => !a.isActive);
     if (inactive.length > 0) {
-      throw new BadRequestException(
-        `Accounts are inactive: ${inactive.map((a) => a.code).join(', ')}`,
-      );
+      throw new BadRequestException({ code: 'JOURNAL_ACCOUNT_INACTIVE', message: `Accounts are inactive: ${inactive.map((a) => a.code).join(', ')}` });
     }
 
     // The receivable/payable control accounts belong to the subledgers.
@@ -174,11 +168,9 @@ export class JournalEntriesService {
       CONTROL_ACCOUNT_CODES.includes(a.code),
     );
     if (control.length > 0) {
-      throw new BadRequestException(
-        `Manual entries cannot post directly to a control account (${control
+      throw new BadRequestException({ code: 'JOURNAL_CONTROL_ACCOUNT', message: `Manual entries cannot post directly to a control account (${control
           .map((a) => a.code)
-          .join(', ')}). Use the customer/supplier documents so the subledger and the ledger move together.`,
-      );
+          .join(', ')}). Use the customer/supplier documents so the subledger and the ledger move together.` });
     }
 
     // The analytical dimension is validated against this company and the entry
@@ -260,9 +252,7 @@ export class JournalEntriesService {
     });
     if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (entry.status !== JournalStatus.DRAFT && entry.status !== JournalStatus.APPROVED) {
-      throw new BadRequestException(
-        `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
-      );
+      throw new BadRequestException({ code: 'JOURNAL_NOT_POSTABLE_STATE', message: `Only a draft or an approved entry can be posted (current status: ${entry.status})` });
     }
 
     if (!entry.reversalOfId) {
@@ -275,11 +265,9 @@ export class JournalEntriesService {
         select: { code: true },
       });
       if (lineAccounts.length > 0) {
-        throw new BadRequestException(
-          `Manual entries cannot post directly to a control account (${lineAccounts
+        throw new BadRequestException({ code: 'JOURNAL_CONTROL_ACCOUNT', message: `Manual entries cannot post directly to a control account (${lineAccounts
             .map((a) => a.code)
-            .join(', ')}). Cancel this draft and use the customer/supplier documents instead.`,
-        );
+            .join(', ')}). Cancel this draft and use the customer/supplier documents instead.` });
       }
     }
 
@@ -289,9 +277,7 @@ export class JournalEntriesService {
     // settings, and the rule is enforced here - not by the screen hiding a
     // button. A draft can only reach the ledger through an approval.
     if (entry.status === JournalStatus.DRAFT && policy.approvalRequiredForJournal) {
-      throw new BadRequestException(
-        'This company requires manual journal entries to be approved before posting. Submit the entry for approval first.',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_NEEDS_APPROVAL', message: 'This company requires manual journal entries to be approved before posting. Submit the entry for approval first.' });
     }
 
     // Separation of duties: whoever wrote an entry does not also approve or
@@ -299,19 +285,15 @@ export class JournalEntriesService {
     // small company needs when the accountant is on holiday.
     if (policy.segregationOfDuties && !entry.reversalOfId && !(await this.isSuperAdmin(userId))) {
       if (entry.status === JournalStatus.APPROVED && entry.approvedBy === entry.createdBy) {
-        throw new BadRequestException(
-          'Separation of duties is on: the person who approved this entry may not post it, and the person who wrote it may not approve it.',
-        );
+        throw new BadRequestException({ code: 'JOURNAL_SEPARATION', message: 'Separation of duties is on: the person who approved this entry may not post it, and the person who wrote it may not approve it.' });
       }
       if (entry.createdBy === userId && entry.approvedBy !== userId) {
-        throw new BadRequestException(
-          'Separation of duties is on: the person who created this entry may not post it.',
-        );
+        throw new BadRequestException({ code: 'JOURNAL_SEPARATION', message: 'Separation of duties is on: the person who created this entry may not post it.' });
       }
     }
 
     if (!entry.totalDebit.equals(entry.totalCredit)) {
-      throw new BadRequestException('Journal entry is not balanced');
+      throw new BadRequestException({ code: 'JOURNAL_UNBALANCED', message: 'Journal entry is not balanced' });
     }
 
     // A manual entry goes straight to the ledger, so it has to respect the
@@ -364,9 +346,7 @@ export class JournalEntriesService {
       entry.createdBy === userId &&
       !(await this.isSuperAdmin(userId))
     ) {
-      throw new BadRequestException(
-        'Separation of duties is on: an entry cannot be approved by the person who created it.',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_SEPARATION', message: 'Separation of duties is on: an entry cannot be approved by the person who created it.' });
     }
 
     const result = await this.transition(companyId, userId, entry, {
@@ -508,20 +488,20 @@ export class JournalEntriesService {
     },
     options: { discloseBalance?: boolean } = {},
   ): Promise<void> {
-    if (entry.lines.length < 2) throw new BadRequestException('A journal needs at least two lines');
+    if (entry.lines.length < 2) throw new BadRequestException({ code: 'JOURNAL_TWO_LINES', message: 'A journal needs at least two lines' });
     let debit = new Prisma.Decimal(0);
     let credit = new Prisma.Decimal(0);
     for (const line of entry.lines) {
       if (!line.debit.isFinite() || !line.credit.isFinite() ||
           line.debit.isNegative() || line.credit.isNegative() ||
           (line.debit.isZero() === line.credit.isZero())) {
-        throw new BadRequestException('Every journal line needs one positive debit or credit');
+        throw new BadRequestException({ code: 'JOURNAL_LINE_AMOUNT', message: 'Every journal line needs one positive debit or credit' });
       }
       debit = debit.plus(line.debit);
       credit = credit.plus(line.credit);
     }
     if (!debit.equals(credit) || !debit.equals(entry.totalDebit) || !credit.equals(entry.totalCredit)) {
-      throw new BadRequestException('Journal lines do not balance or do not match the entry totals');
+      throw new BadRequestException({ code: 'JOURNAL_UNBALANCED', message: 'Journal lines do not balance or do not match the entry totals' });
     }
     // Historical reversals may use accounts since deactivated. Ordinary
     // entries must still use active, postable, non-control accounts now.
@@ -537,10 +517,10 @@ export class JournalEntriesService {
       select: { id:true, code:true, isActive:true, isPostable:true },
     });
     if (accounts.length !== ids.length || accounts.some(account => !account.isActive || !account.isPostable)) {
-      throw new BadRequestException('One or more journal accounts are unavailable or cannot receive postings');
+      throw new BadRequestException({ code: 'JOURNAL_ACCOUNT_UNAVAILABLE', message: 'One or more journal accounts are unavailable or cannot receive postings' });
     }
     if (accounts.some(account => CONTROL_ACCOUNT_CODES.includes(account.code))) {
-      throw new BadRequestException('Manual entries cannot post directly to a control account');
+      throw new BadRequestException({ code: 'JOURNAL_CONTROL_ACCOUNT', message: 'Manual entries cannot post directly to a control account' });
     }
     // A manual entry can name a box or a bank directly, and taking more out
     // than it holds is refused here exactly as it is for a payment voucher.
@@ -567,9 +547,7 @@ export class JournalEntriesService {
     });
     if (!entry) throw new NotFoundException({ code: 'JOURNAL_ENTRY_NOT_FOUND', message: 'Journal entry not found' });
     if (!allowed.includes(entry.status)) {
-      throw new BadRequestException(
-        `This action is not allowed while the entry is ${entry.status}. Allowed from: ${allowed.join(', ')}.`,
-      );
+      throw new BadRequestException({ code: 'JOURNAL_STATE_NOT_ALLOWED', message: `This action is not allowed while the entry is ${entry.status}. Allowed from: ${allowed.join(', ')}.` });
     }
     return entry;
   }
@@ -721,31 +699,23 @@ export class JournalEntriesService {
       debit = new Prisma.Decimal(rawDebit).toDecimalPlaces(MONEY_SCALE);
       credit = new Prisma.Decimal(rawCredit).toDecimalPlaces(MONEY_SCALE);
     } catch {
-      throw new BadRequestException(
-        `Invalid amount on account ${line.accountId}`,
-      );
+      throw new BadRequestException({ code: 'JOURNAL_LINE_AMOUNT', message: `Invalid amount on account ${line.accountId}` });
     }
 
     if (debit.isNegative() || credit.isNegative()) {
       throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: 'Amounts cannot be negative', field: 'Amounts' });
     }
     if (debit.isZero() && credit.isZero()) {
-      throw new BadRequestException(
-        'Every line needs either a debit or a credit',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_LINE_AMOUNT', message: 'Every line needs either a debit or a credit' });
     }
     if (!debit.isZero() && !credit.isZero()) {
-      throw new BadRequestException(
-        'A line cannot be both a debit and a credit',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_LINE_AMOUNT', message: 'A line cannot be both a debit and a credit' });
     }
 
     const amount = debit.plus(credit);
     const requested = line.allocations ?? [];
     if (requested.length > 0 && line.costCenterId) {
-      throw new BadRequestException(
-        'A journal line cannot name one cost center and also be split between several',
-      );
+      throw new BadRequestException({ code: 'JOURNAL_COST_CENTER_SPLIT', message: 'A journal line cannot name one cost center and also be split between several' });
     }
     const allocations =
       requested.length > 0
