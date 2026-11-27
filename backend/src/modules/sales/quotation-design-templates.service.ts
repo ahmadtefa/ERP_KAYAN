@@ -95,11 +95,11 @@ export class QuotationDesignTemplatesService {
 
   private validateDesign(value: Record<string, unknown>) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BadRequestException('Quotation design must be an object');
+      throw new BadRequestException({ code: 'QUOTE_DESIGN_INVALID', message: 'Quotation design must be an object' });
     }
     const encoded = JSON.stringify(value);
     if (encoded.length > 50000) {
-      throw new BadRequestException('Quotation design is too large');
+      throw new BadRequestException({ code: 'QUOTE_DESIGN_TOO_BIG', message: 'Quotation design is too large' });
     }
     return JSON.parse(encoded) as Record<string, unknown>;
   }

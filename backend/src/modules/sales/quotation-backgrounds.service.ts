@@ -12,20 +12,20 @@ export const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024;
 /// Throws a 400 with a plain reason when the bytes are not a readable PDF.
 export async function extractBackgroundPage(bytes: Buffer, pageNumber = 1): Promise<Buffer> {
   if (bytes.length === 0 || bytes.length > MAX_BACKGROUND_BYTES) {
-    throw new BadRequestException('The background PDF must be between 1 byte and 5 MB');
+    throw new BadRequestException({ code: 'QUOTE_BG_SIZE', message: 'The background PDF must be between 1 byte and 5 MB' });
   }
   if (bytes.subarray(0, 4).toString('latin1') !== '%PDF') {
-    throw new BadRequestException('The background file is not a PDF');
+    throw new BadRequestException({ code: 'QUOTE_BG_NOT_PDF', message: 'The background file is not a PDF' });
   }
   let source: PDFDocument;
   try {
     source = await PDFDocument.load(bytes);
   } catch {
-    throw new BadRequestException('The background PDF could not be read (it may be encrypted or damaged)');
+    throw new BadRequestException({ code: 'QUOTE_BG_UNREADABLE', message: 'The background PDF could not be read (it may be encrypted or damaged)' });
   }
   const count = source.getPageCount();
   if (pageNumber < 1 || pageNumber > count) {
-    throw new BadRequestException(`The PDF has ${count} page(s); page ${pageNumber} does not exist`);
+    throw new BadRequestException({ code: 'QUOTE_BG_PAGE', message: `The PDF has ${count} page(s); page ${pageNumber} does not exist` });
   }
   const out = await PDFDocument.create();
   const [page] = await out.copyPages(source, [pageNumber - 1]);

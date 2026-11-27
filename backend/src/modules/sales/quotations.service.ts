@@ -134,7 +134,7 @@ export class QuotationsService {
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
       const status = this.status(query.status);
-      if (!status) throw new BadRequestException(`Unknown quotation status "${query.status}"`);
+      if (!status) throw new BadRequestException({ code: 'QUOTE_STATUS_UNKNOWN', message: `Unknown quotation status "${query.status}"` });
       where.status = status;
     }
     if (query.from || query.to) {
@@ -494,9 +494,9 @@ export class QuotationsService {
         const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { status: true } });
         if (!existing) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
         if (existing.status === QuotationStatus.CONVERTED) {
-          throw new BadRequestException('A converted quotation can no longer change status');
+          throw new BadRequestException({ code: 'QUOTE_CONVERTED_LOCKED', message: 'A converted quotation can no longer change status' });
         }
-        throw new BadRequestException(`This quotation is already ${existing.status.toLowerCase()}`);
+        throw new BadRequestException({ code: 'QUOTE_ALREADY_STATUS', message: `This quotation is already ${existing.status.toLowerCase()}` });
       }
       const quotation = await tx.quotation.findFirst({
         where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
@@ -543,7 +543,7 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status === QuotationStatus.DRAFT) {
-      throw new BadRequestException('A draft is edited directly; revision is for issued quotations');
+      throw new BadRequestException({ code: 'QUOTE_DRAFT_NOT_REVISED', message: 'A draft is edited directly; revision is for issued quotations' });
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -643,7 +643,7 @@ export class QuotationsService {
 
   async followUp(companyId: string, userId: string, id: string, note?: string) {
     const text = this.text(note);
-    if (!text) throw new BadRequestException('Write what was discussed before saving the follow-up');
+    if (!text) throw new BadRequestException({ code: 'QUOTE_FOLLOWUP_TEXT', message: 'Write what was discussed before saving the follow-up' });
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true },
@@ -721,9 +721,7 @@ export class QuotationsService {
       throw new BadRequestException({ code: 'QUOTE_ALREADY_CONVERTED', message: 'This quotation has already been converted to an invoice' });
     }
     if (quotation.status !== QuotationStatus.ACCEPTED) {
-      throw new BadRequestException(
-        'Only an accepted quotation can become an invoice; record the customer decision first',
-      );
+      throw new BadRequestException({ code: 'QUOTE_NOT_ACCEPTED', message: 'Only an accepted quotation can become an invoice; record the customer decision first' });
     }
     if (quotation.tables.length === 0) {
       throw new BadRequestException({ code: 'QUOTE_NO_LINES', message: 'This quotation has no lines to convert' });
@@ -806,7 +804,7 @@ export class QuotationsService {
       const off = (a: Prisma.Decimal, b: Prisma.Decimal) => a.minus(b).abs().greaterThan(tolerance);
       if (!invoice.subTotal.equals(acceptedNet) || off(invoice.taxAmount, quotation.taxAmount) ||
           off(invoice.totalAmount, quotation.totalAmount)) {
-        throw new BadRequestException('Invoice totals differ from the accepted quotation; review tax and discounts before conversion');
+        throw new BadRequestException({ code: 'QUOTE_TOTALS_DIFFER', message: 'Invoice totals differ from the accepted quotation; review tax and discounts before conversion' });
       }
       await tx.quotation.update({
         where: { id },
@@ -968,9 +966,7 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException({ code: 'QUOTATION_NOT_FOUND', message: 'Quotation not found' });
     if (quotation.status !== QuotationStatus.DRAFT) {
-      throw new BadRequestException(
-        'This quotation has been issued and can no longer be edited. Start a revision instead.',
-      );
+      throw new BadRequestException({ code: 'QUOTE_ISSUED_LOCKED', message: 'This quotation has been issued and can no longer be edited. Start a revision instead.' });
     }
     return quotation;
   }
@@ -1026,7 +1022,7 @@ export class QuotationsService {
 
     for (const [tableIndex, rawTable] of dto.tables.entries()) {
       const title = rawTable.title.trim();
-      if (!title) throw new BadRequestException(`Table ${tableIndex + 1}: give the table a title`);
+      if (!title) throw new BadRequestException({ code: 'QUOTE_TABLE_TITLE', message: `Table ${tableIndex + 1}: give the table a title` });
       const lines: PreparedQuotationLine[] = [];
 
       for (const [lineIndex, rawLine] of rawTable.lines.entries()) {
@@ -1034,10 +1030,10 @@ export class QuotationsService {
         const quantity = this.positive(rawLine.quantity, `${where}: quantity`);
         const item = rawLine.itemId ? itemMap.get(rawLine.itemId) : null;
         if (rawLine.itemId && !item) {
-          throw new BadRequestException(`${where}: the item does not exist`);
+          throw new BadRequestException({ code: 'QUOTE_ITEM_MISSING', message: `${where}: the item does not exist` });
         }
         if (item && !item.isActive) {
-          throw new BadRequestException(`${where}: the item is inactive`);
+          throw new BadRequestException({ code: 'QUOTE_ITEM_INACTIVE', message: `${where}: the item is inactive` });
         }
         const unitPrice = rawLine.unitPrice === undefined || rawLine.unitPrice === ''
           ? (item?.salePrice ?? new Prisma.Decimal(0))
@@ -1045,7 +1041,7 @@ export class QuotationsService {
         const description = (rawLine.description ?? '').trim()
           || (item ? `${item.code} ${item.nameEn}` : '');
         if (!description) {
-          throw new BadRequestException(`${where}: give either an item or a description`);
+          throw new BadRequestException({ code: 'QUOTE_ITEM_OR_TEXT', message: `${where}: give either an item or a description` });
         }
         const lineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
         lines.push({

@@ -86,7 +86,7 @@ export class SalesOrdersService {
     if (query.status) {
       const status = query.status.toUpperCase();
       if (!Object.values(OrderStatus).includes(status as OrderStatus)) {
-        throw new BadRequestException(`Unknown order status: ${query.status}`);
+        throw new BadRequestException({ code: 'SALES_STATUS_UNKNOWN', message: `Unknown order status: ${query.status}` });
       }
       where.status = status as OrderStatus;
     }
@@ -201,12 +201,12 @@ export class SalesOrdersService {
       where: { id: customerId, companyId, deletedAt: null },
       select: { id: true, isActive: true, code: true },
     });
-    if (!customer) throw new BadRequestException('The customer does not exist in this company');
+    if (!customer) throw new BadRequestException({ code: 'SALES_CUSTOMER_MISSING', message: 'The customer does not exist in this company' });
     if (!customer.isActive) throw new BadRequestException(`Customer ${customer.code} is inactive`);
 
     const orderDate = this.date(dto.orderDate, 'orderDate');
     const rawLines = Array.isArray(dto.lines) ? (dto.lines as OrderLineInput[]) : [];
-    if (rawLines.length === 0) throw new BadRequestException('An order needs at least one line');
+    if (rawLines.length === 0) throw new BadRequestException({ code: 'SALES_ORDER_NO_LINES', message: 'An order needs at least one line' });
 
     const prepared = await this.prepareLines(companyId, customerId, rawLines);
 
@@ -311,7 +311,7 @@ export class SalesOrdersService {
       if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       if (approved ? (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.PARTIALLY_FULFILLED)
         : order.status !== OrderStatus.DRAFT) {
-        throw new BadRequestException(approved ? 'Only approved or partially fulfilled orders can be amended' : 'Only draft orders can be edited');
+        throw new BadRequestException({ code: 'SALES_ORDER_NOT_EDITABLE', message: approved ? 'Only approved or partially fulfilled orders can be amended' : 'Only draft orders can be edited' });
       }
       if (typeof dto.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(dto.expectedUpdatedAt))) {
         throw new BadRequestException({ code: 'FIELD_REQUIRED', message: 'expectedUpdatedAt is required', field: 'expectedUpdatedAt' });
@@ -326,7 +326,7 @@ export class SalesOrdersService {
         });
         assertActiveOrderAllocations(order.lines, invoices);
       } else if (await tx.salesInvoice.count({ where: { companyId, salesOrderId: id } }) > 0) {
-        throw new BadRequestException('Order has invoice history; draft editing is not allowed');
+        throw new BadRequestException({ code: 'SALES_ORDER_HAS_INVOICES_EDIT', message: 'Order has invoice history; draft editing is not allowed' });
       }
       const planned = planDraftOrderEdit(order.lines, dto.lines, approved);
       for (const line of planned.lines) {
@@ -381,16 +381,16 @@ export class SalesOrdersService {
       });
       if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       if (order.status !== OrderStatus.DRAFT) {
-        throw new BadRequestException(`Only a draft order can be approved (it is ${order.status})`);
+        throw new BadRequestException({ code: 'SALES_ORDER_NOT_DRAFT_APPROVE', message: `Only a draft order can be approved (it is ${order.status})` });
       }
       if (settings.segregationOfDuties && order.createdBy === userId) {
-        throw new BadRequestException('Segregation of duties is on: the person who raised this order may not approve it');
+        throw new BadRequestException({ code: 'SALES_ORDER_SELF_APPROVE', message: 'Segregation of duties is on: the person who raised this order may not approve it' });
       }
       const claimed = await tx.salesOrder.updateMany({
         where: { id, companyId, status: OrderStatus.DRAFT, deletedAt: null },
         data: { status: OrderStatus.APPROVED, approvedAt: new Date(), approvedBy: userId },
       });
-      if (claimed.count !== 1) throw new BadRequestException('This order was approved by someone else a moment ago.');
+      if (claimed.count !== 1) throw new BadRequestException({ code: 'SALES_ORDER_APPROVED_ELSEWHERE', message: 'This order was approved by someone else a moment ago.' });
       await this.audit.recordRequired({
         companyId, userId, action: 'APPROVE', entity: 'sales_orders', entityId: id,
         before: { status: order.status }, after: { orderNumber: order.orderNumber, status: OrderStatus.APPROVED },
@@ -429,11 +429,11 @@ export class SalesOrdersService {
       if (locked.length !== 1) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
       const order = await tx.salesOrder.findFirst({ where: { id, companyId, deletedAt: null } });
       if (!order) throw new NotFoundException({ code: 'SALES_ORDER_NOT_FOUND', message: 'Sales order not found' });
-      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('This order is already cancelled');
+      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException({ code: 'SALES_ORDER_CANCELLED', message: 'This order is already cancelled' });
       const activeInvoices = await tx.salesInvoice.count({
         where: { companyId, salesOrderId: id, deletedAt: null, status: { not: 'REVERSED' } },
       });
-      if (activeInvoices > 0) throw new BadRequestException('This order has active invoices; reverse them before cancelling');
+      if (activeInvoices > 0) throw new BadRequestException({ code: 'SALES_ORDER_HAS_INVOICES_CANCEL', message: 'This order has active invoices; reverse them before cancelling' });
       await tx.salesOrder.update({ where: { id }, data: { status: OrderStatus.CANCELLED,
         notes: reason ? `${order.notes ?? ''}\n${reason}`.trim() : order.notes } });
       await this.audit.recordRequired({
@@ -494,12 +494,12 @@ export class SalesOrdersService {
     });
     if (previous) {
       if (previous.orderConversionHash !== identity.hash) throw new ConflictException({ code: 'REQUEST_KEY_REUSED', message: 'The idempotency key was used for a different request' });
-      if (previous.deletedAt || previous.status === 'REVERSED') throw new ConflictException('The invoice for this idempotency key is no longer active');
+      if (previous.deletedAt || previous.status === 'REVERSED') throw new ConflictException({ code: 'SALES_ORDER_INVOICE_INACTIVE', message: 'The invoice for this idempotency key is no longer active' });
       return previous.id;
     }
     selectedOrderLineQuantities(dto.lines, order.lines);
-      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('A cancelled order cannot be invoiced');
-      if (order.status === OrderStatus.DRAFT) throw new BadRequestException('Approve the order before invoicing it');
+      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException({ code: 'SALES_ORDER_CANCELLED_INVOICE', message: 'A cancelled order cannot be invoiced' });
+      if (order.status === OrderStatus.DRAFT) throw new BadRequestException({ code: 'SALES_ORDER_NOT_APPROVED', message: 'Approve the order before invoicing it' });
 
     const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; discountPercent: string; unitName?: string }> = [];
     const consumed: Array<{ lineId: string; quantity: Prisma.Decimal }> = [];
@@ -511,10 +511,8 @@ export class SalesOrdersService {
       const outstanding = line.quantity.minus(line.invoicedQuantity);
       if (quantity.lessThanOrEqualTo(0)) continue;
       if (quantity.greaterThan(outstanding)) {
-        throw new BadRequestException(
-          `Line ${line.lineNumber}: only ${outstanding.toFixed(MONEY_SCALE)} is still outstanding, ` +
-            `${quantity.toFixed(MONEY_SCALE)} was asked for`,
-        );
+        throw new BadRequestException({ code: 'SALES_ORDER_OVER_OUTSTANDING', message: `Line ${line.lineNumber}: only ${outstanding.toFixed(MONEY_SCALE)} is still outstanding, ` +
+            `${quantity.toFixed(MONEY_SCALE)} was asked for` });
       }
       const historical = historicalOrderUnit({
         label: `Line ${line.lineNumber}`,
@@ -537,7 +535,7 @@ export class SalesOrdersService {
     }
 
     if (invoiceLines.length === 0) {
-      throw new BadRequestException('This order is fully invoiced; nothing is outstanding');
+      throw new BadRequestException({ code: 'SALES_ORDER_FULLY_INVOICED', message: 'This order is fully invoiced; nothing is outstanding' });
     }
 
 
@@ -707,7 +705,7 @@ export class SalesOrdersService {
   private date(value: unknown, field: string): Date {
     const text = this.text(value, field);
     const date = new Date(`${text.slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(date.getTime())) throw new BadRequestException(`${field} is not a date`);
+    if (Number.isNaN(date.getTime())) throw new BadRequestException({ code: 'SALES_DATE_INVALID', message: `${field} is not a date` });
     return date;
   }
 
@@ -722,7 +720,7 @@ export class SalesOrdersService {
     try {
       decimal = new Prisma.Decimal(String(value ?? '').trim() || '0');
     } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+      throw new BadRequestException({ code: 'SALES_NUMBER_INVALID', message: `${field} is not a valid number` });
     }
     if (decimal.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     return decimal.toDecimalPlaces(MONEY_SCALE);
@@ -731,7 +729,7 @@ export class SalesOrdersService {
   private percent(value: unknown, field: string): Prisma.Decimal {
     if (value === undefined || value === null || value === '') return new Prisma.Decimal(0);
     const decimal = this.nonNegative(value, field);
-    if (decimal.greaterThan(100)) throw new BadRequestException(`${field} cannot exceed 100`);
+    if (decimal.greaterThan(100)) throw new BadRequestException({ code: 'SALES_PERCENT_RANGE', message: `${field} cannot exceed 100` });
     return decimal;
   }
 

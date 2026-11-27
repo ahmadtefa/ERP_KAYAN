@@ -175,7 +175,7 @@ export class SalesInvoicesService {
     if (query.status) {
       const status = query.status.toUpperCase() as InvoiceStatus;
       if (!Object.values(InvoiceStatus).includes(status)) {
-        throw new BadRequestException(`Unknown status: ${query.status}`);
+        throw new BadRequestException({ code: 'SALES_STATUS_UNKNOWN', message: `Unknown status: ${query.status}` });
       }
       where.status = status;
     }
@@ -1278,7 +1278,7 @@ export class SalesInvoicesService {
         },
       },
     });
-    if (!original) throw new NotFoundException('The original journal entry is missing');
+    if (!original) throw new NotFoundException({ code: 'SALES_ENTRY_MISSING', message: 'The original journal entry is missing' });
     if (original.status === JournalStatus.REVERSED) {
       throw new BadRequestException({ code: 'ALREADY_REVERSED', message: 'This invoice has already been reversed' });
     }
@@ -1304,9 +1304,7 @@ export class SalesInvoicesService {
         },
       });
       if (activeReturns > 0) {
-        throw new BadRequestException(
-          'Reverse the posted sales returns before reversing their source invoice.',
-        );
+        throw new BadRequestException({ code: 'SALES_HAS_RETURNS', message: 'Reverse the posted sales returns before reversing their source invoice.' });
       }
       // The journal claim itself happens inside PostingService.reverse,
       // below, in the same transaction as the stock coming back in.
@@ -1339,7 +1337,7 @@ export class SalesInvoicesService {
           where: { id: line.itemId, companyId, deletedAt: null },
           select: { id: true, isStockTracked: true },
         });
-        if (!item) throw new BadRequestException('A sales invoice item no longer exists');
+        if (!item) throw new BadRequestException({ code: 'SALES_LINE_ITEM_GONE', message: 'A sales invoice item no longer exists' });
         if (!item.isStockTracked) continue;
 
         // What this invoice actually took, lot by lot. Read from the movements
@@ -1546,19 +1544,19 @@ export class SalesInvoicesService {
     const settings = await this.settings.get(companyId, client);
 
     if (orderUnits && orderUnits.length !== input.length) {
-      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+      throw new BadRequestException({ code: 'SALES_UNIT_SNAPSHOT', message: 'Order invoice unit snapshots do not match its lines' });
     }
     for (const [index, raw] of input.entries()) {
       const isAdditionalCharge = raw.isAdditionalCharge === true;
       if (isAdditionalCharge && (orderUnits || raw.itemId || raw.unitName || raw.unitId)) {
-        throw new BadRequestException('Additional charges cannot be linked to an item or an order');
+        throw new BadRequestException({ code: 'SALES_CHARGE_NO_ITEM', message: 'Additional charges cannot be linked to an item or an order' });
       }
       const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
       if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'LINE_QTY_POSITIVE', message: `Line ${index + 1} quantity must be greater than zero` });
 
       if (isAdditionalCharge && (!quantity.equals(1) || raw.discountType ||
           raw.discountAmount || raw.discountPercent)) {
-        throw new BadRequestException('An additional charge must have quantity one and no line discount');
+        throw new BadRequestException({ code: 'SALES_CHARGE_QTY_ONE', message: 'An additional charge must have quantity one and no line discount' });
       }
 
       // A price typed on the line is what was charged. When nobody typed one,
@@ -1622,9 +1620,7 @@ export class SalesInvoicesService {
 
       const description = raw.description?.trim() || (item ? `${item.code} ${item.nameEn}` : '');
       if (!description) {
-        throw new BadRequestException(
-          `Line ${index + 1}: give either an item or a description`,
-        );
+        throw new BadRequestException({ code: 'SALES_LINE_ITEM_OR_TEXT', message: `Line ${index + 1}: give either an item or a description` });
       }
 
       // What this line costs, when the person did not say.
@@ -1651,9 +1647,7 @@ export class SalesInvoicesService {
           unitPrice = defaultUnitPrice('sale', resolved.row, item.salePrice);
         }
       } else {
-        throw new BadRequestException(
-          `Line ${index + 1}: a price is required when the line names no item`,
-        );
+        throw new BadRequestException({ code: 'SALES_LINE_PRICE_REQUIRED', message: `Line ${index + 1}: a price is required when the line names no item` });
       }
 
       // Missing or cleared tax is zero. Conversion callers pass the stored
@@ -1842,7 +1836,7 @@ export class SalesInvoicesService {
   private rate(value: string, field: string): Prisma.Decimal {
     const d = this.decimal(value, field, RATE_SCALE);
     if (d.isNegative() || d.greaterThan(100)) {
-      throw new BadRequestException(`${field} must be between 0 and 100`);
+      throw new BadRequestException({ code: 'SALES_PERCENT_RANGE', message: `${field} must be between 0 and 100` });
     }
     return d;
   }
@@ -1857,7 +1851,7 @@ export class SalesInvoicesService {
       if (!amount.isFinite()) throw new Error('Non-finite amount');
       return amount.toDecimalPlaces(scale);
     } catch {
-      throw new BadRequestException(`${field} is not a valid number: ${value}`);
+      throw new BadRequestException({ code: 'SALES_NUMBER_INVALID', message: `${field} is not a valid number: ${value}` });
     }
   }
 

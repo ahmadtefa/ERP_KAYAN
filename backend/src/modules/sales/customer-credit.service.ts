@@ -117,7 +117,7 @@ export class CustomerCreditService {
          WHERE id = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`);
       const check = await this.evaluatePeriod(tx, companyId, invoiceId);
       if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });
-      if (check.overdueCount === 0) throw new BadRequestException('This invoice does not need payment-period approval');
+      if (check.overdueCount === 0) throw new BadRequestException({ code: 'CREDIT_NO_PERIOD_APPROVAL', message: 'This invoice does not need payment-period approval' });
       if (check.createdBy && check.createdBy === userId) {
         throw new ForbiddenException('The person who created the invoice cannot approve its payment-period exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لمدة السداد.');
       }
@@ -209,7 +209,7 @@ export class CustomerCreditService {
       const check = await this.evaluate(tx, companyId, invoiceId, true);
       if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });
       if (!check.exceeds) {
-        throw new BadRequestException('This invoice does not need credit approval');
+        throw new BadRequestException({ code: 'CREDIT_NO_APPROVAL_NEEDED', message: 'This invoice does not need credit approval' });
       }
       // The approval is a second person's review: whoever created the invoice
       // cannot sign for its credit exception, even with the permission.

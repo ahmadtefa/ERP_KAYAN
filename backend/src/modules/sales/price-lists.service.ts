@@ -209,7 +209,7 @@ export class PriceListsService {
       where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, code: true, unit: true },
     });
-    if (!item) throw new BadRequestException('The item does not exist in this company');
+    if (!item) throw new BadRequestException({ code: 'PRICELIST_ITEM_MISSING', message: 'The item does not exist in this company' });
 
     const unit = String(dto.unit ?? '').trim() || item.unit;
     const minQuantity = this.nonNegative(dto.minQuantity ?? '0', 'minQuantity');
@@ -277,7 +277,7 @@ export class PriceListsService {
     const kind = String(dto.kind ?? '').toUpperCase();
     const partyId = this.text(dto.partyId, 'partyId');
     if (kind !== 'CUSTOMER' && kind !== 'SUPPLIER') {
-      throw new BadRequestException('kind must be CUSTOMER or SUPPLIER');
+      throw new BadRequestException({ code: 'PRICELIST_KIND_UNKNOWN', message: 'kind must be CUSTOMER or SUPPLIER' });
     }
 
     if (kind === 'CUSTOMER') {
@@ -285,7 +285,7 @@ export class PriceListsService {
         where: { id: partyId, companyId, deletedAt: null },
         select: { id: true, code: true },
       });
-      if (!customer) throw new BadRequestException('The customer does not exist in this company');
+      if (!customer) throw new BadRequestException({ code: 'PRICELIST_CUSTOMER_MISSING', message: 'The customer does not exist in this company' });
       // A list that expired yesterday must not be handed out today.
       await this.assertUsable(companyId, list.id);
       await this.prisma.customer.update({ where: { id: partyId }, data: { priceListId: list.id } });
@@ -294,7 +294,7 @@ export class PriceListsService {
         where: { id: partyId, companyId, deletedAt: null },
         select: { id: true, code: true },
       });
-      if (!supplier) throw new BadRequestException('The supplier does not exist in this company');
+      if (!supplier) throw new BadRequestException({ code: 'PRICELIST_SUPPLIER_MISSING', message: 'The supplier does not exist in this company' });
       await this.assertUsable(companyId, list.id);
       await this.prisma.supplier.update({ where: { id: partyId }, data: { priceListId: list.id } });
     }
@@ -403,7 +403,7 @@ export class PriceListsService {
     try {
       decimal = new Prisma.Decimal(String(value ?? '').trim() || '0');
     } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+      throw new BadRequestException({ code: 'SALES_NUMBER_INVALID', message: `${field} is not a valid number` });
     }
     if (decimal.isNegative()) throw new BadRequestException({ code: 'FIELD_NOT_NEGATIVE', message: `${field} cannot be negative`, field });
     return decimal.toDecimalPlaces(MONEY_SCALE);
@@ -411,7 +411,7 @@ export class PriceListsService {
 
   private percent(value: unknown, field: string): Prisma.Decimal {
     const decimal = this.nonNegative(value ?? '0', field);
-    if (decimal.greaterThan(100)) throw new BadRequestException(`${field} cannot exceed 100`);
+    if (decimal.greaterThan(100)) throw new BadRequestException({ code: 'SALES_PERCENT_RANGE', message: `${field} cannot exceed 100` });
     return decimal;
   }
 }
