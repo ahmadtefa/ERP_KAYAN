@@ -436,13 +436,11 @@ export class BatchesService {
   ) {
     const quantity = toDecimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        'الكمية يجب أن تكون أكبر من صفر. / The received quantity must be greater than zero.',
-      );
+      throw new BadRequestException({ code: 'LOT_RECEIVE_QTY', message: 'الكمية يجب أن تكون أكبر من صفر. / The received quantity must be greater than zero.' });
     }
     const unitCost = toDecimal(input.unitCost);
     if (unitCost.lessThan(0)) {
-      throw new BadRequestException('التكلفة لا تكون سالبة. / The unit cost cannot be negative.');
+      throw new BadRequestException({ code: 'LOT_COST_NEGATIVE', message: 'التكلفة لا تكون سالبة. / The unit cost cannot be negative.' });
     }
 
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
@@ -556,12 +554,10 @@ export class BatchesService {
         const before = dayOnly(existing.expiryDate).getTime();
         const after = dayOnly(lot.expiryDate).getTime();
         if (before !== after) {
-          throw new ConflictException(
-            `الدفعة ${batchNumber} مسجلة بتاريخ صلاحية ${existing.expiryDate
+          throw new ConflictException({ code: 'LOT_EXPIRY_LOCKED', message: `الدفعة ${batchNumber} مسجلة بتاريخ صلاحية ${existing.expiryDate
               .toISOString()
               .slice(0, 10)} ولا يمكن تغييره. / Lot ${batchNumber} is already recorded with ` +
-              `expiry ${existing.expiryDate.toISOString().slice(0, 10)}, which cannot be changed.`,
-          );
+              `expiry ${existing.expiryDate.toISOString().slice(0, 10)}, which cannot be changed.` });
         }
       }
       await tx.itemBatch.update({
@@ -727,14 +723,10 @@ export class BatchesService {
   ) {
     const quantity = toDecimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        'الكمية يجب أن تكون أكبر من صفر. / The issued quantity must be greater than zero.',
-      );
+      throw new BadRequestException({ code: 'LOT_ISSUE_QTY', message: 'الكمية يجب أن تكون أكبر من صفر. / The issued quantity must be greater than zero.' });
     }
     if (!input.warehouseId) {
-      throw new BadRequestException(
-        'اسم المخزن مطلوب للصرف. / A warehouse is required to issue stock.',
-      );
+      throw new BadRequestException({ code: 'LOT_ISSUE_WAREHOUSE', message: 'اسم المخزن مطلوب للصرف. / A warehouse is required to issue stock.' });
     }
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     const item = await this.requireItem(companyId, input.itemId);
@@ -811,10 +803,8 @@ export class BatchesService {
       // The branch has no shelf at all: there is nothing for a lot to belong
       // to, so this is exactly the behaviour before warehouses existed.
       if (policy.requiresBatch) {
-        throw new BadRequestException(
-          'هذا الصنف يتطلب دفعة ولا يوجد مخزن للفرع. / This item is lot-controlled, but the '
-            + 'branch has no warehouse, so a lot cannot be issued from a shelf.',
-        );
+        throw new BadRequestException({ code: 'LOT_NO_BRANCH_WAREHOUSE', message: 'هذا الصنف يتطلب دفعة ولا يوجد مخزن للفرع. / This item is lot-controlled, but the '
+            + 'branch has no warehouse, so a lot cannot be issued from a shelf.' });
       }
       return this.issueUnbatched(
         tx,
@@ -846,15 +836,11 @@ export class BatchesService {
         orderBy: { expiryDate: 'asc' },
       });
       if (input.batchId && lots.length === 0) {
-        throw new NotFoundException(
-          'الدفعة غير موجودة أو لا يوجد بها رصيد. / The chosen lot does not exist or is empty.',
-        );
+        throw new NotFoundException({ code: 'LOT_MISSING_OR_EMPTY', message: 'الدفعة غير موجودة أو لا يوجد بها رصيد. / The chosen lot does not exist or is empty.' });
       }
       if (lots.length === 0) {
         if (policy.requiresBatch) {
-          throw new BadRequestException(
-            'هذا الصنف يتطلب دفعة. / This item is lot-controlled: no lot is available to issue from.',
-          );
+          throw new BadRequestException({ code: 'LOT_NONE_AVAILABLE', message: 'هذا الصنف يتطلب دفعة. / This item is lot-controlled: no lot is available to issue from.' });
         }
         // An item without lots issues from the shelf's plain balance, which is
         // exactly how the program worked before lots existed.
@@ -913,10 +899,8 @@ export class BatchesService {
       if (atLocation) {
         const here = lotsForFefo.reduce((acc, lot) => acc.plus(lot.remainingQuantity), new Prisma.Decimal(0));
         if (here.lessThan(quantity)) {
-          throw new BadRequestException(
-            `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
-              `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.`,
-          );
+          throw new BadRequestException({ code: 'LOT_LOCATION_SHORT', message: `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
+              `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.` });
         }
       }
 
@@ -940,12 +924,10 @@ export class BatchesService {
           useFefo: policy.useFefo,
         });
         if (withExpired.shortfall.isZero()) {
-          throw new ForbiddenException(
-            'الكمية المطلوبة متوفرة في دفعات منتهية الصلاحية فقط. صرفها يتطلب اعتمادًا مسجّلًا: ' +
+          throw new ForbiddenException({ code: 'LOT_EXPIRED_ONLY', message: 'الكمية المطلوبة متوفرة في دفعات منتهية الصلاحية فقط. صرفها يتطلب اعتمادًا مسجّلًا: ' +
               'صلاحية صرف المنتهي، واسم المعتمِد، وسبب الصرف. / ' +
               'The requested quantity is only available in expired lots. Issuing it needs a ' +
-              'recorded approval: the expiry-issue permission, the person who approved it, and a reason.',
-          );
+              'recorded approval: the expiry-issue permission, the person who approved it, and a reason.' });
         }
       }
 
@@ -995,9 +977,7 @@ export class BatchesService {
           },
         });
         if (taken.count !== 1) {
-          throw new ConflictException(
-            'تغير رصيد الدفعة أثناء الصرف. أعد المحاولة. / The lot changed while it was being issued.',
-          );
+          throw new ConflictException({ code: 'LOT_CHANGED_ISSUING', message: 'تغير رصيد الدفعة أثناء الصرف. أعد المحاولة. / The lot changed while it was being issued.' });
         }
         const isLast = index === selection.allocations.length - 1;
         const lineValue = isLast
@@ -1131,17 +1111,13 @@ export class BatchesService {
         await this.lotQuantitiesAt(tx, companyId, warehouse.id, item.id, input.storageLocationId)
       ).get('') ?? new Prisma.Decimal(0);
       if (here.lessThan(quantity)) {
-        throw new BadRequestException(
-          `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
-            `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.`,
-        );
+        throw new BadRequestException({ code: 'LOT_LOCATION_SHORT', message: `الموقع المختار يحوي ${here.toFixed(MONEY_SCALE)} فقط من هذا الصنف. / ` +
+            `The chosen location holds ${here.toFixed(MONEY_SCALE)} of this item, not ${quantity.toFixed(MONEY_SCALE)}.` });
       }
     }
     if (onHand.lessThan(quantity)) {
-      throw new BadRequestException(
-        `الرصيد غير كافٍ في هذا المخزن: ${onHand.toFixed(MONEY_SCALE)} متاح، ` +
-          `${quantity.toFixed(MONEY_SCALE)} مطلوب. / Not enough stock in this warehouse.`,
-      );
+      throw new BadRequestException({ code: 'LOT_WAREHOUSE_SHORT', message: `الرصيد غير كافٍ في هذا المخزن: ${onHand.toFixed(MONEY_SCALE)} متاح، ` +
+          `${quantity.toFixed(MONEY_SCALE)} مطلوب. / Not enough stock in this warehouse.` });
     }
     const cost = issueAtAverage({ quantity: onHand, value: shelf.value }, quantity);
     await tx.stockMovement.create({
@@ -1206,15 +1182,11 @@ export class BatchesService {
   ) {
     const quantity = toDecimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        'كمية الإعدام يجب أن تكون أكبر من صفر. / The written-off quantity must be positive.',
-      );
+      throw new BadRequestException({ code: 'LOT_WRITEOFF_QTY', message: 'كمية الإعدام يجب أن تكون أكبر من صفر. / The written-off quantity must be positive.' });
     }
     const reason = (input.reason ?? '').trim();
     if (reason.length < 3) {
-      throw new BadRequestException(
-        'سبب الإعدام مطلوب. / A reason is required to write stock off.',
-      );
+      throw new BadRequestException({ code: 'LOT_WRITEOFF_REASON', message: 'سبب الإعدام مطلوب. / A reason is required to write stock off.' });
     }
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     await this.requireItem(companyId, input.itemId);
@@ -1230,15 +1202,11 @@ export class BatchesService {
     });
     if (!batch) throw new NotFoundException({ code: 'BATCH_NOT_IN_WAREHOUSE', message: 'Batch not found in this warehouse' });
     if (batch.remainingQuantity.lessThan(quantity)) {
-      throw new BadRequestException(
-        `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +
-          `The lot holds ${batch.remainingQuantity.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
-      );
+      throw new BadRequestException({ code: 'LOT_WRITEOFF_SHORT', message: `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +
+          `The lot holds ${batch.remainingQuantity.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.` });
     }
     if (batch.status === 'WRITTEN_OFF') {
-      throw new ConflictException(
-        'الدفعة تم إعدامها بالفعل. / This lot has already been written off.',
-      );
+      throw new ConflictException({ code: 'LOT_ALREADY_WRITTEN_OFF', message: 'الدفعة تم إعدامها بالفعل. / This lot has already been written off.' });
     }
     let writeOffShelf: string | null = null;
 
@@ -1289,9 +1257,7 @@ export class BatchesService {
         },
       });
       if (claimed.count !== 1) {
-        throw new ConflictException(
-          'تم تعديل الدفعة أثناء الإعدام. أعد المحاولة. / The lot changed while it was being written off.',
-        );
+        throw new ConflictException({ code: 'LOT_CHANGED_WRITING_OFF', message: 'تم تعديل الدفعة أثناء الإعدام. أعد المحاولة. / The lot changed while it was being written off.' });
       }
 
       const documentNumber = await this.numbers.next(tx, companyId, 'INVENTORY_WRITE_OFF', 'WO');
@@ -1418,22 +1384,16 @@ export class BatchesService {
   ) {
     const quantity = toDecimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        'كمية التحويل يجب أن تكون أكبر من صفر. / The transferred quantity must be positive.',
-      );
+      throw new BadRequestException({ code: 'LOT_TRANSFER_QTY', message: 'كمية التحويل يجب أن تكون أكبر من صفر. / The transferred quantity must be positive.' });
     }
     if (input.fromWarehouseId === input.toWarehouseId) {
-      throw new BadRequestException(
-        'لا يمكن التحويل إلى نفس المخزن. / The source and destination warehouses are the same.',
-      );
+      throw new BadRequestException({ code: 'LOT_TRANSFER_SAME_WAREHOUSE', message: 'لا يمكن التحويل إلى نفس المخزن. / The source and destination warehouses are the same.' });
     }
     const from = await this.requireWarehouse(companyId, input.fromWarehouseId, scope);
     const to = await this.requireWarehouse(companyId, input.toWarehouseId, scope);
     if (from.branchId !== to.branchId) {
-      throw new BadRequestException(
-        'التحويل بين مخزنين في فرعين مختلفين غير مدعوم هنا؛ استخدم تحويل المخازن. / ' +
-          'A move between two branches is a stock transfer document, not a lot transfer.',
-      );
+      throw new BadRequestException({ code: 'LOT_TRANSFER_OTHER_BRANCH', message: 'التحويل بين مخزنين في فرعين مختلفين غير مدعوم هنا؛ استخدم تحويل المخازن. / ' +
+          'A move between two branches is a stock transfer document, not a lot transfer.' });
     }
 
     const batch = await this.prisma.itemBatch.findFirst({
@@ -1441,10 +1401,8 @@ export class BatchesService {
     });
     if (!batch) throw new NotFoundException({ code: 'BATCH_NOT_IN_SOURCE', message: 'Batch not found in the source warehouse' });
     if (batch.remainingQuantity.lessThan(quantity)) {
-      throw new BadRequestException(
-        `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +
-          `The lot holds ${batch.remainingQuantity.toFixed(MONEY_SCALE)}.`,
-      );
+      throw new BadRequestException({ code: 'LOT_TRANSFER_SHORT', message: `الدفعة تحتوي ${batch.remainingQuantity.toFixed(MONEY_SCALE)} فقط. / ` +
+          `The lot holds ${batch.remainingQuantity.toFixed(MONEY_SCALE)}.` });
     }
 
     const date = input.documentDate ? dayOnly(input.documentDate) : dayOnly(new Date());
@@ -1501,9 +1459,7 @@ export class BatchesService {
         data: { remainingQuantity: { decrement: quantity }, updatedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new ConflictException(
-          'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed during the transfer.',
-        );
+        throw new ConflictException({ code: 'LOT_CHANGED_TRANSFERRING', message: 'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed during the transfer.' });
       }
 
       // A move between shelves must not launder a quality hold. Goods that are
@@ -1961,9 +1917,7 @@ export class BatchesService {
     });
     if (!warehouse) throw new NotFoundException({ code: 'WAREHOUSE_NOT_FOUND', message: 'Warehouse not found' });
     if (scope !== null && !scope.includes(warehouse.branchId)) {
-      throw new ForbiddenException(
-        'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.',
-      );
+      throw new ForbiddenException({ code: 'LOT_WAREHOUSE_OTHER_BRANCH', message: 'هذا المخزن يخص فرعًا غير مسند إليك. / This warehouse belongs to a branch you are not assigned to.' });
     }
     return warehouse;
   }
@@ -2117,9 +2071,7 @@ export class BatchesService {
       select: { id: true },
     });
     if (!location) {
-      throw new BadRequestException(
-        'موقع التخزين غير موجود في هذا المخزن. / The storage location is not in this warehouse.',
-      );
+      throw new BadRequestException({ code: 'LOCATION_NOT_IN_WAREHOUSE', message: 'موقع التخزين غير موجود في هذا المخزن. / The storage location is not in this warehouse.' });
     }
   }
 
@@ -2153,9 +2105,7 @@ export class BatchesService {
       select: { id: true },
     });
     if (!location) {
-      throw new BadRequestException(
-        'موقع التخزين غير موجود في هذا المخزن. / The storage location is not in this warehouse.',
-      );
+      throw new BadRequestException({ code: 'LOCATION_NOT_IN_WAREHOUSE', message: 'موقع التخزين غير موجود في هذا المخزن. / The storage location is not in this warehouse.' });
     }
     return location;
   }

@@ -150,21 +150,15 @@ export class StorageLocationsService {
         select: { id: true, kind: true },
       });
       if (!parent) {
-        throw new BadRequestException(
-          'الأب غير موجود في هذا المخزن. / The parent location is not in this warehouse.',
-        );
+        throw new BadRequestException({ code: 'LOCATION_PARENT_NOT_HERE', message: 'الأب غير موجود في هذا المخزن. / The parent location is not in this warehouse.' });
       }
       if (!PARENT_OF[kind].includes(parent.kind as LocationKind)) {
-        throw new BadRequestException(
-          `الموقع من نوع ${kind} لا يمكن أن يوضع داخل ${parent.kind}. / ` +
-            `A ${kind} cannot be placed inside a ${parent.kind}.`,
-        );
+        throw new BadRequestException({ code: 'LOCATION_KIND_NOT_INSIDE', message: `الموقع من نوع ${kind} لا يمكن أن يوضع داخل ${parent.kind}. / ` +
+            `A ${kind} cannot be placed inside a ${parent.kind}.` });
       }
     } else if (PARENT_OF[kind].length > 0) {
-      throw new BadRequestException(
-        `الموقع من نوع ${kind} يجب أن يكون داخل ${PARENT_OF[kind].join(' أو ')}. / ` +
-          `A ${kind} must sit inside a ${PARENT_OF[kind].join(' or ')}.`,
-      );
+      throw new BadRequestException({ code: 'LOCATION_KIND_NEEDS_PARENT', message: `الموقع من نوع ${kind} يجب أن يكون داخل ${PARENT_OF[kind].join(' أو ')}. / ` +
+          `A ${kind} must sit inside a ${PARENT_OF[kind].join(' or ')}.` });
     }
 
     const code = input.code?.trim() || `LOC-${randomUUID()}`;
@@ -261,9 +255,7 @@ export class StorageLocationsService {
         const seen = new Set<string>([id]);
         while (cursor) {
           if (seen.has(cursor)) {
-            throw new BadRequestException(
-              'هذا النقل يجعل الموقع داخل نفسه. / That move would place a location inside itself.',
-            );
+            throw new BadRequestException({ code: 'LOCATION_MOVE_INTO_SELF', message: 'هذا النقل يجعل الموقع داخل نفسه. / That move would place a location inside itself.' });
           }
           seen.add(cursor);
           const next: { parentId: string | null } | null =
@@ -324,10 +316,8 @@ export class StorageLocationsService {
       where: { parentId: id, deletedAt: null },
     });
     if (children > 0) {
-      throw new ConflictException(
-        `لا يمكن حذف موقع يحتوي على ${children} موقعًا فرعيًا. / ` +
-          `This location holds ${children} sub-location(s); move them first.`,
-      );
+      throw new ConflictException({ code: 'LOCATION_HAS_CHILDREN', message: `لا يمكن حذف موقع يحتوي على ${children} موقعًا فرعيًا. / ` +
+          `This location holds ${children} sub-location(s); move them first.` });
     }
     const inRows = await this.prisma.$queryRaw<Array<{ quantity: Prisma.Decimal | null }>>(
       Prisma.sql`
@@ -339,10 +329,8 @@ export class StorageLocationsService {
     );
     const balance = inRows[0]?.quantity ?? null;
     if (balance && new Prisma.Decimal(balance).greaterThan(0)) {
-      throw new ConflictException(
-        `لا يمكن حذف موقع به ${Number(balance).toFixed(4)} رصيد. / ` +
-          `This location still holds ${Number(balance).toFixed(4)}; move the stock first.`,
-      );
+      throw new ConflictException({ code: 'LOCATION_HAS_STOCK', message: `لا يمكن حذف موقع به ${Number(balance).toFixed(4)} رصيد. / ` +
+          `This location still holds ${Number(balance).toFixed(4)}; move the stock first.` });
     }
     await this.prisma.storageLocation.update({
       where: { id },
@@ -381,9 +369,7 @@ export class StorageLocationsService {
     transferWarehouseIds?: string[],
   ) {
     if (input.fromLocationId === input.toLocationId) {
-      throw new BadRequestException(
-        'الموقعان متطابقان. / The source and destination locations are the same.',
-      );
+      throw new BadRequestException({ code: 'LOCATION_SAME_SOURCE_DEST', message: 'الموقعان متطابقان. / The source and destination locations are the same.' });
     }
     const quantity = new Prisma.Decimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) {
@@ -400,10 +386,8 @@ export class StorageLocationsService {
     ]);
     if (!from || !to) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (from.warehouseId !== to.warehouseId) {
-      throw new BadRequestException(
-        'المواقعتين في مخزنين مختلفين؛ استخدم تحويل الدفعات. / ' +
-          'The two locations are in different warehouses; use a lot transfer.',
-      );
+      throw new BadRequestException({ code: 'LOCATION_DIFFERENT_WAREHOUSES', message: 'المواقعتين في مخزنين مختلفين؛ استخدم تحويل الدفعات. / ' +
+          'The two locations are in different warehouses; use a lot transfer.' });
     }
     if (!from.isActive || !to.isActive) {
       throw new BadRequestException({ code: 'LOCATION_BOTH_ACTIVE', message: 'Both locations must be active' });
@@ -442,10 +426,8 @@ export class StorageLocationsService {
       );
       const available = new Prisma.Decimal(availableRows[0]?.quantity ?? 0);
       if (available.lessThan(quantity)) {
-        throw new BadRequestException(
-          `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
-            `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.`,
-        );
+        throw new BadRequestException({ code: 'LOCATION_SHORT', message: `الموقع يحوي ${available.toFixed(MONEY_SCALE)} فقط. / ` +
+            `That location holds ${available.toFixed(MONEY_SCALE)}, not ${quantity.toFixed(MONEY_SCALE)}.` });
       }
       // The value travels with the goods at the shelf's average, so a move
       // never invents profit and never loses cost.
@@ -674,9 +656,7 @@ export class StorageLocationsService {
     });
     if (!to) throw new NotFoundException({ code: 'STORAGE_LOCATION_NOT_FOUND', message: 'Storage location not found' });
     if (to.warehouseId !== input.warehouseId) {
-      throw new BadRequestException(
-        'الموقع ليس في هذا المخزن. / The location is not in that warehouse.',
-      );
+      throw new BadRequestException({ code: 'LOCATION_NOT_IN_WAREHOUSE', message: 'الموقع ليس في هذا المخزن. / The location is not in that warehouse.' });
     }
     if (!to.isActive) throw new BadRequestException({ code: 'LOCATION_MUST_BE_ACTIVE', message: 'The location must be active' });
     if (scope !== null && !scope.includes(to.branchId)) {
@@ -719,10 +699,8 @@ export class StorageLocationsService {
       `);
       const unlocated = new Prisma.Decimal(rows[0]?.quantity ?? 0);
       if (unlocated.lessThan(quantity)) {
-        throw new BadRequestException(
-          `الكمية بدون موقع ${unlocated.toFixed(MONEY_SCALE)} فقط. / ` +
-            `Only ${unlocated.toFixed(MONEY_SCALE)} has no location, not ${quantity.toFixed(MONEY_SCALE)}.`,
-        );
+        throw new BadRequestException({ code: 'LOCATION_UNLOCATED_SHORT', message: `الكمية بدون موقع ${unlocated.toFixed(MONEY_SCALE)} فقط. / ` +
+            `Only ${unlocated.toFixed(MONEY_SCALE)} has no location, not ${quantity.toFixed(MONEY_SCALE)}.` });
       }
       const bal = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(
         Prisma.sql`
@@ -813,15 +791,13 @@ export class StorageLocationsService {
     const quantity = new Prisma.Decimal(input.quantity);
     if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'QUANTITY_NOT_POSITIVE', message: 'Quantity must be positive' });
     if ((input.reason ?? '').trim().length < 3) {
-      throw new BadRequestException(
-        'اكتب سبب التصحيح (3 أحرف على الأقل). / Write the reason for this correction (at least 3 characters).',
-      );
+      throw new BadRequestException({ code: 'LOCATION_CORRECTION_REASON', message: 'اكتب سبب التصحيح (3 أحرف على الأقل). / Write the reason for this correction (at least 3 characters).' });
     }
     const from = await this.prisma.storageLocation.findFirst({
       where: { id: input.fromLocationId, companyId, deletedAt: null },
     });
     if (!from || from.warehouseId !== input.warehouseId) {
-      throw new BadRequestException('The shelf is not in that warehouse. / الموقع ليس في هذا المخزن.');
+      throw new BadRequestException({ code: 'LOCATION_NOT_IN_WAREHOUSE', message: 'The shelf is not in that warehouse. / الموقع ليس في هذا المخزن.' });
     }
     if (scope !== null && !scope.includes(from.branchId)) {
       throw new ForbiddenException({ code: 'LOCATION_OTHER_BRANCH', message: 'This location belongs to another branch' });
@@ -858,18 +834,14 @@ export class StorageLocationsService {
       const bucket = await sum(false);
       const deficit = bucket.isNegative() ? bucket.negated() : new Prisma.Decimal(0);
       if (deficit.isZero()) {
-        throw new BadRequestException(
-          'لا يوجد عجز في الكمية بدون موقع لهذا الصنف، فلا حاجة للتصحيح. / ' +
-            'The unlocated quantity is not negative for this item, so there is nothing to correct.',
-        );
+        throw new BadRequestException({ code: 'LOCATION_NO_DEFICIT', message: 'لا يوجد عجز في الكمية بدون موقع لهذا الصنف، فلا حاجة للتصحيح. / ' +
+            'The unlocated quantity is not negative for this item, so there is nothing to correct.' });
       }
       if (quantity.greaterThan(deficit) || quantity.greaterThan(shelf)) {
-        throw new BadRequestException(
-          `أقصى كمية للتصحيح ${Prisma.Decimal.min(deficit, shelf).toFixed(MONEY_SCALE)} ` +
+        throw new BadRequestException({ code: 'LOCATION_CORRECTION_MAX', message: `أقصى كمية للتصحيح ${Prisma.Decimal.min(deficit, shelf).toFixed(MONEY_SCALE)} ` +
             `(العجز ${deficit.toFixed(MONEY_SCALE)}، رصيد الموقع ${shelf.toFixed(MONEY_SCALE)}). / ` +
             `At most ${Prisma.Decimal.min(deficit, shelf).toFixed(MONEY_SCALE)} can be corrected ` +
-            `(unlocated deficit ${deficit.toFixed(MONEY_SCALE)}, shelf holds ${shelf.toFixed(MONEY_SCALE)}). Lower the quantity or pick the shelf the goods really left.`,
-        );
+            `(unlocated deficit ${deficit.toFixed(MONEY_SCALE)}, shelf holds ${shelf.toFixed(MONEY_SCALE)}). Lower the quantity or pick the shelf the goods really left.` });
       }
       const bal = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(Prisma.sql`
         SELECT "quantity", "value" FROM "warehouse_stock_balances"
