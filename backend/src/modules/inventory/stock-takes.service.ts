@@ -606,10 +606,10 @@ export class StockTakesService {
       // committed in between must stop this write, so read it again under the lock.
       const locked = await tx.stockTakeSession.findFirst({ where: { id: session.id, companyId }, select: { status: true } });
       if (!locked || locked.status !== 'COUNTING') {
-        throw new BadRequestException(
-          `هذا الجرد لم يعد مفتوحًا للعد (الحالة: ${locked?.status ?? '-'}). ما أدخلته لم يُحفظ في الجرد؛ أعد إدخاله بعد إعادة فتح العد أو في جرد جديد. / ` +
-            `This count is no longer open for counting (status: ${locked?.status ?? '-'}). Your figures were not saved to it; enter them again once counting is reopened or in a new count.`,
-        );
+        throw new BadRequestException({
+          code: 'STOCKTAKE_NOT_COUNTING',
+          message: `This count is no longer open for counting (status: ${locked?.status ?? '-'}). Your figures were not saved to it; enter them again once counting is reopened or in a new count.`,
+        });
       }
       for (const entry of dto.lines) {
         const line = await tx.stockTakeLine.findFirst({
@@ -771,9 +771,10 @@ export class StockTakesService {
     });
     if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (session.status === 'APPROVED' || session.status === 'POSTED') {
-      throw new BadRequestException(
-        `This count was already approved (status: ${session.status}). / تم اعتماد هذا الجرد مسبقًا.`,
-      );
+      throw new BadRequestException({
+        code: 'STOCKTAKE_ALREADY_APPROVED',
+        message: `This count was already approved (status: ${session.status}).`,
+      });
     }
     if (session.status !== 'REVIEW') {
       throw new BadRequestException({ code: 'STOCKTAKE_APPROVE_STAGE', message: `A count can be approved only after every line is counted and submitted for review (status: ${session.status}).` });
@@ -817,8 +818,8 @@ export class StockTakesService {
     if (session.status !== 'APPROVED') {
       throw new BadRequestException(
         session.status === 'POSTED'
-          ? 'This count has already been posted. / تم ترحيل هذا الجرد مسبقًا.'
-          : `A count is posted only after it is approved (status: ${session.status}).`,
+          ? { code: 'STOCKTAKE_ALREADY_POSTED', message: 'This count has already been posted.' }
+          : { code: 'STOCKTAKE_POST_STAGE', message: `A count is posted only after it is approved (status: ${session.status}).` },
       );
     }
 

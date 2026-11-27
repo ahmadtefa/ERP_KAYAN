@@ -1061,9 +1061,10 @@ export class PurchaseInvoicesService {
             data: { remainingQuantity: { decrement: line.quantity } },
           });
           if (claimed.count !== 1) {
-            throw new BadRequestException(
-              'تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.',
-            );
+            throw new BadRequestException({
+              code: 'PURCHASE_REVERSE_LOT_CHANGED',
+              message: 'The lot changed during the reversal; try again.',
+            });
           }
           await tx.itemBatch.updateMany({
             where: { id: reverseLotId, remainingQuantity: { lte: 0 }, status: 'OPEN' },

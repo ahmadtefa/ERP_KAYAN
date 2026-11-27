@@ -206,6 +206,26 @@ const Map<String, List<String>> wordedRefusals = {
     'الخادم مشغول بعملية أخرى في هذه اللحظة. انتظر قليلًا ثم أعد المحاولة. لم يُحفظ شيء.',
     'The server is busy with another operation right now. Wait a moment, then try again. Nothing was saved.',
   ],
+  'STOCKTAKE_NOT_COUNTING': [
+    'هذا الجرد لم يعد مفتوحًا للعد، فلم تُحفظ الأرقام التي أدخلتها. أعد فتح العد أو ابدأ جردًا جديدًا، ثم أعد إدخال الأرقام.',
+    'This count is no longer open for counting, so the figures you entered were not saved. Reopen the count or start a new one, then enter the figures again.',
+  ],
+  'STOCKTAKE_ALREADY_APPROVED': [
+    'هذا الجرد معتمد من قبل ولا يمكن اعتماده مرة ثانية. حدّث الصفحة لرؤية حالته الحالية. لم يتغير شيء.',
+    'This count was already approved and cannot be approved again. Refresh the page to see its current status. Nothing changed.',
+  ],
+  'STOCKTAKE_ALREADY_POSTED': [
+    'هذا الجرد مُرحَّل من قبل ولا يمكن ترحيله مرة ثانية. حدّث الصفحة لرؤية حالته الحالية. لم يتغير شيء.',
+    'This count was already posted and cannot be posted again. Refresh the page to see its current status. Nothing changed.',
+  ],
+  'STOCKTAKE_POST_STAGE': [
+    'لا يُرحَّل الجرد إلا بعد اعتماده. اعتمد الجرد أولًا من شخص لديه صلاحية الاعتماد، ثم رحّله. لم يتغير شيء.',
+    'A count can be posted only after it is approved. Have a person with approval permission approve it first, then post it. Nothing changed.',
+  ],
+  'PURCHASE_REVERSE_LOT_CHANGED': [
+    'تغيّرت دفعة المخزون أثناء عكس الفاتورة، فلم يكتمل العكس. أعد المحاولة بعد لحظات، وإن تكرر ذلك فتأكد أن لا أحد يعدّل نفس الدفعة. لم يتغير شيء.',
+    'The stock lot changed while the invoice was being reversed, so the reversal did not finish. Try again in a moment, and if it keeps happening make sure nobody else is editing the same lot. Nothing changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
