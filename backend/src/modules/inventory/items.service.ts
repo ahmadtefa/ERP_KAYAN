@@ -114,7 +114,7 @@ export class ItemsService {
       include: { item: { include: { units: { orderBy: { factor: 'asc' } } } } },
     });
     if (!unit) {
-      throw new NotFoundException(`No item or unit carries the barcode ${barcode}`);
+      throw new NotFoundException({ code: 'ITEMS_FIND_BY_BARCODE_E124', message: `No item or unit carries the barcode ${barcode}` });
     }
 
     const owner = unit.item;
@@ -349,7 +349,7 @@ export class ItemsService {
     const nameEn = String(dto.nameEn ?? '').trim();
     const nameAr = String(dto.nameAr ?? '').trim();
     if (!nameEn && !nameAr) {
-      throw new BadRequestException('Provide an Arabic or English item name');
+      throw new BadRequestException({ code: 'ITEMS_CREATE_E125', message: 'Provide an Arabic or English item name' });
     }
 
     // The form sends the base unit and every packing unit together. They are
@@ -402,22 +402,16 @@ export class ItemsService {
       openingQuantity !== null || openingUnitCost !== null;
     if (wantsOpeningStock) {
       if (!isStockTracked) {
-        throw new BadRequestException(
-          'Opening stock cannot be set on an item that is not stock-tracked',
-        );
+        throw new BadRequestException({ code: 'ITEMS_CREATE_E126', message: 'Opening stock cannot be set on an item that is not stock-tracked' });
       }
       if (openingQuantity === null || openingUnitCost === null) {
-        throw new BadRequestException(
-          'openingQuantity and openingUnitCost must be given together',
-        );
+        throw new BadRequestException({ code: 'ITEMS_CREATE_E127', message: 'openingQuantity and openingUnitCost must be given together' });
       }
       if (!openingQuantity.greaterThan(0)) {
         throw new BadRequestException({ code: 'FIELD_POSITIVE', message: 'openingQuantity must be greater than zero', field: 'openingQuantity' });
       }
       if (!branchId) {
-        throw new BadRequestException(
-          'Select a branch before adding opening stock',
-        );
+        throw new BadRequestException({ code: 'ITEMS_CREATE_E128', message: 'Select a branch before adding opening stock' });
       }
     }
 
@@ -960,14 +954,12 @@ export class ItemsService {
       movements + (balance ? 1 : 0) + stockLines + salesLines + purchaseLines;
     if (history === 0) return;
 
-    throw new BadRequestException(
-      `لا يمكن تغيير وحدة الأساس للصنف من "${fromUnit}" إلى "${toUnit}" لأنه مسجّل عليه ` +
+    throw new BadRequestException({ code: 'ITEMS_ASSERT_BASE_UNIT_MAY_CHANGE_E131', message: `لا يمكن تغيير وحدة الأساس للصنف من "${fromUnit}" إلى "${toUnit}" لأنه مسجّل عليه ` +
         `${movements} حركة مخزنية و${stockLines + salesLines + purchaseLines} سطرًا في مستندات` +
         `${balance ? ' ورصيد قائم' : ''}. تغيير الوحدة سيعيد تفسير الكميات القديمة دون أن تتغيّر أرقامها. ` +
         'أضف وحدة تعبئة جديدة بدلًا من ذلك، أو صحّح الكميات بتسوية جرد مرحّلة. / ' +
         'The base unit of an item with recorded stock cannot be renamed: it would re-read existing ' +
-        'quantities in a different unit. Add a packing unit instead, or correct the stock with a posted count.',
-    );
+        'quantities in a different unit. Add a packing unit instead, or correct the stock with a posted count.' });
   }
 
   /**

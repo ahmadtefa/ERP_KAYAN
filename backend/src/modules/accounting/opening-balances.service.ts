@@ -583,7 +583,7 @@ export class OpeningBalancesService {
       throw new ForbiddenException({ code: 'OPENING_COST_PERMISSION', message: 'Stock opening balances require inventory cost permission' });
     }
     if (document.status !== InvoiceStatus.POSTED || !document.journalEntryId) {
-      throw new BadRequestException('Only a posted opening balance can be reversed');
+      throw new BadRequestException({ code: 'OPENING_BALANCES_REVERSE_E034', message: 'Only a posted opening balance can be reversed' });
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {

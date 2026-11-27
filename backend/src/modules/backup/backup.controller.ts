@@ -168,10 +168,8 @@ export class BackupController {
       file.buffer.subarray(0, 5).toString('latin1') === 'PGDMP' ||
       file.originalname.toLowerCase().endsWith('.dump')
     ) {
-      throw new BadRequestException(
-        'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON. ' +
-          'الملف يحتوي قاعدة البيانات فقط ولا يشمل الملفات والترخيص؛ الاستعادة الكاملة متوقفة حاليًا لحماية البيانات. احتفظ بالأرشيف وتواصل مع الدعم.',
-      );
+      throw new BadRequestException({ code: 'BACKUP_PARSE_E038', message: 'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON. ' +
+          'الملف يحتوي قاعدة البيانات فقط ولا يشمل الملفات والترخيص؛ الاستعادة الكاملة متوقفة حاليًا لحماية البيانات. احتفظ بالأرشيف وتواصل مع الدعم.' });
     }
     try {
       return JSON.parse(file.buffer.toString('utf8')) as BackupFile;

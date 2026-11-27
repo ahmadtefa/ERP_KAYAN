@@ -127,9 +127,7 @@ export function parseUnitRows(
 ): ParsedUnitRow[] | null {
   if (raw === undefined) return null;
   if (!Array.isArray(raw)) {
-    throw new BadRequestException(
-      'units must be a list / يجب أن تكون الوحدات قائمة',
-    );
+    throw new BadRequestException({ code: 'UNIT_INPUT_X_E156', message: 'units must be a list / يجب أن تكون الوحدات قائمة' });
   }
 
   const base = String(baseUnit ?? '').trim();
@@ -139,18 +137,14 @@ export function parseUnitRows(
 
   for (const entry of raw) {
     if (entry === null || typeof entry !== 'object') {
-      throw new BadRequestException(
-        'Every unit row must be an object / كل سطر وحدة يجب أن يكون بيانات',
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E157', message: 'Every unit row must be an object / كل سطر وحدة يجب أن يكون بيانات' });
     }
     const row = entry as Record<string, unknown>;
     const unit = String(row.unit ?? '').trim();
     const label = unit === '' ? 'unit' : unit;
 
     if (unit === '') {
-      throw new BadRequestException(
-        'Every unit needs a name / كل وحدة تحتاج اسمًا',
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E158', message: 'Every unit needs a name / كل وحدة تحتاج اسمًا' });
     }
     if (unit.length > UNIT_NAME_MAX) {
       throw new BadRequestException(
@@ -187,9 +181,7 @@ export function parseUnitRows(
     }
     factor = factor.toDecimalPlaces(UNIT_FACTOR_SCALE);
     if (key === baseKey && !factor.equals(1)) {
-      throw new BadRequestException(
-        `The base unit factor must be 1 / معامل الوحدة الأساسية يجب أن يكون 1`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E164', message: `The base unit factor must be 1 / معامل الوحدة الأساسية يجب أن يكون 1` });
     }
 
     const barcodeText = String(row.barcode ?? '').trim();

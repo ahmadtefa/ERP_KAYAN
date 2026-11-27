@@ -530,9 +530,7 @@ export class ReturnsService {
         data: { remainingQuantity: { decrement: quantity } },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException(
-          'تغيرت الدفعة أثناء الترحيل؛ أعد المحاولة. / The lot changed while posting; try again.',
-        );
+        throw new BadRequestException({ code: 'RETURNS_TAKE_BACK_FROM_RECEIPT_E177', message: 'تغيرت الدفعة أثناء الترحيل؛ أعد المحاولة. / The lot changed while posting; try again.' });
       }
       await tx.itemBatch.updateMany({
         where: { id: lotId, remainingQuantity: { lte: 0 }, status: 'OPEN' },
@@ -652,7 +650,7 @@ export class ReturnsService {
             data: { remainingQuantity: { decrement: qty } },
           });
           if (claimed.count !== 1) {
-            throw new BadRequestException('تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.');
+            throw new BadRequestException({ code: 'RETURNS_UNDO_RETURN_MOVEMENTS_E178', message: 'تغيرت الدفعة أثناء العكس؛ أعد المحاولة. / The lot changed during the reversal; try again.' });
           }
           await tx.itemBatch.updateMany({ where: { id: m.batchId, remainingQuantity: { lte: 0 }, status: 'OPEN' }, data: { status: 'CLOSED' } });
         }
@@ -934,9 +932,7 @@ export class ReturnsService {
                 select: { id: true, unitCost: true, status: true },
               });
               if (!lot) {
-                throw new BadRequestException(
-                  'دفعة الفاتورة الأصلية لم تعد موجودة. / The original invoice lot no longer exists.',
-                );
+                throw new BadRequestException({ code: 'RETURNS_POST_SALES_RETURN_E179', message: 'دفعة الفاتورة الأصلية لم تعد موجودة. / The original invoice lot no longer exists.' });
               }
               // Reopening a lot the sale closed is the point: the sale is being
               // undone, and refusing to reopen would silently lose the stock.

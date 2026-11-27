@@ -24,9 +24,7 @@ export class StockController {
   @RequirePermissions('inventory.stock.read')
   balances(@CurrentUser() user: AuthUser, @Query() query: StockQuery) {
     if (grantsOf(user) !== null) {
-      throw new ForbiddenException(
-        'Branch-wide stock totals are unavailable with restricted warehouse access. Use the warehouse balance view. / إجمالي الفرع غير متاح مع تقييد صلاحيات المستودعات.',
-      );
+      throw new ForbiddenException({ code: 'STOCK_BALANCES_E153', message: 'Branch-wide stock totals are unavailable with restricted warehouse access. Use the warehouse balance view. / إجمالي الفرع غير متاح مع تقييد صلاحيات المستودعات.' });
     }
     return this.service.balances(
       user.companyId,

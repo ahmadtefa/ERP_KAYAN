@@ -490,7 +490,7 @@ export class StockTakesService {
     });
     if (!session) throw new NotFoundException({ code: 'STOCK_TAKE_SESSION_NOT_FOUND', message: 'Stock-take session not found' });
     if (!dto?.itemId || !dto?.storageLocationId) {
-      throw new BadRequestException('اختر الصنف وموقع التخزين. / Choose the item and the storage location.');
+      throw new BadRequestException({ code: 'STOCK_TAKES_ADD_LOCATION_E148', message: 'اختر الصنف وموقع التخزين. / Choose the item and the storage location.' });
     }
     const batchId = dto.batchId ?? null;
     await this.prisma.$transaction(async (tx) => {
@@ -665,7 +665,7 @@ export class StockTakesService {
         });
         const counted = resolved.baseQuantity.toDecimalPlaces(MONEY_SCALE);
         if (counted.isNegative()) {
-          throw new BadRequestException('A counted quantity cannot be negative.');
+          throw new BadRequestException({ code: 'STOCK_TAKES_RECORD_E150', message: 'A counted quantity cannot be negative.' });
         }
         const variance = counted.minus(line.systemQuantity);
         await tx.stockTakeLine.update({

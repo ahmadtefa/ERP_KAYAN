@@ -324,9 +324,7 @@ export class ApprovalsService {
       // A matched policy with no levels is a configuration mistake, and the
       // right answer is to stop the document rather than let it through a
       // chain nobody can satisfy.
-      throw new ConflictException(
-        error instanceof Error ? error.message : 'Approval chain is misconfigured',
-      );
+      throw new ConflictException({ code: 'APPROVALS_CHAIN_FOR_E001', message: error instanceof Error ? error.message : 'Approval chain is misconfigured' });
     }
   }
 

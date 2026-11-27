@@ -151,11 +151,9 @@ export class ChartOfAccountsService {
         new Set(used.map((u) => u.code)),
       );
       if (!next) {
-        throw new BadRequestException(
-          prefix.length >= 8
+        throw new BadRequestException({ code: 'CHART_OF_ACCOUNTS_SUGGEST_CODE_E027', message: prefix.length >= 8
             ? 'An 8-digit account is the last level and cannot have sub-accounts'
-            : 'No free two-digit code left under this parent',
-        );
+            : 'No free two-digit code left under this parent' });
       }
       return { code: next };
     }

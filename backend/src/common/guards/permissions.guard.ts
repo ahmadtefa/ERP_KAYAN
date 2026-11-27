@@ -25,7 +25,7 @@ export class PermissionsGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{ user?: AuthUser }>();
     const user = request.user;
-    if (!user) throw new ForbiddenException('No principal');
+    if (!user) throw new ForbiddenException({ code: 'PERMISSIONS_CAN_ACTIVATE_E005', message: 'No principal' });
     if (user.isSuperAdmin) return true;
 
     const missing = required.filter((p) => !user.permissions.includes(p));

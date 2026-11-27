@@ -83,7 +83,7 @@ export class BranchWriteGuard implements CanActivate {
       // Unknown ids fall through to the route's own 404. A document with no
       // branch is company-level and is not made writable to branch staff.
       if (row && (row.branchId === null || !scope.includes(row.branchId))) {
-        throw new NotFoundException('Not found');
+        throw new NotFoundException({ code: 'BRANCH_WRITE_CAN_ACTIVATE_E004', message: 'Not found' });
       }
       return true;
     }

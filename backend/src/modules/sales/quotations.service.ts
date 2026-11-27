@@ -1385,9 +1385,7 @@ export class QuotationsService {
     for (const entry of raw) {
       const key = (entry.key ?? '').trim();
       if (!key) {
-        throw new BadRequestException(
-          `${where}: اسم العمود فارغ. أعطِ كل عمود اسمًا قبل الحفظ. / A column has no name. Name every column before saving.`,
-        );
+        throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E192', message: `${where}: اسم العمود فارغ. أعطِ كل عمود اسمًا قبل الحفظ. / A column has no name. Name every column before saving.` });
       }
       if (key.length > COLUMN_KEY_MAX_LENGTH) {
         throw new BadRequestException(
@@ -1398,9 +1396,7 @@ export class QuotationsService {
       // The key reaches the HTML table, the workbook and the saved JSON, so a
       // control character is refused rather than sanitised behind the user's back.
       if (/[\u0000-\u001f\u007f]/.test(key)) {
-        throw new BadRequestException(
-          `${where}: اسم العمود يحتوي على محرف غير صالح. / A column name contains an invalid character.`,
-        );
+        throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E194', message: `${where}: اسم العمود يحتوي على محرف غير صالح. / A column name contains an invalid character.` });
       }
       if (seen.has(key)) {
         throw new BadRequestException(
@@ -1419,9 +1415,7 @@ export class QuotationsService {
       return column;
     });
     if (!columns.some((column) => column.visible)) {
-      throw new BadRequestException(
-        `${where}: أبقِ عمودًا واحدًا ظاهرًا على الأقل. / Keep at least one column visible.`,
-      );
+      throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E196', message: `${where}: أبقِ عمودًا واحدًا ظاهرًا على الأقل. / Keep at least one column visible.` });
     }
     return columns;
   }

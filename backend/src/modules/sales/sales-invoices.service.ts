@@ -1376,10 +1376,8 @@ export class SalesInvoicesService {
             }),
           );
           if (policy.requiresBatch) {
-            throw new BadRequestException(
-              'لا يمكن عكس فاتورة صنف يتطلب دفعة دون حركات دفعات مسجّلة. / ' +
-                'A lot-controlled invoice cannot be reversed: its original lot movements are missing.',
-            );
+            throw new BadRequestException({ code: 'SALES_INVOICES_REVERSE_E204', message: 'لا يمكن عكس فاتورة صنف يتطلب دفعة دون حركات دفعات مسجّلة. / ' +
+                'A lot-controlled invoice cannot be reversed: its original lot movements are missing.' });
           }
         }
 
@@ -1404,10 +1402,8 @@ export class SalesInvoicesService {
             },
           });
           if (restored.count !== 1) {
-            throw new BadRequestException(
-              'دفعة أصلية لم تعد موجودة؛ لا يمكن إعادة الكمية. / ' +
-                'An original lot no longer exists, so its quantity cannot be given back.',
-            );
+            throw new BadRequestException({ code: 'SALES_INVOICES_REVERSE_E205', message: 'دفعة أصلية لم تعد موجودة؛ لا يمكن إعادة الكمية. / ' +
+                'An original lot no longer exists, so its quantity cannot be given back.' });
           }
 
           await tx.stockMovement.create({

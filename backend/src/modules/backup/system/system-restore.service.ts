@@ -218,9 +218,7 @@ export class SystemRestoreService implements OnModuleInit {
       throw new BadRequestException({ code: 'FULL_RESTORE_CONFIRM', message: 'A complete restore replaces the whole database. Send confirm=true once you have read the warning.' });
     }
     if ((input.confirmPhrase ?? '').trim().toUpperCase() !== 'RESTORE') {
-      throw new BadRequestException(
-        'اكتب كلمة RESTORE لتأكيد الاستعادة. / Type RESTORE to confirm that you want to replace everything.',
-      );
+      throw new BadRequestException({ code: 'SYSTEM_RESTORE_RESTORE_E100', message: 'اكتب كلمة RESTORE لتأكيد الاستعادة. / Type RESTORE to confirm that you want to replace everything.' });
     }
 
     if (this.running || this.maintenance.isActive) {
@@ -260,11 +258,9 @@ export class SystemRestoreService implements OnModuleInit {
     }
 
     if (input.uploaded?.buffer?.length && input.uploaded.buffer.subarray(0, 5).toString('latin1') === 'PGDMP') {
-      throw new BadRequestException(
-        'هذا أرشيف قاعدة بيانات (.dump) وليس نسخة نظام كاملة. استخدم قسم أرشيف قاعدة البيانات. / ' +
+      throw new BadRequestException({ code: 'SYSTEM_RESTORE_RESTORE_E102', message: 'هذا أرشيف قاعدة بيانات (.dump) وليس نسخة نظام كاملة. استخدم قسم أرشيف قاعدة البيانات. / ' +
           'This is a database-only .dump archive, not a complete system backup. Use the ' +
-          'database-archive restore instead.',
-      );
+          'database-archive restore instead.' });
     }
 
     // One restore at a time, across processes as well as inside this one.

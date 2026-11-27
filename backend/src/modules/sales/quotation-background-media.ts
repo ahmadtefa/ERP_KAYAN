@@ -108,11 +108,11 @@ function isPdf(b: Buffer): boolean {
 /// plain sentence; nothing is thrown as a server error for a bad file.
 export async function analyseBackground(bytes: Buffer, page?: number): Promise<AnalysedBackground> {
   if (bytes.length === 0 || bytes.length > MAX_BACKGROUND_BYTES) {
-    throw new BadRequestException('الملف يجب أن يكون بين 1 بايت و4 ميجابايت');
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E182', message: 'الملف يجب أن يكون بين 1 بايت و4 ميجابايت' });
   }
   if (isPdf(bytes)) return analysePdf(bytes, page);
   if (isPng(bytes) || isJpeg(bytes)) return analyseImage(bytes);
-  throw new BadRequestException('نوع الملف غير مدعوم. اختر ملف PDF أو صورة PNG أو JPG');
+  throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E183', message: 'نوع الملف غير مدعوم. اختر ملف PDF أو صورة PNG أو JPG' });
 }
 
 async function analysePdf(bytes: Buffer, page?: number): Promise<AnalysedBackground> {
@@ -123,9 +123,9 @@ async function analysePdf(bytes: Buffer, page?: number): Promise<AnalysedBackgro
     // pdf-lib reads the page tree lazily, so a damaged file fails here.
     count = source.getPageCount();
   } catch {
-    throw new BadRequestException('تعذرت قراءة ملف الـPDF (قد يكون مشفرًا أو تالفًا)');
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E184', message: 'تعذرت قراءة ملف الـPDF (قد يكون مشفرًا أو تالفًا)' });
   }
-  if (count === 0) throw new BadRequestException('ملف الـPDF لا يحتوي على صفحات');
+  if (count === 0) throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E185', message: 'ملف الـPDF لا يحتوي على صفحات' });
   if (page === undefined && count > 1) throw new BackgroundPageRequired(count);
   const pageNumber = page ?? 1;
   if (pageNumber < 1 || pageNumber > count) {
@@ -152,7 +152,7 @@ async function analysePdf(bytes: Buffer, page?: number): Promise<AnalysedBackgro
       doc.destroy();
     }
   } catch {
-    throw new BadRequestException('تعذر عرض صفحة الـPDF، جرّب حفظها من البرنامج الأصلي مرة أخرى أو استخدم صورة');
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E187', message: 'تعذر عرض صفحة الـPDF، جرّب حفظها من البرنامج الأصلي مرة أخرى أو استخدم صورة' });
   }
   const preview = Buffer.from(rendered.data);
   const zones = await inkZones(preview);
@@ -179,10 +179,10 @@ async function analyseImage(bytes: Buffer): Promise<AnalysedBackground> {
     width = encoded.info.width;
     height = encoded.info.height;
   } catch {
-    throw new BadRequestException('تعذرت قراءة الصورة، استخدم ملف PNG أو JPG سليم');
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E188', message: 'تعذرت قراءة الصورة، استخدم ملف PNG أو JPG سليم' });
   }
   if (width < 200 || height < 200) {
-    throw new BadRequestException('الصورة صغيرة جدًا لتكون خلفية، استخدم صورة بعرض 200 بكسل على الأقل');
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E189', message: 'الصورة صغيرة جدًا لتكون خلفية، استخدم صورة بعرض 200 بكسل على الأقل' });
   }
   const doc = await PDFDocument.create();
   const embedded = png ? await doc.embedPng(normalised) : await doc.embedJpg(normalised);

@@ -188,7 +188,7 @@ export class WarehouseAccessService {
           tx.userWarehouseAccess.count({ where: { companyId, userId, warehouse: { branchId: { notIn: scope } } } }),
         ]);
         if (total > 0 && outside === 0) {
-          throw new ForbiddenException('A branch-scoped manager cannot remove the last warehouse restriction. / لا يمكن لمسؤول الفرع إزالة آخر قيد للمستودعات.');
+          throw new ForbiddenException({ code: 'WAREHOUSE_ACCESS_SET_FOR_USER_E165', message: 'A branch-scoped manager cannot remove the last warehouse restriction. / لا يمكن لمسؤول الفرع إزالة آخر قيد للمستودعات.' });
         }
       }
       await tx.userWarehouseAccess.deleteMany({

@@ -370,7 +370,7 @@ export class StockDocumentsService {
       // A write-off is a loss somebody has to own. The reason is not decoration:
       // it is the sentence that explains the difference to an auditor.
       if (kind === StockDocumentKind.WRITE_OFF && !String(dto.reason ?? '').trim()) {
-        throw new BadRequestException('A write-off needs a reason. / مستند الإعدام يتطلب سببًا.');
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E133', message: 'A write-off needs a reason. / مستند الإعدام يتطلب سببًا.' });
       }
       if (kind === StockDocumentKind.OPENING) {
         throw new BadRequestException({ code: 'STOCKDOC_USE_OPENING_BALANCE', message: 'Use an opening balance document for opening stock: it posts the accounting and the stock together.' });
@@ -383,7 +383,7 @@ export class StockDocumentsService {
         if (!warehouse) throw new BadRequestException({ code: 'VOUCHER_WAREHOUSE_INVALID', message: 'The voucher warehouse does not belong to this branch or is inactive' });
       }
       if (!Array.isArray(dto.lines) || dto.lines.length === 0) {
-        throw new BadRequestException('A stock document needs at least one line');
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E134', message: 'A stock document needs at least one line' });
       }
 
       const date = this.date(dto.documentDate, 'documentDate');
@@ -535,10 +535,8 @@ export class StockDocumentsService {
         // destroyed - the worst kind of mistake, because the document, the
         // movement and the ledger would all agree on a lie.
         if (kind === StockDocumentKind.WRITE_OFF && quantity.greaterThan(0)) {
-          throw new BadRequestException(
-            `Line ${index + 1}: a write-off removes stock, so its quantity is negative. / ` +
-              'الإعدام يُخرج البضاعة من المخزن، فكميته سالبة.',
-          );
+          throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E135', message: `Line ${index + 1}: a write-off removes stock, so its quantity is negative. / ` +
+              'الإعدام يُخرج البضاعة من المخزن، فكميته سالبة.' });
         }
         if (kind === StockDocumentKind.COUNT && (!countedQuantity || countedQuantity.isNegative())) {
           throw new BadRequestException({ code: 'STOCKDOC_COUNT_QTY_REQUIRED', message: `Line ${index + 1}: a count needs the quantity that was actually counted` });
@@ -657,17 +655,15 @@ export class StockDocumentsService {
       if (kind === StockDocumentKind.TRANSFER) {
         if (!fromBranchId && movesBetweenWarehouses) fromBranchId = targetBranch;
         if (!fromBranchId) {
-          throw new BadRequestException('A transfer needs the branch the stock leaves');
+          throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E136', message: 'A transfer needs the branch the stock leaves' });
         }
         const sourceBranch = await branchModel.findFirst({ where: { id: fromBranchId, companyId, deletedAt: null }, select: { id: true } });
         if (!sourceBranch) throw new BadRequestException({ code: 'STOCKDOC_SOURCE_BRANCH_INVALID', message: 'Source branch does not belong to this company' });
         if (fromBranchId === targetBranch && !movesBetweenWarehouses) {
-          throw new BadRequestException(
-            'A transfer needs two different branches, or two different warehouses of the same branch',
-          );
+          throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E137', message: 'A transfer needs two different branches, or two different warehouses of the same branch' });
         }
         if (movesBetweenWarehouses && fromWarehouseId === toWarehouseId) {
-          throw new BadRequestException('A transfer needs two different warehouses');
+          throw new BadRequestException({ code: 'STOCK_DOCUMENTS_CREATE_E138', message: 'A transfer needs two different warehouses' });
         }
         void movesBetweenBranches;
       }
@@ -987,7 +983,7 @@ export class StockDocumentsService {
     });
     if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
     if (document.kind !== StockDocumentKind.WRITE_OFF) {
-      throw new BadRequestException('Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.');
+      throw new BadRequestException({ code: 'STOCK_DOCUMENTS_APPROVE_E139', message: 'Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.' });
     }
     if (document.approvedAt) {
       throw new BadRequestException(`This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`);
@@ -1083,7 +1079,7 @@ export class StockDocumentsService {
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This document has just been posted by someone else.');
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_POST_E141', message: 'This document has just been posted by someone else.' });
       }
       const reloaded = await (tx.stockDocument.findFirst
         ? tx.stockDocument.findFirst({
@@ -1101,7 +1097,7 @@ export class StockDocumentsService {
         throw new BadRequestException({ code: 'VOUCHER_NOT_APPROVED', message: 'Stock voucher must be reviewed and approved before posting' });
       }
       if (document.kind === StockDocumentKind.WRITE_OFF && (!document.approvedAt || !document.approvedBy)) {
-        throw new BadRequestException('A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.');
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_POST_E142', message: 'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.' });
       }
       if (document.voucherKind === 'ISSUE') {
         if (!document.costCenterId) {
@@ -1530,9 +1526,7 @@ export class StockDocumentsService {
               data: { remainingQuantity: { decrement: absoluteQuantity } },
             });
             if (claimedBatch.count !== 1) {
-              throw new BadRequestException(
-                'The lot does not hold enough for that quantity. / الدفعة لا تحمل الكمية المطلوبة.',
-              );
+              throw new BadRequestException({ code: 'STOCK_DOCUMENTS_POST_E143', message: 'The lot does not hold enough for that quantity. / الدفعة لا تحمل الكمية المطلوبة.' });
             }
             await tx.$executeRaw(Prisma.sql`
               UPDATE "item_batches"
@@ -1626,7 +1620,7 @@ export class StockDocumentsService {
     if (!document) throw new NotFoundException({ code: 'STOCK_DOCUMENT_NOT_FOUND', message: 'Stock document not found' });
     if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException({ code: 'STOCK_VOUCHER_NOT_FOUND', message: 'Stock voucher not found' });
     if (document.status !== InvoiceStatus.POSTED) {
-      throw new BadRequestException('Only a posted stock document can be reversed');
+      throw new BadRequestException({ code: 'STOCK_DOCUMENTS_REVERSE_E144', message: 'Only a posted stock document can be reversed' });
     }
 
     if (document.kind === StockDocumentKind.TRANSFER &&
@@ -1639,7 +1633,7 @@ export class StockDocumentsService {
         data: { status: InvoiceStatus.REVERSED },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('This document has just been changed by someone else.');
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_REVERSE_E145', message: 'This document has just been changed by someone else.' });
       }
 
       const reversalToWarehouseId = await this.warehouses.resolve(
@@ -1845,9 +1839,7 @@ export class StockDocumentsService {
       }
 
       if (usedOriginals.size !== originals.length) {
-        throw new BadRequestException(
-          'The original stock movements do not match the document; it cannot be reversed automatically.',
-        );
+        throw new BadRequestException({ code: 'STOCK_DOCUMENTS_REVERSE_E146', message: 'The original stock movements do not match the document; it cannot be reversed automatically.' });
       }
 
       // A transfer that moved a lot is undone lot by lot: the receiving lot gives
@@ -2091,9 +2083,7 @@ export class StockDocumentsService {
         },
       });
       if (claimed.count !== 1) {
-        throw new ConflictException(
-          'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed while the transfer was posted; try again.',
-        );
+        throw new ConflictException({ code: 'STOCK_DOCUMENTS_MOVE_LOTS_E147', message: 'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed while the transfer was posted; try again.' });
       }
       await tx.$executeRaw(Prisma.sql`
         UPDATE "item_batches"

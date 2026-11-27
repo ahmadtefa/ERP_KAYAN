@@ -36,6 +36,6 @@ export async function assertRestoreAuthority(prisma: PrismaService, actor: AuthU
   if (user.isSuperAdmin) return;
   if (superAdminOnly || !resolveEffectivePermissions(user.userRoles, user.userPermissions, user.companyId)
     .permissions.includes('admin.backup')) {
-    throw new ForbiddenException('Restore permission changed while waiting. No data was changed.');
+    throw new ForbiddenException({ code: 'RESTORE_AUTHORITY_X_E093', message: 'Restore permission changed while waiting. No data was changed.' });
   }
 }

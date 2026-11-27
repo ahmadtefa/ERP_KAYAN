@@ -119,7 +119,7 @@ export class CustomerCreditService {
       if (!check || (branchScope && !branchScope.includes(check.branchId))) throw new NotFoundException({ code: 'DRAFT_SALES_INVOICE_NOT_FOUND', message: 'Draft sales invoice not found' });
       if (check.overdueCount === 0) throw new BadRequestException({ code: 'CREDIT_NO_PERIOD_APPROVAL', message: 'This invoice does not need payment-period approval' });
       if (check.createdBy && check.createdBy === userId) {
-        throw new ForbiddenException('The person who created the invoice cannot approve its payment-period exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لمدة السداد.');
+        throw new ForbiddenException({ code: 'CUSTOMER_CREDIT_APPROVE_PERIOD_E180', message: 'The person who created the invoice cannot approve its payment-period exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لمدة السداد.' });
       }
       await tx.$executeRaw(Prisma.sql`
         DELETE FROM sales_invoice_term_approvals
@@ -214,7 +214,7 @@ export class CustomerCreditService {
       // The approval is a second person's review: whoever created the invoice
       // cannot sign for its credit exception, even with the permission.
       if (check.createdBy && check.createdBy === userId) {
-        throw new ForbiddenException('The person who created the invoice cannot approve its credit exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لحد الائتمان.');
+        throw new ForbiddenException({ code: 'CUSTOMER_CREDIT_APPROVE_E181', message: 'The person who created the invoice cannot approve its credit exception. / لا يجوز لمنشئ الفاتورة أن يوافق على تجاوزها لحد الائتمان.' });
       }
       await tx.$executeRaw(Prisma.sql`
         DELETE FROM sales_invoice_credit_approvals

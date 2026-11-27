@@ -32,10 +32,10 @@ export function applyInvoiceDiscount<T extends DiscountableInvoiceLine>(
   const percent = parseNonNegative(rawPercent ?? '0', 'discountPercent', RATE_SCALE);
   const fixed = parseNonNegative(rawAmount ?? '0', 'discountAmount', MONEY_SCALE);
   if (percent.greaterThan(0) && fixed.greaterThan(0)) {
-    throw new BadRequestException('Choose either a percentage discount or a fixed discount, not both');
+    throw new BadRequestException({ code: 'INVOICE_DISCOUNT_X_E166', message: 'Choose either a percentage discount or a fixed discount, not both' });
   }
   if (percent.greaterThan(100)) {
-    throw new BadRequestException('discountPercent must be between 0 and 100');
+    throw new BadRequestException({ code: 'INVOICE_DISCOUNT_X_E167', message: 'discountPercent must be between 0 and 100' });
   }
 
   const subtotal = sourceLines.reduce(
@@ -43,10 +43,10 @@ export function applyInvoiceDiscount<T extends DiscountableInvoiceLine>(
     new Prisma.Decimal(0),
   );
   if (fixed.greaterThan(subtotal)) {
-    throw new BadRequestException('discountAmount cannot exceed the invoice subtotal');
+    throw new BadRequestException({ code: 'INVOICE_DISCOUNT_X_E168', message: 'discountAmount cannot exceed the invoice subtotal' });
   }
   if (percent.greaterThan(0) && subtotal.isZero()) {
-    throw new BadRequestException('A percentage discount requires a non-zero subtotal');
+    throw new BadRequestException({ code: 'INVOICE_DISCOUNT_X_E169', message: 'A percentage discount requires a non-zero subtotal' });
   }
 
   const requested = percent.greaterThan(0)

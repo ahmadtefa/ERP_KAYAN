@@ -79,9 +79,7 @@ export async function normalizePicture(
   try {
     metadata = await sharp(input, { failOn: 'error', limitInputPixels: labels.maxPixels }).metadata();
   } catch {
-    throw new BadRequestException(
-      `تعذّر فتح الصورة. اختر ملف PNG أو JPEG أو WebP سليمًا / The ${stripArticle(labels.subjectEn)} could not be decoded.`,
-    );
+    throw new BadRequestException({ code: 'NORMALIZE_PICTURE_X_E011', message: `تعذّر فتح الصورة. اختر ملف PNG أو JPEG أو WebP سليمًا / The ${stripArticle(labels.subjectEn)} could not be decoded.` });
   }
 
   const width = metadata.width ?? 0;
@@ -110,15 +108,11 @@ export async function normalizePicture(
         };
       }
     } catch {
-      throw new BadRequestException(
-        `تعذّر ضغط الصورة. اختر صورة صالحة وحاول مرة أخرى / The ${stripArticle(labels.subjectEn)} could not be resized.`,
-      );
+      throw new BadRequestException({ code: 'NORMALIZE_PICTURE_X_E013', message: `تعذّر ضغط الصورة. اختر صورة صالحة وحاول مرة أخرى / The ${stripArticle(labels.subjectEn)} could not be resized.` });
     }
   }
 
-  throw new BadRequestException(
-    `تعذّر ضغط الصورة إلى الحجم المسموح. اختر صورة أصغر / The ${stripArticle(labels.subjectEn)} remains too large after compression; choose a smaller image.`,
-  );
+  throw new BadRequestException({ code: 'NORMALIZE_PICTURE_X_E014', message: `تعذّر ضغط الصورة إلى الحجم المسموح. اختر صورة أصغر / The ${stripArticle(labels.subjectEn)} remains too large after compression; choose a smaller image.` });
 }
 
 /// "The item picture" → "item picture", so it can sit after "The".
