@@ -639,6 +639,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.sales,
       ),
       _NavItem(
+        AppRoutes.commissions,
+        Icons.percent_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'عمولات المندوبين' : 'Sales-rep commissions',
+        permissions: const ['commissions.read'],
+        group: _NavGroup.sales,
+      ),
+      _NavItem(
         AppRoutes.quotations,
         Icons.request_quote_outlined,
         l10n.quotations,
