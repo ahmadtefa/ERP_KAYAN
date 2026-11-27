@@ -87,7 +87,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
     final fields = <FieldSpec>[
       if (!isEdit)
         FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
-      FieldSpec('nameEn', 'Name (English)', maxLength: 200),
+      FieldSpec('nameEn', isArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200),
       FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
       FieldSpec('phone', l10n.phone, nullWhenEmpty: isEdit, maxLength: 40),
       FieldSpec(

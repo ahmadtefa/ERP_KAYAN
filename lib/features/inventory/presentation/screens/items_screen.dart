@@ -237,10 +237,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       fields: [
         if (!isEdit)
           FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
-        FieldSpec('nameEn', 'Name (English)', maxLength: 200),
+        FieldSpec('nameEn', openingArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200),
         FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
         FieldSpec('unit', l10n.unit, maxLength: 20),
-        FieldSpec('barcode', 'Barcode', maxLength: 60, nullWhenEmpty: isEdit),
+        FieldSpec('barcode', openingArabic ? 'الباركود' : 'Barcode', maxLength: 60, nullWhenEmpty: isEdit),
         if (canManageSalePrice)
           FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         if (canManagePurchasePrice)

@@ -282,7 +282,7 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
     }
     final fields = [
       if (!isEdit) FieldSpec('code', arabic ? 'الكود' : 'Code', required: true),
-      FieldSpec('nameEn', 'Name (English)'),
+      FieldSpec('nameEn', arabic ? 'الاسم (إنجليزي)' : 'Name (English)'),
       FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec(
         'branchId',

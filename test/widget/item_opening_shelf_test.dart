@@ -208,7 +208,7 @@ void main() {
           'OPEN-1',
         );
         await tester.enterText(
-          find.widgetWithText(TextFormField, 'Name (English)'),
+          find.widgetWithText(TextFormField, ar ? 'الاسم (إنجليزي)' : 'Name (English)'),
           'Opening item',
         );
         await tester.tap(find.byType(Switch).first);

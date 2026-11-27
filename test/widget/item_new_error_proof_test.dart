@@ -236,7 +236,7 @@ void main() {
       }
 
       await fill('الرمز', 'TE-01');
-      await fill('Name (English)', 'Arosa Tea');
+      await fill('الاسم (إنجليزي)', 'Arosa Tea');
       await fill('الاسم (عربي)', 'شاي العروسة');
       await fill('الوحدة', 'باكو');
       await fill('سعر الشراء', '20');
@@ -343,7 +343,7 @@ void main() {
     }
 
     await fill('الرمز', 'TE-01');
-    await fill('Name (English)', 'Arosa Tea');
+    await fill('الاسم (إنجليزي)', 'Arosa Tea');
     await fill('الاسم (عربي)', 'شاي العروسة');
     await fill('الوحدة', 'باكو');
     await fill('سعر الشراء', '20');
