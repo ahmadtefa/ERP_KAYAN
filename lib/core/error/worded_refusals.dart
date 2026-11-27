@@ -250,4 +250,112 @@ const Map<String, List<String>> wordedRefusals = {
     'إحدى الدفعات الأصلية لم تعد موجودة، فلا يمكن إعادة كميتها. اختر دفعة أخرى أو تواصل مع الدعم.',
     'An original lot no longer exists, so its quantity cannot be given back. Choose another lot or contact support.',
   ],
+  'PERMISSIONS_CAN_ACTIVATE_E006': [
+    'ليس لديك الصلاحية المطلوبة لتنفيذ هذا الإجراء ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have the required permission for this action ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+  ],
+  'STOCK_LEDGER_APPLY_BRANCH_E024': [
+    'الرصيد غير كافٍ في هذا الفرع: المتاح {available} والمطلوب {requested}. خفّض الكمية أو انقل رصيدًا إلى الفرع، ثم أعد المحاولة. لم يتغير شيء.',
+    'There is not enough stock in this branch: {available} available and {requested} requested. Reduce the quantity or transfer stock into the branch, then try again. Nothing changed.',
+  ],
+  'OPENING_BALANCES_CREATE_E031': [
+    'الرصيد الافتتاحي يحتاج عددًا من الأسطر بين {minimum} و1,000 سطر. عدّل عدد الأسطر ليقع ضمن هذا الحد، ثم أعد المحاولة.',
+    'An opening balance needs between {minimum} and 1,000 lines. Adjust the number of lines to fall within this range, then try again.',
+  ],
+  'OPENING_BALANCES_POST_E033': [
+    'يوجد لهذا الفرع رصيد افتتاحي مسجل بالفعل ({documentNumber} بتاريخ {date}). إن لزم، احذف الرصيد الحالي أو اطرحه قبل ترحيل رصيد جديد، حتى لا تتضاعف بداية الدفاتر.',
+    'This branch already has a posted opening balance ({documentNumber}, dated {date}). If needed, delete or reverse the existing balance before posting a new one, so the start of the books is not doubled.',
+  ],
+  'OPENING_BALANCES_PREPARE_LINES_E035': [
+    'السطر {line}: صنف المخزون يحتاج كمية أكبر من صفر. أدخل كمية صحيحة أو احذف السطر، ثم أعد المحاولة.',
+    'Line {line}: a stock item needs a quantity greater than zero. Enter a valid quantity or remove the line, then try again.',
+  ],
+  'FULL_BACKUP_ASSERT_CUSTOM_DUMP_E083': [
+    'الملف المحدد {label} هو نسخة احتياطية لبيانات الشركة بصيغة JSON وليس أرشيف قاعدة بيانات. لاستعادته، استخدم قسم استعادة بيانات الشركة.',
+    'The selected file {label} is a company data backup in JSON format, not a database archive. To restore it, use the company data restore section.',
+  ],
+  'FULL_BACKUP_ASSERT_CUSTOM_DUMP_E084': [
+    'الملف المحدد {label} ليس أرشيفًا صالحًا لقاعدة البيانات. اختر ملف أرشيف صالحًا أُنشئ بأداة النسخ الاحتياطي.',
+    'The selected file {label} is not a valid database archive. Choose a valid archive file created by the backup tool.',
+  ],
+  'IMPORT_UPLOAD_E116': [
+    'ليس لديك صلاحية تعديل السجلات الموجودة عن طريق الاستيراد ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have permission to modify existing records through import ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+  ],
+  'IMPORT_ALLOWED_E117': [
+    'ليس لديك صلاحية استخدام هذا الاستيراد ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة.',
+    'You do not have permission to use this import ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen, then try again.',
+  ],
+  'BATCHES_ISSUE_TX_E122': [
+    'الرصيد غير كافٍ في الدفعات المتاحة: ينقص {shortfall}. خفّض الكمية أو أضف رصيدًا، وإن وُجدت دفعات منتهية الصلاحية فصرفها يحتاج صلاحية. لم يُحفظ شيء.',
+    'There is not enough stock in the available lots: {shortfall} short. Reduce the quantity or add stock; if some lots have expired, issuing them needs permission. Nothing was saved.',
+  ],
+  'ITEMS_CREATE_E129': [
+    'يوجد لهذا الفرع رصيد افتتاحي بالفعل ({documentNumber}). أضف الصنف إليه بدلًا من إدخال رصيد افتتاحي هنا.',
+    'This branch already has an opening balance ({documentNumber}). Add the item there instead of entering opening stock here.',
+  ],
+  'STOCK_DOCUMENTS_CREATE_E132': [
+    'ليس لديك صلاحية تنفيذ هذا الإجراء ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have permission to perform this action ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+  ],
+  'STOCK_DOCUMENTS_APPROVE_E140': [
+    'تم اعتماد مستند الإعدام هذا مسبقًا ({documentNumber}). لا حاجة لاعتماده مرة أخرى.',
+    'This write-off was already approved ({documentNumber}). It does not need to be approved again.',
+  ],
+  'UNIT_INPUT_X_E159': [
+    'اسم الوحدة {unit} أطول من {max} حرفًا. اختصر الاسم، ثم أعد المحاولة.',
+    'The unit name {unit} is longer than {max} characters. Shorten the name, then try again.',
+  ],
+  'UNIT_INPUT_X_E160': [
+    'الوحدة {unit} مكررة داخل الصنف نفسه. احذف التكرار، ثم أعد المحاولة.',
+    'The unit {unit} is listed twice inside the same item. Remove the duplicate, then try again.',
+  ],
+  'UNIT_INPUT_X_E161': [
+    'الوحدة {unit} تحتاج معامل تحويل. أدخل معامل التحويل، ثم أعد المحاولة.',
+    'The unit {unit} needs a conversion factor. Enter the factor, then try again.',
+  ],
+  'UNIT_INPUT_X_E162': [
+    'معامل تحويل الوحدة {unit} ليس رقمًا صالحًا. أدخل رقمًا صالحًا.',
+    'The conversion factor of the unit {unit} is not a valid number. Enter a valid number.',
+  ],
+  'UNIT_INPUT_X_E163': [
+    'معامل تحويل الوحدة {unit} يجب أن يكون أكبر من صفر. أدخل رقمًا أكبر من صفر.',
+    'The conversion factor of the unit {unit} must be greater than zero. Enter a number above zero.',
+  ],
+  'QUOTATION_BACKGROUND_MEDIA_DESTROY_E186': [
+    'الملف يحتوي {count} صفحة، والصفحة {pageNumber} غير موجودة. اختر صفحة ضمن صفحات الملف.',
+    'The file has {count} pages, and page {pageNumber} does not exist. Choose a page within the file\'s pages.',
+  ],
+  'QUOTATIONS_COLUMN_DATA_E193': [
+    'اسم أحد الأعمدة أطول من {max} حرفًا. اختصره ليصبح عنوانًا.',
+    'A column name is longer than {max} characters. Shorten it to a heading.',
+  ],
+  'QUOTATIONS_COLUMN_DATA_E195': [
+    'العمود {key} مكرر؛ فالعمود، سواء كان مدمجًا أو مخصصًا، يظهر مرة واحدة فقط. احذف التكرار.',
+    'The column {key} is listed twice; a column, whether built-in or custom, may appear only once. Remove the duplicate.',
+  ],
+  'SALES_INVOICES_X_E197': [
+    'السطر {line}: كمية الموقع غير صالحة. اكتب رقمًا أكبر من صفر.',
+    'Line {line}: a location quantity is not valid. Enter a number above zero.',
+  ],
+  'SALES_INVOICES_X_E198': [
+    'السطر {line}: كمية الموقع يجب أن تكون أكبر من صفر. احذف الموقع أو اكتب كمية.',
+    'Line {line}: each location quantity must be above zero. Remove that location or enter a quantity.',
+  ],
+  'SALES_INVOICES_X_E199': [
+    'السطر {line}: الموقع نفسه مكرر. اجمع الكميتين في صف واحد.',
+    'Line {line}: the same location is listed twice. Combine the two quantities into one row.',
+  ],
+  'SALES_INVOICES_X_E200': [
+    'السطر {line}: مجموع كميات المواقع {sum} لا يساوي كمية السطر {lineQuantity}. عدّل كميات المواقع حتى يتساوى المجموع مع كمية السطر.',
+    'Line {line}: the location quantities add up to {sum} but the line quantity is {lineQuantity}. Change the location quantities so they add up to the line quantity.',
+  ],
+  'SALES_INVOICES_POST_E201': [
+    'السطر {line}: مجموع المواقع {allocated} لا يساوي الكمية {quantity}. عدّل السطر، ثم رحّل مرة أخرى.',
+    'Line {line}: the locations add up to {allocated} but the quantity is {quantity}. Edit the line, then post again.',
+  ],
+  'SALES_INVOICES_POST_E202': [
+    'السطر {line}: حُدد موقع لكن هذا الفرع بلا مخزن. احذف المواقع من السطر، أو أضف مخزنًا للفرع.',
+    'Line {line} names a location, but this branch has no warehouse. Remove the locations from the line, or add a warehouse to the branch.',
+  ],
 };

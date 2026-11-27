@@ -1388,10 +1388,8 @@ export class QuotationsService {
         throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E192', message: `${where}: اسم العمود فارغ. أعطِ كل عمود اسمًا قبل الحفظ. / A column has no name. Name every column before saving.` });
       }
       if (key.length > COLUMN_KEY_MAX_LENGTH) {
-        throw new BadRequestException(
-          `${where}: اسم العمود أطول من ${COLUMN_KEY_MAX_LENGTH} حرفًا. اختصره ليصبح عنوانًا. / ` +
-            `The column name is longer than ${COLUMN_KEY_MAX_LENGTH} characters; shorten it to a heading.`,
-        );
+        throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E193', message: `${where}: اسم العمود أطول من ${COLUMN_KEY_MAX_LENGTH} حرفًا. اختصره ليصبح عنوانًا. / ` +
+            `The column name is longer than ${COLUMN_KEY_MAX_LENGTH} characters; shorten it to a heading.`, params: { max: COLUMN_KEY_MAX_LENGTH } });
       }
       // The key reaches the HTML table, the workbook and the saved JSON, so a
       // control character is refused rather than sanitised behind the user's back.
@@ -1399,9 +1397,7 @@ export class QuotationsService {
         throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E194', message: `${where}: اسم العمود يحتوي على محرف غير صالح. / A column name contains an invalid character.` });
       }
       if (seen.has(key)) {
-        throw new BadRequestException(
-          `${where}: العمود "${key}" مكرر. لا يمكن تكرار العمود نفسه أو إعادة تعريف عمود مدمج. / The column "${key}" is listed twice; a column — built-in or custom — may appear only once.`,
-        );
+        throw new BadRequestException({ code: 'QUOTATIONS_COLUMN_DATA_E195', message: `${where}: العمود "${key}" مكرر. لا يمكن تكرار العمود نفسه أو إعادة تعريف عمود مدمج. / The column "${key}" is listed twice; a column — built-in or custom — may appear only once.`, params: { key: key } });
       }
       seen.add(key);
     }

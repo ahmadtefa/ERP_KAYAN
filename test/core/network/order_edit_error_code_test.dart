@@ -109,7 +109,11 @@ void main() {
                     'code',
                     code,
                   )
-                : isA<PermissionFailure>(),
+                : isA<PermissionFailure>().having(
+                    (failure) => failure.code,
+                    'the refusal code is kept so the app can explain it',
+                    code,
+                  ),
           ),
         );
       }

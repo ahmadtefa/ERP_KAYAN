@@ -129,7 +129,7 @@ async function analysePdf(bytes: Buffer, page?: number): Promise<AnalysedBackgro
   if (page === undefined && count > 1) throw new BackgroundPageRequired(count);
   const pageNumber = page ?? 1;
   if (pageNumber < 1 || pageNumber > count) {
-    throw new BadRequestException(`الملف فيه ${count} صفحة، والصفحة ${pageNumber} غير موجودة`);
+    throw new BadRequestException({ code: 'QUOTATION_BACKGROUND_MEDIA_DESTROY_E186', message: `الملف فيه ${count} صفحة، والصفحة ${pageNumber} غير موجودة`, params: { count: count, pageNumber: pageNumber } });
   }
   const out = await PDFDocument.create();
   const [copied] = await out.copyPages(source, [pageNumber - 1]);

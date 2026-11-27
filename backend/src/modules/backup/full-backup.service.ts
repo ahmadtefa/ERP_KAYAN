@@ -1394,16 +1394,12 @@ export class FullBackupService {
     }
     const isJson = buffer[0] === 0x7b /* '{' */ || label.toLowerCase().endsWith('.json');
     if (isJson) {
-      throw new BadRequestException(
-        `الملف "${label}" هو ملف نسخة احتياطية لبيانات الشركة بصيغة JSON، وليس ملف أرشيف PostgreSQL (.dump). ` +
-          'لاستعادة ملف JSON، يرجى استخدام قسم "استعادة بيانات الشركة" (/api/v1/backup/restore).',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_ASSERT_CUSTOM_DUMP_E083', message: `الملف "${label}" هو ملف نسخة احتياطية لبيانات الشركة بصيغة JSON، وليس ملف أرشيف PostgreSQL (.dump). ` +
+          'لاستعادة ملف JSON، يرجى استخدام قسم "استعادة بيانات الشركة" (/api/v1/backup/restore).', params: { label: label } });
     }
     if (!buffer.subarray(0, 5).equals(CUSTOM_MAGIC)) {
-      throw new BadRequestException(
-        `الملف "${label}" ليس ملف أرشيف PostgreSQL صالحاً بصيغة Custom Format (.dump). ` +
-          'يرجى اختيار ملف .dump صالح تم إنشاؤه عبر pg_dump.',
-      );
+      throw new BadRequestException({ code: 'FULL_BACKUP_ASSERT_CUSTOM_DUMP_E084', message: `الملف "${label}" ليس ملف أرشيف PostgreSQL صالحاً بصيغة Custom Format (.dump). ` +
+          'يرجى اختيار ملف .dump صالح تم إنشاؤه عبر pg_dump.', params: { label: label } });
     }
   }
 

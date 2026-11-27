@@ -935,13 +935,11 @@ export class BatchesService {
         const expired = lots.filter(
           (lot) => lot.expiryDate && daysUntil(lot.expiryDate, today) < 0,
         ).length;
-        throw new BadRequestException(
-          `الرصيد غير كافٍ في الدفعات المتاحة: ينقص ${selection.shortfall.toFixed(MONEY_SCALE)}. / ` +
+        throw new BadRequestException({ code: 'BATCHES_ISSUE_TX_E122', message: `الرصيد غير كافٍ في الدفعات المتاحة: ينقص ${selection.shortfall.toFixed(MONEY_SCALE)}. / ` +
             `Not enough stock in the available lots: ${selection.shortfall.toFixed(MONEY_SCALE)} short.` +
             (expired > 0
               ? ` (${expired} lot(s) exist but have expired; issuing them needs permission.)`
-              : ''),
-        );
+              : ''), params: { shortfall: selection.shortfall.toFixed(MONEY_SCALE) } });
       }
 
       // Priced at what *this shelf* averages, which is what makes two

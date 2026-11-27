@@ -134,6 +134,11 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         if (typeof b.field === 'string' && /^[A-Za-z][A-Za-z0-9.]{0,39}$/.test(b.field)) {
           extra = { ...extra, errorField: b.field };
         }
+        // Values a reviewed message names (a line number, a unit name, a
+        // difference). At most 8 short plain values under plain names: the app
+        // fills them into its own sentence and never shows the server text.
+        const params = sanitizeMessageParams(b.params);
+        if (params) extra = { ...extra, params };
         // Credit figures for a permitted viewer: forwarded only for the credit
         // refusal code, only these four keys, only plain decimal strings.
         if (b.code === 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' && b.creditSummary && typeof b.creditSummary === 'object') {
@@ -173,4 +178,23 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       ...extra,
     });
   }
+}
+
+/** Plain, short, non-secret values that travel next to a refusal code. */
+export function sanitizeMessageParams(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 8) break;
+    if (!/^[a-z][A-Za-z0-9]{0,19}$/.test(key)) continue;
+    let text: string | undefined;
+    if (typeof value === 'number' && Number.isFinite(value)) text = String(value);
+    else if (typeof value === 'string') text = value;
+    if (text === undefined) continue;
+    // eslint-disable-next-line no-control-regex
+    text = text.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+    if (text.length === 0 || text.length > 80) continue;
+    out[key] = text;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

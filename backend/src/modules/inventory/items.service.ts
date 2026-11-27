@@ -430,10 +430,8 @@ export class ItemsService {
           select: { documentNumber: true },
         });
         if (existingOpening) {
-          throw new BadRequestException(
-            `This branch already has an opening balance (${existingOpening.documentNumber}). ` +
-              'Add the item there instead of giving it opening stock here.',
-          );
+          throw new BadRequestException({ code: 'ITEMS_CREATE_E129', message: `This branch already has an opening balance (${existingOpening.documentNumber}). ` +
+              'Add the item there instead of giving it opening stock here.', params: { documentNumber: existingOpening.documentNumber } });
         }
       }
 

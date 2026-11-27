@@ -61,8 +61,10 @@ void main() {
         final failure = ApiFailure('synthetic raw ${entry.key}', statusCode: status, code: entry.key);
         final ar = const AppErrorMessageResolver(isArabic: true).resolve(failure).businessMessage!;
         final en = const AppErrorMessageResolver(isArabic: false).resolve(failure).businessMessage!;
-        expect(ar, entry.value[0]);
-        expect(en, entry.value[1]);
+        expect(ar, fillRefusalParams(entry.value[0], const {}));
+        expect(en, fillRefusalParams(entry.value[1], const {}));
+        expect(ar, isNot(contains('{')), reason: entry.key);
+        expect(en, isNot(contains('{')), reason: entry.key);
         expect(ar, isNot(contains('synthetic raw')));
         expect(en, isNot(contains('synthetic raw')));
       }

@@ -110,11 +110,9 @@ export class ImportController {
       };
       const needed = updatePermission[slug];
       if (needed && !user.permissions.includes(needed)) {
-        throw new ForbiddenException(
-          `ليس لديك صلاحية تعديل السجلات الموجودة بالاستيراد (${needed}). ` +
+        throw new ForbiddenException({ code: 'IMPORT_UPLOAD_E116', message: `ليس لديك صلاحية تعديل السجلات الموجودة بالاستيراد (${needed}). ` +
             'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ' +
-            `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
-        );
+            `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`, params: { permission: needed } });
       }
     }
 
@@ -139,10 +137,8 @@ export class ImportController {
   private allowed(user: AuthUser, needed: readonly string[]): void {
     if (user.isSuperAdmin) return;
     if (needed.some((code) => user.permissions.includes(code))) return;
-    throw new ForbiddenException(
-      `ليس لديك صلاحية استخدام هذا الاستيراد (${needed.join(' or ')}). ` +
+    throw new ForbiddenException({ code: 'IMPORT_ALLOWED_E117', message: `ليس لديك صلاحية استخدام هذا الاستيراد (${needed.join(' or ')}). ` +
         'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة. ' +
-        `/ Missing permission: ${needed.join(' or ')}. Ask an administrator to grant it to your role, then try again.`,
-    );
+        `/ Missing permission: ${needed.join(' or ')}. Ask an administrator to grant it to your role, then try again.`, params: { permission: needed.join(' or ') } });
   }
 }

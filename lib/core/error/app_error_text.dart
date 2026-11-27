@@ -435,7 +435,7 @@ class AppErrorMessageResolver {
           return AppErrorText(
             reason: error.statusCode == 404 ? AppErrorReason.notFound : conflict ? AppErrorReason.conflict : AppErrorReason.invalidInput,
             severity: conflict ? AppErrorSeverity.warning : AppErrorSeverity.error,
-            businessMessage: refusal[isArabic ? 0 : 1],
+            businessMessage: fillRefusalParams(refusal[isArabic ? 0 : 1], error.params),
           );
         }
         final fieldKind = error.statusCode == 400 && error.errorField != null ? fieldRefusal(error.code) : null;
@@ -553,11 +553,18 @@ class AppErrorMessageResolver {
           );
         }
       }
+      if (error is PermissionFailure && error.code != null && moduleRefusals.containsKey(error.code)) {
+        return AppErrorText(
+          reason: AppErrorReason.permission,
+          severity: AppErrorSeverity.error,
+          businessMessage: fillRefusalParams(moduleRefusals[error.code]![isArabic ? 0 : 1], error.params),
+        );
+      }
       if (error is ApiFailure && error.statusCode == 403 && moduleRefusals.containsKey(error.code)) {
         return AppErrorText(
           reason: AppErrorReason.permission,
           severity: AppErrorSeverity.error,
-          businessMessage: moduleRefusals[error.code]![isArabic ? 0 : 1],
+          businessMessage: fillRefusalParams(moduleRefusals[error.code]![isArabic ? 0 : 1], error.params),
         );
       }
       if (error is ApiFailure &&
@@ -1894,4 +1901,16 @@ String describeFieldErrors(
     header,
     for (final entry in errors.entries) '• ${label(entry.key)}: ${entry.value}',
   ].join('\n');
+}
+
+
+/// Fills the `{name}` places of a reviewed sentence with the plain values the
+/// server sent next to the code. A value that did not arrive becomes a dash,
+/// so a sentence never shows a raw `{name}`.
+String fillRefusalParams(String template, Map<String, String> params) {
+  if (!template.contains('{')) return template;
+  return template.replaceAllMapped(
+    RegExp(r'\{([a-z][A-Za-z0-9]{0,19})\}'),
+    (m) => params[m.group(1)!] ?? '-',
+  );
 }

@@ -110,34 +110,26 @@ export function normalizeLocationAllocations(
     try {
       q = new Prisma.Decimal(entry.quantity);
     } catch {
-      throw new BadRequestException(
-        `السطر ${lineNumber}: كمية الموقع غير صالحة. اكتب رقمًا أكبر من صفر. / ` +
-          `Line ${lineNumber}: a location quantity is not a number. Enter a number above zero.`,
-      );
+      throw new BadRequestException({ code: 'SALES_INVOICES_X_E197', message: `السطر ${lineNumber}: كمية الموقع غير صالحة. اكتب رقمًا أكبر من صفر. / ` +
+          `Line ${lineNumber}: a location quantity is not a number. Enter a number above zero.`, params: { line: lineNumber } });
     }
     if (q.lessThanOrEqualTo(0)) {
-      throw new BadRequestException(
-        `السطر ${lineNumber}: كمية الموقع يجب أن تكون أكبر من صفر. احذف الموقع أو اكتب كمية. / ` +
-          `Line ${lineNumber}: each location quantity must be above zero. Remove that location or enter a quantity.`,
-      );
+      throw new BadRequestException({ code: 'SALES_INVOICES_X_E198', message: `السطر ${lineNumber}: كمية الموقع يجب أن تكون أكبر من صفر. احذف الموقع أو اكتب كمية. / ` +
+          `Line ${lineNumber}: each location quantity must be above zero. Remove that location or enter a quantity.`, params: { line: lineNumber } });
     }
     if (seen.has(entry.storageLocationId)) {
-      throw new BadRequestException(
-        `السطر ${lineNumber}: نفس الموقع مكرر. اجمع الكميتين في صف واحد. / ` +
-          `Line ${lineNumber}: the same location is listed twice. Combine them into one row.`,
-      );
+      throw new BadRequestException({ code: 'SALES_INVOICES_X_E199', message: `السطر ${lineNumber}: نفس الموقع مكرر. اجمع الكميتين في صف واحد. / ` +
+          `Line ${lineNumber}: the same location is listed twice. Combine them into one row.`, params: { line: lineNumber } });
     }
     seen.add(entry.storageLocationId);
     sum = sum.plus(q);
     return { id: entry.storageLocationId, q };
   });
   if (!sum.equals(lineQuantity)) {
-    throw new BadRequestException(
-      `السطر ${lineNumber}: مجموع كميات المواقع ${sum.toFixed(4)} لا يساوي كمية السطر ${lineQuantity.toFixed(4)}. ` +
+    throw new BadRequestException({ code: 'SALES_INVOICES_X_E200', message: `السطر ${lineNumber}: مجموع كميات المواقع ${sum.toFixed(4)} لا يساوي كمية السطر ${lineQuantity.toFixed(4)}. ` +
         'عدّل كميات المواقع حتى يتساوى المجموع مع الكمية. / ' +
         `Line ${lineNumber}: the location quantities add up to ${sum.toFixed(4)} but the line quantity is ` +
-        `${lineQuantity.toFixed(4)}. Change the location quantities so they add up to the line quantity.`,
-    );
+        `${lineQuantity.toFixed(4)}. Change the location quantities so they add up to the line quantity.`, params: { line: lineNumber, sum: sum.toFixed(4), lineQuantity: lineQuantity.toFixed(4) } });
   }
   // Stored exactly as typed, in the line's own unit. The conversion to base
   // units happens once, when the line is posted, so what the screen reads
@@ -1042,10 +1034,8 @@ export class SalesInvoicesService {
         if (enteredAllocations?.length) {
           const typed = enteredAllocations.reduce((acc, e) => acc.plus(e.quantity), new Prisma.Decimal(0));
           if (!typed.equals(enteredTotal)) {
-            throw new BadRequestException(
-              `السطر ${line.lineNumber}: مجموع المواقع ${typed.toFixed(MONEY_SCALE)} لا يساوي الكمية ${enteredTotal.toFixed(MONEY_SCALE)}. عدّل السطر ثم رحّل. / ` +
-                `Line ${line.lineNumber}: locations add up to ${typed.toFixed(MONEY_SCALE)} but the quantity is ${enteredTotal.toFixed(MONEY_SCALE)}. Edit the line, then post again.`,
-            );
+            throw new BadRequestException({ code: 'SALES_INVOICES_POST_E201', message: `السطر ${line.lineNumber}: مجموع المواقع ${typed.toFixed(MONEY_SCALE)} لا يساوي الكمية ${enteredTotal.toFixed(MONEY_SCALE)}. عدّل السطر ثم رحّل. / ` +
+                `Line ${line.lineNumber}: locations add up to ${typed.toFixed(MONEY_SCALE)} but the quantity is ${enteredTotal.toFixed(MONEY_SCALE)}. Edit the line, then post again.`, params: { line: line.lineNumber, allocated: typed.toFixed(MONEY_SCALE), quantity: enteredTotal.toFixed(MONEY_SCALE) } });
           }
         }
         const placed = warehouseId
@@ -1070,10 +1060,8 @@ export class SalesInvoicesService {
           });
         }
         if (allocations?.length && !warehouseId) {
-          throw new BadRequestException(
-            `السطر ${line.lineNumber}: حُدد موقع لكن الفرع بلا مخزن. احذف المواقع من السطر أو أضف مخزنًا للفرع. / ` +
-              `Line ${line.lineNumber} names a location but this branch has no warehouse. Remove the locations from the line or add a warehouse to the branch.`,
-          );
+          throw new BadRequestException({ code: 'SALES_INVOICES_POST_E202', message: `السطر ${line.lineNumber}: حُدد موقع لكن الفرع بلا مخزن. احذف المواقع من السطر أو أضف مخزنًا للفرع. / ` +
+              `Line ${line.lineNumber} names a location but this branch has no warehouse. Remove the locations from the line or add a warehouse to the branch.`, params: { line: line.lineNumber } });
         }
         const allocated = (allocations ?? []).reduce(
           (acc, entry) => acc.plus(entry.quantity),

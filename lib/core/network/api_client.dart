@@ -354,14 +354,28 @@ class ApiClient {
             }
           }
         }
+        final params = <String, String>{};
+        final rawParams = data is Map ? data['params'] : null;
+        if (rawParams is Map) {
+          rawParams.forEach((key, value) {
+            if (params.length < 8 &&
+                key is String &&
+                RegExp(r'^[a-z][A-Za-z0-9]{0,19}$').hasMatch(key) &&
+                (value is String || value is num)) {
+              final text = value.toString().trim();
+              if (text.isNotEmpty && text.length <= 80) params[key] = text;
+            }
+          });
+        }
         if (status == 403 && code != 'LICENSE_STATE_ID_MISMATCH') {
-          return PermissionFailure(message);
+          return PermissionFailure(message, null, code, params);
         }
         return ApiFailure(
           message,
           statusCode: status,
           code: code,
           fieldErrors: fieldErrors,
+          params: params,
           creditSummary: CreditSummary.fromProblem(data is Map ? data['creditSummary'] : null, code),
           userAction: data is Map && data['userAction'] is String
               ? data['userAction'] as String

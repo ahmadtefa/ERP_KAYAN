@@ -206,11 +206,9 @@ export class StockLedgerService {
     const nextValue = current.value.plus(value).toDecimalPlaces(MONEY_SCALE);
 
     if (nextQuantity.lessThan(0)) {
-      throw new BadRequestException(
-        `Not enough stock in this branch: ${current.quantity.toFixed(MONEY_SCALE)} available, ` +
+      throw new BadRequestException({ code: 'STOCK_LEDGER_APPLY_BRANCH_E024', message: `Not enough stock in this branch: ${current.quantity.toFixed(MONEY_SCALE)} available, ` +
           `${quantity.abs().toFixed(MONEY_SCALE)} requested. The branch total is never allowed ` +
-          'below zero, whatever a shelf is allowed to do. / رصيد الفرع لا يصبح سالبًا.',
-      );
+          'below zero, whatever a shelf is allowed to do. / رصيد الفرع لا يصبح سالبًا.', params: { available: current.quantity.toFixed(MONEY_SCALE), requested: quantity.abs().toFixed(MONEY_SCALE) } });
     }
 
     await tx.stockBalance.update({

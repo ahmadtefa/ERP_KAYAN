@@ -34,6 +34,7 @@ class ApiFailure extends Failure {
     this.userAction,
     this.requestId,
     this.errorField,
+    this.params = const {},
     super.cause,
   });
 
@@ -48,6 +49,10 @@ class ApiFailure extends Failure {
 
   /// The input a refusal is about (a plain identifier from the server).
   final String? errorField;
+
+  /// Short plain values the reviewed sentence names (a line number, a unit
+  /// name). Filled into `{name}` places; the server text is never shown.
+  final Map<String, String> params;
 }
 
 /// Authentication is missing, expired or rejected.
@@ -71,8 +76,17 @@ class SessionExpiredFailure extends Failure {
 /// credentials" here would make a permission problem look like a wrong
 /// password and send people to reset a password that is perfectly good.
 class PermissionFailure extends Failure {
-  const PermissionFailure([super.message = 'Permission denied', Object? cause])
-    : super(cause: cause);
+  const PermissionFailure([
+    super.message = 'Permission denied',
+    Object? cause,
+    this.code,
+    this.params = const {},
+  ]) : super(cause: cause);
+
+  /// The reviewed refusal code the server sent, when it sent one, so the app
+  /// can explain which permission is missing instead of a generic refusal.
+  final String? code;
+  final Map<String, String> params;
 }
 
 /// The server failed (5xx) or returned a malformed payload.

@@ -230,3 +230,27 @@ describe('ProblemDetailsFilter', () => {
     expect(body.detail).not.toContain('23P01');
   });
 });
+
+describe('sanitizeMessageParams', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { sanitizeMessageParams } = require('./problem-details.filter');
+
+  it('keeps short plain values under plain names and drops the rest', () => {
+    expect(
+      sanitizeMessageParams({ line: 3, unit: 'Box', 'bad name': 'x', long: 'y'.repeat(81), obj: {}, empty: '  ' }),
+    ).toEqual({ line: '3', unit: 'Box' });
+  });
+
+  it('allows at most eight values and ignores non-objects', () => {
+    const many: Record<string, string> = {};
+    for (let i = 0; i < 12; i += 1) many[`k${i}`] = 'v';
+    expect(Object.keys(sanitizeMessageParams(many)!)).toHaveLength(8);
+    expect(sanitizeMessageParams('x')).toBeUndefined();
+    expect(sanitizeMessageParams(['a'])).toBeUndefined();
+    expect(sanitizeMessageParams({})).toBeUndefined();
+  });
+
+  it('removes control characters from a value', () => {
+    expect(sanitizeMessageParams({ label: 'a\nb\u0000c' })).toEqual({ label: 'a b c' });
+  });
+});

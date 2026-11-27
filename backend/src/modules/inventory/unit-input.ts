@@ -147,37 +147,27 @@ export function parseUnitRows(
       throw new BadRequestException({ code: 'UNIT_INPUT_X_E158', message: 'Every unit needs a name / كل وحدة تحتاج اسمًا' });
     }
     if (unit.length > UNIT_NAME_MAX) {
-      throw new BadRequestException(
-        `Unit name "${unit}" is longer than ${UNIT_NAME_MAX} characters / اسم الوحدة أطول من المسموح`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E159', message: `Unit name "${unit}" is longer than ${UNIT_NAME_MAX} characters / اسم الوحدة أطول من المسموح`, params: { max: UNIT_NAME_MAX, unit: unit } });
     }
     const key = unit.toLowerCase();
     if (seen.has(key)) {
-      throw new BadRequestException(
-        `Unit "${unit}" is listed twice; a unit name must be unique inside the item / الوحدة "${unit}" مكررة داخل الصنف`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E160', message: `Unit "${unit}" is listed twice; a unit name must be unique inside the item / الوحدة "${unit}" مكررة داخل الصنف`, params: { unit: unit } });
     }
     seen.add(key);
 
     const rawFactor = String(row.factor ?? '').trim();
     const factorText = rawFactor === '' ? (key === baseKey ? '1' : '') : rawFactor;
     if (factorText === '') {
-      throw new BadRequestException(
-        `Unit "${label}" needs a conversion factor / الوحدة "${label}" تحتاج معامل تحويل`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E161', message: `Unit "${label}" needs a conversion factor / الوحدة "${label}" تحتاج معامل تحويل`, params: { unit: label } });
     }
     let factor: Prisma.Decimal;
     try {
       factor = new Prisma.Decimal(factorText);
     } catch {
-      throw new BadRequestException(
-        `Unit "${label}" has an invalid factor: "${factorText}" / معامل تحويل غير صالح`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E162', message: `Unit "${label}" has an invalid factor: "${factorText}" / معامل تحويل غير صالح`, params: { unit: label } });
     }
     if (!factor.greaterThan(0)) {
-      throw new BadRequestException(
-        `Unit "${label}" factor must be greater than zero / معامل التحويل يجب أن يكون أكبر من صفر`,
-      );
+      throw new BadRequestException({ code: 'UNIT_INPUT_X_E163', message: `Unit "${label}" factor must be greater than zero / معامل التحويل يجب أن يكون أكبر من صفر`, params: { unit: label } });
     }
     factor = factor.toDecimalPlaces(UNIT_FACTOR_SCALE);
     if (key === baseKey && !factor.equals(1)) {

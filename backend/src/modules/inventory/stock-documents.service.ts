@@ -986,7 +986,7 @@ export class StockDocumentsService {
       throw new BadRequestException({ code: 'STOCK_DOCUMENTS_APPROVE_E139', message: 'Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.' });
     }
     if (document.approvedAt) {
-      throw new BadRequestException(`This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`);
+      throw new BadRequestException({ code: 'STOCK_DOCUMENTS_APPROVE_E140', message: `This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`, params: { documentNumber: document.documentNumber } });
     }
     if (document.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException({ code: 'WRITEOFF_APPROVE_NOT_DRAFT', message: 'Only a draft write-off can be approved' });

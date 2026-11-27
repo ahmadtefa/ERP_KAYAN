@@ -159,7 +159,7 @@ export class OpeningBalancesService {
     const asOfDate = this.date(dto.asOfDate);
     const minimum = dto.autoBalanceToEquity === true ? 1 : 2;
     if (!Array.isArray(dto.lines) || dto.lines.length < minimum || dto.lines.length > 1000) {
-      throw new BadRequestException(`An opening balance needs between ${minimum} and 1,000 lines`);
+      throw new BadRequestException({ code: 'OPENING_BALANCES_CREATE_E031', message: `An opening balance needs between ${minimum} and 1,000 lines`, params: { minimum: minimum } });
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -377,11 +377,9 @@ export class OpeningBalancesService {
       select: { documentNumber: true, asOfDate: true },
     });
     if (alreadyPosted) {
-      throw new BadRequestException(
-        `This branch already has an opening balance (${alreadyPosted.documentNumber}, ${alreadyPosted.asOfDate
+      throw new BadRequestException({ code: 'OPENING_BALANCES_POST_E033', message: `This branch already has an opening balance (${alreadyPosted.documentNumber}, ${alreadyPosted.asOfDate
           .toISOString()
-          .slice(0, 10)}). Posting a second one would double the start of the books.`,
-      );
+          .slice(0, 10)}). Posting a second one would double the start of the books.`, params: { documentNumber: alreadyPosted.documentNumber, date: alreadyPosted.asOfDate.toISOString().slice(0, 10) } });
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -847,7 +845,7 @@ export class OpeningBalancesService {
           quantity = this.amount(raw.quantity, `Line ${index + 1} quantity`);
           unitCost = this.amount(raw.unitCost, `Line ${index + 1} unit cost`);
           if (quantity.isZero()) {
-            throw new BadRequestException(`Line ${index + 1}: a stock item needs a quantity greater than zero`);
+            throw new BadRequestException({ code: 'OPENING_BALANCES_PREPARE_LINES_E035', message: `Line ${index + 1}: a stock item needs a quantity greater than zero`, params: { line: index + 1 } });
           }
           const stockValue = quantity.mul(unitCost).toDecimalPlaces(MONEY_SCALE);
           if (!debit.equals(stockValue)) {

@@ -59,10 +59,8 @@ export class StockDocumentsController {
     // adjust stock in general. Every other kind keeps the stock-adjust grant.
     const needed = kind === 'WRITE_OFF' ? 'inventory.writeoff.create' : 'inventory.stock.adjust';
     if (!user.isSuperAdmin && !user.permissions.includes(needed)) {
-      throw new ForbiddenException(
-        `ليس لديك صلاحية تنفيذ هذا الإجراء (${needed}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ` +
-          `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
-      );
+      throw new ForbiddenException({ code: 'STOCK_DOCUMENTS_CREATE_E132', message: `ليس لديك صلاحية تنفيذ هذا الإجراء (${needed}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ` +
+          `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`, params: { permission: needed } });
     }
     return this.createDocument(user, body, idempotencyKey);
   }
