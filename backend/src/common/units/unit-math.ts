@@ -70,10 +70,10 @@ export function parseFactor(value: unknown, field = 'factor'): Prisma.Decimal {
   try {
     factor = new Prisma.Decimal(String(value));
   } catch {
-    throw new BadRequestException(`${field} is not a valid number`);
+    throw new BadRequestException({ code: 'UNIT_NUMBER_INVALID', message: `${field} is not a valid number` });
   }
   if (!factor.isFinite() || factor.isNegative() || factor.isZero() || factor.greaterThanOrEqualTo('1e13')) {
-    throw new BadRequestException(`${field} must be greater than zero and fit Decimal(19,6)`);
+    throw new BadRequestException({ code: 'UNIT_FACTOR_RANGE', message: `${field} must be greater than zero and fit Decimal(19,6)` });
   }
   // Reject over-precise textual inputs even if their extra digits are zero.
   // Persisted Prisma.Decimal values stringify without artificial zero padding.
@@ -81,7 +81,7 @@ export function parseFactor(value: unknown, field = 'factor'): Prisma.Decimal {
   const match = raw.match(/^[+-]?(?:\d+(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/);
   const inputScale = match ? (match[1]?.length ?? match[2]?.length ?? 0) - Number(match[3] ?? 0) : 0;
   if (inputScale > FACTOR_SCALE || !factor.equals(factor.toDecimalPlaces(FACTOR_SCALE))) {
-    throw new BadRequestException(`${field} supports at most ${FACTOR_SCALE} decimal places`);
+    throw new BadRequestException({ code: 'UNIT_FACTOR_SCALE', message: `${field} supports at most ${FACTOR_SCALE} decimal places` });
   }
   return factor;
 }
@@ -103,9 +103,9 @@ export function toBaseQuantity(
 export function parseDocumentQuantity(value: unknown, field: string): Prisma.Decimal {
   let quantity: Prisma.Decimal;
   try { quantity = new Prisma.Decimal(String(value)); }
-  catch { throw new BadRequestException(`${field} is not a valid number`); }
+  catch { throw new BadRequestException({ code: 'UNIT_NUMBER_INVALID', message: `${field} is not a valid number` }); }
   if (!quantity.isFinite() || quantity.abs().greaterThanOrEqualTo('1e15') || !quantity.equals(quantity.toDecimalPlaces(QUANTITY_SCALE))) {
-    throw new BadRequestException(`${field} must be finite and have at most ${QUANTITY_SCALE} decimal places`);
+    throw new BadRequestException({ code: 'UNIT_QUANTITY_SCALE', message: `${field} must be finite and have at most ${QUANTITY_SCALE} decimal places` });
   }
   return quantity;
 }
@@ -117,12 +117,12 @@ export function exactBaseQuantity(quantity: Prisma.Decimal, factor: Prisma.Decim
   // high-precision constructor so multiplication itself cannot round first.
   if (!quantity.isFinite() || quantity.abs().greaterThanOrEqualTo('1e15') ||
       !factor.isFinite() || factor.lessThanOrEqualTo(0) || factor.greaterThanOrEqualTo('1e13')) {
-    throw new BadRequestException('Quantity or factor exceeds the supported storage range');
+    throw new BadRequestException({ code: 'UNIT_STORAGE_RANGE', message: 'Quantity or factor exceeds the supported storage range' });
   }
   const ExactDecimal = Prisma.Decimal.clone({ precision: 80 });
   const exact = new ExactDecimal(quantity.toString()).mul(factor.toString());
   if (!exact.isFinite() || exact.abs().greaterThanOrEqualTo('1e15') || !exact.equals(exact.toDecimalPlaces(QUANTITY_SCALE))) {
-    throw new BadRequestException(`Converted quantity cannot be represented at ${QUANTITY_SCALE} decimal places`);
+    throw new BadRequestException({ code: 'UNIT_CONVERTED_SCALE', message: `Converted quantity cannot be represented at ${QUANTITY_SCALE} decimal places` });
   }
   return new Prisma.Decimal(exact.toFixed());
 }
@@ -176,7 +176,7 @@ export function resolveUnitSelection(input: {
   if (requestedId) {
     row = units.find((candidate) => candidate.id === requestedId);
     if (!row) {
-      throw new BadRequestException(`${lineLabel}: the selected unit does not belong to this item`);
+      throw new BadRequestException({ code: 'UNIT_NOT_OF_ITEM', message: `${lineLabel}: the selected unit does not belong to this item` });
     }
   } else {
     row = units.find(
@@ -197,31 +197,25 @@ export function resolveUnitSelection(input: {
           isLegacy: false,
         };
       }
-      throw new BadRequestException(
-        `${lineLabel}: unit "${requestedName}" is not defined for this item`,
-      );
+      throw new BadRequestException({ code: 'UNIT_NOT_DEFINED', message: `${lineLabel}: unit "${requestedName}" is not defined for this item` });
     }
   }
 
   if (!row.isActive) {
-    throw new BadRequestException(
-      `${lineLabel}: unit "${row.unit}" is inactive and cannot be used on a new document`,
-    );
+    throw new BadRequestException({ code: 'UNIT_INACTIVE', message: `${lineLabel}: unit "${row.unit}" is inactive and cannot be used on a new document` });
   }
 
   // A unit that is enabled only for sales or only for purchases may still be
   // refused for the other purpose (a purchase unit on a sales line).
   if (input.purpose) {
     const problem = unitUsageProblem(row, input.purpose);
-    if (problem) throw new BadRequestException(`${lineLabel}: ${problem}`);
+    if (problem) throw new BadRequestException({ code: 'UNIT_LINE_PROBLEM', message: `${lineLabel}: ${problem}` });
   }
 
   const factor = parseFactor(row.factor, `${lineLabel} unit factor`);
   const baseQuantity = exactBaseQuantity(enteredQuantity, factor);
   if (baseQuantity.isZero() && !input.allowZeroBaseQuantity) {
-    throw new BadRequestException(
-      `${lineLabel}: the converted quantity is zero; check the unit factor and quantity`,
-    );
+    throw new BadRequestException({ code: 'UNIT_CONVERTED_ZERO', message: `${lineLabel}: the converted quantity is zero; check the unit factor and quantity` });
   }
 
   return {

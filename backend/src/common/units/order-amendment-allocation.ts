@@ -9,17 +9,17 @@ export function assertActiveOrderAllocations(
 ): void {
   const totals = new Map(lines.map(line => [line.id, new Prisma.Decimal(0)]));
   for (const invoice of invoices) {
-    if (!invoice.lines.length) throw new BadRequestException('Invoice allocation missing; manual review required');
+    if (!invoice.lines.length) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Invoice allocation missing; manual review required' });
     for (const line of invoice.lines) {
       if (!line.orderLineId || !totals.has(line.orderLineId) || !line.quantity.isFinite() || !line.quantity.isPositive()) {
-        throw new BadRequestException('Invoice allocation is invalid; manual review required');
+        throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Invoice allocation is invalid; manual review required' });
       }
       totals.set(line.orderLineId, totals.get(line.orderLineId)!.plus(line.quantity));
     }
   }
   for (const line of lines) {
     if (!line.invoicedQuantity.equals(totals.get(line.id)!)) {
-      throw new BadRequestException('Order allocations are inconsistent; manual review required');
+      throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order allocations are inconsistent; manual review required' });
     }
   }
 }

@@ -6,6 +6,7 @@ import 'company_import_report_refusals.dart';
 import 'inventory_refusals.dart';
 import 'cash_refusals.dart';
 import 'purchase_refusals.dart';
+import 'order_unit_refusals.dart';
 import 'return_refusals.dart';
 import 'sales_refusals.dart';
 
@@ -24,6 +25,7 @@ const Map<String, List<String>> moduleRefusals = {
   ...purchaseRefusals,
   ...salesRefusals,
   ...returnRefusals,
+  ...orderUnitRefusals,
   'SERIAL_DUPLICATE': [
     'رقم تسلسلي أو أكثر مسجّل من قبل لنفس الصنف. راجع الأرقام وأزل المكرر ثم أعد المحاولة. لم يُحفظ شيء.',
     'One or more serial numbers are already registered for this item. Check the list, remove the repeats and try again. Nothing was saved.',

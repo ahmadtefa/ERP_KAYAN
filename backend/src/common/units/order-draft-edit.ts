@@ -28,23 +28,23 @@ export function planDraftOrderEdit(existing: readonly ExistingLine[], raw: unkno
   lines: PlannedLine[]; subTotal: Prisma.Decimal; taxAmount: Prisma.Decimal; totalAmount: Prisma.Decimal;
 } {
   if (!Array.isArray(raw) || !existing.length || raw.length !== existing.length) {
-    throw new BadRequestException('Every existing order line must be supplied exactly once');
+    throw new BadRequestException({ code: 'ORDER_EDIT_LINES_INCOMPLETE', message: 'Every existing order line must be supplied exactly once' });
   }
   const selections = new Map<string, Record<string, unknown>>();
   for (const input of raw as unknown[]) {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Invalid order line');
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException({ code: 'ORDER_EDIT_LINE_INVALID', message: 'Invalid order line' });
     const row = input as Record<string, unknown>;
     const id = typeof row.orderLineId === 'string' ? row.orderLineId.trim() : '';
-    if (!id || selections.has(id)) throw new BadRequestException('Invalid or duplicate order line');
+    if (!id || selections.has(id)) throw new BadRequestException({ code: 'ORDER_EDIT_LINE_INVALID', message: 'Invalid or duplicate order line' });
     selections.set(id, row);
   }
   const decimal = (value: unknown, label: string, percent = false) => {
     let result: Prisma.Decimal;
     try { result = new Prisma.Decimal(String(value)); }
-    catch { throw new BadRequestException(`${label} is not a valid number`); }
+    catch { throw new BadRequestException({ code: 'ORDER_NUMBER_INVALID', message: `${label} is not a valid number` }); }
     if (!result.isFinite() || result.isNegative() || result.greaterThanOrEqualTo('1e15') ||
       !result.equals(result.toDecimalPlaces(4)) || (percent && result.greaterThan(100))) {
-      throw new BadRequestException(`${label} is outside the supported range or precision`);
+      throw new BadRequestException({ code: 'ORDER_NUMBER_RANGE', message: `${label} is outside the supported range or precision` });
     }
     return result;
   };
@@ -52,7 +52,7 @@ export function planDraftOrderEdit(existing: readonly ExistingLine[], raw: unkno
   const asMoney = (value: Prisma.Decimal, label: string) => {
     const rounded = value.toDecimalPlaces(4);
     if (!rounded.isFinite() || rounded.isNegative() || rounded.greaterThanOrEqualTo('1e15')) {
-      throw new BadRequestException(`${label} exceeds the supported money range`);
+      throw new BadRequestException({ code: 'ORDER_AMOUNT_RANGE', message: `${label} exceeds the supported money range` });
     }
     return new Prisma.Decimal(rounded.toFixed());
   };
@@ -60,28 +60,28 @@ export function planDraftOrderEdit(existing: readonly ExistingLine[], raw: unkno
   let tax = new Exact(0);
   const lines = existing.map((line, index): PlannedLine => {
     const selection = selections.get(line.id);
-    if (!selection) throw new BadRequestException('Selected line does not belong to this order');
+    if (!selection) throw new BadRequestException({ code: 'ORDER_LINE_NOT_ON_ORDER', message: 'Selected line does not belong to this order' });
     if (line.invoicedQuantity.isNegative() || line.invoicedQuantity.greaterThan(line.quantity)) {
-      throw new BadRequestException('Order allocations are inconsistent; manual review required');
+      throw new BadRequestException({ code: 'ORDER_ALLOCATION_INCONSISTENT', message: 'Order allocations are inconsistent; manual review required' });
     }
-    if (!approved && !line.invoicedQuantity.isZero()) throw new BadRequestException('Allocated order lines cannot be edited as a draft');
+    if (!approved && !line.invoicedQuantity.isZero()) throw new BadRequestException({ code: 'ORDER_LINE_ALLOCATED', message: 'Allocated order lines cannot be edited as a draft' });
     const entered = parseDocumentQuantity(selection.quantity, `Line ${index + 1} quantity`);
-    if (entered.lessThanOrEqualTo(0)) throw new BadRequestException('Quantity must be greater than zero');
+    if (entered.lessThanOrEqualTo(0)) throw new BadRequestException({ code: 'ORDER_QUANTITY_NOT_POSITIVE', message: 'Quantity must be greater than zero' });
     let quantity = entered;
     let unitQuantity: Prisma.Decimal | null = null;
     if (line.unitFactor === null) {
-      if (line.unitName !== null || line.unitQuantity !== null) throw new BadRequestException('Incomplete historical unit snapshot');
+      if (line.unitName !== null || line.unitQuantity !== null) throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_INCOMPLETE', message: 'Incomplete historical unit snapshot' });
     } else {
-      if (!line.unitName || line.unitQuantity === null) throw new BadRequestException('Incomplete historical unit snapshot');
+      if (!line.unitName || line.unitQuantity === null) throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_INCOMPLETE', message: 'Incomplete historical unit snapshot' });
       const factor = parseFactor(line.unitFactor, 'historical unit factor');
       if (!exactBaseQuantity(line.unitQuantity, factor).equals(line.quantity)) {
-        throw new BadRequestException('Inconsistent historical unit snapshot');
+        throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_MISMATCH', message: 'Inconsistent historical unit snapshot' });
       }
       quantity = exactBaseQuantity(entered, factor);
       unitQuantity = entered;
     }
     if (quantity.lessThan(line.invoicedQuantity)) {
-      throw new BadRequestException('Quantity cannot be less than the allocated quantity');
+      throw new BadRequestException({ code: 'ORDER_QUANTITY_BELOW_ALLOCATED', message: 'Quantity cannot be less than the allocated quantity' });
     }
     const price = decimal(selection.unitPrice, 'unitPrice');
     const discountPercent = decimal(selection.discountPercent, 'discountPercent', true);
@@ -92,7 +92,7 @@ export function planDraftOrderEdit(existing: readonly ExistingLine[], raw: unkno
     if (approved && !line.invoicedQuantity.isZero() &&
         (!line.unitPrice || !line.discountPercent || !line.taxRate ||
          !price.equals(line.unitPrice) || !discountPercent.equals(line.discountPercent) || !taxRate.equals(line.taxRate))) {
-      throw new BadRequestException('Financial terms of allocated lines cannot be changed');
+      throw new BadRequestException({ code: 'ORDER_ALLOCATED_TERMS_LOCKED', message: 'Financial terms of allocated lines cannot be changed' });
     }
     const net = asMoney(new Exact(entered.toString()).mul(price.toString()), 'line subtotal');
     const discount = asMoney(new Exact(net.toString()).mul(discountPercent.toString()).div(100), 'line discount');

@@ -8,25 +8,25 @@ export function selectedOrderLineQuantities(
   orderLines?: ReadonlyArray<{ id: string }>,
 ): Map<string, Prisma.Decimal> {
   if (!Array.isArray(input) || input.length === 0) {
-    throw new BadRequestException('Select the order lines and quantities to invoice');
+    throw new BadRequestException({ code: 'ORDER_LINES_NOT_SELECTED', message: 'Select the order lines and quantities to invoice' });
   }
   const available = orderLines && new Set(orderLines.map((line) => line.id));
   const requested = new Map<string, Prisma.Decimal>();
   for (const value of input as unknown[]) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BadRequestException('Invalid order line selection');
+      throw new BadRequestException({ code: 'ORDER_LINE_SELECTION_INVALID', message: 'Invalid order line selection' });
     }
     const raw = value as { orderLineId?: unknown; quantity?: unknown };
     const id = typeof raw.orderLineId === 'string' ? raw.orderLineId.trim() : '';
     if (!id || (available && !available.has(id))) {
-      throw new BadRequestException('Selected order line does not belong to this order');
+      throw new BadRequestException({ code: 'ORDER_LINE_NOT_ON_ORDER', message: 'Selected order line does not belong to this order' });
     }
     if (requested.has(id)) {
-      throw new BadRequestException('An order line was selected more than once');
+      throw new BadRequestException({ code: 'ORDER_LINE_DUPLICATE_SELECTION', message: 'An order line was selected more than once' });
     }
     const quantity = parseDocumentQuantity(raw.quantity, 'quantity');
     if (quantity.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('quantity must be greater than zero');
+      throw new BadRequestException({ code: 'ORDER_QUANTITY_NOT_POSITIVE', message: 'quantity must be greater than zero' });
     }
     requested.set(id, quantity);
   }

@@ -9,10 +9,10 @@ export function orderConversionIdentity(
 ): { key: string; hash: string } {
   const key = typeof dto.idempotencyKey === 'string' ? dto.idempotencyKey.trim() : '';
   if (!/^[a-zA-Z0-9._:-]{16,128}$/.test(key)) {
-    throw new BadRequestException('idempotencyKey is required (16–128 safe characters)');
+    throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'idempotencyKey is required (16–128 safe characters)' });
   }
   if (dto.invoiceDate !== undefined && typeof dto.invoiceDate !== 'string') {
-    throw new BadRequestException('invoiceDate must be a date string');
+    throw new BadRequestException({ code: 'ORDER_INVOICE_DATE_INVALID', message: 'invoiceDate must be a date string' });
   }
   const lines = [...selected.entries()]
     .map(([id, quantity]) => ({ id, quantity: quantity.toFixed(4) }))

@@ -7,7 +7,7 @@ export function orderCreationIdentity(dto: Record<string, unknown>): { key: stri
   if (dto.idempotencyKey === undefined) return null;
   const key = typeof dto.idempotencyKey === 'string' ? dto.idempotencyKey.trim() : '';
   if (!/^[a-zA-Z0-9._:-]{16,128}$/.test(key)) {
-    throw new BadRequestException('idempotencyKey must contain 16–128 safe characters');
+    throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID', message: 'idempotencyKey must contain 16–128 safe characters' });
   }
   const canonical = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(canonical);

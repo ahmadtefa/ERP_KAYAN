@@ -16,25 +16,25 @@ export function historicalOrderUnit(input: {
   baseQuantity: Prisma.Decimal;
 }): ResolvedUnit {
   if (!input.baseQuantity.isFinite() || input.baseQuantity.lessThanOrEqualTo(0)) {
-    throw new BadRequestException(`${input.label}: quantity must be greater than zero`);
+    throw new BadRequestException({ code: 'ORDER_QUANTITY_NOT_POSITIVE', message: `${input.label}: quantity must be greater than zero` });
   }
   const name = (input.unitName ?? '').trim();
   if (input.unitFactor === null) {
-    if (name) throw new BadRequestException(`${input.label}: incomplete historical unit snapshot`);
+    if (name) throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_INCOMPLETE', message: `${input.label}: incomplete historical unit snapshot` });
     return { snapshot: { unitName: null, unitFactor: null, unitQuantity: null },
       baseQuantity: input.baseQuantity, row: null, isLegacy: true };
   }
-  if (!name) throw new BadRequestException(`${input.label}: incomplete historical unit snapshot`);
+  if (!name) throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_INCOMPLETE', message: `${input.label}: incomplete historical unit snapshot` });
   const factor = parseFactor(input.unitFactor, `${input.label} historical factor`);
   const ExactDecimal = Prisma.Decimal.clone({ precision: 80 });
   const divided = new ExactDecimal(input.baseQuantity.toString()).div(factor.toString());
   if (!divided.isFinite() || divided.lessThanOrEqualTo(0) ||
       !divided.equals(divided.toDecimalPlaces(QUANTITY_SCALE))) {
-    throw new BadRequestException(`${input.label}: quantity cannot be represented at historical unit precision`);
+    throw new BadRequestException({ code: 'ORDER_UNIT_PRECISION', message: `${input.label}: quantity cannot be represented at historical unit precision` });
   }
   const entered = new Prisma.Decimal(divided.toFixed());
   if (!exactBaseQuantity(entered, factor).equals(input.baseQuantity)) {
-    throw new BadRequestException(`${input.label}: quantity cannot be represented at historical unit precision`);
+    throw new BadRequestException({ code: 'ORDER_UNIT_PRECISION', message: `${input.label}: quantity cannot be represented at historical unit precision` });
   }
   return { snapshot: { unitName: name, unitFactor: factor, unitQuantity: entered },
     baseQuantity: input.baseQuantity, row: null, isLegacy: false };
@@ -51,7 +51,7 @@ export function orderUnitForInvoiceLine(
   const unit = units[index];
   if (!unit || unit.itemId !== itemId ||
       !(unit.resolved.snapshot.unitQuantity ?? unit.resolved.baseQuantity).equals(quantity)) {
-    throw new BadRequestException('Order invoice unit snapshot does not match the invoice line');
+    throw new BadRequestException({ code: 'ORDER_UNIT_SNAPSHOT_MISMATCH', message: 'Order invoice unit snapshot does not match the invoice line' });
   }
   return unit.resolved;
 }
