@@ -23,6 +23,7 @@ class _AdminApi extends ApiClient {
   bool malformedPermissions = false;
   bool malformedCatalogue = false;
   bool memberActive = true;
+  List<String> fromRoles = [];
   bool roleDeleted = false;
   bool loseDeactivateResponse = false;
   bool loseDeleteResponse = false;
@@ -56,7 +57,8 @@ class _AdminApi extends ApiClient {
       {'code':'sales.invoices.write','module':'sales','nameEn':'Edit invoices','nameAr':'تعديل الفواتير'}],
   };
   @override
-  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'items':[]};
+  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async =>
+      path.endsWith('/effective-permissions') ? {'permissions':fromRoles,'fromRoles':fromRoles,'roles':['ACTIVE']} : {'items':[]};
   @override
   Future<Map<String,dynamic>> patch(String path,{Object? body}) async {
     patches++;
@@ -241,6 +243,24 @@ void main() {
       }
     });
   }
+
+  testWidgets('permissions that come from the job role show ticked and locked, direct grants stay editable', (tester) async {
+    final api=_AdminApi()..fromRoles=['sales.invoices.write']; await _screen(tester,api);
+    final action=find.byTooltip('Extra permissions');
+    await tester.ensureVisible(action); await tester.pumpAndSettle();
+    await tester.tap(action); await tester.pumpAndSettle();
+    final inherited=find.widgetWithText(CheckboxListTile,'Edit invoices');
+    expect(tester.widget<CheckboxListTile>(inherited).value,isTrue);
+    expect(tester.widget<CheckboxListTile>(inherited).onChanged,isNull);
+    expect(find.textContaining('from the job role'),findsOneWidget);
+    final direct=find.widgetWithText(CheckboxListTile,'Read invoices');
+    expect(tester.widget<CheckboxListTile>(direct).value,isTrue);
+    expect(tester.widget<CheckboxListTile>(direct).onChanged,isNotNull);
+    await tester.tap(direct); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+    expect(api.submitted!['extraPermissions'],isNot(contains('sales.invoices.write')));
+    expect(api.submitted!['extraPermissions'],isEmpty);
+  });
 
   testWidgets('unchanged permissions are not sent over newer server grants', (tester) async {
     final api=_AdminApi(); await _screen(tester,api);

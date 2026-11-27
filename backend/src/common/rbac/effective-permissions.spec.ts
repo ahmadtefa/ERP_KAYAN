@@ -54,6 +54,7 @@ describe('effective permissions', () => {
     );
     expect(granted.permissions).toContain('inventory.items.read');
     expect(granted.grantedDirectly).toEqual(['inventory.items.read']);
+    expect(granted.fromRoles).toEqual(['reports.read']);
 
     const denied = resolveEffectivePermissions(
       [role('READ_ONLY', ['reports.read'])],

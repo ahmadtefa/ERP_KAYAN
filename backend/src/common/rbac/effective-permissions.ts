@@ -44,6 +44,8 @@ export interface EffectivePermissions {
   deniedFromRoles: string[];
   /** Codes the person holds only because they were granted by name. */
   grantedDirectly: string[];
+  /** Every code the person's active roles grant, before any deny. */
+  fromRoles: string[];
   /** Role codes that contributed — disabled and deleted roles are not here. */
   roles: string[];
 }
@@ -96,6 +98,7 @@ export function resolveEffectivePermissions(
     denied: [...denied].sort(),
     deniedFromRoles: [...fromRoles].filter((code) => denied.has(code)).sort(),
     grantedDirectly: [...direct].sort(),
+    fromRoles: [...fromRoles].sort(),
     roles: [...new Set(roleCodes)].sort(),
   };
 }

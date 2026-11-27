@@ -406,12 +406,26 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       showAppError(context, const FormatException());
       return;
     }
+    // What the person's roles already grant, so the boxes show it ticked.
+    // A failed read stops here: an empty list would look like "no permissions".
+    final Set<String> inherited;
+    try {
+      final data = await ref
+          .read(apiClientProvider)
+          .get('/admin/users/${row['id']}/effective-permissions');
+      inherited = _permissionCodes(data['fromRoles']) ?? <String>{};
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
+    }
+    if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _PermissionsDialog(
         title: '${l10n.extraPermissions} — ${text(row, 'username')}',
         selected: selected,
+        inherited: inherited,
         exitRelay: widget.exitRelay,
         onSubmit: (chosen) async {
           try {
@@ -1160,12 +1174,17 @@ class _PermissionsDialog extends ConsumerStatefulWidget {
   const _PermissionsDialog({
     required this.title,
     required this.selected,
+    this.inherited = const <String>{},
     required this.exitRelay,
     required this.onSubmit,
   });
 
   final String title;
   final Set<String> selected;
+
+  /// Permissions the person already has through a job role: shown ticked and
+  /// locked, never sent as a direct grant.
+  final Set<String> inherited;
   final DraftExitRelay exitRelay;
   final Future<void> Function(Set<String>) onSubmit;
 
@@ -1417,7 +1436,11 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                       children: [
                         TextButton(
                           onPressed: () => setState(() {
-                            _selected.addAll(items.map((p) => text(p, 'code')));
+                            _selected.addAll(
+                              items
+                                  .map((p) => text(p, 'code'))
+                                  .where((c) => !widget.inherited.contains(c)),
+                            );
                           }),
                           child: Text(l10n.selectAll),
                         ),
@@ -1517,7 +1540,9 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
               TextButton(
                 onPressed: () => setState(() {
                   for (final p in permissions) {
-                    _selected.add(text(p, 'code'));
+                    if (!widget.inherited.contains(text(p, 'code'))) {
+                      _selected.add(text(p, 'code'));
+                    }
                   }
                 }),
                 child: Text(l10n.selectAll),
@@ -1537,7 +1562,9 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
           CheckboxListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            value: _selected.contains(text(permission, 'code')),
+            value:
+                _selected.contains(text(permission, 'code')) ||
+                widget.inherited.contains(text(permission, 'code')),
             title: Text(
               isArabic
                   ? text(
@@ -1551,8 +1578,14 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                       fallback: text(permission, 'code'),
                     ),
             ),
-            subtitle: Text(text(permission, 'code')),
-            onChanged: (checked) => setState(() {
+            subtitle: Text(
+              widget.inherited.contains(text(permission, 'code'))
+                  ? '${text(permission, 'code')} — ${isArabic ? 'من الدور الوظيفي' : 'from the job role'}'
+                  : text(permission, 'code'),
+            ),
+            onChanged: widget.inherited.contains(text(permission, 'code'))
+                ? null
+                : (checked) => setState(() {
               final code = text(permission, 'code');
               if (checked ?? false) {
                 _selected.add(code);
