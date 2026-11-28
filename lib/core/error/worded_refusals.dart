@@ -1126,4 +1126,100 @@ const Map<String, List<String>> wordedRefusals = {
     'لم تكتمل الاستعادة، وأُعيدت البيانات السابقة تلقائيًا من نسخة الأمان {backup}، ولم تُفقد أي بيانات. ما يزال النظام في وضع الصيانة؛ تواصل مع الدعم.',
     'The restore did not finish, and the previous data was put back automatically from the safety backup {backup}; no data was lost. The system is still in maintenance mode; contact support.',
   ],
+  'CONTRACT_AMOUNT_BAD': [
+    'أحد المبالغ المدخلة غير صحيح. اكتب المبلغ بالأرقام فقط وبحد أقصى خانتين عشريتين وبقيمة أكبر من صفر، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'One of the amounts entered is not valid. Enter the amount in digits only, with at most two decimals and a value above zero, then try again. Nothing was saved.',
+  ],
+  'CONTRACT_PERCENT_BAD': [
+    'النسبة المدخلة غير صحيحة. اكتب رقمًا من صفر إلى مئة بحد أقصى أربع خانات عشرية، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The percentage entered is not valid. Enter a number from 0 to 100 with at most four decimals, then try again. Nothing was saved.',
+  ],
+  'CONTRACT_DATE_BAD': [
+    'التاريخ المدخل غير صحيح. اختر تاريخًا حقيقيًا بالشكل سنة-شهر-يوم، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The date entered is not valid. Choose a real date in the form year-month-day, then try again. Nothing was saved.',
+  ],
+  'CONTRACT_CODE_BAD': [
+    'رمز العقد مطلوب ولا يزيد عن 32 حرفًا. اكتب رمزًا قصيرًا يميّز العقد ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The contract code is required and can be at most 32 characters. Write a short code that identifies the contract, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_TITLE_BAD': [
+    'عنوان العقد مطلوب ولا يزيد عن 200 حرف. اكتب عنوانًا يوضح موضوع العقد ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The contract title is required and can be at most 200 characters. Write a title that says what the contract is about, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_ADVANCE_TOO_HIGH': [
+    'الدفعة المقدمة أكبر من قيمة العقد. صحّح الدفعة المقدمة لتكون أقل من قيمة العقد أو تساويها، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The advance is larger than the contract value. Correct the advance so it is not more than the contract value, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_CUSTOMER_BAD': [
+    'لم نجد العميل المختار. اختر عميلًا موجودًا من القائمة ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The selected customer was not found. Choose an existing customer from the list, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_ITEM_NOT_SERVICE': [
+    'بند الفوترة المختار ليس بند خدمة، فهو بند مخزني. اختر بند خدمة مثل "أعمال مقاولات" أو أنشئ واحدًا من شاشة الأصناف، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The selected billing item is not a service item because it is a stock item. Choose a service item, or create one in the items screen, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_COSTCENTER_BAD': [
+    'لم نجد مركز التكلفة المختار. اختر مركز تكلفة موجودًا أو اتركه فارغًا، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The selected cost centre was not found. Choose an existing cost centre or leave it empty, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_CODE_EXISTS': [
+    'يوجد عقد آخر بالرمز {code}. اكتب رمزًا مختلفًا للعقد الجديد، أو افتح العقد الموجود إن كان هو المقصود. لم يُحفظ شيء.',
+    'Another contract already uses the code {code}. Write a different code for the new contract, or open the existing contract if that is the one you meant. Nothing was saved.',
+  ],
+  'CONTRACT_CLOSED': [
+    'هذا العقد مغلق ولا يقبل تعديلًا أو مستخلصًا جديدًا. أعد فتح العقد من شاشة العقود إن كنت تريد الاستمرار فيه. لم يتغير شيء.',
+    'This contract is closed and does not accept changes or a new claim. Reopen the contract from the contracts screen if you want to continue with it. Nothing was changed.',
+  ],
+  'CONTRACT_NOTE_BAD': [
+    'البيان مطلوب ولا يزيد عن 200 حرف. اكتب بإيجاز ما هو التغيير ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The description is required and can be at most 200 characters. Write briefly what the change is, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_VARIATION_BELOW_BILLED': [
+    'هذا التعديل يجعل قيمة العقد أقل من الأعمال المفوترة فعلًا ({billed}). خفّض مبلغ التعديل بحيث تبقى قيمة العقد أكبر من الأعمال المفوترة، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'This change would make the contract value lower than the work already billed ({billed}). Reduce the change amount so the contract value stays above the billed work, then save again. Nothing was saved.',
+  ],
+  'CONTRACT_OPEN_CLAIMS': [
+    'لا يمكن إغلاق العقد لأن به مستخلصًا لم يُعتمد بعد. اعتمد المستخلص أو ألغه أولًا، ثم أغلق العقد. لم يتغير شيء.',
+    'The contract cannot be closed because it has a claim that is not approved yet. Approve or cancel that claim first, then close the contract. Nothing was changed.',
+  ],
+  'CONTRACT_NOT_FOUND': [
+    'لم نجد هذا العقد، وربما حُذف أو أنه تابع لشركة أخرى. ارجع إلى قائمة العقود واختر العقد من جديد. لم يتغير شيء.',
+    'This contract was not found, and it may have been deleted or belong to another company. Go back to the contracts list and choose the contract again. Nothing was changed.',
+  ],
+  'CLAIM_NOT_ABOVE_PREVIOUS': [
+    'إجمالي الأعمال المنفذة يجب أن يكون أكبر من إجمالي المستخلص السابق ({previous}). اكتب الإجمالي التراكمي الجديد للأعمال منذ بداية العقد، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The total work done must be above the previous claim total ({previous}). Enter the new cumulative work since the start of the contract, then save again. Nothing was saved.',
+  ],
+  'CLAIM_ABOVE_CONTRACT': [
+    'إجمالي الأعمال المنفذة أكبر من قيمة العقد بعد التعديلات ({limit}). صحّح الإجمالي، أو سجّل أمر تغيير يزيد قيمة العقد أولًا، ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The total work done is above the contract value after changes ({limit}). Correct the total, or record a variation that raises the contract value first, then save again. Nothing was saved.',
+  ],
+  'CLAIM_ALREADY_OPEN': [
+    'يوجد مستخلص لهذا العقد ما زال في انتظار الاعتماد. اعتمده أو ألغه أولًا، ثم جهّز المستخلص التالي. لم يُحفظ شيء.',
+    'This contract already has a claim waiting for approval. Approve or cancel it first, then prepare the next claim. Nothing was saved.',
+  ],
+  'CLAIM_NOT_CANCELLABLE': [
+    'لا يمكن إلغاء هذا المستخلص لأنه اعتُمد وصدرت له فاتورة أو أنه ملغي من قبل. إن كانت الفاتورة خاطئة فعالجها من شاشة الفواتير بإشعار دائن. لم يتغير شيء.',
+    'This claim cannot be cancelled because it was approved and has an invoice, or it was already cancelled. If the invoice is wrong, correct it from the invoices screen with a credit note. Nothing was changed.',
+  ],
+  'CLAIM_NOT_FOUND': [
+    'لم نجد هذا المستخلص، وربما حُذف أو أنه تابع لشركة أخرى. افتح العقد من جديد واختر المستخلص. لم يتغير شيء.',
+    'This claim was not found, and it may have been deleted or belong to another company. Open the contract again and choose the claim. Nothing was changed.',
+  ],
+  'CLAIM_NOT_DRAFT': [
+    'تمت معالجة هذا المستخلص من قبل، فهو معتمد أو ملغي. حدّث الشاشة لترى حالته الحالية. لم يتغير شيء.',
+    'This claim was already handled, so it is approved or cancelled. Refresh the screen to see its current state. Nothing was changed.',
+  ],
+  'CLAIM_SAME_PERSON': [
+    'لا يجوز لمن جهّز المستخلص أن يعتمده بنفسه. اطلب من مستخدم آخر لديه صلاحية اعتماد المستخلصات أن يعتمده. لم يتغير شيء.',
+    'The person who prepared the claim cannot approve it. Ask another user who has the permission to approve claims to approve it. Nothing was changed.',
+  ],
+  'CLAIM_BRANCH_REQUIRED': [
+    'حسابك غير مرتبط بفرع، ولذلك لا يمكن إنشاء الفاتورة. اطلب من المسؤول ربط حسابك بفرع من شاشة المستخدمين ثم أعد الاعتماد. لم يتغير شيء.',
+    'Your account is not linked to a branch, so the invoice cannot be created. Ask the administrator to link your account to a branch in the users screen, then approve again. Nothing was changed.',
+  ],
+  'RETENTION_RELEASE_TOO_HIGH': [
+    'مبلغ الصرف أكبر من المحتجز المتبقي ({held}). اكتب مبلغًا أقل من المحتجز أو يساويه ثم أعد الحفظ. لم يُحفظ شيء.',
+    'The release amount is above the retention still held ({held}). Enter an amount not more than the retention held, then save again. Nothing was saved.',
+  ],
 };

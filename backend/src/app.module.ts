@@ -28,6 +28,7 @@ import { CurrencyModule } from './modules/currency/currency.module';
 import { WithholdingModule } from './modules/withholding/withholding.module';
 import { InstallmentsModule } from './modules/installments/installments.module';
 import { CommissionsModule } from './modules/commissions/commissions.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
 import { SerialsModule } from './modules/serials/serials.module';
 import { FixedAssetsModule } from './modules/fixed-assets/fixed-assets.module';
 import { CompanyModule } from './modules/company/company.module';
@@ -71,6 +72,7 @@ import { SearchModule } from './modules/search/search.module';
     HrModule,
     SerialsModule,
     CommissionsModule,
+    ContractsModule,
     InstallmentsModule,
     FixedAssetsModule,
     AdminModule,
