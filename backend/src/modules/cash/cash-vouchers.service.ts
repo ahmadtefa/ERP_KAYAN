@@ -413,7 +413,7 @@ export class CashVouchersService {
     const accounts = await this.accounts.resolve(
       this.prisma as never,
       companyId,
-      ['accountsReceivable', 'accountsPayable', 'exchangeGain', 'exchangeLoss'],
+      ['accountsReceivable', 'accountsPayable'],
     );
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -651,10 +651,15 @@ export class CashVouchersService {
         const diffTotal = settled.reduce((sum, row) => sum.plus(row.diff), new Prisma.Decimal(0));
         cashAmount = baseTotal.plus(diffTotal);
         lines.push({ accountId: accounts.accountsReceivable, credit: baseTotal, description: 'Settlement of foreign-currency sales invoices' });
-        if (diffTotal.greaterThan(0)) {
-          lines.push({ accountId: accounts.exchangeGain, credit: diffTotal, description: 'Realised exchange gain' });
-        } else if (diffTotal.lessThan(0)) {
-          lines.push({ accountId: accounts.exchangeLoss, debit: diffTotal.neg(), description: 'Realised exchange loss' });
+        // Only a settlement with a real difference needs the exchange accounts; an ordinary
+        // receipt must not depend on them existing.
+        const fxAccounts = diffTotal.isZero()
+          ? null
+          : await this.accounts.resolve(tx as never, companyId, ['exchangeGain', 'exchangeLoss']);
+        if (fxAccounts && diffTotal.greaterThan(0)) {
+          lines.push({ accountId: fxAccounts.exchangeGain, credit: diffTotal, description: 'Realised exchange gain' });
+        } else if (fxAccounts && diffTotal.lessThan(0)) {
+          lines.push({ accountId: fxAccounts.exchangeLoss, debit: diffTotal.neg(), description: 'Realised exchange loss' });
         }
       }
 
