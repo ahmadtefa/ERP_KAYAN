@@ -71,8 +71,8 @@ const vmReady =
     expect(await shelf(W1)).toEqual({ q: '16', v: '240' });
   });
 
-  it('04 issuing more than the shelf holds is refused and changes nothing', async () => {
-    await expect(issue(W1, '17')).rejects.toMatchObject({ response: { code: 'STOCK_SHORT_IN_WAREHOUSE' } });
+  it('04 issuing more than the branch holds is refused and changes nothing', async () => {
+    await expect(issue(W1, '17')).rejects.toMatchObject({ response: { code: 'STOCK_LEDGER_APPLY_BRANCH_E024' } });
     expect(await shelf(W1)).toEqual({ q: '16', v: '240' });
   });
 
@@ -103,6 +103,8 @@ const vmReady =
     const w2 = await tx((t) => ledger.position(t, at(W2)));
     expect(w1.unitCost.toString()).toBe('15');
     expect(w2.unitCost.toString()).toBe('19');
+    // The branch holds 20 in all, but this shelf holds 10: the shelf refuses.
+    await expect(issue(W2, '11')).rejects.toMatchObject({ response: { code: 'STOCK_SHORT_IN_WAREHOUSE' } });
   });
 
   it('08 the branch book equals the sum of its shelves after all movements', async () => {
