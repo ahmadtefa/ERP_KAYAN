@@ -406,6 +406,50 @@ const Map<String, List<String>> wordedRefusals = {
     'سبق أن اتخذت قرارك في هذا المستوى من الاعتماد ولا يمكن تكراره. حدّث الصفحة لرؤية الحالة الحالية. لم يتغير شيء.',
     'You have already decided on this approval level and cannot decide again. Refresh the page to see the current status. Nothing changed.',
   ],
+  'CURRENCY_CODE_BAD': [
+    'رمز العملة غير صحيح، ويجب أن يكون ثلاثة أحرف إنجليزية مثل USD. اكتب الرمز بهذا الشكل ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The currency code is not valid. It must be three letters, for example USD. Enter the code in that form and try again. Nothing was saved.',
+  ],
+  'CURRENCY_RATE_BAD': [
+    'سعر الصرف غير صحيح، ويجب أن يكون رقمًا أكبر من صفر. اكتب السعر بالأرقام فقط، مثل 48.50، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The exchange rate is not valid. It must be a number greater than zero. Enter the rate in digits only, for example 48.50, and try again. Nothing was saved.',
+  ],
+  'CURRENCY_IS_BASE': [
+    'هذه هي عملة الشركة الأساسية ولا تحتاج إلى سعر صرف. اختر عملة أجنبية أخرى إن أردت إضافة سعر. لم يتغير شيء.',
+    'This is the company currency and does not need an exchange rate. Choose a foreign currency if you want to add a rate. Nothing changed.',
+  ],
+  'CURRENCY_NAME_REQUIRED': [
+    'اسم العملة بالعربية والإنجليزية مطلوب. اكتب الاسمين ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The currency name in Arabic and in English is required. Enter both names and try again. Nothing was saved.',
+  ],
+  'CURRENCY_NAME_LONG': [
+    'اسم العملة أطول من المسموح. اكتب اسمًا أقصر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The currency name is longer than allowed. Enter a shorter name and try again. Nothing was saved.',
+  ],
+  'CURRENCY_NOT_FOUND': [
+    'العملة {code} غير موجودة في قائمة عملات الشركة. أضفها من شاشة العملات أولًا ثم أعد المحاولة. لم يتغير شيء.',
+    'The currency {code} is not in the company currency list. Add it on the currencies screen first, then try again. Nothing changed.',
+  ],
+  'CURRENCY_DUPLICATE': [
+    'العملة {code} مضافة من قبل. اختر عملة أخرى أو عدّل العملة الموجودة. لم يُحفظ شيء.',
+    'The currency {code} was already added. Choose another currency or edit the existing one. Nothing was saved.',
+  ],
+  'CURRENCY_INACTIVE': [
+    'العملة {code} متوقفة حاليًا. فعّلها من شاشة العملات ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The currency {code} is switched off. Switch it on in the currencies screen and try again. Nothing was saved.',
+  ],
+  'CURRENCY_RATE_DATE_BAD': [
+    'تاريخ سعر الصرف غير صحيح. اختر تاريخًا حقيقيًا بالشكل سنة-شهر-يوم ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The exchange rate date is not valid. Choose a real date in the form year-month-day and try again. Nothing was saved.',
+  ],
+  'CURRENCY_RATE_DATE_FUTURE': [
+    'لا يمكن إدخال سعر صرف بتاريخ في المستقبل. اختر تاريخ اليوم أو تاريخًا سابقًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'An exchange rate cannot be entered for a future date. Choose today or an earlier date and try again. Nothing was saved.',
+  ],
+  'FX_RATE_MISSING': [
+    'لا يوجد سعر صرف للعملة {code} في تاريخ {date} أو قبله. أدخل سعر الصرف من شاشة العملات ثم أعد المحاولة. لم يُحفظ شيء.',
+    'No exchange rate has been entered for {code} on or before {date}. Enter the rate on the currencies screen and try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
