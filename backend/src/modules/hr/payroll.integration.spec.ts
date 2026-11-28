@@ -36,6 +36,7 @@ const vmReady =
     await run(`INSERT INTO companies(id,code,"nameEn","nameAr","updatedAt") VALUES ('${COMPANY}','CO','Company','شركة',now())`);
     await run(`INSERT INTO branches(id,"companyId",code,"nameEn","nameAr","updatedAt") VALUES ('${BRANCH}','${COMPANY}','A','A','أ',now())`);
     await run(`INSERT INTO users(id,"companyId",username,"fullNameEn","fullNameAr","passwordHash","updatedAt") VALUES ('${USER}','${COMPANY}','pr','Pr','ع','x',now())`);
+    await run(`INSERT INTO users(id,"companyId",username,"fullNameEn","fullNameAr","passwordHash","updatedAt") VALUES ('${BOSS}','${COMPANY}','boss','Boss','م','x',now())`);
     await run(`INSERT INTO accounts(id,"companyId",code,"nameEn","nameAr",type,"isPostable","isActive","updatedAt") VALUES
       ('${A(1)}','${COMPANY}','5401','Salaries','الرواتب','EXPENSE',true,true,now()),
       ('${A(2)}','${COMPANY}','5402','Employer insurance','تأمينات صاحب العمل','EXPENSE',true,true,now()),
