@@ -317,6 +317,11 @@ void main() {
     scrollable.position.jumpTo(0);
     await tester.pumpAndSettle();
     for (final key in _groupKeys) {
+      await tester.scrollUntilVisible(
+        find.byKey(ValueKey(key)),
+        120,
+        scrollable: find.descendant(of: _menu, matching: find.byType(Scrollable)).first,
+      );
       expect(find.byKey(ValueKey(key)), findsOneWidget);
     }
 
