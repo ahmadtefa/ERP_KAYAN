@@ -178,8 +178,10 @@ export class CashVouchersService {
     if (accountCurrency === (co?.currency ?? 'EGP')) return null;
     // A receipt from a customer that settles foreign-currency sales invoices is the one
     // party voucher a foreign account may carry; create() checks the allocations.
-    const settlesForeignSales = Boolean(party.customerId) && !party.supplierId && !party.counterAccountId && (dto.allocations ?? []).length > 0 &&
-      (dto.allocations ?? []).every((a) => Boolean(a.salesInvoiceId) && !a.purchaseInvoiceId);
+    const settlesForeignSales = (Boolean(party.customerId) && !party.supplierId && !party.counterAccountId && (dto.allocations ?? []).length > 0 &&
+      (dto.allocations ?? []).every((a) => Boolean(a.salesInvoiceId) && !a.purchaseInvoiceId)) ||
+      (Boolean(party.supplierId) && !party.customerId && !party.counterAccountId && (dto.allocations ?? []).length > 0 &&
+      (dto.allocations ?? []).every((a) => Boolean(a.purchaseInvoiceId) && !a.salesInvoiceId));
     if (!settlesForeignSales && (party.customerId || party.supplierId || (dto.allocations ?? []).length > 0)) {
       throw new BadRequestException({ code: 'VOUCHER_FX_NO_PARTY', message: 'A voucher on a foreign-currency account cannot name a customer or supplier or settle invoices' });
     }
@@ -276,11 +278,15 @@ export class CashVouchersService {
       throw new BadRequestException({ code: 'VOUCHER_ALLOC_NEEDS_PARTY', message: 'A voucher can only be allocated against invoices when it names a customer or a supplier' });
     }
     if (allocations.length > 0 && fx) {
-      if (kind !== CashVoucherKind.RECEIPT) {
+      if (party.supplierId) {
+        if (kind !== CashVoucherKind.PAYMENT) {
+          throw new BadRequestException({ code: 'SETTLE_PURCHASE_NEEDS_PAYMENT', message: 'A purchase invoice can only be settled by a payment' });
+        }
+      } else if (kind !== CashVoucherKind.RECEIPT) {
         throw new BadRequestException({ code: 'SETTLE_SALES_NEEDS_RECEIPT', message: 'A sales invoice can only be settled by a receipt' });
       }
       if (!allocationTotal.equals(amount)) {
-        throw new BadRequestException({ code: 'VOUCHER_FX_ALLOC_EXACT', message: 'A receipt in a foreign currency must be allocated in full to invoices in that currency' });
+        throw new BadRequestException({ code: 'VOUCHER_FX_ALLOC_EXACT', message: 'A voucher in a foreign currency must be allocated in full to invoices in that currency' });
       }
       await this.validateForeignSettlement(companyId, cashAccount.currency, party, allocations);
     } else if (allocations.length > 0) {
@@ -431,13 +437,56 @@ export class CashVouchersService {
       // invoices: each allocation is a foreign amount, and the exchange difference is booked.
       const [voucherFx] = await tx.$queryRaw<{ rate: Prisma.Decimal }[]>(Prisma.sql`
         SELECT rate FROM voucher_exchange_rates WHERE "voucherId" = ${voucher.id}::uuid`);
-      const settlementMode = Boolean(voucherFx) && Boolean(voucher.customerId) && voucher.allocations.length > 0;
+      const settlementMode = Boolean(voucherFx) && Boolean(voucher.customerId || voucher.supplierId) && voucher.allocations.length > 0;
+      const purchaseSettlement = settlementMode && Boolean(voucher.supplierId);
       const voucherRate = voucherFx ? new Prisma.Decimal(voucherFx.rate) : null;
       const settled: Array<{ allocationId: string; base: Prisma.Decimal; foreign: Prisma.Decimal; diff: Prisma.Decimal }> = [];
 
       // ---- allocations: what the money settled
       let allocated = new Prisma.Decimal(0);
       for (const allocation of voucher.allocations) {
+        if (settlementMode && voucherRate && purchaseSettlement) {
+          if (!allocation.purchaseInvoiceId || voucher.kind !== CashVoucherKind.PAYMENT) {
+            throw new BadRequestException({ code: 'VOUCHER_FX_NO_PARTY', message: 'A voucher on a foreign-currency account cannot name a customer or supplier or settle invoices' });
+          }
+          const invoice = await tx.purchaseInvoice.findFirst({
+            where: { id: allocation.purchaseInvoiceId, companyId, deletedAt: null },
+            select: { id: true, invoiceNumber: true, supplierId: true, totalAmount: true, paidAmount: true, status: true },
+          });
+          if (!invoice) throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing purchase invoice' });
+          if (invoice.status !== InvoiceStatus.POSTED) {
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_NOT_POSTED', message: `Purchase invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid` });
+          }
+          if (invoice.supplierId !== voucher.supplierId) {
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier` });
+          }
+          const fxInvoice = await this.foreignDue(tx as never, companyId, invoice.id, true, 'PURCHASE');
+          if (!fxInvoice || fxInvoice.currency !== voucher.currency) {
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_CURRENCY', message: `Purchase invoice ${invoice.invoiceNumber} is not in ${voucher.currency}; this voucher moves ${voucher.currency}` });
+          }
+          const dueForeign = fxInvoice.foreignTotal.minus(fxInvoice.foreignPaid);
+          if (allocation.amount.greaterThan(dueForeign)) {
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OVERPAID', message: `Purchase invoice ${invoice.invoiceNumber} has only ${dueForeign.toFixed(MONEY_SCALE)} ${voucher.currency} left to pay; ${allocation.amount.toFixed(MONEY_SCALE)} was allocated to it.` });
+          }
+          // The payable leaves the books at the invoice's own rate; the last payment clears
+          // exactly what is left. Gain is positive when the cash paid is less than the payable cleared.
+          const dueBase = invoice.totalAmount.minus(invoice.paidAmount);
+          const baseSettled = allocation.amount.equals(dueForeign) ? dueBase : toBase(allocation.amount, fxInvoice.rate);
+          if (baseSettled.greaterThan(dueBase)) {
+            throw new BadRequestException({ code: 'VOUCHER_INVOICE_OVERPAID', message: `Purchase invoice ${invoice.invoiceNumber} has only ${dueBase.toFixed(MONEY_SCALE)} left to pay` });
+          }
+          const cashBase = toBase(allocation.amount, voucherRate);
+          const gain = baseSettled.minus(cashBase);
+          settled.push({ allocationId: allocation.id, base: baseSettled, foreign: allocation.amount, diff: gain });
+          await tx.purchaseInvoice.update({ where: { id: invoice.id }, data: { paidAmount: { increment: baseSettled } } });
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE purchase_invoice_fx SET "foreignPaid" = "foreignPaid" + ${allocation.amount.toFixed(4)}::numeric
+             WHERE "invoiceId" = ${invoice.id}::uuid AND "companyId" = ${companyId}::uuid`);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO voucher_allocation_fx ("allocationId", "baseSettled", "foreignSettled", "exchangeDifference")
+            VALUES (${allocation.id}::uuid, ${baseSettled.toFixed(4)}::numeric, ${allocation.amount.toFixed(4)}::numeric, ${gain.toFixed(4)}::numeric)`);
+          continue;
+        }
         if (settlementMode && voucherRate) {
           if (!allocation.salesInvoiceId || voucher.kind !== CashVoucherKind.RECEIPT) {
             throw new BadRequestException({ code: 'VOUCHER_FX_NO_PARTY', message: 'A voucher on a foreign-currency account cannot name a customer or supplier or settle invoices' });
@@ -570,6 +619,19 @@ export class CashVouchersService {
             where: { id: invoice.id },
             data: { paidAmount: { increment: allocation.amount } },
           });
+          // Paid in company currency against a foreign-currency invoice: the foreign balance
+          // follows at the invoice's own rate.
+          const fxInvoice = await this.foreignDue(tx as never, companyId, invoice.id, true, 'PURCHASE');
+          if (fxInvoice) {
+            const clears = invoice.totalAmount.minus(invoice.paidAmount).equals(allocation.amount);
+            const left = fxInvoice.foreignTotal.minus(fxInvoice.foreignPaid);
+            const share = clears
+              ? left
+              : Prisma.Decimal.min(left, allocation.amount.div(fxInvoice.rate).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP));
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE purchase_invoice_fx SET "foreignPaid" = "foreignPaid" + ${share.toFixed(4)}::numeric
+               WHERE "invoiceId" = ${invoice.id}::uuid AND "companyId" = ${companyId}::uuid`);
+          }
         }
         allocated = allocated.plus(allocation.amount);
       }
@@ -649,8 +711,14 @@ export class CashVouchersService {
         // receipt's rate, and the difference as a realised exchange gain or loss.
         const baseTotal = settled.reduce((sum, row) => sum.plus(row.base), new Prisma.Decimal(0));
         const diffTotal = settled.reduce((sum, row) => sum.plus(row.diff), new Prisma.Decimal(0));
-        cashAmount = baseTotal.plus(diffTotal);
-        lines.push({ accountId: accounts.accountsReceivable, credit: baseTotal, description: 'Settlement of foreign-currency sales invoices' });
+        if (purchaseSettlement) {
+          // diff is the gain: payable cleared minus cash paid.
+          cashAmount = baseTotal.minus(diffTotal);
+          lines.push({ accountId: accounts.accountsPayable, debit: baseTotal, description: 'Settlement of foreign-currency purchase invoices' });
+        } else {
+          cashAmount = baseTotal.plus(diffTotal);
+          lines.push({ accountId: accounts.accountsReceivable, credit: baseTotal, description: 'Settlement of foreign-currency sales invoices' });
+        }
         // Only a settlement with a real difference needs the exchange accounts; an ordinary
         // receipt must not depend on them existing.
         const fxAccounts = diffTotal.isZero()
@@ -802,10 +870,33 @@ export class CashVouchersService {
           }
         }
         if (allocation.purchaseInvoiceId) {
-          await tx.purchaseInvoice.update({
-            where: { id: allocation.purchaseInvoiceId },
-            data: { paidAmount: { decrement: allocation.amount } },
-          });
+          const [taken] = await tx.$queryRaw<Array<{ baseSettled: Prisma.Decimal; foreignSettled: Prisma.Decimal }>>(Prisma.sql`
+            SELECT "baseSettled", "foreignSettled" FROM voucher_allocation_fx WHERE "allocationId" = ${allocation.id}::uuid`);
+          if (taken) {
+            await tx.purchaseInvoice.update({
+              where: { id: allocation.purchaseInvoiceId },
+              data: { paidAmount: { decrement: new Prisma.Decimal(taken.baseSettled) } },
+            });
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE purchase_invoice_fx SET "foreignPaid" = "foreignPaid" - ${new Prisma.Decimal(taken.foreignSettled).toFixed(4)}::numeric
+               WHERE "invoiceId" = ${allocation.purchaseInvoiceId}::uuid`);
+          } else {
+            await tx.purchaseInvoice.update({
+              where: { id: allocation.purchaseInvoiceId },
+              data: { paidAmount: { decrement: allocation.amount } },
+            });
+            const fxInvoice = await this.foreignDue(tx as never, companyId, allocation.purchaseInvoiceId, true, 'PURCHASE');
+            if (fxInvoice) {
+              const [inv] = await tx.$queryRaw<Array<{ paidAmount: Prisma.Decimal }>>(Prisma.sql`
+                SELECT "paidAmount" FROM purchase_invoices WHERE id = ${allocation.purchaseInvoiceId}::uuid`);
+              const paidBase = new Prisma.Decimal(inv.paidAmount);
+              const target = paidBase.lessThanOrEqualTo(0)
+                ? new Prisma.Decimal(0)
+                : Prisma.Decimal.min(fxInvoice.foreignTotal, paidBase.div(fxInvoice.rate).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP));
+              await tx.$executeRaw(Prisma.sql`
+                UPDATE purchase_invoice_fx SET "foreignPaid" = ${target.toFixed(4)}::numeric WHERE "invoiceId" = ${allocation.purchaseInvoiceId}::uuid`);
+            }
+          }
         }
       }
 
@@ -941,11 +1032,13 @@ export class CashVouchersService {
     companyId: string,
     invoiceId: string,
     lock = false,
+    kind: 'SALES' | 'PURCHASE' = 'SALES',
   ): Promise<{ currency: string; rate: Prisma.Decimal; foreignTotal: Prisma.Decimal; foreignPaid: Prisma.Decimal } | null> {
+    const table = Prisma.raw(kind === 'SALES' ? 'sales_invoice_fx' : 'purchase_invoice_fx');
     const rows = await q.$queryRaw<Array<{ currency: string; rate: Prisma.Decimal; foreignTotal: Prisma.Decimal; foreignPaid: Prisma.Decimal }>>(
       lock
-        ? Prisma.sql`SELECT currency, rate, "foreignTotal", "foreignPaid" FROM sales_invoice_fx WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`
-        : Prisma.sql`SELECT currency, rate, "foreignTotal", "foreignPaid" FROM sales_invoice_fx WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid`,
+        ? Prisma.sql`SELECT currency, rate, "foreignTotal", "foreignPaid" FROM ${table} WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid FOR UPDATE`
+        : Prisma.sql`SELECT currency, rate, "foreignTotal", "foreignPaid" FROM ${table} WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid`,
     );
     if (!rows[0]) return null;
     return {
@@ -960,24 +1053,30 @@ export class CashVouchersService {
   private async validateForeignSettlement(
     companyId: string,
     currency: string,
-    party: { customerId: string | null },
+    party: { customerId: string | null; supplierId?: string | null },
     allocations: AllocationInput[],
   ): Promise<void> {
+    const purchaseSide = Boolean(party.supplierId);
     const owed = new Map<string, Prisma.Decimal>();
     for (const allocation of allocations) {
-      const id = allocation.salesInvoiceId as string;
-      const invoice = await this.prisma.salesInvoice.findFirst({
-        where: { id, companyId, deletedAt: null },
-        select: { id: true, invoiceNumber: true, customerId: true, status: true },
-      });
-      if (!invoice) throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: 'An allocation references a missing sales invoice' });
-      if (invoice.customerId !== party.customerId) {
-        throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer` });
+      const id = (purchaseSide ? allocation.purchaseInvoiceId : allocation.salesInvoiceId) as string;
+      const invoice = purchaseSide
+        ? await this.prisma.purchaseInvoice.findFirst({
+            where: { id, companyId, deletedAt: null },
+            select: { id: true, invoiceNumber: true, supplierId: true, status: true },
+          }).then((row) => (row ? { id: row.id, invoiceNumber: row.invoiceNumber, customerId: row.supplierId as string | null, status: row.status } : null))
+        : await this.prisma.salesInvoice.findFirst({
+            where: { id, companyId, deletedAt: null },
+            select: { id: true, invoiceNumber: true, customerId: true, status: true },
+          });
+      if (!invoice) throw new BadRequestException({ code: 'VOUCHER_INVOICE_MISSING', message: `An allocation references a missing ${purchaseSide ? 'purchase' : 'sales'} invoice` });
+      if (invoice.customerId !== (purchaseSide ? party.supplierId : party.customerId)) {
+        throw new BadRequestException({ code: 'VOUCHER_INVOICE_OTHER_PARTY', message: `Invoice ${invoice.invoiceNumber} does not belong to this voucher's ${purchaseSide ? 'supplier' : 'customer'}` });
       }
       if (invoice.status !== InvoiceStatus.POSTED) {
         throw new BadRequestException({ code: 'VOUCHER_INVOICE_NOT_POSTED', message: `Sales invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid` });
       }
-      const fxInvoice = await this.foreignDue(this.prisma as never, companyId, id);
+      const fxInvoice = await this.foreignDue(this.prisma as never, companyId, id, false, purchaseSide ? 'PURCHASE' : 'SALES');
       if (!fxInvoice || fxInvoice.currency !== currency) {
         throw new BadRequestException({ code: 'VOUCHER_INVOICE_CURRENCY', message: `Sales invoice ${invoice.invoiceNumber} is not in ${currency}; this voucher moves ${currency}` });
       }
