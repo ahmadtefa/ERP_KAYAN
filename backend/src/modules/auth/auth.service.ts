@@ -45,11 +45,33 @@ export class AuthService {
   async login(
     username: string,
     password: string,
+    companyCode?: string,
     ip?: string,
     userAgent?: string,
   ) {
-    const user = await this.prisma.user.findUnique({
-      where: { username },
+    // The same username may exist in several companies, so the company has to
+    // be known before the account is: a typed code names it; with a single
+    // company the code is not needed; with several it is required.
+    const code = companyCode?.trim().toUpperCase() || '';
+    let companyFilter: { companyId?: string } = {};
+    if (code) {
+      const named = await this.prisma.company.findFirst({
+        where: { code, deletedAt: null },
+        select: { id: true },
+      });
+      // An unknown code gets the same generic refusal as a wrong password.
+      companyFilter = { companyId: named?.id ?? '00000000-0000-0000-0000-000000000000' };
+    } else {
+      const companies = await this.prisma.company.count({ where: { deletedAt: null, isActive: true } });
+      if (companies > 1) {
+        throw new BadRequestException({
+          code: 'LOGIN_COMPANY_CODE_REQUIRED',
+          message: 'This installation holds more than one company. Type the company code with the username',
+        });
+      }
+    }
+    const user = await this.prisma.user.findFirst({
+      where: { username, ...companyFilter },
       include: {
         company: { select: { isActive: true, deletedAt: true } },
         userRoles: {
@@ -213,6 +235,18 @@ export class AuthService {
     const invalid = new UnauthorizedException('Invalid username or current password');
     if (newPassword !== confirmPassword) {
       throw new BadRequestException('New password confirmation does not match');
+    }
+
+    if (!companyCode?.trim()) {
+      // The same username may exist in several companies: without the code the
+      // account cannot be told apart once there is more than one company.
+      const companies = await this.prisma.company.count({ where: { deletedAt: null, isActive: true } });
+      if (companies > 1) {
+        throw new BadRequestException({
+          code: 'LOGIN_COMPANY_CODE_REQUIRED',
+          message: 'This installation holds more than one company. Type the company code with the username',
+        });
+      }
     }
 
     const user = await this.prisma.user.findFirst({

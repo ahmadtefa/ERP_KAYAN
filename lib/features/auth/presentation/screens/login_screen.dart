@@ -37,6 +37,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _username = TextEditingController();
+  final _companyCode = TextEditingController();
   final _password = TextEditingController();
   late final CredentialsStore _credentials;
 
@@ -175,11 +176,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     if (remembered) {
       final username = await _credentials.savedUsername();
+      final savedCode = await _credentials.savedCompanyCode();
       final password = await _credentials.savedPassword();
       if (!mounted) return;
       setState(() {
         _remember = true;
         if (username != null) _username.text = username;
+        if (savedCode != null) _companyCode.text = savedCode;
         if (password != null) _password.text = password;
       });
     }
@@ -188,6 +191,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void dispose() {
     _username.dispose();
+    _companyCode.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -312,6 +316,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             '/auth/change-password',
                             body: {
                               'username': currentUser,
+                              if (_companyCode.text.trim().isNotEmpty)
+                                'companyCode': _companyCode.text.trim(),
                               'currentPassword': current,
                               'newPassword': next,
                               'confirmPassword': confirmPassword.text,
@@ -369,6 +375,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _busy = true);
+    ref.read(loginCompanyCodeProvider.notifier).set(_companyCode.text);
     final result = await ref
         .read(authControllerProvider.notifier)
         .signIn(username: _username.text, password: _password.text);
@@ -381,6 +388,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         remember: _remember,
         username: _username.text.trim(),
         password: _password.text,
+        companyCode: _companyCode.text,
       );
     }
 
@@ -400,6 +408,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() {
       _remember = false;
       _username.clear();
+      _companyCode.clear();
       _password.clear();
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -469,6 +478,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final form = _SignInForm(
       formKey: _formKey,
       username: _username,
+      companyCode: _companyCode,
       password: _password,
       obscure: _obscure,
       busy: _busy,
@@ -547,6 +557,7 @@ class _SignInForm extends StatelessWidget {
   const _SignInForm({
     required this.formKey,
     required this.username,
+    required this.companyCode,
     required this.password,
     required this.obscure,
     required this.busy,
@@ -561,6 +572,7 @@ class _SignInForm extends StatelessWidget {
 
   final GlobalKey<FormState> formKey;
   final TextEditingController username;
+  final TextEditingController companyCode;
   final TextEditingController password;
   final bool obscure;
   final bool busy;
@@ -618,6 +630,23 @@ class _SignInForm extends StatelessWidget {
                 (value == null || value.trim().isEmpty)
                 ? l10n.usernameRequired
                 : null,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextFormField(
+            controller: companyCode,
+            enabled: !busy,
+            textCapitalization: TextCapitalization.characters,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'كود الشركة'
+                  : 'Company code',
+              helperText: Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'اتركه فارغاً إذا كان البرنامج يضم شركة واحدة فقط.'
+                  : 'Leave it empty if the program holds only one company.',
+              helperMaxLines: 2,
+              prefixIcon: const Icon(Icons.apartment_outlined),
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           TextFormField(

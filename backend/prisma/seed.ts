@@ -224,7 +224,7 @@ async function main(): Promise<void> {
   const passwordHash = await argon2.hash(adminPassword);
 
   const admin = await prisma.user.upsert({
-    where: { username: adminUsername },
+    where: { companyId_username: { companyId: company.id, username: adminUsername } },
     update: {},
     create: {
       companyId: company.id,

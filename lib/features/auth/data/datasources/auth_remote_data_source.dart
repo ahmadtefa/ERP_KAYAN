@@ -17,9 +17,11 @@ abstract class AuthRemoteDataSource {
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
-  const AuthRemoteDataSourceImpl(this._client);
+  const AuthRemoteDataSourceImpl(this._client, {String Function()? companyCode})
+    : _companyCode = companyCode;
 
   final ApiClient _client;
+  final String Function()? _companyCode;
 
   static const _login = '/auth/login';
   static const _me = '/auth/me';
@@ -30,9 +32,14 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String username,
     required String password,
   }) {
+    final code = (_companyCode?.call() ?? '').trim();
     return _client.post(
       _login,
-      body: {'username': username, 'password': password},
+      body: {
+        'username': username,
+        'password': password,
+        if (code.isNotEmpty) 'companyCode': code,
+      },
     );
   }
 

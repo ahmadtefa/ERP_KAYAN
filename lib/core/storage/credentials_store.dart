@@ -50,6 +50,7 @@ class CredentialsStore {
 
   static const _kRemember = 'login.remember';
   static const _kUsername = 'login.username';
+  static const _kCompanyCode = 'login.companyCode';
   static const _kPassword = 'login.password';
 
   static const FlutterSecureStorage _secure = FlutterSecureStorage();
@@ -101,6 +102,15 @@ class CredentialsStore {
     }
   }
 
+  Future<String?> savedCompanyCode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kCompanyCode);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The saved password, only ever from the keystore — never from plain
   /// preferences. Null on the web and whenever nothing was saved.
   Future<String?> savedPassword() async {
@@ -117,6 +127,7 @@ class CredentialsStore {
     required bool remember,
     required String username,
     String? password,
+    String? companyCode,
   }) async {
     final SharedPreferences prefs;
     try {
@@ -130,6 +141,11 @@ class CredentialsStore {
       return;
     }
     await prefs.setString(_kUsername, username);
+    if (companyCode != null && companyCode.trim().isNotEmpty) {
+      await prefs.setString(_kCompanyCode, companyCode.trim());
+    } else {
+      await prefs.remove(_kCompanyCode);
+    }
     if (password != null && password.isNotEmpty && canStorePassword) {
       try {
         await _keystoreWrite(_kPassword, password);
@@ -154,6 +170,7 @@ class CredentialsStore {
 
   Future<void> _forget(SharedPreferences prefs) async {
     await prefs.remove(_kUsername);
+    await prefs.remove(_kCompanyCode);
     try {
       await _keystoreDelete(_kPassword);
     } catch (_) {

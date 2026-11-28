@@ -44,6 +44,7 @@ function build(overrides: Record<string, unknown> = {}) {
   const prisma = {
     user: {
       findUnique: jest.fn().mockResolvedValue(userRow),
+      findFirst: jest.fn().mockResolvedValue(userRow),
       update: jest.fn().mockResolvedValue({ failedLoginCount: 1 }),
       count: jest.fn().mockResolvedValue(5),
     },
@@ -65,7 +66,7 @@ describe('POST /auth/login outcomes', () => {
     jest.mocked(argon2.verify).mockResolvedValue(true);
     const { service, audit } = build();
 
-    const result = await service.login('admin', 'correct-password', '192.168.1.30');
+    const result = await service.login('admin', 'correct-password', undefined, '192.168.1.30');
 
     expect(result.accessToken).toBe('access-token');
     expect(typeof result.refreshToken).toBe('string');
@@ -105,6 +106,7 @@ describe('POST /auth/login outcomes', () => {
     jest.mocked(argon2.verify).mockResolvedValue(false);
     const unknown = build();
     unknown.prisma.user.findUnique.mockResolvedValue(null);
+    unknown.prisma.user.findFirst.mockResolvedValue(null);
 
     const wrongPassword = build();
     const a = await unknown.service.login('ghost', 'whatever').catch((e) => e);
@@ -159,6 +161,12 @@ describe('POST /auth/login outcomes', () => {
           expiresAt: new Date(Date.now() + 60_000),
           user: userRow,
         }),
+      findFirst: jest.fn().mockResolvedValue({
+          id: 'rt-3',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: userRow,
+        }),
         updateMany,
       };
       await expect(service.refresh('live-token')).rejects.toMatchObject({ status: 401 });
@@ -171,6 +179,12 @@ describe('POST /auth/login outcomes', () => {
     const updateMany = jest.fn();
     (prisma as unknown as { refreshToken: Record<string, unknown> }).refreshToken = {
       findUnique: jest.fn().mockResolvedValue({
+        id: 'rt-2',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+        user: userRow,
+      }),
+      findFirst: jest.fn().mockResolvedValue({
         id: 'rt-2',
         revokedAt: null,
         expiresAt: new Date(Date.now() + 60_000),
@@ -200,6 +214,7 @@ describe('POST /auth/login outcomes', () => {
     const { service, prisma } = build();
     (prisma as unknown as { refreshToken: Record<string, unknown> }).refreshToken = {
       findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
       updateMany: jest.fn(),
     };
     await expect(service.refresh('not-a-token')).rejects.toBeInstanceOf(
@@ -210,6 +225,12 @@ describe('POST /auth/login outcomes', () => {
     (revoked.prisma as unknown as { refreshToken: Record<string, unknown> }).refreshToken =
       {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'rt-1',
+          revokedAt: new Date(),
+          expiresAt: new Date(Date.now() + 60_000),
+          user: revoked.userRow,
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'rt-1',
           revokedAt: new Date(),
           expiresAt: new Date(Date.now() + 60_000),

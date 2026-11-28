@@ -25,6 +25,7 @@ describe('self-service password change', () => {
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findFirst: jest.fn().mockResolvedValue(user),
         update: jest.fn().mockResolvedValue({ failedLoginCount: 1 }),

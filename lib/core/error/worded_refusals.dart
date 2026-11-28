@@ -458,6 +458,10 @@ const Map<String, List<String>> wordedRefusals = {
     'كُتب سعر صرف لكن الفاتورة بعملة الشركة. اختر العملة الأجنبية للفاتورة أو امسح سعر الصرف ثم أعد المحاولة. لم يُحفظ شيء.',
     'An exchange rate was typed but the invoice is in the company currency. Choose the foreign currency for the invoice or clear the exchange rate, and try again. Nothing was saved.',
   ],
+  'LOGIN_COMPANY_CODE_REQUIRED': [
+    'لم يتم تسجيل الدخول لأن البرنامج يضم أكثر من شركة ولم يُكتب كود الشركة. اكتب كود شركتك في خانة كود الشركة ثم أعد المحاولة.',
+    'You were not signed in because the program holds more than one company and no company code was typed. Type your company code in the Company code field and try again.',
+  ],
   'EOS_PERCENT_BAD': [
     'نسبة المخصص غير صحيحة. اكتب رقمًا أكبر من صفر ولا يزيد على 100 ثم احفظ مرة أخرى. لم يُحفظ شيء.',
     'The accrual percent is not valid. Type a number above 0 and not more than 100, then save again. Nothing was saved.',

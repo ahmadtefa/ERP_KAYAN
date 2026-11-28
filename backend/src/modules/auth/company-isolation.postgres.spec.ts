@@ -172,12 +172,43 @@ const password = 'initial-password-123';
   });
 
   it('signs each person into their own company from the username alone', async () => {
-    const a = await auth.login(A.username, password);
-    const b = await auth.login(B.username, password);
+    const a = await auth.login(A.username, password, A.code);
+    const b = await auth.login(B.username, password, B.code);
     expect(a.user.companyId).toBe(A.companyId);
     expect(a.user.branchId).toBe(A.branchId);
     expect(b.user.companyId).toBe(B.companyId);
     expect(b.user.branchId).toBe(B.branchId);
+  });
+
+  it('the same username can exist in two companies, and the company code picks the account', async () => {
+    const shared = `shared-${randomUUID().slice(0, 8)}`;
+    const mk = async (side: typeof A, name: string, pw: string) => prisma.user.create({
+      data: { companyId: side.companyId, username: shared, fullNameEn: name, fullNameAr: name, passwordHash: await argon2.hash(pw) },
+    });
+    const inA = await mk(A, 'Shared in A', 'password-for-company-a-1');
+    const inB = await mk(B, 'Shared in B', 'password-for-company-b-1');
+    try {
+      // Inside one company a name is still unique.
+      await expect(mk(A, 'Duplicate in A', 'x-password-123456')).rejects.toMatchObject({ code: 'P2002' });
+      const a = await auth.login(shared, 'password-for-company-a-1', A.code);
+      const b = await auth.login(shared, 'password-for-company-b-1', B.code);
+      expect(a.user.companyId).toBe(A.companyId);
+      expect(b.user.companyId).toBe(B.companyId);
+      // A company's password does not open the other company's account.
+      await expect(auth.login(shared, 'password-for-company-a-1', B.code)).rejects.toBeInstanceOf(UnauthorizedException);
+      // The code is case-insensitive; an unknown code is refused like a wrong password.
+      await expect(auth.login(shared, 'password-for-company-a-1', A.code.toLowerCase())).resolves.toMatchObject({ user: { companyId: A.companyId } });
+      await expect(auth.login(shared, 'password-for-company-a-1', 'NOSUCHCODE')).rejects.toMatchObject({ status: 401 });
+      // With two live companies the code is required.
+      await expect(auth.login(shared, 'password-for-company-a-1')).rejects.toMatchObject({ response: { code: 'LOGIN_COMPANY_CODE_REQUIRED' } });
+      // Failed attempts are counted per account, not across the companies.
+      await expect(auth.login(shared, 'wrong-password-123', A.code)).rejects.toMatchObject({ status: 401 });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: inA.id } })).failedLoginCount).toBeGreaterThan(0);
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: inB.id } })).failedLoginCount).toBe(0);
+    } finally {
+      await prisma.refreshToken.deleteMany({ where: { userId: { in: [inA.id, inB.id] } } });
+      await prisma.user.deleteMany({ where: { id: { in: [inA.id, inB.id] } } });
+    }
   });
 
   it('reads one company profile per company and never the other one', async () => {
@@ -186,18 +217,18 @@ const password = 'initial-password-123';
   });
 
   it('accepts a live company on every request', async () => {
-    const session = await auth.login(A.username, password);
+    const session = await auth.login(A.username, password, A.code);
     const { ctx, request } = context(session.accessToken);
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
     expect(request.user?.companyId).toBe(A.companyId);
   });
 
   it('a suspended company stops sign-in, refresh and requests, and only that company', async () => {
-    const a = await auth.login(A.username, password);
-    const b = await auth.login(B.username, password);
+    const a = await auth.login(A.username, password, A.code);
+    const b = await auth.login(B.username, password, B.code);
     await prisma.company.update({ where: { id: A.companyId }, data: { isActive: false } });
 
-    await expect(auth.login(A.username, password)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(auth.login(A.username, password, A.code)).rejects.toBeInstanceOf(UnauthorizedException);
     await expect(auth.refresh(a.refreshToken)).rejects.toBeInstanceOf(UnauthorizedException);
     await expect(guard.canActivate(context(a.accessToken).ctx)).rejects.toBeInstanceOf(UnauthorizedException);
     // The refusal also ended A's sessions.
@@ -205,17 +236,17 @@ const password = 'initial-password-123';
 
     // The other company is not affected at all.
     await expect(guard.canActivate(context(b.accessToken).ctx)).resolves.toBe(true);
-    await expect(auth.login(B.username, password)).resolves.toMatchObject({ user: { companyId: B.companyId } });
+    await expect(auth.login(B.username, password, B.code)).resolves.toMatchObject({ user: { companyId: B.companyId } });
 
     // Reactivating lets people sign in again.
     await prisma.company.update({ where: { id: A.companyId }, data: { isActive: true } });
-    await expect(auth.login(A.username, password)).resolves.toMatchObject({ user: { companyId: A.companyId } });
+    await expect(auth.login(A.username, password, A.code)).resolves.toMatchObject({ user: { companyId: A.companyId } });
   });
 
   it('a retired company (deletedAt) is refused the same way', async () => {
-    const a = await auth.login(A.username, password);
+    const a = await auth.login(A.username, password, A.code);
     await prisma.company.update({ where: { id: A.companyId }, data: { deletedAt: new Date() } });
-    await expect(auth.login(A.username, password)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(auth.login(A.username, password, A.code)).rejects.toBeInstanceOf(UnauthorizedException);
     await expect(guard.canActivate(context(a.accessToken).ctx)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
@@ -238,17 +269,4 @@ const password = 'initial-password-123';
     ).rejects.toMatchObject({ status: 401, message: 'Invalid username or current password' });
   });
 
-  it('the username is unique across companies, so a second company cannot reuse it', async () => {
-    await expect(
-      prisma.user.create({
-        data: {
-          companyId: B.companyId,
-          username: A.username,
-          fullNameEn: 'Clash',
-          fullNameAr: 'تعارض',
-          passwordHash: 'x',
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'P2002' });
-  });
 });

@@ -23,6 +23,7 @@ export class AuthController {
     return this.auth.login(
       dto.username,
       dto.password,
+      dto.companyCode,
       req.ip ?? undefined,
       req.headers['user-agent'] ?? undefined,
     );

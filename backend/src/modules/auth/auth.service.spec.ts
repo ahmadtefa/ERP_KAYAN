@@ -13,8 +13,23 @@ describe('refresh session security', () => {
     verify.mockResolvedValue(true);
     const jwt = { signAsync: jest.fn().mockResolvedValue('access-token') };
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          username: 'admin',
+          passwordHash: 'hash',
+          companyId: 'company-1',
+          isActive: true,
+          isSuperAdmin: true,
+          tokenVersion: 7,
+          deletedAt: null,
+          company: { isActive: true, deletedAt: null },
+          lockedUntil: null,
+          userRoles: [],
+          userPermissions: [],
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'user-1',
           username: 'admin',
           passwordHash: 'hash',
@@ -57,8 +72,21 @@ describe('refresh session security', () => {
       .mockResolvedValueOnce({ failedLoginCount: 5 })
       .mockResolvedValueOnce({});
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          username: 'employee',
+          passwordHash: 'hash',
+          companyId: 'company-1',
+          isActive: true,
+          deletedAt: null,
+          company: { isActive: true, deletedAt: null },
+          lockedUntil: null,
+          failedLoginCount: 4,
+          userRoles: [],
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'user-1',
           username: 'employee',
           passwordHash: 'hash',
@@ -81,7 +109,7 @@ describe('refresh session security', () => {
 
     try {
       await expect(
-        service.login('employee', 'wrong-password', '127.0.0.1', 'test-agent'),
+        service.login('employee', 'wrong-password', undefined, '127.0.0.1', 'test-agent'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(update).toHaveBeenNthCalledWith(1, {
         where: { id: 'user-1' },
@@ -100,8 +128,22 @@ describe('refresh session security', () => {
   it('rejects a refresh token that another concurrent request already rotated', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       refreshToken: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            id: 'active-user',
+            deletedAt: null,
+            company: { isActive: true, deletedAt: null },
+            isActive: true,
+            userRoles: [],
+            branches: [],
+          },
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'refresh-id',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 60_000),
@@ -140,8 +182,20 @@ describe('refresh session security', () => {
   it('revokes sessions and rejects refresh when the account is inactive', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 2 });
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       refreshToken: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            id: 'inactive-user',
+            deletedAt: null,
+            company: { isActive: true, deletedAt: null },
+            isActive: false,
+          },
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'refresh-id',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 60_000),
@@ -235,8 +289,10 @@ describe('refresh session security', () => {
     const userBranchFindMany = jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]);
     const jwt = { signAsync: jest.fn().mockResolvedValue('access-token') };
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findUnique: jest.fn().mockResolvedValue(user),
+      findFirst: jest.fn().mockResolvedValue(user),
         update: jest.fn().mockResolvedValue({}),
       },
       userBranch: { findMany: userBranchFindMany },
@@ -284,8 +340,21 @@ describe('refresh session security', () => {
       .mockResolvedValueOnce({ failedLoginCount: 5 })
       .mockResolvedValueOnce({});
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          username: 'employee',
+          passwordHash: 'hash',
+          companyId: 'company-1',
+          isActive: true,
+          deletedAt: null,
+          company: { isActive: true, deletedAt: null },
+          lockedUntil: null,
+          failedLoginCount: 4,
+          userRoles: [],
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'user-1',
           username: 'employee',
           passwordHash: 'hash',
@@ -308,7 +377,7 @@ describe('refresh session security', () => {
 
     try {
       await expect(
-        service.login('employee', 'wrong-password', '127.0.0.1', 'test-agent'),
+        service.login('employee', 'wrong-password', undefined, '127.0.0.1', 'test-agent'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(update).toHaveBeenNthCalledWith(1, {
         where: { id: 'user-1' },
@@ -327,8 +396,22 @@ describe('refresh session security', () => {
   it('rejects a refresh token that another concurrent request already rotated', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       refreshToken: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            id: 'active-user',
+            deletedAt: null,
+            company: { isActive: true, deletedAt: null },
+            isActive: true,
+            userRoles: [],
+            branches: [],
+          },
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'refresh-id',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 60_000),
@@ -367,8 +450,20 @@ describe('refresh session security', () => {
   it('revokes sessions and rejects refresh when the account is inactive', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 2 });
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       refreshToken: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            id: 'inactive-user',
+            deletedAt: null,
+            company: { isActive: true, deletedAt: null },
+            isActive: false,
+          },
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'refresh-id',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 60_000),
@@ -439,8 +534,10 @@ describe('direct per-user permission grants', () => {
     verify.mockResolvedValue(true as never);
     const signAsync = jest.fn().mockResolvedValue('access-token');
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       user: {
         findUnique: jest.fn().mockResolvedValue(userWithGrants()),
+      findFirst: jest.fn().mockResolvedValue(userWithGrants()),
         update: jest.fn().mockResolvedValue({}),
       },
       userBranch: { findMany: jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]) },
@@ -469,8 +566,23 @@ describe('direct per-user permission grants', () => {
   it('includes direct grants when a session is refreshed', async () => {
     const signAsync = jest.fn().mockResolvedValue('access-token');
     const prisma = {
+      company: { count: jest.fn().mockResolvedValue(1) },
       refreshToken: {
         findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            ...userWithGrants(),
+            branches: [
+              {
+                branchId: 'branch-1',
+                branch: { companyId: 'company-1', isActive: true, deletedAt: null },
+              },
+            ],
+          },
+        }),
+      findFirst: jest.fn().mockResolvedValue({
           id: 'refresh-id',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 60_000),

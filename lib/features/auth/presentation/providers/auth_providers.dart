@@ -57,8 +57,26 @@ class SessionStorageNotifier extends Notifier<bool> {
 final volatileSessionProvider =
     NotifierProvider<SessionStorageNotifier, bool>(SessionStorageNotifier.new);
 
+/// The company code typed on the sign-in form. The same username can exist in
+/// several companies, so the code goes to the server with the username; it is
+/// empty when the installation holds a single company.
+class LoginCompanyCodeNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void set(String value) => state = value.trim();
+}
+
+final loginCompanyCodeProvider =
+    NotifierProvider<LoginCompanyCodeNotifier, String>(
+      LoginCompanyCodeNotifier.new,
+    );
+
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
-  (ref) => AuthRemoteDataSourceImpl(ref.watch(apiClientProvider)),
+  (ref) => AuthRemoteDataSourceImpl(
+    ref.watch(apiClientProvider),
+    companyCode: () => ref.read(loginCompanyCodeProvider),
+  ),
 );
 
 final authRepositoryProvider = Provider<AuthRepository>(

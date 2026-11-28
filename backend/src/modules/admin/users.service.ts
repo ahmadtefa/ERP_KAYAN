@@ -23,10 +23,11 @@ import { permissionWarnings, warningsForSet } from '../../common/rbac/permission
 /// Who may be changed, and by whom.
 const SYSTEM_USERNAME = 'admin';
 
-/// A username and an email address are each unique across the whole
-/// installation (every company), so a clash can be with an account of another
-/// company. The message says what to do and never says whose account it is or
-/// which company it belongs to.
+/// A username is unique inside its company (the same name may exist in another
+/// company, which is why sign-in asks for the company code); an email address is
+/// unique across the installation, so that clash can be with another company's
+/// account. The message never says whose account it is or which company it
+/// belongs to.
 export function uniqueAccountClash(error: unknown): ConflictException | null {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
   const where = `${JSON.stringify(error.meta ?? {})} ${error.message}`.toLowerCase();
@@ -145,7 +146,7 @@ export class UsersService {
     if (username === SYSTEM_USERNAME) {
       throw new ConflictException({ code: 'USER_NAME_RESERVED', message: 'That username is reserved' });
     }
-    const existing = await this.prisma.user.findUnique({ where: { username } });
+    const existing = await this.prisma.user.findUnique({ where: { companyId_username: { companyId, username } } });
     if (existing) throw new ConflictException({ code: 'USER_USERNAME_TAKEN', message: 'That username is already taken. Choose a different username.' });
 
     await this.assertRolesAssignable(
