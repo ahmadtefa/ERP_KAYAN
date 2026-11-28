@@ -28,7 +28,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(_MasterDataApi()),
         currentUserProvider.overrideWithValue(const AppUser(id:'test',username:'test',fullName:'Test',
-          companyId:'synthetic',permissions:['inventory.warehouses.manage'])),
+          companyId:'synthetic',permissions:['inventory.warehouses.manage','parties.customers.create','parties.customers.update','parties.suppliers.create','parties.suppliers.update'])),
         exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
       addTearDown(container.dispose);
       final router=GoRouter(initialLocation:'/data',routes:[
