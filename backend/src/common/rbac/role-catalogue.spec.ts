@@ -110,4 +110,21 @@ describe('role catalogue', () => {
     }
     expect(permissionsForRole({ permissions: [] }, CODES)).toEqual([]);
   });
+  it('keeps pay and personal data out of every wildcard and prefix; only exact grants reach it', () => {
+    const sensitive = CODES.filter((c) => c.startsWith('hr.') || c.startsWith('payroll.'));
+    expect(sensitive.length).toBeGreaterThan(10);
+    for (const code of ['INTERNAL_AUDITOR', 'READ_ONLY', 'REPORT_USER', 'GENERAL_MANAGER', 'FINANCE_MANAGER']) {
+      const role = SEEDED.find((r) => r.code === code);
+      const granted = permissionsForRole(role!, CODES);
+      expect(granted.filter((c) => c.startsWith('hr.') || c.startsWith('payroll.'))).toEqual([]);
+    }
+    const hr = permissionsForRole(SEEDED.find((r) => r.code === 'HR_MANAGER')!, CODES);
+    expect(hr).toContain('hr.salary.read');
+    expect(hr).toContain('payroll.run.create');
+    for (const code of ['payroll.run.approve', 'payroll.run.post', 'payroll.run.pay', 'payroll.settings.manage']) expect(hr).not.toContain(code);
+    const accountant = permissionsForRole(SEEDED.find((r) => r.code === 'ACCOUNTANT')!, CODES);
+    expect(accountant).toContain('payroll.run.post');
+    expect(accountant).not.toContain('hr.salary.read');
+    expect(accountant).not.toContain('hr.employee.read');
+  });
 });

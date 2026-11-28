@@ -164,6 +164,38 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
       'dashboard.top',
       'dashboard.recent',
       'notifications.read',
+      // Run steps and totals, never per-employee salary or personal data.
+      'payroll.run.read',
+      'payroll.run.approve',
+      'payroll.run.post',
+      'payroll.run.pay',
+      'payroll.report.read',
+    ],
+    seeded: true,
+  },
+  {
+    code: 'HR_MANAGER',
+    nameEn: 'HR manager',
+    nameAr: 'مدير الموارد البشرية',
+    descriptionEn: 'Keeps the employee file, salary structures, attendance and loans, and prepares payroll runs. Cannot approve, post or change insurance and tax settings.',
+    descriptionAr: 'يمسك ملف الموظفين وهياكل الرواتب والحضور والسلف ويعد مسيرات الرواتب. لا يعتمد ولا يرحّل ولا يغيّر إعدادات التأمينات والضريبة.',
+    category: 'MANAGEMENT',
+    permissions: [
+      'hr.employee.read',
+      'hr.employee.manage',
+      'hr.attendance.read',
+      'hr.attendance.manage',
+      'hr.salary.read',
+      'hr.salary.manage',
+      'hr.loan.read',
+      'hr.loan.manage',
+      'payroll.run.read',
+      'payroll.run.create',
+      'payroll.payslip.print',
+      'payroll.report.read',
+      'payroll.settings.read',
+      'dashboard.view',
+      'notifications.read',
     ],
     seeded: true,
   },
@@ -455,6 +487,12 @@ const EXACT_PREFIXES = new Set(['*', '.read']);
 
 // These grants must always be assigned by their exact permission code. A broad
 // module prefix or generic read-only role is not an explicit price grant.
+/// People and pay data: nothing under hr. or payroll. is reached by a prefix or by the
+/// generic read-only wildcard, so a read-only user or an auditor never sees a salary by
+/// accident. Each is granted by its exact code.
+const isExplicitOnly = (code: string): boolean =>
+  EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code) || code.startsWith('hr.') || code.startsWith('payroll.');
+
 const EXPLICIT_ONLY_PRICE_PERMISSIONS = new Set([
   'sales.price.read',
   'purchases.price.read',
@@ -485,14 +523,14 @@ export function permissionsForRole(
         // The wildcard never reaches the admin area (audit trail, approvals):
         // those reads must be granted by exact code.
         if (code.endsWith('.read') && !code.startsWith('admin.') &&
-            !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code)) wanted.add(code);
+            !isExplicitOnly(code)) wanted.add(code);
       }
       continue;
     }
     for (const code of catalogue) {
       const explicit = code === prefix;
       if ((explicit || code.startsWith(prefix)) &&
-          (explicit || !EXPLICIT_ONLY_PRICE_PERMISSIONS.has(code))) wanted.add(code);
+          (explicit || !isExplicitOnly(code))) wanted.add(code);
     }
   }
   return [...wanted].sort();

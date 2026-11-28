@@ -23,6 +23,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BackupModule } from './modules/backup/backup.module';
 import { CashModule } from './modules/cash/cash.module';
 import { ChequesModule } from './modules/cheques/cheques.module';
+import { HrModule } from './modules/hr/hr.module';
 import { CurrencyModule } from './modules/currency/currency.module';
 import { WithholdingModule } from './modules/withholding/withholding.module';
 import { InstallmentsModule } from './modules/installments/installments.module';
@@ -67,6 +68,7 @@ import { SearchModule } from './modules/search/search.module';
     ChequesModule,
     WithholdingModule,
     CurrencyModule,
+    HrModule,
     SerialsModule,
     CommissionsModule,
     InstallmentsModule,

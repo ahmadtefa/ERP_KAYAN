@@ -458,6 +458,102 @@ const Map<String, List<String>> wordedRefusals = {
     'لا يمكن توزيع سطر في مستند بعملة أجنبية على عدة مراكز تكلفة. اختر مركز تكلفة واحدًا للسطر ثم أعد المحاولة. لم يُحفظ شيء.',
     'A line in a foreign-currency document cannot be split across several cost centers. Choose one cost center for the line and try again. Nothing was saved.',
   ],
+  'HR_AMOUNT_BAD': [
+    'أحد المبالغ المدخلة غير صحيح. اكتب المبلغ بالأرقام فقط وبحد أقصى أربع خانات عشرية، وبقيمة مسموحة، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'One of the amounts entered is not valid. Enter the amount in digits only, with at most four decimals and an allowed value, then try again. Nothing was saved.',
+  ],
+  'HR_DATE_BAD': [
+    'أحد التواريخ المدخلة غير صحيح. اختر تاريخًا حقيقيًا بالشكل سنة-شهر-يوم ثم أعد المحاولة. لم يُحفظ شيء.',
+    'One of the dates entered is not valid. Choose a real date in the form year-month-day and try again. Nothing was saved.',
+  ],
+  'HR_MONTH_BAD': [
+    'الشهر المدخل غير صحيح. اختر الشهر بالشكل سنة-شهر مثل 2026-03 ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The month entered is not valid. Choose the month in the form year-month, for example 2026-03, and try again. Nothing was saved.',
+  ],
+  'HR_RATE_BAD': [
+    'النسبة المدخلة غير صحيحة، ويجب أن تكون بين صفر ومئة. اكتب النسبة بالأرقام فقط ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The percentage entered is not valid. It must be between zero and one hundred. Enter it in digits only and try again. Nothing was saved.',
+  ],
+  'HR_BRACKETS_BAD': [
+    'شرائح الضريبة غير مرتبة بشكل صحيح في الصف {row}. ابدأ الشريحة الأولى من صفر، واجعل كل شريحة تبدأ من حيث انتهت التي قبلها، واترك الحد الأعلى فارغًا للشريحة الأخيرة فقط، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The tax brackets are not in a valid order at row {row}. Start the first bracket at zero, make each bracket start where the one before it ends, and leave the upper limit empty only on the last bracket, then try again. Nothing was saved.',
+  ],
+  'HR_NATIONAL_ID_BAD': [
+    'الرقم القومي يجب أن يتكون من 14 رقمًا بالضبط. راجع الرقم واكتبه بالأرقام فقط ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The national ID must be exactly 14 digits. Check the number, enter digits only and try again. Nothing was saved.',
+  ],
+  'HR_EMPLOYEE_NOT_FOUND': [
+    'لم يُعثر على هذا الموظف. حدّث قائمة الموظفين واختر الموظف من جديد. لم يتغير شيء.',
+    'This employee could not be found. Refresh the employee list and choose the employee again. Nothing changed.',
+  ],
+  'HR_FIELD_REQUIRED': [
+    'بيان مطلوب لم يُكتب، مثل كود الموظف أو اسمه أو اسم البدل. اكتب البيانات المطلوبة ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A required detail is missing, such as the employee code, name or allowance name. Fill in the required details and try again. Nothing was saved.',
+  ],
+  'HR_FIELD_LONG': [
+    'أحد النصوص المدخلة أطول من المسموح. اكتب نصًا أقصر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'One of the texts entered is longer than allowed. Enter a shorter text and try again. Nothing was saved.',
+  ],
+  'HR_BRANCH_NOT_FOUND': [
+    'الفرع المختار غير موجود. اختر فرعًا من القائمة ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The branch you chose does not exist. Choose a branch from the list and try again. Nothing was saved.',
+  ],
+  'HR_COST_CENTER_NOT_FOUND': [
+    'مركز التكلفة المختار غير موجود. اختر مركز تكلفة من القائمة ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The cost center you chose does not exist. Choose a cost center from the list and try again. Nothing was saved.',
+  ],
+  'HR_EMPLOYEE_CODE_DUPLICATE': [
+    'يوجد موظف بنفس الكود {code}. اكتب كودًا مختلفًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'An employee with the code {code} already exists. Enter a different code and try again. Nothing was saved.',
+  ],
+  'HR_STATUS_BAD': [
+    'حالة الموظف غير صحيحة. اختر نشط أو غادر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The employee status is not valid. Choose active or left and try again. Nothing was saved.',
+  ],
+  'HR_LEAVE_DATE_REQUIRED': [
+    'لا بد من كتابة تاريخ ترك العمل عند تغيير حالة الموظف إلى غادر. اكتب التاريخ ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A leaving date is required when the employee status is changed to left. Enter the date and try again. Nothing was saved.',
+  ],
+  'HR_LEAVE_BEFORE_HIRE': [
+    'تاريخ ترك العمل قبل تاريخ التعيين. صحّح أحد التاريخين ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The leaving date is before the hire date. Correct one of the two dates and try again. Nothing was saved.',
+  ],
+  'HR_ITEM_KIND_BAD': [
+    'نوع أحد بنود الراتب غير صحيح في الصف {row}. اختر بدلًا أو خصمًا ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The type of a salary line at row {row} is not valid. Choose allowance or deduction and try again. Nothing was saved.',
+  ],
+  'HR_SALARY_DATE_EXISTS': [
+    'يوجد هيكل راتب لهذا الموظف يبدأ في {date}. اختر تاريخ سريان أحدث ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A salary structure for this employee already starts on {date}. Choose a later effective date and try again. Nothing was saved.',
+  ],
+  'HR_ATTENDANCE_EMPTY': [
+    'لا توجد صفوف حضور للحفظ. أدخل بيانات موظف واحد على الأقل ثم احفظ. لم يُحفظ شيء.',
+    'There are no attendance rows to save. Enter the details of at least one employee and save. Nothing was saved.',
+  ],
+  'HR_ATTENDANCE_DAYS_INVALID': [
+    'عدد الأيام المدخل لا يناسب شهر {month}، وعدد أيامه {days}. اكتب أيامًا لا تزيد على أيام الشهر ثم احفظ مرة أخرى. لم يُحفظ شيء.',
+    'The number of days entered does not fit the month {month}, which has {days} days. Enter days that do not exceed the days of the month and save again. Nothing was saved.',
+  ],
+  'HR_ATTENDANCE_DUPLICATE': [
+    'ظهر أحد الموظفين مرتين في قائمة الحضور. احذف الصف المكرر ثم احفظ. لم يُحفظ شيء.',
+    'An employee appears twice in the attendance list. Remove the repeated row and save. Nothing was saved.',
+  ],
+  'HR_SETTINGS_DATE_EXISTS': [
+    'توجد إعدادات رواتب تبدأ في {date}. اختر تاريخ سريان أحدث ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A payroll settings set already starts on {date}. Choose a later effective date and try again. Nothing was saved.',
+  ],
+  'HR_SETTINGS_NOT_FOUND': [
+    'لم يُعثر على إعدادات الرواتب المطلوبة. حدّث الشاشة واختر الإعدادات من جديد. لم يتغير شيء.',
+    'The payroll settings could not be found. Refresh the screen and choose the settings again. Nothing changed.',
+  ],
+  'HR_SETTINGS_ALREADY_CONFIRMED': [
+    'تم تأكيد هذه الإعدادات من قبل ولا يلزم تأكيدها مرة أخرى. لتغيير الأرقام أضف إعدادات جديدة بتاريخ سريان جديد. لم يتغير شيء.',
+    'These settings were already confirmed and do not need confirming again. To change the figures, add new settings with a new effective date. Nothing changed.',
+  ],
+  'HR_DIVISOR_BAD': [
+    'عدد أيام الشهر المستخدم في حساب الأجر اليومي غير صحيح. اكتب رقمًا صحيحًا بين 20 و31 ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The number of days used to work out the daily wage is not valid. Enter a whole number between 20 and 31 and try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
