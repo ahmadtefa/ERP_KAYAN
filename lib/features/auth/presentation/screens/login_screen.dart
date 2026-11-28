@@ -10,6 +10,7 @@ import '../../../../core/error/failure.dart';
 import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
+import '../../../../shared/widgets/brand_emblem.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
 import '../../../../shared/widgets/surface_card.dart';
 import '../providers/auth_providers.dart';
@@ -582,13 +583,9 @@ class _SignInForm extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Center(
-            child: Image.asset(
-              'assets/branding/almarwa-emblem.png',
-              key: const ValueKey('login-brand-emblem'),
-              width: 88,
-              height: 88,
-              fit: BoxFit.contain,
-              excludeFromSemantics: true,
+            child: const BrandEmblem(
+              key: ValueKey('login-brand-emblem'),
+              size: 88,
             ),
           ),
           const SizedBox(height: AppSpacing.lg),

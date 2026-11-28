@@ -12,6 +12,7 @@ import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../features/settings/presentation/providers/appearance_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
 import '../../shared/widgets/app_error_dialog.dart';
+import '../../shared/widgets/brand_emblem.dart';
 import '../router/draft_exit_guard.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
@@ -989,7 +990,7 @@ class _SidebarBrand extends StatelessWidget {
           BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
         ],
       ),
-      child: Image.asset('assets/branding/almarwa-emblem.png', fit: BoxFit.contain),
+      child: const BrandEmblem(forceLight: true),
     );
     if (!extended) {
       return Padding(
