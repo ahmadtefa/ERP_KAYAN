@@ -105,24 +105,84 @@ export class SetupService {
         throw new ConflictException({ code: 'SETUP_CLOSED', message: 'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.' });
       }
 
+      const { company, hq, admin } = await this.provisionCompany(tx, dto, {
+        logo,
+        passwordHash,
+        // The first company's administrator is the installation's top administrator.
+        isSuperAdmin: true,
+      });
+
+      await this.audit.recordRequired({
+        companyId: company.id,
+        userId: admin.id,
+        action: 'CREATE',
+        entity: 'companies',
+        entityId: company.id,
+        after: {
+          code: company.code,
+          nameEn: company.nameEn,
+          nameAr: company.nameAr,
+          hq: hq.code,
+          adminUsername: admin.username,
+        },
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      }, tx);
+
+      // The first-run administrator is always a newly-created account and
+      // therefore consumes a seat after the required audit record succeeds.
+      await this.licensing.reserveSeat(tx, {
+        userId: admin.id,
+        username: admin.username,
+        reason: 'SETUP_ADMIN',
+        idempotencyKey: `setup:${company.id}:${admin.username}`,
+      });
+
+      return { company, hq, admin };
+    }, { maxWait: 10000, timeout: 30000 });
+
+    return {
+      companyId: result.company.id,
+      companyCode: result.company.code,
+      headquartersId: result.hq.id,
+      adminUsername: result.admin.username,
+    };
+  }
+
+  /// Everything a new company needs, inside the caller's transaction: the
+  /// company, its head office and default warehouse, the permission catalogue,
+  /// its two starter roles, its first administrator, the fiscal period and the
+  /// chart of accounts. The caller decides who may call it and records the
+  /// audit entry and the seat. `isSuperAdmin` is true only for the first
+  /// company of an installation: the administrator of a later company is the
+  /// administrator of that company alone.
+  async provisionCompany(
+    tx: Prisma.TransactionClient,
+    input: InitialSetupDto,
+    options: {
+      logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null;
+      passwordHash: string;
+      isSuperAdmin: boolean;
+    },
+  ) {
       // The request's own code and names are what the operator is entering.
       const profile = {
-        code: dto.companyCode,
-        nameEn: dto.companyNameEn,
-        nameAr: dto.companyNameAr,
-        phone: dto.phone ?? null,
-        email: dto.email ?? null,
-        address: dto.address ?? null,
-        logoData: logo?.data ?? null,
-        logoMime: logo?.mime ?? null,
+        code: input.companyCode,
+        nameEn: input.companyNameEn,
+        nameAr: input.companyNameAr,
+        phone: input.phone ?? null,
+        email: input.email ?? null,
+        address: input.address ?? null,
+        logoData: options.logo?.data ?? null,
+        logoMime: options.logo?.mime ?? null,
       };
       const company = await tx.company.create({ data: { ...profile, accountCodeScheme: 'EIGHT_DIGIT' } });
 
-      const isBranch = dto.facilityKind === 'BRANCH';
+      const isBranch = input.facilityKind === 'BRANCH';
       const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;
-      const unitCode = dto.unitCode ?? dto.hqCode ?? (isBranch ? 'BR01' : 'MAIN');
-      const unitNameEn = dto.unitNameEn ?? dto.hqNameEn ?? (isBranch ? 'Branch' : 'Head Office');
-      const unitNameAr = dto.unitNameAr ?? dto.hqNameAr ?? (isBranch ? 'الفرع' : 'المركز الرئيسي');
+      const unitCode = input.unitCode ?? input.hqCode ?? (isBranch ? 'BR01' : 'MAIN');
+      const unitNameEn = input.unitNameEn ?? input.hqNameEn ?? (isBranch ? 'Branch' : 'Head Office');
+      const unitNameAr = input.unitNameAr ?? input.hqNameAr ?? (isBranch ? 'الفرع' : 'المركز الرئيسي');
 
       const hq = await tx.branch.create({
         data: {
@@ -166,11 +226,11 @@ export class SetupService {
       const admin = await tx.user.create({
         data: {
           companyId: company.id,
-          username: dto.adminUsername,
-          fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-          fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-          passwordHash,
-          isSuperAdmin: true,
+          username: input.adminUsername,
+          fullNameEn: input.adminFullNameEn ?? 'System Administrator',
+          fullNameAr: input.adminFullNameAr ?? 'مدير النظام',
+          passwordHash: options.passwordHash,
+          isSuperAdmin: options.isSuperAdmin,
         },
       });
 
@@ -187,45 +247,11 @@ export class SetupService {
 
       await this.seedFiscalPeriod(tx, company.id);
 
-      if (dto.seedChartOfAccounts !== false) {
+      if (input.seedChartOfAccounts !== false) {
         await this.seedChartOfAccounts(tx, company.id);
       }
 
-      await this.audit.recordRequired({
-        companyId: company.id,
-        userId: admin.id,
-        action: 'CREATE',
-        entity: 'companies',
-        entityId: company.id,
-        after: {
-          code: company.code,
-          nameEn: company.nameEn,
-          nameAr: company.nameAr,
-          hq: hq.code,
-          adminUsername: admin.username,
-        },
-        ipAddress: ip ?? null,
-        userAgent: userAgent ?? null,
-      }, tx);
-
-      // The first-run administrator is always a newly-created account and
-      // therefore consumes a seat after the required audit record succeeds.
-      await this.licensing.reserveSeat(tx, {
-        userId: admin.id,
-        username: admin.username,
-        reason: 'SETUP_ADMIN',
-        idempotencyKey: `setup:${company.id}:${admin.username}`,
-      });
-
-      return { company, hq, admin };
-    }, { maxWait: 10000, timeout: 30000 });
-
-    return {
-      companyId: result.company.id,
-      companyCode: result.company.code,
-      headquartersId: result.hq.id,
-      adminUsername: result.admin.username,
-    };
+    return { company, hq, admin };
   }
 
   /// The permission list is part of the program, not of any one company's
