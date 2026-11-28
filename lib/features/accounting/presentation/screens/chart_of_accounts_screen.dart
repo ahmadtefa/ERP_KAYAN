@@ -21,6 +21,8 @@ import '../providers/chart_of_accounts_providers.dart';
 
 /// The chart of accounts as a tree: every depth, expandable, searchable, and
 /// editable — with every rule still enforced on the server, never here.
+String _t(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 class ChartOfAccountsScreen extends ConsumerStatefulWidget {
   const ChartOfAccountsScreen({super.key, this.navigationKey});
   final ValueKey<String>? navigationKey;
@@ -61,6 +63,11 @@ class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
       children: [
         PageHeader(
           title: l10n.chartOfAccounts,
+          subtitle: _t(
+            context,
+            'كل حساب يظهر تحت أبيه. الحساب ذو الـ8 أرقام فقط يقبل القيود، وما فوقه مجاميع.',
+            'Every account sits under its parent. Only an 8-digit account takes entries; the shorter ones are totals.',
+          ),
           actions: [
             IconButton(
               tooltip: l10n.refresh,
@@ -108,7 +115,11 @@ class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
           child: AsyncStateView<List<Account>>(
             value: accounts,
             onRetry: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
-            emptyMessage: l10n.noAccounts,
+            emptyMessage: _t(
+              context,
+              'لا توجد حسابات بعد. اضغط «حساب جديد» لبناء أول حساب في الدليل.',
+              'No accounts yet. Choose "New account" to build the first one.',
+            ),
             isEmpty: (list) => list.isEmpty,
             data: (_) => _AccountTree(exitRelay: _exitRelay),
           ),
@@ -162,7 +173,14 @@ class _AccountTreeState extends ConsumerState<_AccountTree> {
     final nodes = ref.watch(accountTreeProvider);
     final l10n = context.l10n;
     if (nodes.isEmpty) {
-      return EmptyView(message: l10n.noAccounts, icon: Icons.search_off);
+      return EmptyView(
+        message: _t(
+          context,
+          'لا يوجد حساب مطابق للبحث أو التصفية. امسح البحث أو التصفية لعرض الدليل كاملًا.',
+          'No account matches the search or filter. Clear them to see the whole chart.',
+        ),
+        icon: Icons.search_off,
+      );
     }
 
     // Traverse the original parents-first list. A collapsed node hides every
@@ -460,6 +478,16 @@ Future<void> _editAccount(
                         : 'The save result is uncertain. Review the refreshed accounts before trying again.'),
                     const SizedBox(height: 12),
                   ],
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        arabic ? 'بيانات الحساب' : 'Account details',
+                        style: Theme.of(dialogContext).textTheme.titleSmall,
+                      ),
+                    ),
+                  ),
                   TextField(
                     controller: codeController,
                     keyboardType: eightDigit ? TextInputType.number : null,
@@ -521,6 +549,18 @@ Future<void> _editAccount(
                     ),
                   ),
                   const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        arabic
+                            ? 'التبعية والتصنيف'
+                            : 'Parent and classification',
+                        style: Theme.of(dialogContext).textTheme.titleSmall,
+                      ),
+                    ),
+                  ),
                   DropdownButtonFormField<AccountType>(
                     key: ValueKey(selectedType),
                     initialValue: selectedType,
@@ -650,6 +690,18 @@ Future<void> _editAccount(
                     ),
                     const SizedBox(height: 12),
                   ],
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        arabic
+                            ? 'الترحيل والتدفقات النقدية'
+                            : 'Posting and cash flow',
+                        style: Theme.of(dialogContext).textTheme.titleSmall,
+                      ),
+                    ),
+                  ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(dialogL10n.postable),

@@ -20,6 +20,8 @@ import '../../../operations/ops_auto_create.dart';
 /// The screen never invents accounting rules of its own. Creating, moving and
 /// deactivating are the server's decisions, so a refusal (a cycle, a duplicate
 /// code) is shown exactly as the server phrased it.
+String _t(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 class CostCentersScreen extends ConsumerStatefulWidget {
   const CostCentersScreen({super.key, this.navigationKey});
 
@@ -82,14 +84,26 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
     final selfId = existing == null ? '' : text(existing, 'id');
 
     final fields = <FieldSpec>[
-      if (!isEdit) FieldSpec('code', l10n.costCenterCode, required: true),
-      FieldSpec('nameEn', l10n.nameEnglish, required: true),
+      if (!isEdit)
+        FieldSpec(
+          'code',
+          l10n.costCenterCode,
+          required: true,
+          section: _t(context, 'بيانات مركز التكلفة', 'Cost centre details'),
+        ),
+      FieldSpec('nameEn', l10n.nameEnglish, required: true, section: isEdit ? _t(context, 'بيانات مركز التكلفة', 'Cost centre details') : null),
       FieldSpec('nameAr', l10n.nameArabic, required: true),
       FieldSpec(
         'type',
         l10n.costCenterType,
         kind: FieldKind.select,
         required: true,
+        section: _t(context, 'التبعية والنوع', 'Parent and type'),
+        helper: _t(
+          context,
+          'النوع يحدد التقارير التي يظهر فيها المركز.',
+          'The type decides which reports list this centre.',
+        ),
         options: [
           FieldOption('DEPARTMENT', l10n.department),
           FieldOption('ADMINISTRATIVE_UNIT', l10n.administrativeUnit),
@@ -100,6 +114,11 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
         'parentId',
         l10n.parentCostCenter,
         kind: FieldKind.select,
+        helper: _t(
+          context,
+          '«بلا أب» يجعل المركز رئيسيًا في الشجرة.',
+          'No parent makes it a top-level centre in the tree.',
+        ),
         options: [
           FieldOption('none', l10n.noParent),
           for (final row in rows)
@@ -110,12 +129,22 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
               ),
         ],
       ),
-      FieldSpec('responsiblePerson', l10n.responsiblePerson, emptyValue: ''),
+      FieldSpec(
+        'responsiblePerson',
+        l10n.responsiblePerson,
+        emptyValue: '',
+        section: _t(context, 'المسؤول والمدة', 'Owner and dates'),
+      ),
       FieldSpec(
         'startDate',
         l10n.startDate,
         kind: FieldKind.date,
         clearable: true,
+        helper: _t(
+          context,
+          'اختياري — للمركز المؤقت. اتركه فارغًا لمركز دائم.',
+          'Optional, for a temporary centre. Leave empty for a permanent one.',
+        ),
       ),
       FieldSpec('endDate', l10n.endDate, kind: FieldKind.date, clearable: true),
       FieldSpec(
@@ -124,8 +153,15 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
         kind: FieldKind.multiline,
         maxLines: 2,
         emptyValue: '',
+        section: _t(context, 'ملاحظات', 'Notes'),
       ),
-      if (isEdit) FieldSpec('isActive', l10n.active, kind: FieldKind.toggle),
+      if (isEdit)
+        FieldSpec(
+          'isActive',
+          l10n.active,
+          kind: FieldKind.toggle,
+          section: _t(context, 'الحالة', 'Status'),
+        ),
     ];
 
     final values = await showFormSheet(
@@ -362,7 +398,11 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
         value: async,
         onRetry: () => ref.invalidate(costCentersProvider),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: l10n.noCostCenters,
+        emptyMessage: _t(
+          context,
+          'لا توجد مراكز تكلفة لعرضها. اضغط «مركز جديد» لإضافة مركز، أو امسح عوامل التصفية.',
+          'No cost centres to show. Choose "New cost centre" to add one, or clear the filters.',
+        ),
         data: (rows) {
           final visible = _filter(rows);
           return Column(

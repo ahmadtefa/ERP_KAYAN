@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
@@ -69,20 +70,45 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
       title: isEdit ? l10n.editPeriod : l10n.newPeriod,
       fields: [
         if (!isEdit)
-          FieldSpec('code', l10n.periodCode, maxLength: 20, required: true),
-        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
+          FieldSpec(
+            'code',
+            l10n.periodCode,
+            maxLength: 20,
+            required: true,
+            section: _t(context, 'بيانات الفترة', 'Period details'),
+          ),
+        FieldSpec(
+          'nameEn',
+          l10n.fullNameEn,
+          maxLength: 200,
+          required: true,
+          section: isEdit
+              ? _t(context, 'بيانات الفترة', 'Period details')
+              : null,
+        ),
         FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
         FieldSpec(
           'startDate',
           l10n.startDate,
           kind: FieldKind.date,
           required: true,
+          section: _t(context, 'المدة', 'Dates'),
+          helper: _t(
+            context,
+            'أول يوم في السنة المالية.',
+            'The first day of the fiscal year.',
+          ),
         ),
         FieldSpec(
           'endDate',
           l10n.endDate,
           kind: FieldKind.date,
           required: true,
+          helper: _t(
+            context,
+            'آخر يوم فيها؛ بعد الإقفال لا يُرحّل داخلها أي شيء.',
+            'Its last day; once closed, nothing more posts inside it.',
+          ),
         ),
       ],
       initial: existing,
@@ -178,7 +204,11 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
         value: async,
         onRetry: () => ref.read(fiscalPeriodsListProvider.notifier).reload(),
         isEmpty: (rows) => rows.isEmpty,
-        emptyMessage: l10n.noPeriods,
+        emptyMessage: _t(
+          context,
+          'لا توجد سنوات مالية بعد. اضغط «فترة جديدة» لتعريف أول سنة مالية.',
+          'No fiscal years yet. Choose "New period" to define the first one.',
+        ),
         data: (rows) => RecordsTable(
           rows: rows,
           columns: [
@@ -193,8 +223,14 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
                   ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
                   : text(r, 'nameEn', fallback: text(r, 'nameAr')),
             ),
-            ColumnSpec(l10n.startDate, value: (r) => text(r, 'startDate')),
-            ColumnSpec(l10n.endDate, value: (r) => text(r, 'endDate')),
+            ColumnSpec(
+              l10n.startDate,
+              value: (r) => _dateLabel(context, text(r, 'startDate')),
+            ),
+            ColumnSpec(
+              l10n.endDate,
+              value: (r) => _dateLabel(context, text(r, 'endDate')),
+            ),
             ColumnSpec(
               l10n.status,
               value: (r) => flag(r, 'isClosed') ? l10n.closed : l10n.open,
@@ -205,7 +241,7 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
               l10n.closedOn,
               value: (r) => text(r, 'closedAt').isEmpty
                   ? '—'
-                  : text(r, 'closedAt').split('T').first,
+                  : _dateLabel(context, text(r, 'closedAt').split('T').first),
             ),
           ],
           actions: (row) => [
@@ -282,6 +318,15 @@ String _yearEndSentence(BuildContext context, String raw) {
 
 String _t(BuildContext context, String ar, String en) =>
     Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 /// Review before the point of no return: what closing this year will
 /// move, what blocks it outright, and what merely deserves a look —

@@ -1,18 +1,41 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../core/json/amount_format.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
 import 'opening_balance_draft_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../inventory/presentation/screens/stock_screen.dart';
+
+/// A short label in the reader's language.
+String _t(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
+
+/// An amount in the company currency: two decimals, grouped digits.
+String _amountLabel(Object? raw) {
+  final text = raw == null ? '' : '$raw';
+  if (text.isEmpty) return '—';
+  return formatAmount(text, decimals: 2);
+}
 
 /// Lists imported opening-balance drafts and gives the accountant a review
 /// screen before posting them to the ledger and stock.
@@ -227,20 +250,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(describeError(context, snapshot.error!)),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh),
-                    label: Text(l10n.retry),
-                  ),
-                ],
-              ),
-            );
+            return ErrorView(message: snapshot.error!, onRetry: _refresh);
           }
 
           final data = snapshot.data ?? const <String, dynamic>{};
@@ -252,23 +262,12 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
               .map(Map<String, dynamic>.from)
               .toList(growable: false);
           if (items.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.account_balance_outlined, size: 40),
-                    const SizedBox(height: 12),
-                    Text(l10n.noOpeningBalanceDocuments),
-                    const SizedBox(height: 8),
-                    Text(
-                      l10n.openingBalanceDraftHint,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+            return EmptyView(
+              icon: Icons.account_balance_outlined,
+              message: _t(
+                context,
+                'لا توجد مسودات أرصدة افتتاحية بعد. اضغط «إدخال يدوي» لتسجيل أول مسودة، أو نزّل القالب واستورده.',
+                'No opening-balance drafts yet. Choose "Manual entry" to start the first draft, or download the template and import it.',
               ),
             );
           }
@@ -285,7 +284,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                     leading: const Icon(Icons.account_balance_wallet_outlined),
                     title: Text('${row['documentNumber'] ?? ''}'),
                     subtitle: Text(
-                      '${l10n.invoiceDate}: ${row['asOfDate'] ?? ''} · '
+                      '${l10n.invoiceDate}: ${_dateLabel(context, '${row['asOfDate'] ?? ''}')} · '
                       '${_localized(row['branch'], isArabic, 'nameEn', 'nameAr') ?? (row['branch'] is Map ? (row['branch'] as Map)['code'] : '')}',
                     ),
                     trailing: Chip(
@@ -342,7 +341,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text('${l10n.invoiceDate}: ${data['asOfDate'] ?? ''}'),
+                Text(
+                  '${l10n.invoiceDate}: ${_dateLabel(context, '${data['asOfDate'] ?? ''}')}',
+                ),
                 if (branch is Map)
                   Text(
                     '${l10n.branch}: ${_localized(branch, isArabic, 'nameEn', 'nameAr') ?? branch['code'] ?? ''}',
@@ -359,11 +360,11 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                   spacing: 12,
                   runSpacing: 8,
                   children: [
-                    _total(context, l10n.debit, '${data['totalDebit'] ?? '—'}'),
+                    _total(context, l10n.debit, _amountLabel(data['totalDebit'])),
                     _total(
                       context,
                       l10n.credit,
-                      '${data['totalCredit'] ?? '—'}',
+                      _amountLabel(data['totalCredit']),
                     ),
                   ],
                 ),
@@ -416,8 +417,8 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
                 '${isArabic ? line['accountNameAr'] ?? line['accountNameEn'] ?? '' : line['accountNameEn'] ?? line['accountNameAr'] ?? ''}',
               ),
               subtitle: Text(
-                '${l10n.debit}: ${line['debit'] ?? '—'} · '
-                '${l10n.credit}: ${line['credit'] ?? '—'}'
+                '${l10n.debit}: ${_amountLabel(line['debit'])} · '
+                '${l10n.credit}: ${_amountLabel(line['credit'])}'
                 '${line['item'] is Map ? ' · ${(line['item'] as Map)['code'] ?? ''}' : ''}'
                 '${line['customer'] is Map ? ' · ${(line['customer'] as Map)['code'] ?? ''}' : ''}'
                 '${line['supplier'] is Map ? ' · ${(line['supplier'] as Map)['code'] ?? ''}' : ''}',

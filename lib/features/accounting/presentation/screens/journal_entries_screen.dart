@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +26,15 @@ import '../providers/chart_of_accounts_providers.dart';
 import '../providers/cost_center_providers.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class JournalEntriesController extends JsonListController {
   @override
@@ -189,7 +199,10 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
         value: async,
         onRetry: () => ref.read(journalEntriesProvider.notifier).reload(),
         isEmpty: (rows) => rows.isEmpty,
-        emptyMessage: l10n.noEntries,
+        emptyMessage: _label(
+          'لا توجد قيود يومية بعد. اضغط «قيد جديد» لتسجيل أول قيد.',
+          'No journal entries yet. Choose "New journal entry" to record the first one.',
+        ),
         data: (rows) => RecordsTable(
           rows: rows,
           columns: [
@@ -198,7 +211,10 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
               value: (r) => text(r, 'entryNumber'),
               emphasise: true,
             ),
-            ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'entryDate')),
+            ColumnSpec(
+              l10n.invoiceDate,
+              value: (r) => _dateLabel(context, text(r, 'entryDate')),
+            ),
             ColumnSpec(l10n.description, value: (r) => text(r, 'description')),
             ColumnSpec(
               l10n.debit,

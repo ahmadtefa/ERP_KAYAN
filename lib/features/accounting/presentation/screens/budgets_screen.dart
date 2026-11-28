@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
@@ -18,6 +19,19 @@ import '../../domain/entities/account.dart';
 import '../../domain/entities/account_type.dart';
 import '../providers/chart_of_accounts_providers.dart';
 import '../providers/cost_center_providers.dart';
+
+/// A short heading over a group of fields, in the reader's language.
+String _t(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 /// Budgets, as definitions. The comparison with the ledger lives in the
 /// budget report, which reads posted entries only.
@@ -128,6 +142,12 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           l10n.costCenter,
           kind: FieldKind.select,
           required: true,
+          section: _t(context, 'بيانات الموازنة', 'Budget details'),
+          helper: _t(
+            context,
+            'الموازنة تُقارن بقيود هذا المركز فقط.',
+            'The budget is compared with entries booked to this centre only.',
+          ),
           options: [
             if (missingCenter)
               FieldOption(
@@ -148,6 +168,11 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           l10n.account,
           kind: FieldKind.select,
           required: true,
+          helper: _t(
+            context,
+            'حسابات الإيراد والمصروف القابلة للترحيل فقط.',
+            'Postable revenue and expense accounts only.',
+          ),
           options: [
             if (missingAccount)
               FieldOption(
@@ -164,6 +189,12 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           l10n.from,
           kind: FieldKind.date,
           required: true,
+          section: _t(context, 'المدة والمبلغ', 'Period and amount'),
+          helper: _t(
+            context,
+            'أول يوم تُقارن منه الموازنة بالقيود.',
+            'The first day the budget is compared with entries.',
+          ),
         ),
         FieldSpec('periodEnd', l10n.to, kind: FieldKind.date, required: true),
         FieldSpec(
@@ -171,6 +202,11 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           l10n.budgetAmount,
           kind: FieldKind.decimal,
           required: true,
+          helper: _t(
+            context,
+            'بعملة الشركة، بدون تحويل عملات.',
+            'In the company currency, with no conversion.',
+          ),
         ),
         FieldSpec(
           'notes',
@@ -178,6 +214,7 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           kind: FieldKind.multiline,
           maxLines: 2,
           emptyValue: '',
+          section: _t(context, 'ملاحظات', 'Notes'),
         ),
       ],
       initial: existing,
@@ -273,7 +310,11 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
         value: async,
         onRetry: () => ref.invalidate(budgetsProvider),
         isEmpty: (rows) => rows.isEmpty,
-        emptyMessage: l10n.noBudgets,
+        emptyMessage: _t(
+          context,
+          'لا توجد موازنات بعد. اضغط «موازنة جديدة» لتعريف أول موازنة.',
+          'No budgets yet. Choose "New budget" to define the first one.',
+        ),
         data: (rows) => RecordsTable(
           rows: rows,
           columns: [
@@ -305,10 +346,15 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
             ColumnSpec(
               l10n.budgetPeriod,
               value: (row) =>
-                  '${text(row, 'periodStart')} → ${text(row, 'periodEnd')}',
+                  '${_dateLabel(context, text(row, 'periodStart'))} → '
+                  '${_dateLabel(context, text(row, 'periodEnd'))}',
             ),
             ColumnSpec(
-              l10n.budgetAmount,
+              _t(
+                context,
+                'مبلغ الموازنة (بعملة الشركة)',
+                'Budget amount (company currency)',
+              ),
               numeric: true,
               value: (row) => formatAmount(text(row, 'amount', fallback: '0')),
             ),
