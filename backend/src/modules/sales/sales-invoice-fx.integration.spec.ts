@@ -126,9 +126,10 @@ function serviceWith(db: PGlite) {
     new AccountMapService(),
     // Company tax policy is configuration, not behaviour under test here; a
     // zero rate keeps the journal to the accounts this suite seeded.
-    { get: async () => ({ defaultTaxRate: D(0), pricesIncludeTax: false }) } as never,
+    { get: async () => ({ defaultTaxRate: D(0), pricesIncludeTax: false, maxDiscountPercent: D(100) }) } as never,
     new WarehouseService(prisma as never, audit as never),
-    {} as never,
+    // No price list is configured in this suite: every price is typed.
+    { resolvePrice: async () => null } as never,
     audit as never,
     batches,
     ledger, { assertCanPost: async () => undefined, assertPeriodCanPost: async () => undefined } as never,
