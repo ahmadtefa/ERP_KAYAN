@@ -202,9 +202,12 @@ const password = 'initial-password-123';
       // With two live companies the code is required.
       await expect(auth.login(shared, 'password-for-company-a-1')).rejects.toMatchObject({ response: { code: 'LOGIN_COMPANY_CODE_REQUIRED' } });
       // Failed attempts are counted per account, not across the companies.
+      const countOf = async (id: string) => (await prisma.user.findUniqueOrThrow({ where: { id } })).failedLoginCount;
+      const aBefore = await countOf(inA.id);
+      const bBefore = await countOf(inB.id);
       await expect(auth.login(shared, 'wrong-password-123', A.code)).rejects.toMatchObject({ status: 401 });
-      expect((await prisma.user.findUniqueOrThrow({ where: { id: inA.id } })).failedLoginCount).toBeGreaterThan(0);
-      expect((await prisma.user.findUniqueOrThrow({ where: { id: inB.id } })).failedLoginCount).toBe(0);
+      expect(await countOf(inA.id)).toBe(aBefore + 1);
+      expect(await countOf(inB.id)).toBe(bBefore);
     } finally {
       await prisma.refreshToken.deleteMany({ where: { userId: { in: [inA.id, inB.id] } } });
       await prisma.user.deleteMany({ where: { id: { in: [inA.id, inB.id] } } });
@@ -250,9 +253,9 @@ const password = 'initial-password-123';
     await expect(guard.canActivate(context(a.accessToken).ctx)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('changes a password by username alone and touches only that account', async () => {
+  it('changes a password by username and company code and touches only that account', async () => {
     const before = await prisma.user.findUniqueOrThrow({ where: { id: A.userId } });
-    await auth.changeOwnPassword(B.username, undefined, password, 'second-password-4567', 'second-password-4567');
+    await auth.changeOwnPassword(B.username, B.code, password, 'second-password-4567', 'second-password-4567');
     const afterB = await prisma.user.findUniqueOrThrow({ where: { id: B.userId } });
     const afterA = await prisma.user.findUniqueOrThrow({ where: { id: A.userId } });
     expect(await argon2.verify(afterB.passwordHash, 'second-password-4567')).toBe(true);
@@ -265,7 +268,7 @@ const password = 'initial-password-123';
   it('refuses a password change for a suspended company without saying why', async () => {
     await prisma.company.update({ where: { id: A.companyId }, data: { isActive: false } });
     await expect(
-      auth.changeOwnPassword(A.username, undefined, password, 'third-password-4567', 'third-password-4567'),
+      auth.changeOwnPassword(A.username, A.code, password, 'third-password-4567', 'third-password-4567'),
     ).rejects.toMatchObject({ status: 401, message: 'Invalid username or current password' });
   });
 
