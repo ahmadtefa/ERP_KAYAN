@@ -74,6 +74,7 @@ void main() {
         ProviderScope(
           overrides: [
             apiClientProvider.overrideWithValue(api),
+            currentUserProvider.overrideWithValue(fullAccessTestUser),
             appConfigProvider.overrideWithValue(
               AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
             ),
@@ -113,6 +114,7 @@ void main() {
             ProviderScope(
               overrides: [
                 apiClientProvider.overrideWithValue(api),
+                currentUserProvider.overrideWithValue(fullAccessTestUser),
                 appConfigProvider.overrideWithValue(
                   AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),
                 ),

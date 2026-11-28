@@ -63,6 +63,11 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
 
   bool get _isCustomer => widget.kind == PartyKind.customer;
 
+  bool get _canCreate =>
+      ref.watch(currentUserProvider)?.can(_isCustomer ? 'parties.customers.create' : 'parties.suppliers.create') ?? false;
+  bool get _canUpdate =>
+      ref.watch(currentUserProvider)?.can(_isCustomer ? 'parties.customers.update' : 'parties.suppliers.update') ?? false;
+
   String get _path => _isCustomer ? '/parties/customers' : '/parties/suppliers';
 
   AsyncNotifierProvider<JsonListController, List<Json>> get _provider =>
@@ -239,11 +244,12 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
             hint: l10n.searchParties,
             onChanged: (value) => setState(() => _query = value.trim()),
           ),
-          FilledButton.icon(
-            onPressed: _busy ? null : () => _save(),
-            icon: const Icon(Icons.add),
-            label: Text(_isCustomer ? l10n.newCustomer : l10n.newSupplier),
-          ),
+          if (_canCreate)
+            FilledButton.icon(
+              onPressed: _busy ? null : () => _save(),
+              icon: const Icon(Icons.add),
+              label: Text(_isCustomer ? l10n.newCustomer : l10n.newSupplier),
+            ),
           MasterDataBackupActions(
             kind: _isCustomer ? 'customers' : 'suppliers',
             onRestored: () {
@@ -302,11 +308,13 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
                       party: row,
                     ),
             ),
+            if (_canUpdate)
             IconButton(
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),
               onPressed: _busy ? null : () => _save(existing: row),
             ),
+            if (_canUpdate)
             IconButton(
               tooltip: flag(row, 'isActive', fallback: true)
                   ? l10n.deactivate
