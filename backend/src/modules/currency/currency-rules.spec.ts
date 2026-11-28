@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 
-import { assertForeign, CurrencyError, normalizeCode, parseRate, realizedDifference, toBase } from './currency-rules';
+import { assertForeign, convertEntryLines, CurrencyError, normalizeCode, parseRate, realizedDifference, toBase } from './currency-rules';
 
 describe('currency rules', () => {
   it('normalizes and rejects currency codes', () => {
@@ -43,5 +43,33 @@ describe('currency rules', () => {
   it('refuses a rate for the company currency', () => {
     expect(() => assertForeign('EGP', 'EGP')).toThrow(CurrencyError);
     expect(() => assertForeign('USD', 'EGP')).not.toThrow();
+  });
+
+  describe('converting an entry', () => {
+    const D = (v: string) => new Prisma.Decimal(v);
+    const total = (ls: Array<{ debit: Prisma.Decimal; credit: Prisma.Decimal }>, k: 'debit' | 'credit'): string =>
+      ls.reduce((a: Prisma.Decimal, l) => a.add(l[k]), D('0')).toFixed(4);
+
+    it('keeps a balanced entry balanced after rounding', () => {
+      const out = convertEntryLines(
+        [
+          { debit: D('33.33'), credit: D('0') },
+          { debit: D('33.33'), credit: D('0') },
+          { debit: D('33.34'), credit: D('0') },
+          { debit: D('0'), credit: D('100') },
+        ],
+        '48.12345',
+      );
+      expect(total(out, 'debit')).toBe(total(out, 'credit'));
+    });
+
+    it('converts plainly when nothing rounds', () => {
+      const out = convertEntryLines([{ debit: D('100'), credit: D('0') }, { debit: D('0'), credit: D('100') }], '48.5');
+      expect(out.map((l) => `${l.debit.toFixed(4)}/${l.credit.toFixed(4)}`)).toEqual(['4850.0000/0.0000', '0.0000/4850.0000']);
+    });
+
+    it('refuses an entry that was not balanced in the foreign currency', () => {
+      expect(() => convertEntryLines([{ debit: D('100'), credit: D('0') }, { debit: D('0'), credit: D('99') }], '48')).toThrow(CurrencyError);
+    });
   });
 });

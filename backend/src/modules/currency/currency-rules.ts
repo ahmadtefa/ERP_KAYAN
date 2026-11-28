@@ -59,3 +59,31 @@ export function asHttp(error: unknown): never {
   }
   throw error;
 }
+
+export type FxLine = { debit: Prisma.Decimal; credit: Prisma.Decimal };
+
+/**
+ * Converts a balanced foreign-currency entry to the company currency at one rate.
+ * Each line is rounded half-up to 4 places; any rounding leftover (a few units of the
+ * fourth place) is absorbed by the largest line on the heavier side so the entry still
+ * balances to the cent. A leftover bigger than the rounding of the lines is refused:
+ * that would mean the foreign entry was not balanced to begin with.
+ */
+export function convertEntryLines<T extends FxLine>(lines: T[], rate: Prisma.Decimal.Value): T[] {
+  const converted = lines.map((l) => ({ ...l, debit: toBase(l.debit, rate), credit: toBase(l.credit, rate) }));
+  const sum = (pick: (l: FxLine) => Prisma.Decimal) => converted.reduce((a, l) => a.add(pick(l)), new Prisma.Decimal(0));
+  const diff = sum((l) => l.debit).sub(sum((l) => l.credit));
+  if (diff.isZero()) return converted;
+  const limit = new Prisma.Decimal('0.0001').mul(lines.length);
+  if (diff.abs().gt(limit)) {
+    throw new CurrencyError('FX_ENTRY_UNBALANCED', 'The foreign amounts do not balance, so they cannot be converted');
+  }
+  const side: 'debit' | 'credit' = diff.gt(0) ? 'debit' : 'credit';
+  let target = -1;
+  converted.forEach((l, i) => {
+    if (!l[side].isZero() && (target < 0 || l[side].gt(converted[target][side]))) target = i;
+  });
+  if (target < 0) throw new CurrencyError('FX_ENTRY_UNBALANCED', 'The foreign amounts do not balance, so they cannot be converted');
+  converted[target] = { ...converted[target], [side]: converted[target][side].sub(diff.abs()) };
+  return converted;
+}

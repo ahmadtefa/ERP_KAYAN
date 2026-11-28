@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { JournalStatus, Prisma } from '@prisma/client';
+import { asHttp, convertEntryLines } from '../currency/currency-rules';
 import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { FiscalPeriodsService } from './fiscal-periods.service';
@@ -57,6 +58,9 @@ export interface PostingRequest {
   entryDescription?: string;
   /// Overrides the period code used when a message has to name the period.
   currency?: string;
+  /// A foreign-currency document posts its lines in the document currency and the
+  /// rate to the company currency; the ledger always stores company-currency amounts.
+  fx?: { currency: string; rate: string | Prisma.Decimal };
   /// When true, a cash-balance refusal may carry the actual figures (the
   /// caller has checked the user may read cash balances). Default false:
   /// the refusal names the account but no amounts.
@@ -119,6 +123,18 @@ export class PostingService {
       })
       // A zero line carries no information and would only clutter the ledger.
       .filter((l) => !l.debit.isZero() || !l.credit.isZero());
+
+    if (request.fx) {
+      if (lines.some((l) => l.allocations.length > 0)) {
+        throw new BadRequestException({ code: 'FX_COST_SPLIT_UNSUPPORTED', message: 'A foreign-currency document cannot split a line across cost centers' });
+      }
+      try {
+        const converted = convertEntryLines(lines, request.fx.rate);
+        converted.forEach((c, i) => { lines[i] = c; });
+      } catch (error) {
+        asHttp(error);
+      }
+    }
 
     if (lines.length < 2) {
       throw new BadRequestException({ code: 'POSTING_NEEDS_BOTH_SIDES', message: 'A posting needs at least one debit and one credit' });

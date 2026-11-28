@@ -450,6 +450,14 @@ const Map<String, List<String>> wordedRefusals = {
     'لا يوجد سعر صرف للعملة {code} في تاريخ {date} أو قبله. أدخل سعر الصرف من شاشة العملات ثم أعد المحاولة. لم يُحفظ شيء.',
     'No exchange rate has been entered for {code} on or before {date}. Enter the rate on the currencies screen and try again. Nothing was saved.',
   ],
+  'FX_ENTRY_UNBALANCED': [
+    'المبالغ بالعملة الأجنبية غير متوازنة فلا يمكن تحويلها إلى عملة الشركة. راجع أسطر المستند والمبالغ ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The foreign-currency amounts do not balance, so they cannot be converted to the company currency. Check the document lines and amounts, then try again. Nothing was saved.',
+  ],
+  'FX_COST_SPLIT_UNSUPPORTED': [
+    'لا يمكن توزيع سطر في مستند بعملة أجنبية على عدة مراكز تكلفة. اختر مركز تكلفة واحدًا للسطر ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A line in a foreign-currency document cannot be split across several cost centers. Choose one cost center for the line and try again. Nothing was saved.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',
