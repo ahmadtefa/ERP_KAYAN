@@ -515,10 +515,10 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
               'leaveDate': text(emp, 'leaveDate'),
             },
       fields: [
-        FieldSpec('code', _arabic ? 'كود الموظف' : 'Employee code', required: true, maxLength: 32),
+        FieldSpec('code', _arabic ? 'كود الموظف' : 'Employee code', required: true, maxLength: 32, section: _arabic ? 'بيانات الموظف' : 'Employee details'),
         FieldSpec('nameAr', _arabic ? 'الاسم' : 'Name', required: true, maxLength: 160),
         FieldSpec('jobTitle', _arabic ? 'الوظيفة' : 'Job title', maxLength: 120),
-        FieldSpec('hireDate', _arabic ? 'تاريخ التعيين' : 'Hire date', kind: FieldKind.date, required: true),
+        FieldSpec('hireDate', _arabic ? 'تاريخ التعيين' : 'Hire date', kind: FieldKind.date, required: true, section: _arabic ? 'التعيين' : 'Employment'),
         if (!editing) FieldSpec('nationalId', _arabic ? 'الرقم القومي (14 رقمًا)' : 'National ID (14 digits)', maxLength: 14),
         if (!editing) FieldSpec('bankAccount', _arabic ? 'حساب البنك' : 'Bank account', maxLength: 64),
         if (editing) FieldSpec('leaveDate', _arabic ? 'تاريخ ترك العمل (اتركه فارغًا لمن يعمل)' : 'Leaving date (empty while employed)', kind: FieldKind.date, clearable: true),
@@ -837,10 +837,10 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
       submitLabel: _arabic ? 'حفظ' : 'Save',
       fields: [
         FieldSpec('effectiveFrom', _arabic ? 'تسري من تاريخ' : 'Effective from', kind: FieldKind.date, required: true),
-        FieldSpec('siEmployeeRate', _arabic ? 'نسبة تأمينات العامل %' : 'Employee insurance rate %', kind: FieldKind.decimal, required: true),
+        FieldSpec('siEmployeeRate', _arabic ? 'نسبة تأمينات العامل %' : 'Employee insurance rate %', kind: FieldKind.decimal, required: true, section: _arabic ? 'التأمينات' : 'Insurance'),
         FieldSpec('siEmployerRate', _arabic ? 'نسبة تأمينات صاحب العمل %' : 'Employer insurance rate %', kind: FieldKind.decimal, required: true),
         FieldSpec('siCeiling', _arabic ? 'الحد الأقصى للأجر التأميني الشهري' : 'Monthly insurable pay ceiling', kind: FieldKind.decimal, required: true),
-        FieldSpec('personalExemption', _arabic ? 'الإعفاء الشخصي السنوي' : 'Annual personal exemption', kind: FieldKind.decimal, required: true),
+        FieldSpec('personalExemption', _arabic ? 'الإعفاء الشخصي السنوي' : 'Annual personal exemption', kind: FieldKind.decimal, required: true, section: _arabic ? 'الضريبة والأجور' : 'Tax and wages'),
         FieldSpec('overtimeFactor', _arabic ? 'معامل أجر الساعة الإضافية' : 'Overtime hourly factor', kind: FieldKind.decimal, required: true),
         FieldSpec('monthDivisor', _arabic ? 'عدد أيام الشهر لحساب الأجر اليومي' : 'Days per month for the daily wage', kind: FieldKind.integer, required: true, minInteger: 20, maxInteger: 31),
         FieldSpec(

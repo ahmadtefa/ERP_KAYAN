@@ -149,17 +149,17 @@ class _ContractsScreenState extends ConsumerState<ContractsScreen> {
       submitLabel: _arabic ? 'حفظ العقد' : 'Save the contract',
       initial: {'startDate': _today(), 'retentionPercent': '0', 'advanceAmount': '0'},
       fields: [
-        FieldSpec('code', _arabic ? 'رمز العقد' : 'Contract code', required: true, maxLength: 32),
+        FieldSpec('code', _arabic ? 'رمز العقد' : 'Contract code', required: true, maxLength: 32, section: _arabic ? 'بيانات العقد' : 'Contract details'),
         FieldSpec('titleAr', _arabic ? 'عنوان العقد' : 'Contract title', required: true, maxLength: 200),
         FieldSpec('customerId', _arabic ? 'العميل' : 'Customer', kind: FieldKind.select, required: true, options: customers),
         FieldSpec('serviceItemId', _arabic ? 'بند الفوترة (بند خدمة)' : 'Billing item (a service item)', kind: FieldKind.select, required: true, options: items),
         FieldSpec('costCenterId', _arabic ? 'مركز التكلفة (اختياري)' : 'Cost centre (optional)', kind: FieldKind.select, options: centers),
-        FieldSpec('contractValue', _arabic ? 'قيمة العقد' : 'Contract value', kind: FieldKind.decimal, required: true),
+        FieldSpec('contractValue', _arabic ? 'قيمة العقد' : 'Contract value', kind: FieldKind.decimal, required: true, section: _arabic ? 'القيمة والتحصيل' : 'Value and collection'),
         FieldSpec('advanceAmount', _arabic ? 'الدفعة المقدمة' : 'Advance payment', kind: FieldKind.decimal,
             helper: _arabic ? 'تُخصم من المستخلصات بنسبة الأعمال المنفذة. سجّل استلامها بسند قبض ثم اربطه بفاتورة المستخلص.' : 'It is deducted from the claims in proportion to the work done. Record its receipt with a receipt voucher, then link it to the claim invoice.'),
         FieldSpec('retentionPercent', _arabic ? 'نسبة المحتجز %' : 'Retention %', kind: FieldKind.decimal),
         FieldSpec('taxRatePercent', _arabic ? 'نسبة ضريبة القيمة المضافة % (اختياري)' : 'VAT % (optional)', kind: FieldKind.decimal),
-        FieldSpec('startDate', _arabic ? 'تاريخ البدء' : 'Start date', kind: FieldKind.date),
+        FieldSpec('startDate', _arabic ? 'تاريخ البدء' : 'Start date', kind: FieldKind.date, section: _arabic ? 'التاريخ' : 'Dates'),
       ],
       onSubmit: (values) async {
         await ref.read(apiClientProvider).post('/contracts', body: {

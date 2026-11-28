@@ -87,9 +87,9 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
     final fields = <FieldSpec>[
       if (!isEdit)
         FieldSpec('code', l10n.accountCode, maxLength: 30, required: true),
-      FieldSpec('nameEn', isArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200),
+      FieldSpec('nameEn', isArabic ? 'الاسم (إنجليزي)' : 'Name (English)', maxLength: 200, section: isArabic ? 'البيانات الأساسية' : 'Basic details'),
       FieldSpec('nameAr', 'الاسم (عربي)', maxLength: 200),
-      FieldSpec('phone', l10n.phone, nullWhenEmpty: isEdit, maxLength: 40),
+      FieldSpec('phone', l10n.phone, nullWhenEmpty: isEdit, maxLength: 40, section: isArabic ? 'بيانات الاتصال' : 'Contact'),
       FieldSpec(
         'email',
         l10n.email,
@@ -102,7 +102,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
         l10n.taxNumber,
         nullWhenEmpty: isEdit,
         maxLength: 60,
-      ),
+       section: isArabic ? 'البيانات الضريبية والعنوان' : 'Tax and address'),
       FieldSpec(
         'address',
         l10n.address,

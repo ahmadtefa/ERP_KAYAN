@@ -189,7 +189,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       title: isEdit ? l10n.editAsset : l10n.newAsset,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.assetCode, maxLength: 50),
-        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true),
+        FieldSpec('nameEn', l10n.fullNameEn, maxLength: 200, required: true, section: _t('بيانات الأصل', 'Asset details')),
         FieldSpec('nameAr', l10n.fullNameAr, maxLength: 200, required: true),
         FieldSpec(
           'category',
@@ -209,7 +209,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           l10n.purchaseDate,
           kind: FieldKind.date,
           required: true,
-        ),
+         section: _t('الشراء والتكلفة', 'Purchase and cost')),
         FieldSpec(
           'inServiceDate',
           l10n.inServiceDate,
@@ -230,14 +230,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           maxInteger: 1200,
           kind: FieldKind.integer,
           required: true,
-        ),
+         section: _t('الإهلاك', 'Depreciation')),
         FieldSpec(
           'assetAccountId',
           l10n.assetAccount,
           kind: FieldKind.select,
           required: true,
           options: _options(accounts, type: 'asset'),
-        ),
+         section: _t('الحسابات', 'Accounts')),
         FieldSpec(
           'accumulatedAccountId',
           l10n.accumulatedAccount,
@@ -257,7 +257,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           l10n.assetLocation,
           nullWhenEmpty: isEdit,
           maxLength: 200,
-        ),
+         section: _t('أخرى', 'Other')),
         FieldSpec(
           'purchaseInvoiceLineId',
           _t('بند فاتورة الشراء (اختياري)', 'Purchase invoice line (optional)'),
