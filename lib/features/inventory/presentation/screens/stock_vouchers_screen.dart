@@ -258,8 +258,8 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
                               child: Text(
                                 _label(
                                   context,
-                                  'لا توجد أذون في هذه الصفحة',
-                                  'No vouchers on this page',
+                                  'لا توجد أذون لعرضها. غيّر التصفية أو التاريخ، أو سجّل إذنًا جديدًا من قائمة المخزون.',
+                                  'No vouchers to show. Change the filter or the dates, or record a new voucher from the Stock menu.',
                                 ),
                               ),
                             )
