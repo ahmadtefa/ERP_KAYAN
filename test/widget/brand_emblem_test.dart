@@ -38,6 +38,7 @@ void main() {
         home: const BrandEmblem(size: 100, full: true),
       ),
     );
+    await tester.pumpAndSettle();
     expect(_assetOf(tester), BrandEmblem.fullDarkAsset);
     await tester.pumpWidget(
       MaterialApp(
@@ -45,6 +46,7 @@ void main() {
         home: const BrandEmblem(size: 100, full: true),
       ),
     );
+    await tester.pumpAndSettle();
     expect(_assetOf(tester), BrandEmblem.fullLightAsset);
   });
 

@@ -7,11 +7,16 @@ class BrandEmblem extends StatelessWidget {
   const BrandEmblem({
     super.key,
     this.size,
+    this.width,
     this.forceLight = false,
     this.full = false,
   });
 
   final double? size;
+
+  /// Overrides the width when it must differ from [size] (the full logo is
+  /// wider than it is tall).
+  final double? width;
   final bool forceLight;
 
   /// Emblem plus the English name "AL-MARWA". Used only where the English
@@ -31,7 +36,7 @@ class BrandEmblem extends StatelessWidget {
       full
           ? (dark ? fullDarkAsset : fullLightAsset)
           : (dark ? darkAsset : lightAsset),
-      width: size,
+      width: width ?? size,
       height: size,
       fit: BoxFit.contain,
       excludeFromSemantics: true,
