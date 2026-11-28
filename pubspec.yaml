@@ -35,6 +35,8 @@ flutter:
     - 1.png
     - assets/branding/almarwa-emblem.png
     - assets/branding/almarwa-emblem-dark.png
+    - assets/branding/almarwa-logo-full.png
+    - assets/branding/almarwa-logo-full-dark.png
 
   # Redistributed under SIL OFL 1.1; available offline in every Flutter build.
   fonts:

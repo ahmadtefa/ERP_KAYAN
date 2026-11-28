@@ -585,7 +585,8 @@ class _SignInForm extends StatelessWidget {
           Center(
             child: const BrandEmblem(
               key: ValueKey('login-brand-emblem'),
-              size: 88,
+              size: 150,
+              full: true,
             ),
           ),
           const SizedBox(height: AppSpacing.lg),

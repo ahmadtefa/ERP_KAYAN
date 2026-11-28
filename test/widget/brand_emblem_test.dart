@@ -31,6 +31,23 @@ void main() {
     expect(_assetOf(tester), BrandEmblem.darkAsset);
   });
 
+  testWidgets('full logo follows the theme', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark),
+        home: const BrandEmblem(size: 100, full: true),
+      ),
+    );
+    expect(_assetOf(tester), BrandEmblem.fullDarkAsset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.light),
+        home: const BrandEmblem(size: 100, full: true),
+      ),
+    );
+    expect(_assetOf(tester), BrandEmblem.fullLightAsset);
+  });
+
   testWidgets('forceLight keeps the light emblem on a white tile', (
     tester,
   ) async {
