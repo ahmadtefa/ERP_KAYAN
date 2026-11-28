@@ -458,6 +458,70 @@ const Map<String, List<String>> wordedRefusals = {
     'كُتب سعر صرف لكن الفاتورة بعملة الشركة. اختر العملة الأجنبية للفاتورة أو امسح سعر الصرف ثم أعد المحاولة. لم يُحفظ شيء.',
     'An exchange rate was typed but the invoice is in the company currency. Choose the foreign currency for the invoice or clear the exchange rate, and try again. Nothing was saved.',
   ],
+  'EOS_PERCENT_BAD': [
+    'نسبة المخصص غير صحيحة. اكتب رقمًا أكبر من صفر ولا يزيد على 100 ثم احفظ مرة أخرى. لم يُحفظ شيء.',
+    'The accrual percent is not valid. Type a number above 0 and not more than 100, then save again. Nothing was saved.',
+  ],
+  'EOS_ACCOUNT_REQUIRED': [
+    'لم تُختر كل الحسابات المطلوبة. اختر حساب المصروف وحساب المخصص من شجرة الحسابات ثم احفظ مرة أخرى. لم يُحفظ شيء.',
+    'Not every required account was chosen. Choose the expense account and the provision account from the chart of accounts, then save again. Nothing was saved.',
+  ],
+  'EOS_ACCOUNT_INVALID': [
+    'أحد الحسابات المختارة غير صالح للترحيل أو من نوع غير مناسب. اختر حسابًا فعّالًا قابلًا للترحيل: مصروف للمصروف، التزام للمخصص، وأصل (خزنة أو بنك) للصرف، ثم أعد المحاولة. لم يُحفظ شيء.',
+    'One of the chosen accounts cannot be posted to or is the wrong type. Choose an active postable account: an expense for the expense, a liability for the provision and an asset (cash or bank) for the payment, then try again. Nothing was saved.',
+  ],
+  'EOS_BRANCH_MISSING': [
+    'لا يوجد فرع في الشركة لترحيل القيد عليه. أضف فرعًا من شاشة الفروع ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'The company has no branch to post the entry to. Add a branch on the branches screen and try again. Nothing was posted.',
+  ],
+  'EOS_SETTINGS_MISSING': [
+    'لم تُضبط نسبة مخصص نهاية الخدمة وحساباته بعد. اضبطها من إعدادات نهاية الخدمة ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'The end-of-service percent and accounts have not been set yet. Set them in the end-of-service settings and try again. Nothing was posted.',
+  ],
+  'EOS_RUN_NOT_POSTED': [
+    'لا توجد مسيرة رواتب مرحّلة لشهر {month}. رحّل مسيرة هذا الشهر أولًا ثم احسب المخصص. لم يُرحَّل شيء.',
+    'There is no posted payroll run for {month}. Post that month\'s payroll run first, then accrue the provision. Nothing was posted.',
+  ],
+  'EOS_ALREADY_ACCRUED': [
+    'مخصص شهر {month} محسوب من قبل. إن كان فيه خطأ فاعكسه أولًا ثم احسبه من جديد. لم يُرحَّل شيء.',
+    'The provision for {month} has already been accrued. If it is wrong, reverse it first and accrue it again. Nothing was posted.',
+  ],
+  'EOS_NOTHING_TO_ACCRUE': [
+    'لا يوجد راتب أساسي في مسيرة شهر {month} لحساب المخصص عليه. راجع المسيرة ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'There is no basic pay in the {month} run to accrue on. Check the payroll run and try again. Nothing was posted.',
+  ],
+  'EOS_ACCRUAL_NOT_FOUND': [
+    'لم يُعثر على هذا المخصص الشهري. حدّث القائمة ثم اختر مخصصًا موجودًا. لم يتغير شيء.',
+    'This monthly accrual was not found. Refresh the list and choose an existing accrual. Nothing was changed.',
+  ],
+  'EOS_ACCRUAL_STATE': [
+    'لا يمكن عكس هذا المخصص لأنه ليس مرحّلًا (ربما عُكس من قبل). حدّث الشاشة وراجع حالته. لم يتغير شيء.',
+    'This accrual cannot be reversed because it is not posted (it may already be reversed). Refresh the screen and check its status. Nothing was changed.',
+  ],
+  'EOS_ACCRUAL_USED': [
+    'لا يمكن عكس هذا المخصص لأن موظفًا صُرف له جزء منه. اعكس مدفوعات نهاية الخدمة أولًا ثم اعكس المخصص. لم يتغير شيء.',
+    'This accrual cannot be reversed because an employee has already been paid out of it. Reverse the end-of-service payments first, then reverse the accrual. Nothing was changed.',
+  ],
+  'EOS_EMPLOYEE_REQUIRED': [
+    'لم يُختر موظف. اختر الموظف الذي ستُصرف له مستحقات نهاية الخدمة ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'No employee was chosen. Choose the employee who receives the end-of-service payment and try again. Nothing was posted.',
+  ],
+  'EOS_EMPLOYEE_NOT_FOUND': [
+    'لم يُعثر على الموظف المختار. حدّث القائمة واختر موظفًا موجودًا ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'The chosen employee was not found. Refresh the list, choose an existing employee and try again. Nothing was posted.',
+  ],
+  'EOS_PAYOUT_NOT_FOUND': [
+    'لم يُعثر على دفعة نهاية الخدمة هذه. حدّث القائمة واختر دفعة موجودة. لم يتغير شيء.',
+    'This end-of-service payment was not found. Refresh the list and choose an existing payment. Nothing was changed.',
+  ],
+  'EOS_PAYOUT_STATE': [
+    'لا يمكن عكس هذه الدفعة لأنها ليست مرحّلة (ربما عُكست من قبل). حدّث الشاشة وراجع حالتها. لم يتغير شيء.',
+    'This payment cannot be reversed because it is not posted (it may already be reversed). Refresh the screen and check its status. Nothing was changed.',
+  ],
+  'VOUCHER_FX_ALLOC_EXACT': [
+    'سند القبض بعملة أجنبية يجب توزيع مبلغه كاملًا على فواتير بنفس العملة. وزّع المبلغ كله على الفواتير أو قلّل مبلغ السند ثم أعد المحاولة. لم يُحفظ شيء.',
+    'A receipt in a foreign currency must be allocated in full to invoices in that currency. Allocate the whole amount to invoices or lower the receipt amount, then try again. Nothing was saved.',
+  ],
   'FX_RATE_MISSING': [
     'لا يوجد سعر صرف للعملة {code} في تاريخ {date} أو قبله. أدخل سعر الصرف من شاشة العملات ثم أعد المحاولة. لم يُحفظ شيء.',
     'No exchange rate has been entered for {code} on or before {date}. Enter the rate on the currencies screen and try again. Nothing was saved.',

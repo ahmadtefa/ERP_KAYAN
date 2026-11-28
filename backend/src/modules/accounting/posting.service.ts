@@ -45,6 +45,8 @@ export interface PostingRequest {
     | 'COMMISSION_PAYOUT'
     | 'PAYROLL_RUN'
     | 'PAYROLL_PAYMENT'
+    | 'EOS_ACCRUAL'
+    | 'EOS_PAYOUT'
     | 'EMPLOYEE_LOAN'
     /// A lot written off or destroyed: the value leaves stock for the
     /// inventory-difference account, with the reason on the entry.

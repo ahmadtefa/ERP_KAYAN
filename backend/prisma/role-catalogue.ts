@@ -172,6 +172,8 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
       'payroll.run.post',
       'payroll.run.pay',
       'payroll.report.read',
+      'payroll.eos.read',
+      'payroll.eos.post',
     ],
     seeded: true,
   },

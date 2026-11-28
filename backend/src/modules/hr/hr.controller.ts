@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } 
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { EosService } from './eos.service';
 import { PayrollService, AccountsInput } from './payroll.service';
 import { AttendanceRow, EmployeeInput, HrService, SalaryInput, SettingsInput } from './hr.service';
 
@@ -11,7 +12,57 @@ const mayShowPersonal = (user: AuthUser) => user.isSuperAdmin || user.permission
 
 @Controller('hr')
 export class HrController {
-  constructor(private readonly service: HrService, private readonly payroll: PayrollService) {}
+  constructor(private readonly service: HrService, private readonly payroll: PayrollService, private readonly eos: EosService) {}
+
+  // ---- end-of-service provision ----
+
+  @Get('eos/settings')
+  @RequirePermissions('payroll.eos.read')
+  eosSettings(@CurrentUser() user: AuthUser) {
+    return this.eos.getSettings(user.companyId);
+  }
+
+  @Put('eos/settings')
+  @RequirePermissions('payroll.eos.manage')
+  setEosSettings(@CurrentUser() user: AuthUser, @Body() body: { accrualPercent?: string; expenseAccountId?: string; provisionAccountId?: string }) {
+    return this.eos.setSettings(user.companyId, user.userId, body ?? {});
+  }
+
+  @Get('eos/accruals')
+  @RequirePermissions('payroll.eos.read')
+  eosAccruals(@CurrentUser() user: AuthUser) {
+    return this.eos.listAccruals(user.companyId);
+  }
+
+  @Post('eos/accruals')
+  @RequirePermissions('payroll.eos.post')
+  accrueEos(@CurrentUser() user: AuthUser, @Body() body: { month?: string }) {
+    return this.eos.accrue(user.companyId, user.userId, body?.month ?? '');
+  }
+
+  @Post('eos/accruals/:id/reverse')
+  @RequirePermissions('payroll.eos.post')
+  reverseEosAccrual(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.eos.reverseAccrual(user.companyId, user.userId, id);
+  }
+
+  @Get('eos/balances')
+  @RequirePermissions('payroll.eos.read')
+  eosBalances(@CurrentUser() user: AuthUser) {
+    return this.eos.balances(user.companyId);
+  }
+
+  @Post('eos/payouts')
+  @RequirePermissions('payroll.eos.post')
+  settleEos(@CurrentUser() user: AuthUser, @Body() body: { employeeId?: string; amount?: string; payoutDate?: string; fundingAccountId?: string; note?: string }) {
+    return this.eos.settle(user.companyId, user.userId, body ?? {});
+  }
+
+  @Post('eos/payouts/:id/reverse')
+  @RequirePermissions('payroll.eos.post')
+  reverseEosPayout(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.eos.reversePayout(user.companyId, user.userId, id);
+  }
 
   @Get('employees')
   @RequirePermissions('hr.employee.read')
