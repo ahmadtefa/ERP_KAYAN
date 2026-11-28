@@ -446,6 +446,18 @@ const Map<String, List<String>> wordedRefusals = {
     'لا يمكن إدخال سعر صرف بتاريخ في المستقبل. اختر تاريخ اليوم أو تاريخًا سابقًا ثم أعد المحاولة. لم يُحفظ شيء.',
     'An exchange rate cannot be entered for a future date. Choose today or an earlier date and try again. Nothing was saved.',
   ],
+  'INVOICE_FX_PRICE_REQUIRED': [
+    'كل سطر في فاتورة بعملة أجنبية يحتاج سعرًا مكتوبًا بتلك العملة، لأن قوائم الأسعار بعملة الشركة فقط. اكتب سعر الوحدة في السطر الفارغ ثم أعد المحاولة. لم يُحفظ شيء.',
+    'Every line of a foreign-currency invoice needs a unit price typed in that currency, because price lists are in the company currency only. Type the unit price on the empty line and try again. Nothing was saved.',
+  ],
+  'INVOICE_FX_CURRENCY_UNKNOWN': [
+    'العملة {code} غير مضافة أو غير مفعّلة في هذه الشركة. أضفها أو فعّلها من شاشة العملات أو اختر عملة أخرى ثم أعد المحاولة. لم يُحفظ شيء.',
+    'The currency {code} is not added or not active in this company. Add or activate it on the currencies screen, or choose another currency, and try again. Nothing was saved.',
+  ],
+  'INVOICE_FX_RATE_WITHOUT_CURRENCY': [
+    'كُتب سعر صرف لكن الفاتورة بعملة الشركة. اختر العملة الأجنبية للفاتورة أو امسح سعر الصرف ثم أعد المحاولة. لم يُحفظ شيء.',
+    'An exchange rate was typed but the invoice is in the company currency. Choose the foreign currency for the invoice or clear the exchange rate, and try again. Nothing was saved.',
+  ],
   'FX_RATE_MISSING': [
     'لا يوجد سعر صرف للعملة {code} في تاريخ {date} أو قبله. أدخل سعر الصرف من شاشة العملات ثم أعد المحاولة. لم يُحفظ شيء.',
     'No exchange rate has been entered for {code} on or before {date}. Enter the rate on the currencies screen and try again. Nothing was saved.',
