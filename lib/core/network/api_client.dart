@@ -197,17 +197,17 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
-    return _send(() => _dio.patch<dynamic>(path, data: body));
+    return _write(() => _dio.patch<dynamic>(path, data: body));
   }
 
   Future<Map<String, dynamic>> put(String path, {Object? body}) async {
-    return _send(() => _dio.put<dynamic>(path, data: body));
+    return _write(() => _dio.put<dynamic>(path, data: body));
   }
 
   /// Deletes a record. Used for the few things that really can be removed —
   /// a role that nobody holds, for instance.
   Future<Map<String, dynamic>> delete(String path) async {
-    return _send(() => _dio.delete<dynamic>(path));
+    return _write(() => _dio.delete<dynamic>(path));
   }
 
   Future<Map<String, dynamic>> post(
@@ -215,7 +215,7 @@ class ApiClient {
     Object? body,
     String? idempotencyKey,
   }) async {
-    return _send(
+    return _write(
       () => _dio.post<dynamic>(
         path,
         data: body,
@@ -228,6 +228,35 @@ class ApiClient {
     );
   }
 
+  // ---- short-lived cache of reference lists ----
+  //
+  // Only lists that hold names, codes and flags are kept: no money, no quantity, nothing
+  // that changes by itself. Every write (including sign-in and sign-out, which are
+  // POSTs) empties the whole cache before and after it runs, and an entry lives one
+  // minute at most, so a change made by another user shows within a minute.
+  static const _referenceListPaths = <String>{
+    '/company/branches',
+    '/inventory/warehouses',
+    '/accounting/chart-of-accounts',
+    '/accounting/cost-centers',
+  };
+  static const _referenceTtl = Duration(seconds: 60);
+  final Map<String, ({DateTime at, List<Map<String, dynamic>> rows})> _referenceCache = {};
+
+  /// Empties the reference-list cache. Called by every write; also callable directly.
+  void clearReferenceCache() => _referenceCache.clear();
+
+  Future<Map<String, dynamic>> _write(
+    Future<Response<dynamic>> Function() request,
+  ) async {
+    clearReferenceCache();
+    try {
+      return await _send(request);
+    } finally {
+      clearReferenceCache();
+    }
+  }
+
   /// Reads an endpoint that returns a collection.
   ///
   /// The API answers either with `{ items: [...], total: n }` for paginated
@@ -237,6 +266,13 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    final cacheKey = _referenceListPaths.contains(path) ? '$path?${query ?? const {}}' : null;
+    if (cacheKey != null) {
+      final hit = _referenceCache[cacheKey];
+      if (hit != null && DateTime.now().difference(hit.at) < _referenceTtl) {
+        return [for (final row in hit.rows) Map<String, dynamic>.from(row)];
+      }
+    }
     final Response<dynamic> response;
     try {
       response = await _dio.get<dynamic>(path, queryParameters: query);
@@ -249,10 +285,14 @@ class ApiClient {
         : data is List
         ? data
         : const [];
-    return raw
+    final rows = raw
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList(growable: false);
+    if (cacheKey != null) {
+      _referenceCache[cacheKey] = (at: DateTime.now(), rows: rows);
+    }
+    return [for (final row in rows) Map<String, dynamic>.from(row)];
   }
 
   /// Reads an endpoint whose body is an object with several fields.

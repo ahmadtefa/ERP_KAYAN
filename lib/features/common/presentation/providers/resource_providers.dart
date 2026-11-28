@@ -49,6 +49,8 @@ abstract class JsonListController extends AsyncNotifier<List<Json>> {
 
   /// Re-reads the collection, showing the loading state again.
   Future<void> reload() async {
+    // An explicit refresh always reads from the server, never from the short-lived cache.
+    ref.read(apiClientProvider).clearReferenceCache();
     final request = _startLoad();
     final generation = _loadGeneration;
     state = const AsyncValue.loading();
