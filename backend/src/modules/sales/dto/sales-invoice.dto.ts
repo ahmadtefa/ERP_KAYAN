@@ -72,6 +72,11 @@ export class CreateSalesInvoiceDto {
   /// When the goods were delivered or received; the delivery-date payment term counts from it.
   @IsOptional() @IsDateString() deliveryDate?: string;
   @IsUUID() customerId!: string;
+  /// A foreign currency code (for example USD). Omit for the company currency. When given,
+  /// every line price and any amount discount is typed in that currency.
+  @IsOptional() @IsString() @MaxLength(3) currency?: string;
+  /// Company-currency units for one unit of `currency`. Omit to use the saved rate on or before the invoice date.
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() @MaxLength(30) exchangeRate?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
   /// The warehouse the goods leave. Omit to use the branch's default.

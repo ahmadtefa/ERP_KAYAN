@@ -67,6 +67,8 @@ describe('cost redaction - sales invoices', () => {
         findMany: jest.fn().mockResolvedValue([invoice]),
         count: jest.fn().mockResolvedValue(1),
       },
+      // No foreign-currency row for this invoice.
+      $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(async (arg: unknown) =>
         Array.isArray(arg) ? [[invoice], 1] : arg,
       ),

@@ -42,6 +42,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { documentInBase, resolveInvoiceFx, saveInvoiceFx } from './sales-invoice-fx';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -216,9 +217,24 @@ export class SalesInvoicesService {
       },
     });
     if (!invoice) throw new NotFoundException({ code: 'SALES_INVOICE_NOT_FOUND', message: 'Sales invoice not found' });
+    const [fxRow] = await this.prisma.$queryRaw<Array<{ currency: string; rate: Prisma.Decimal; rateSource: string; foreignSubTotal: Prisma.Decimal; foreignTaxAmount: Prisma.Decimal; foreignTotal: Prisma.Decimal }>>(Prisma.sql`
+      SELECT currency, rate, "rateSource", "foreignSubTotal", "foreignTaxAmount", "foreignTotal"
+        FROM sales_invoice_fx WHERE "invoiceId" = ${id}::uuid AND "companyId" = ${companyId}::uuid`);
 
     return {
       ...this.toSummary(invoice, mayReadCost),
+      // Present only on a foreign-currency invoice. Every other figure on the invoice is
+      // in the company currency, converted once at this rate.
+      foreign: fxRow
+        ? {
+            currency: fxRow.currency,
+            rate: new Prisma.Decimal(fxRow.rate).toFixed(8),
+            rateSource: fxRow.rateSource,
+            subTotal: new Prisma.Decimal(fxRow.foreignSubTotal).toFixed(MONEY_SCALE),
+            taxAmount: new Prisma.Decimal(fxRow.foreignTaxAmount).toFixed(MONEY_SCALE),
+            totalAmount: new Prisma.Decimal(fxRow.foreignTotal).toFixed(MONEY_SCALE),
+          }
+        : null,
       warehouseId: invoice.warehouseId ?? null,
       branch: invoice.branch,
       orderId: invoice.salesOrderId,
@@ -317,6 +333,16 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
     if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
 
+    // A foreign-currency invoice is priced twice: once as typed (the figures the customer
+    // was quoted) and once converted at the rate, which is what the books and every
+    // report use. Nothing downstream ever sees a foreign figure as company money.
+    const fx = await resolveInvoiceFx(tx, companyId, dto);
+    const foreignPrepared = fx
+      ? await this.prepareLines(companyId, dto.lines, dto.customerId,
+          { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount }, orderUnits, tx, options)
+      : null;
+    const foreignTotals = foreignPrepared ? this.totalsOf(foreignPrepared.lines) : null;
+    if (fx) dto = documentInBase(dto, fx.rate);
     const prepared = await this.prepareLines(
       companyId,
       dto.lines,
@@ -346,7 +372,7 @@ export class SalesInvoicesService {
         'SI',
       );
 
-      return tx.salesInvoice.create({
+      const createdInvoice = await tx.salesInvoice.create({
         data: {
           warehouseId: dto.warehouseId ?? null,
           companyId,
@@ -396,6 +422,8 @@ export class SalesInvoicesService {
         },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
+      await saveInvoiceFx(tx, companyId, createdInvoice.id, fx, foreignTotals);
+      return createdInvoice;
 
   }
 
@@ -443,6 +471,13 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException({ code: 'CUSTOMER_MISSING', message: 'The customer does not exist' });
     if (!customer.isActive) throw new BadRequestException({ code: 'CUSTOMER_INACTIVE', message: 'The customer is inactive' });
 
+    const fx = await resolveInvoiceFx(this.prisma, companyId, dto);
+    const foreignPrepared = fx
+      ? await this.prepareLines(companyId, dto.lines, dto.customerId,
+          { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount })
+      : null;
+    const foreignTotals = foreignPrepared ? this.totalsOf(foreignPrepared.lines) : null;
+    if (fx) dto = documentInBase(dto, fx.rate);
     const prepared = await this.prepareLines(
       companyId,
       dto.lines,
@@ -515,6 +550,7 @@ export class SalesInvoicesService {
           },
         },
       });
+      await saveInvoiceFx(tx, companyId, id, fx, foreignTotals);
     });
 
     await this.audit.record({

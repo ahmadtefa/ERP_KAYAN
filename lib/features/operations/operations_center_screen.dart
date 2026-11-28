@@ -124,6 +124,9 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
           hint: widget.kind == OpsKind.entry
               ? (arabic ? 'ابحث في عمليات الإدخال…' : 'Search entry operations…')
               : (arabic ? 'ابحث في التقارير والمخرجات…' : 'Search reports and outputs…'),
+          helper: arabic
+              ? 'اكتب جزءاً من اسم العملية، ثم اضغط على البطاقة لفتحها.'
+              : 'Type part of an operation name, then tap its card to open it.',
           onChanged: (value) => setState(() => _query = value.trim()),
         ),
         if (items.isEmpty)
@@ -132,8 +135,8 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
             child: Center(
               child: Text(
                 arabic
-                    ? 'لا توجد لديك صلاحية لعرض عمليات هذا القسم.'
-                    : 'You do not have permission to view operations in this section.',
+                    ? 'لا توجد لديك صلاحية لعرض عمليات هذا القسم. اطلب من مدير النظام إعطاءك الصلاحية.'
+                    : 'You do not have permission to view operations in this section. Ask your system administrator to give you access.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
@@ -144,7 +147,9 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
             child: Center(
               child: Text(
-                arabic ? 'لا توجد نتائج مطابقة للبحث.' : 'No matching results.',
+                arabic
+                    ? 'لا توجد نتائج مطابقة. جرّب كلمة أخرى أو امسح البحث.'
+                    : 'No matching results. Try another word or clear the search.',
                 textAlign: TextAlign.center,
               ),
             ),
@@ -205,10 +210,16 @@ class _OperationsCenterScreenState extends ConsumerState<OperationsCenterScreen>
 }
 
 class _SearchBar extends StatelessWidget {
-  const _SearchBar({required this.controller, required this.hint, required this.onChanged});
+  const _SearchBar({
+    required this.controller,
+    required this.hint,
+    required this.helper,
+    required this.onChanged,
+  });
 
   final TextEditingController controller;
   final String hint;
+  final String helper;
   final ValueChanged<String> onChanged;
 
   @override
@@ -219,6 +230,8 @@ class _SearchBar extends StatelessWidget {
       onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hint,
+        helperText: helper,
+        helperMaxLines: 1,
         prefixIcon: const Icon(Icons.search_rounded),
         isDense: true,
         filled: true,

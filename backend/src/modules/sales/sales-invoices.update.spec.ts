@@ -19,6 +19,8 @@ describe('SalesInvoicesService.updateDraft', () => {
         .mockResolvedValueOnce([{ status: InvoiceStatus.DRAFT }])
         .mockResolvedValue([{ itemId: ITEM_ID, quantity: new Prisma.Decimal('100') }]),
       salesInvoice: { update: jest.fn().mockResolvedValue({}) },
+      // The foreign-currency side table: an ordinary invoice only clears it.
+      $executeRaw: jest.fn().mockResolvedValue(0),
       // The save-time stock check: a stock item with plenty on hand, no warehouse found.
       warehouse: { findFirst: jest.fn().mockResolvedValue(null) },
       item: { findMany: jest.fn().mockResolvedValue([{ id: ITEM_ID, code: 'W', nameEn: 'Widget', nameAr: 'صنف', unit: 'pc', isStockTracked: true }]) },

@@ -49,6 +49,8 @@ function makeService(itemOverride: any = milkItem) {
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
     salesInvoiceLine: { update: jest.fn(async () => ({})) },
+    // The foreign-currency side table: an ordinary invoice only clears it.
+    $executeRaw: jest.fn(async () => 0),
     customer: { findFirst: jest.fn(async () => ({ id: CUSTOMER, isActive: true })) },
     // The save-time stock check reads the item rows and the branch balances.
     item: { findFirst: itemFind, findMany: jest.fn(async (args: any) => [itemOverride].filter((i) => args.where.id.in.includes(i.id))) },

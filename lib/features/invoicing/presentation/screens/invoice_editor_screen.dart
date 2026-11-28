@@ -1427,6 +1427,16 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  arabic ? 'بيانات الفاتورة' : 'Invoice details',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
             Row(
               children: [
                 Expanded(
@@ -1450,6 +1460,10 @@ class _Header extends StatelessWidget {
                       decoration: InputDecoration(
                         errorText: errors['date'],
                         labelText: l10n.invoiceDate,
+                        helperText: arabic
+                            ? 'تاريخ إصدار الفاتورة'
+                            : 'The day the invoice is issued',
+                        helperMaxLines: 1,
                         border: const OutlineInputBorder(),
                         suffixIcon: const Icon(Icons.calendar_today_outlined),
                       ),
@@ -1466,6 +1480,14 @@ class _Header extends StatelessWidget {
                       labelText: kind.isSales
                           ? l10n.selectCustomer
                           : l10n.selectSupplier,
+                      helperText: kind.isSales
+                          ? (arabic
+                                ? 'العميل الذي تُسجَّل عليه الفاتورة'
+                                : 'The customer this invoice is for')
+                          : (arabic
+                                ? 'المورد الذي تُسجَّل عليه الفاتورة'
+                                : 'The supplier this invoice is from'),
+                      helperMaxLines: 1,
                       border: const OutlineInputBorder(),
                     ),
                     items: [
@@ -1502,6 +1524,10 @@ class _Header extends StatelessWidget {
                       initialValue: supplierReference,
                       decoration: InputDecoration(
                         labelText: l10n.supplierReference,
+                        helperText: arabic
+                            ? 'رقم فاتورة المورد إن وُجد'
+                            : "The supplier's own invoice number, if any",
+                        helperMaxLines: 1,
                         border: const OutlineInputBorder(),
                       ),
                       onChanged: onSupplierReferenceChanged,
@@ -1569,6 +1595,16 @@ class _Header extends StatelessWidget {
               onChanged: onNotesChanged,
             ),
             const SizedBox(height: 12),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  arabic ? 'الخصم على الفاتورة كلها' : 'Discount on the whole invoice',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
