@@ -554,6 +554,90 @@ const Map<String, List<String>> wordedRefusals = {
     'عدد أيام الشهر المستخدم في حساب الأجر اليومي غير صحيح. اكتب رقمًا صحيحًا بين 20 و31 ثم أعد المحاولة. لم يُحفظ شيء.',
     'The number of days used to work out the daily wage is not valid. Enter a whole number between 20 and 31 and try again. Nothing was saved.',
   ],
+  'PAYROLL_ACCOUNT_REQUIRED': [
+    'لم تُختر كل حسابات الرواتب. اختر حسابًا لكل بند من البنود السبعة ثم احفظ. لم يُحفظ شيء.',
+    'A payroll account has not been chosen. Choose an account for each of the seven items and save again. Nothing was saved.',
+  ],
+  'PAYROLL_ACCOUNT_INVALID': [
+    'الحساب المختار لا يصلح لهذا البند، فهو إما متوقف أو غير قابل للترحيل أو من نوع مختلف. اختر حسابًا نشطًا من النوع المناسب ثم احفظ. لم يُحفظ شيء.',
+    'The chosen account does not suit this item. It is inactive, not postable or of a different type. Choose an active account of the right type and save again. Nothing was saved.',
+  ],
+  'PAYROLL_ACCOUNTS_MISSING': [
+    'لم تُحدَّد حسابات الرواتب بعد، فلا يمكن الترحيل. افتح إعدادات الرواتب واختر الحسابات ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'The payroll accounts have not been chosen yet, so nothing can be posted. Open the payroll settings, choose the accounts and try again. Nothing was posted.',
+  ],
+  'PAYROLL_BRANCH_MISSING': [
+    'لا يوجد فرع تُرحَّل إليه قيود الرواتب. أضف فرعًا للشركة ثم أعد المحاولة. لم يُرحَّل شيء.',
+    'There is no branch to post the payroll entries to. Add a branch to the company and try again. Nothing was posted.',
+  ],
+  'PAYROLL_RUN_NOT_FOUND': [
+    'لم يُعثر على مسيّر الرواتب هذا. حدّث قائمة المسيّرات واخترها من جديد. لم يتغير شيء.',
+    'This payroll run could not be found. Refresh the list of runs and choose it again. Nothing changed.',
+  ],
+  'PAYROLL_MONTH_EXISTS': [
+    'يوجد مسيّر رواتب لهذا الشهر بالفعل ({month}). افتح المسيّر الموجود بدل إنشاء آخر. لم يُنشأ شيء.',
+    'A payroll run already exists for this month ({month}). Open the existing run instead of creating another one. Nothing was created.',
+  ],
+  'PAYROLL_RUN_LOCKED': [
+    'لا يمكن إعادة احتساب المسيّر بعد اعتماده. إن كان فيه خطأ فارحّله ثم اعكس الترحيل ليعود للاحتساب. لم يتغير شيء.',
+    'A run cannot be recalculated after it has been approved. If it contains a mistake, post it and then reverse the posting to bring it back to calculation. Nothing changed.',
+  ],
+  'PAYROLL_SETTINGS_UNVERIFIED': [
+    'مقادير التأمينات والضريبة لهذا الشهر ({month}) غير مكتوبة أو لم تُعتمد. اكتبها في إعدادات الرواتب واعتمدها ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'The insurance and tax figures for this month ({month}) are missing or not confirmed. Enter them in the payroll settings, confirm them and try again. No run was created.',
+  ],
+  'PAYROLL_NO_EMPLOYEES': [
+    'لا يوجد موظفون على رأس العمل في هذا الشهر ({month}). تأكد من تواريخ التعيين والمغادرة ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'No employees were employed in this month ({month}). Check the hiring and leaving dates and try again. No run was created.',
+  ],
+  'PAYROLL_SALARY_MISSING': [
+    'لبعض الموظفين ({employees}) لا يوجد مرتب مسجَّل لهذا الشهر ({month}). سجّل المرتب لكل منهم ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'Some employees ({employees}) have no salary set for this month ({month}). Set a salary for each of them and try again. No run was created.',
+  ],
+  'PAYROLL_ATTENDANCE_MISSING': [
+    'لم يُدخَل الحضور الشهري لبعض الموظفين ({employees}) عن شهر {month}. أدخل الحضور لكل موظف، ولو بصفر غياب، ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'Monthly attendance has not been entered for some employees ({employees}) for {month}. Enter attendance for every employee, even with zero absence, and try again. No run was created.',
+  ],
+  'PAYROLL_RUN_STATE': [
+    'لا يمكن تنفيذ هذه الخطوة على المسيّر وهو في حالته الحالية ({status}). افتح المسيّر وانظر الخطوة التالية المتاحة ثم أعد المحاولة. لم يتغير شيء.',
+    'This step cannot be done while the run is in its current state ({status}). Open the run, see which step comes next and try again. Nothing changed.',
+  ],
+  'PAYROLL_APPROVER_IS_PREPARER': [
+    'لا يجوز لمن أعدّ المسيّر أن يعتمده بنفسه. اطلب من شخص آخر لديه صلاحية الاعتماد أن يعتمده. لم يتغير شيء.',
+    'The person who prepared the run cannot approve it. Ask someone else who has approval permission to approve it. Nothing changed.',
+  ],
+  'PAYROLL_LOAN_CHANGED': [
+    'تغيّر رصيد سلفة منذ احتساب المسيّر. أعد احتساب المسيّر ثم اعتمده وارحّله. لم يُرحَّل شيء.',
+    'A loan balance changed since the run was calculated. Recalculate the run, then approve and post it again. Nothing was posted.',
+  ],
+  'PAYROLL_RUN_PAID': [
+    'المسيّر مدفوع ولا يمكن عكسه مباشرة. اعكس قيد الدفع أولًا ثم أعد المحاولة. لم يتغير شيء.',
+    'The run has been paid and cannot be reversed directly. Reverse the payment entry first, then try again. Nothing changed.',
+  ],
+  'PAYROLL_FUNDING_REQUIRED': [
+    'لم يُختر حساب الصندوق أو البنك الذي سيُدفع منه. اختر الحساب ثم أعد المحاولة. لم يُسجَّل شيء.',
+    'The cash or bank account to pay from has not been chosen. Choose the account and try again. Nothing was recorded.',
+  ],
+  'PAYROLL_FUNDING_INVALID': [
+    'حساب الدفع المختار لا يصلح، فيجب أن يكون حساب صندوق أو بنك نشطًا وقابلًا للترحيل. اختر حسابًا مناسبًا ثم أعد المحاولة. لم يُسجَّل شيء.',
+    'The chosen paying account cannot be used. It must be an active, postable cash or bank account. Choose a suitable account and try again. Nothing was recorded.',
+  ],
+  'PAYROLL_LOAN_INSTALMENTS': [
+    'عدد أقساط السلفة غير صحيح. اكتب رقمًا صحيحًا من 1 إلى 120 ثم أعد المحاولة. لم تُسجَّل السلفة.',
+    'The number of loan instalments is not valid. Enter a whole number from 1 to 120 and try again. The loan was not recorded.',
+  ],
+  'PAYROLL_NOT_EMPLOYED': [
+    'لم يكن الموظف على رأس العمل في هذا الشهر. راجع تاريخ التعيين أو المغادرة ثم أعد المحاولة. لم يُحسب شيء.',
+    'The employee was not employed in this month. Check the hiring or leaving date and try again. Nothing was calculated.',
+  ],
+  'PAYROLL_NEGATIVE_GROSS': [
+    'الغياب والجزاءات أكبر من مستحقات الموظف هذا الشهر. راجع أيام الغياب والجزاءات المُدخلة ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'Absence and penalties are more than the employee earns this month. Check the absence days and penalties entered and try again. No run was created.',
+  ],
+  'PAYROLL_NEGATIVE_NET': [
+    'الاستقطاعات أكبر من صافي ما يستحقه الموظف هذا الشهر. راجع الاستقطاعات وقسط السلفة ثم أعد المحاولة. لم يُنشأ مسيّر.',
+    'Deductions are more than the employee is owed this month. Check the deductions and the loan instalment and try again. No run was created.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

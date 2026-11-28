@@ -1,5 +1,5 @@
 -- Payroll and HR, part 2: the accounts a payroll posts to, monthly runs and their lines,
--- employee loans and the instalments taken from each run, and the payments linked to a run.
+-- employee loans and the instalments taken from each run.
 CREATE TABLE payroll_accounts (
   "companyId" uuid PRIMARY KEY REFERENCES companies(id) ON DELETE RESTRICT,
   "salariesExpenseId" uuid NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
@@ -26,6 +26,9 @@ CREATE TABLE payroll_runs (
   "postedBy" uuid,
   "postedAt" timestamptz,
   "journalEntryId" uuid REFERENCES journal_entries(id) ON DELETE RESTRICT,
+  "paidBy" uuid,
+  "paidAt" timestamptz,
+  "paymentJournalEntryId" uuid REFERENCES journal_entries(id) ON DELETE RESTRICT,
   "totalGross" numeric(19,4) NOT NULL DEFAULT 0,
   "totalNet" numeric(19,4) NOT NULL DEFAULT 0,
   "createdAt" timestamptz NOT NULL DEFAULT now(),
@@ -63,7 +66,7 @@ CREATE TABLE hr_employee_loans (
   instalments integer NOT NULL CHECK (instalments BETWEEN 1 AND 120),
   "firstDeductionMonth" char(7) NOT NULL CHECK ("firstDeductionMonth" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
   status varchar(8) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','SETTLED')),
-  "voucherId" uuid REFERENCES cash_vouchers(id) ON DELETE RESTRICT,
+  "journalEntryId" uuid REFERENCES journal_entries(id) ON DELETE RESTRICT,
   "remainingBalance" numeric(19,4) NOT NULL CHECK ("remainingBalance" >= 0),
   note varchar(200),
   "createdBy" uuid,
@@ -78,13 +81,4 @@ CREATE TABLE hr_loan_deductions (
   amount numeric(19,4) NOT NULL CHECK (amount > 0),
   applied boolean NOT NULL DEFAULT false,
   UNIQUE ("loanId", "runId")
-);
-
-CREATE TABLE payroll_run_payments (
-  id uuid PRIMARY KEY,
-  "runId" uuid NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
-  "voucherId" uuid NOT NULL UNIQUE REFERENCES cash_vouchers(id) ON DELETE RESTRICT,
-  amount numeric(19,4) NOT NULL CHECK (amount > 0),
-  "linkedBy" uuid,
-  "linkedAt" timestamptz NOT NULL DEFAULT now()
 );

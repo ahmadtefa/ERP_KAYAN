@@ -43,6 +43,9 @@ export interface PostingRequest {
     | 'ASSET_DEPRECIATION'
     | 'ASSET_DISPOSAL'
     | 'COMMISSION_PAYOUT'
+    | 'PAYROLL_RUN'
+    | 'PAYROLL_PAYMENT'
+    | 'EMPLOYEE_LOAN'
     /// A lot written off or destroyed: the value leaves stock for the
     /// inventory-difference account, with the reason on the entry.
     | 'INVENTORY_WRITE_OFF'

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } 
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { PayrollService, AccountsInput } from './payroll.service';
 import { AttendanceRow, EmployeeInput, HrService, SalaryInput, SettingsInput } from './hr.service';
 
 /// Personal data (national id, insurance number, bank account) is masked unless the viewer
@@ -10,7 +11,7 @@ const mayShowPersonal = (user: AuthUser) => user.isSuperAdmin || user.permission
 
 @Controller('hr')
 export class HrController {
-  constructor(private readonly service: HrService) {}
+  constructor(private readonly service: HrService, private readonly payroll: PayrollService) {}
 
   @Get('employees')
   @RequirePermissions('hr.employee.read')
@@ -76,5 +77,79 @@ export class HrController {
   @RequirePermissions('payroll.settings.manage')
   confirmSettings(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.confirmSettings(user.companyId, user.userId, id);
+  }
+
+  // ---- payroll runs, accounts and loans ----
+
+  @Get('payroll/accounts')
+  @RequirePermissions('payroll.settings.read')
+  payrollAccounts(@CurrentUser() user: AuthUser) {
+    return this.payroll.getAccounts(user.companyId);
+  }
+
+  @Put('payroll/accounts')
+  @RequirePermissions('payroll.settings.manage')
+  setPayrollAccounts(@CurrentUser() user: AuthUser, @Body() body: AccountsInput) {
+    return this.payroll.setAccounts(user.companyId, user.userId, body ?? {});
+  }
+
+  @Get('payroll/runs')
+  @RequirePermissions('payroll.run.read')
+  runs(@CurrentUser() user: AuthUser) {
+    return this.payroll.listRuns(user.companyId);
+  }
+
+  @Get('payroll/runs/:id')
+  @RequirePermissions('payroll.run.read')
+  run(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payroll.getRun(user.companyId, id);
+  }
+
+  @Post('payroll/runs')
+  @RequirePermissions('payroll.run.create')
+  createRun(@CurrentUser() user: AuthUser, @Body() body: { month?: string }) {
+    return this.payroll.createRun(user.companyId, user.userId, user.branchId, body?.month ?? '');
+  }
+
+  @Post('payroll/runs/:id/recalculate')
+  @RequirePermissions('payroll.run.create')
+  recalculate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payroll.recalculate(user.companyId, user.userId, id);
+  }
+
+  @Post('payroll/runs/:id/approve')
+  @RequirePermissions('payroll.run.approve')
+  approve(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payroll.approve(user.companyId, user.userId, id);
+  }
+
+  @Post('payroll/runs/:id/post')
+  @RequirePermissions('payroll.run.post')
+  postRun(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payroll.post(user.companyId, user.userId, id);
+  }
+
+  @Post('payroll/runs/:id/reverse')
+  @RequirePermissions('payroll.run.post')
+  reverseRun(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payroll.reverse(user.companyId, user.userId, id);
+  }
+
+  @Post('payroll/runs/:id/pay')
+  @RequirePermissions('payroll.run.pay')
+  payRun(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: { fundingAccountId?: string }) {
+    return this.payroll.pay(user.companyId, user.userId, id, body?.fundingAccountId ?? '');
+  }
+
+  @Get('loans')
+  @RequirePermissions('hr.loan.read')
+  loans(@CurrentUser() user: AuthUser, @Query() query: { employeeId?: string }) {
+    return this.payroll.listLoans(user.companyId, query.employeeId);
+  }
+
+  @Post('loans')
+  @RequirePermissions('hr.loan.manage')
+  createLoan(@CurrentUser() user: AuthUser, @Body() body: Record<string, never>) {
+    return this.payroll.createLoan(user.companyId, user.userId, user.branchId, body ?? {});
   }
 }
