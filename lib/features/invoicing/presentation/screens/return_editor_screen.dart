@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
@@ -14,6 +15,15 @@ import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class _ReturnLineDraft {
   _ReturnLineDraft({required this.source}) : quantity = TextEditingController();
@@ -327,7 +337,8 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                     DropdownMenuItem(
                       value: text(invoice, 'id'),
                       child: Text(
-                        '${text(invoice, 'invoiceNumber')} · ${text(invoice, 'invoiceDate')}',
+                        '${text(invoice, 'invoiceNumber')} · '
+                        '${_dateLabel(context, text(invoice, 'invoiceDate'))}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -358,7 +369,10 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                         TextButton.icon(
                           onPressed: _saving || _saved ? null : _chooseDate,
                           icon: const Icon(Icons.calendar_today_outlined),
-                          label: Text('${l10n.returnDate}: $_returnDate'),
+                          label: Text(
+                            '${l10n.returnDate}: '
+                            '${_dateLabel(context, _returnDate)}',
+                          ),
                         ),
                       ],
                     ),

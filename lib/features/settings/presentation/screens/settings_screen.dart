@@ -82,6 +82,11 @@ class SettingsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+        Text(
+          isArabic ? 'حسابك' : 'Your account',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
         Card(
           child: Column(
             children: [

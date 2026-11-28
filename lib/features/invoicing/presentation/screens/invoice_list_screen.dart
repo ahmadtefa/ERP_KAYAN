@@ -275,7 +275,15 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
         value: async,
         onRetry: () => ref.read(provider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: isSales ? l10n.noSalesInvoices : l10n.noPurchaseInvoices,
+        emptyMessage: isSales
+            ? _t(
+                'لا توجد فواتير بيع بعد. اضغط «فاتورة بيع جديدة» لتسجيل أول فاتورة.',
+                'No sales invoices yet. Choose "New sales invoice" to record the first one.',
+              )
+            : _t(
+                'لا توجد فواتير شراء بعد. اضغط «فاتورة شراء جديدة» لتسجيل أول فاتورة.',
+                'No purchase invoices yet. Choose "New purchase invoice" to record the first one.',
+              ),
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           onTap: _openDetail,

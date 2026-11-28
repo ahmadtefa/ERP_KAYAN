@@ -2,6 +2,7 @@ import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/json/amount_format.dart';
@@ -38,6 +39,15 @@ Future<void> showInvoiceDetail(
     initialSize: const Size(1000, 640),
     child: InvoiceDetailDialog(kind: kind, summary: summary),
   );
+}
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
 }
 
 /// The full document, including the discount that was frozen onto each line at
@@ -179,7 +189,10 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          field(l10n.invoiceDate, text(invoice, 'invoiceDate')),
+                          field(
+                            l10n.invoiceDate,
+                            _dateLabel(context, text(invoice, 'invoiceDate')),
+                          ),
                           field(
                             isSales ? l10n.customer : l10n.supplier,
                             party.isEmpty

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -18,6 +19,15 @@ import '../../../inventory/presentation/providers/stock_providers.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 /// Opens one return document, wherever it is asked for: the returns list, or
 /// a partner's statement of account. The dialog is the same one in both
@@ -207,7 +217,9 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
         value: async,
         onRetry: () => ref.read(provider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: l10n.noReturns,
+        emptyMessage: Localizations.localeOf(context).languageCode == 'ar'
+            ? 'لا توجد مرتجعات بعد. اضغط «${isSales ? l10n.newSalesReturn : l10n.newPurchaseReturn}» لتسجيل أول مرتجع.'
+            : 'No returns yet. Choose "${isSales ? l10n.newSalesReturn : l10n.newPurchaseReturn}" to record the first one.',
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           onTap: _showDetails,
@@ -219,7 +231,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
             ),
             ColumnSpec(
               l10n.invoiceDate,
-              value: (row) => text(row, 'invoiceDate'),
+              value: (row) => _dateLabel(context, text(row, 'invoiceDate')),
             ),
             ColumnSpec(
               l10n.originalInvoice,
@@ -296,7 +308,10 @@ class _ReturnDetailDialog extends StatelessWidget {
                 '${l10n.originalInvoice}: ${text(invoice, 'originalInvoiceNumber', fallback: '—')}',
               ),
               const SizedBox(height: 6),
-              Text('${l10n.invoiceDate}: ${text(invoice, 'invoiceDate')}'),
+              Text(
+                '${l10n.invoiceDate}: '
+                '${_dateLabel(context, text(invoice, 'invoiceDate'))}',
+              ),
               const SizedBox(height: 6),
               Text('${l10n.status}: ${statusLabel(context, invoice)}'),
               if (text(invoice, 'returnReason').isNotEmpty) ...[

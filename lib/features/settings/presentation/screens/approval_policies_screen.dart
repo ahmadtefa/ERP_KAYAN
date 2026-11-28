@@ -241,6 +241,14 @@ class _ApprovalPoliciesScreenState extends ConsumerState<ApprovalPoliciesScreen>
   }
 }
 
+/// STOCK_TRANSFER -> Stock transfer. The server owns the codes; a reader
+/// should not have to see them.
+String _operationLabel(String code) {
+  final words = code.replaceAll('_', ' ').trim().toLowerCase();
+  if (words.isEmpty) return code;
+  return '${words[0].toUpperCase()}${words.substring(1)}';
+}
+
 class _PolicyCard extends StatelessWidget {
   const _PolicyCard({
     required this.ar,
@@ -307,7 +315,7 @@ class _PolicyCard extends StatelessWidget {
                       ),
                       Chip(
                         visualDensity: VisualDensity.compact,
-                        label: Text('${policy['operation']}'),
+                        label: Text(_operationLabel('${policy['operation']}')),
                       ),
                       if (!active)
                         Chip(
@@ -521,7 +529,7 @@ class _PolicyEditorDialogState extends ConsumerState<_PolicyEditorDialog> {
                       items: widget.operations
                           .map((operation) => DropdownMenuItem(
                                 value: operation,
-                                child: Text(operation),
+                                child: Text(_operationLabel(operation)),
                               ))
                           .toList(),
                       onChanged: (value) =>

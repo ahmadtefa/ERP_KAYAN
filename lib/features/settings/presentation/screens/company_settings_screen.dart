@@ -111,7 +111,9 @@ class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
                       value: profile,
                       onRetry: () => ref.read(companyProfileProvider.notifier).refresh(),
                       isEmpty: (map) => map.isEmpty || user == null || map['id'] != user.companyId,
-                      emptyMessage: l10n.noData,
+                      emptyMessage: Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'بيانات الشركة غير متاحة الآن. حاول التحديث بعد قليل.'
+                          : 'The company details are not available right now. Try refreshing in a moment.',
                       data: (data) => _ProfileCard(key:_profileKey,profile:data,canCommit:true),
                     ),
                     const SizedBox(height: AppSpacing.xxl),
@@ -639,7 +641,9 @@ class _BranchesCard extends ConsumerWidget {
               value: branches,
               onRetry: () => ref.read(branchesProvider.notifier).refresh(),
               isEmpty: (list) => list.isEmpty,
-              emptyMessage: l10n.noData,
+              emptyMessage: Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'لا توجد فروع بعد. اضغط «فرع جديد» لإضافة أول فرع.'
+                  : 'No branches yet. Choose "New branch" to add the first one.',
               data: (list) => Column(
                 children: [
                   for (final branch in list)
