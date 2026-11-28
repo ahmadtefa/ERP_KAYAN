@@ -196,7 +196,7 @@ const baseDto = (over: Record<string, unknown> = {}) => ({
   it('refuses a missing rate, a line without a typed price and landed costs, and saves nothing', async () => {
     const { service } = serviceWith(db);
     await expect(service.create(COMPANY, BRANCH, USER, baseDto() as never)).rejects.toMatchObject({ response: { code: 'FX_RATE_MISSING' } });
-    await expect(service.create(COMPANY, BRANCH, USER, baseDto({ exchangeRate: '50', lines: [{ itemId: ITEM, quantity: '1', taxRate: '0' }] }) as never)).rejects.toMatchObject({ response: { code: 'INVOICE_FX_PRICE_REQUIRED' } });
+    await expect(service.create(COMPANY, BRANCH, USER, baseDto({ exchangeRate: '50', lines: [{ itemId: ITEM, quantity: '1', taxRate: '0' }] }) as never)).rejects.toMatchObject({ response: { code: 'PURCHASE_PRICE_REQUIRED' } });
     await expect(service.create(COMPANY, BRANCH, USER, baseDto({ exchangeRate: '50', landedCostAmount: '10', landedCostCharges: [{ description: 'Freight', amount: '10' }] }) as never)).rejects.toMatchObject({ response: { code: 'INVOICE_FX_LANDED_COST' } });
     expect(await q(db, `SELECT 1 FROM purchase_invoices`)).toHaveLength(0);
   });
