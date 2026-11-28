@@ -382,7 +382,7 @@ void main() {
       child: const InvoiceListScreen(kind: InvoiceKind.sales),
     );
     expect(find.text('SI-2026-0042'), findsOneWidget);
-    expect(find.text('Noor Trading'), findsOneWidget);
+    expect(find.text('شركة النور للتجارة'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/sales_invoices_ar.png'),

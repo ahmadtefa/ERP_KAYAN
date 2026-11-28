@@ -7,6 +7,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CompanyController } from './company.controller';
 import { CompaniesController } from './companies.controller';
 import { CompanyService } from './company.service';
+import { SetupService } from './setup.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { AccountingSettingsController } from '../accounting/settings.controller';
 import { BackupScheduleController } from '../backup/backup-schedule.controller';
@@ -23,13 +24,14 @@ const companyService = {
   deleteBranch: jest.fn().mockResolvedValue(undefined),
 };
 
+const setupService = { createCompany: jest.fn().mockResolvedValue({ companyId: 'new-company' }) };
 const deniedAudit = {recordRequired: jest.fn().mockResolvedValue(undefined)};
 const schedule = {status:jest.fn().mockResolvedValue({retentionCount:1}), history:jest.fn().mockResolvedValue([]), runNow:jest.fn().mockResolvedValue([]), pruneRetention:jest.fn().mockResolvedValue([])};
 const companySettingsService = {update:jest.fn().mockResolvedValue({updated:true})};
 
 @Module({
   controllers: [CompanyController, CompaniesController, AccountingSettingsController, BackupScheduleController],
-  providers: [AuditedSuperAdminGuard, {provide:AuditService,useValue:deniedAudit}, {provide:PrismaService,useValue:{}}, { provide: CompanyService, useValue: companyService },
+  providers: [AuditedSuperAdminGuard, {provide:AuditService,useValue:deniedAudit}, {provide:PrismaService,useValue:{}}, { provide: CompanyService, useValue: companyService }, { provide: SetupService, useValue: setupService },
     {provide:CompanySettingsService,useValue:companySettingsService}, {provide:BackupScheduleService,useValue:schedule}, {provide:BackupDestinationService,useValue:{}}],
 })
 class FixtureModule {}
@@ -131,4 +133,35 @@ describe('company profile HTTP authorization', () => {
     } finally {await app.close();}
   });
 
+});
+
+describe('adding a company over HTTP', () => {
+  it('is for the program administrator only; a delegated company permission is refused and nothing is created', async () => {
+    setupService.createCompany.mockClear();
+    const app = await NestFactory.create(FixtureModule, { logger: false });
+    app.use((req: { headers: Record<string, string>; user?: object }, _res: unknown, next: () => void) => {
+      req.user = {
+        userId: 'fixture-user', companyId: 'fixture-company', username: 'fixture', branchId: null,
+        isSuperAdmin: req.headers['x-fixture-super'] === 'yes',
+        permissions: ['admin.company.manage', 'company.profile.manage'],
+      };
+      next();
+    });
+    app.useGlobalGuards(new PermissionsGuard(new Reflector()));
+    await app.listen(0, '127.0.0.1');
+    const base = `http://127.0.0.1:${(app.getHttpServer().address() as { port: number }).port}`;
+    const send = (superAdmin: boolean) => fetch(base + '/companies', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fixture-super': superAdmin ? 'yes' : 'no' },
+      body: JSON.stringify({ companyCode: 'NEW', companyNameAr: 'جديدة', companyNameEn: 'New', adminUsername: 'boss', adminPassword: 'a-long-test-password-1' }),
+    });
+    try {
+      expect((await send(false)).status).toBe(403);
+      expect(setupService.createCompany).not.toHaveBeenCalled();
+      expect((await send(true)).status).toBe(201);
+      expect(setupService.createCompany).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
 });
