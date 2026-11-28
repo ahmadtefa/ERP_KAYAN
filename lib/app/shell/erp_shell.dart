@@ -728,6 +728,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.sales,
       ),
       _NavItem(
+        AppRoutes.payroll,
+        Icons.badge_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'الرواتب وشؤون العاملين' : 'Payroll and HR',
+        permissions: const ['payroll.run.read', 'hr.employee.read', 'hr.attendance.read', 'hr.loan.read', 'payroll.settings.read'],
+        group: _NavGroup.administration,
+      ),
+      _NavItem(
         AppRoutes.quotations,
         Icons.request_quote_outlined,
         l10n.quotations,
