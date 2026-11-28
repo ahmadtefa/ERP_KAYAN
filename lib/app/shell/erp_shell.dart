@@ -823,7 +823,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,
         l10n.administration,
-        permissions: const ['admin.users.manage'],
+        permissions: const ['admin.users.manage', 'admin.roles.manage', 'admin.audit.read'],
         group: _NavGroup.administration,
       ),
       _NavItem(

@@ -111,13 +111,12 @@ class _PartyStatementDialogState extends ConsumerState<_PartyStatementDialog> {
   Widget build(BuildContext context) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final user = ref.watch(currentUserProvider);
-    // Exporting a report needs the report permission: the endpoint accepts
-    // reports.read or reports.export, and nothing else. Offering the menu to a
-    // role that would be refused is a button that cannot work.
+    // The statement file needs the statement read permission and the export
+    // permission together. Offering the menu to a role that would be refused is a
+    // button that cannot work.
     final canExport =
         user == null ||
-        user.can('reports.read') ||
-        user.can('reports.export');
+        (user.can('reports.party-statement.read') && user.can('reports.export'));
     final base = widget.isCustomer
         ? '/parties/customers'
         : '/parties/suppliers';
