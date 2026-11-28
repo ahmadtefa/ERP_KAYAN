@@ -997,7 +997,7 @@ class _SidebarBrand extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadii.md),
           onTap: onToggleCollapse,
-          child: Tooltip(message: onToggleCollapse != null ? 'توسيع القائمة الجانبية' : 'KAYAN ERP', child: logo),
+          child: Tooltip(message: onToggleCollapse != null ? 'توسيع القائمة الجانبية' : 'المروه', child: logo),
         ),
       );
     }
@@ -1013,20 +1013,18 @@ class _SidebarBrand extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'KAYAN',
+                  'المروه',
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: _sidebarText(context),
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.6,
-                    fontSize: 15,
+                    fontSize: 17,
                   ),
                 ),
                 Text(
-                  'ERP SUITE',
+                  'نظام إدارة الأعمال',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: _sidebarMuted(context),
-                    letterSpacing: 2.0,
-                    fontSize: 9,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1513,12 +1511,11 @@ class _TopBar extends ConsumerWidget {
                   const SizedBox(width: AppSpacing.md),
                   Flexible(
                     child: Text(
-                      'KAYAN ERP',
+                      'المروه',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: scheme.onSurfaceVariant,
-                        letterSpacing: 1.1,
                       ),
                     ),
                   ),
