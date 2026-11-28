@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/error/failure.dart';
@@ -772,7 +773,7 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
                               ),
                               ColumnSpec(
                                 l10n.invoiceDate,
-                                value: (r) => text(r, 'entryDate'),
+                                value: (r) => _dateLabel(context, text(r, 'entryDate')),
                               ),
                               ColumnSpec(
                                 l10n.description,
@@ -813,6 +814,15 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
 /// translation files, and a hard-coded English label is worse than this.
 String _t(BuildContext context, String ar, String en) =>
     Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// A date the way a reader says it: 3 فبراير 2026, or 3 February 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 /// A compact totals strip: label + formatted amount pairs from `data['totals']`.
 class _SummaryStrip extends StatelessWidget {
@@ -1177,7 +1187,7 @@ class _ReconciliationTab extends ConsumerWidget {
                   ),
                   ColumnSpec(
                     _t(context, 'التاريخ', 'Date'),
-                    value: (r) => text(r, 'entryDate'),
+                    value: (r) => _dateLabel(context, text(r, 'entryDate')),
                   ),
                   ColumnSpec(
                     _t(context, 'المصدر', 'Source'),
@@ -1648,7 +1658,7 @@ class _GeneralJournalTab extends ConsumerWidget {
                   ),
                   ColumnSpec(
                     _t(context, 'التاريخ', 'Date'),
-                    value: (r) => text(r, 'entryDate'),
+                    value: (r) => _dateLabel(context, text(r, 'entryDate')),
                   ),
                   ColumnSpec(
                     _t(context, 'البيان', 'Description'),
@@ -1724,7 +1734,7 @@ class _SalesReportTab extends ConsumerWidget {
         ),
         ColumnSpec(
           _t(context, 'التاريخ', 'Date'),
-          value: (r) => text(r, 'invoiceDate'),
+          value: (r) => _dateLabel(context, text(r, 'invoiceDate')),
         ),
         ColumnSpec(
           _t(context, 'العميل', 'Customer'),
@@ -1794,7 +1804,7 @@ class _PurchasesReportTab extends ConsumerWidget {
         ),
         ColumnSpec(
           _t(context, 'التاريخ', 'Date'),
-          value: (r) => text(r, 'invoiceDate'),
+          value: (r) => _dateLabel(context, text(r, 'invoiceDate')),
         ),
         ColumnSpec(
           _t(context, 'المورد', 'Supplier'),
@@ -1857,7 +1867,7 @@ class _PaymentsReportTab extends ConsumerWidget {
         ),
         ColumnSpec(
           _t(context, 'التاريخ', 'Date'),
-          value: (r) => text(r, 'voucherDate'),
+          value: (r) => _dateLabel(context, text(r, 'voucherDate')),
         ),
         ColumnSpec(
           _t(context, 'النوع', 'Kind'),
@@ -2018,11 +2028,11 @@ class _OutstandingInvoicesTab extends ConsumerWidget {
         ),
         ColumnSpec(
           _t(context, 'التاريخ', 'Date'),
-          value: (r) => text(r, 'invoiceDate'),
+          value: (r) => _dateLabel(context, text(r, 'invoiceDate')),
         ),
         ColumnSpec(
           _t(context, 'الاستحقاق', 'Due'),
-          value: (r) => text(r, 'dueDate'),
+          value: (r) => _dateLabel(context, text(r, 'dueDate')),
         ),
         ColumnSpec(
           _t(context, 'الطرف', 'Party'),
@@ -2255,7 +2265,7 @@ class _CostCentersTab extends ConsumerWidget {
                     emphasise: true,
                     value: (row) => text(row, 'entryNumber'),
                   ),
-                  ColumnSpec(l10n.invoiceDate, value: (row) => text(row, 'entryDate')),
+                  ColumnSpec(l10n.invoiceDate, value: (row) => _dateLabel(context, text(row, 'entryDate'))),
                   ColumnSpec(
                     l10n.account,
                     value: (row) => '${text(row, 'accountCode')} — '
