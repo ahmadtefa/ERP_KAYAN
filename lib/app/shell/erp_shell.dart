@@ -93,7 +93,7 @@ int? _subIndexOf(String path) {
   if (path == AppRoutes.cash || path == AppRoutes.cheques) return 0;
   if (path == AppRoutes.journalEntries || path == AppRoutes.fiscalPeriods || path == AppRoutes.openingBalances) return 1;
   if (path == AppRoutes.fixedAssets || path == AppRoutes.costCenters || path == AppRoutes.budgets) return 2;
-  if (path == AppRoutes.chartOfAccounts || path == AppRoutes.withholding) return 3;
+  if (path == AppRoutes.chartOfAccounts || path == AppRoutes.withholding || path == AppRoutes.currencies) return 3;
   return null;
 }
 
@@ -726,6 +726,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         Localizations.localeOf(context).languageCode == 'ar' ? 'عمولات المندوبين' : 'Sales-rep commissions',
         permissions: const ['commissions.read'],
         group: _NavGroup.sales,
+      ),
+      _NavItem(
+        AppRoutes.currencies,
+        Icons.currency_exchange,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'العملات وأسعار الصرف' : 'Currencies and rates',
+        permissions: const ['currency.read'],
+        group: _NavGroup.accounting,
       ),
       _NavItem(
         AppRoutes.payroll,
