@@ -30,6 +30,10 @@ export const ACCOUNT_CODES = {
   // A single disposal can always name its own gain/loss account instead.
   assetDisposalGain: '4103',
   assetDisposalLoss: '4103',
+  // Realised exchange differences also land in other income (a credit for a gain, a debit
+  // for a loss) until the company maps dedicated accounts.
+  exchangeGain: '4103',
+  exchangeLoss: '4103',
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNT_CODES;
@@ -52,6 +56,8 @@ export const EIGHT_DIGIT_ACCOUNT_CODES: Record<AccountKey, string> = {
   openingBalanceEquity: '03010301',
   assetDisposalGain: '04020101',
   assetDisposalLoss: '04020101',
+  exchangeGain: '04020101',
+  exchangeLoss: '04020101',
 };
 
 export function accountCodesFor(scheme: AccountCodeScheme): Record<AccountKey, string> {
