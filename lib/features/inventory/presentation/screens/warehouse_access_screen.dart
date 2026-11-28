@@ -92,7 +92,9 @@ class WarehouseAccessScreen extends ConsumerWidget {
         value: people,
         onRetry: () => ref.invalidate(_peopleProvider),
         isEmpty: (rows) => rows.isEmpty,
-        emptyMessage: arabic ? 'لا يوجد مستخدمون.' : 'No users.',
+        emptyMessage: arabic
+            ? 'لا يوجد مستخدمون لعرضهم. تأكد من وجود مستخدمين في الشركة، ثم اضغط تحديث.'
+            : 'No users to show. Check that the company has users, then refresh.',
         data: (rows) {
           final subject = ref.watch(_subjectProvider);
           return Row(

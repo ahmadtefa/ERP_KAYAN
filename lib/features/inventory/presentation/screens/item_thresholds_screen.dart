@@ -78,8 +78,8 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
         onRetry: () => ref.read(itemThresholdsProvider.notifier).reload(),
         isEmpty: (rows) => rows.isEmpty,
         emptyMessage: _arabic
-            ? 'لم تُضبط حدود بعد.'
-            : 'No thresholds have been set yet.',
+            ? 'لم تُضبط حدود بعد. أضف أصنافًا ومستودعات أولًا، ثم عد إلى هنا لضبط الحدود.'
+            : 'No thresholds have been set yet. Add items and warehouses first, then come back to set them.',
         data: (rows) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -99,9 +99,12 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
             ),
             Expanded(
               child: _visible(rows).isEmpty
-                  ? Center(child: Text(_arabic
-                      ? 'لا توجد أصناف تطابق البحث أو التصفية. غيّر البحث أو ألغِ تصفية الحد الأدنى.'
-                      : 'No items match the search or filter. Change the search or turn off the minimum filter.'))
+                  ? EmptyView(
+                      icon: Icons.search_off,
+                      message: _arabic
+                          ? 'لا توجد أصناف تطابق البحث أو التصفية. غيّر البحث أو ألغِ تصفية الحد الأدنى.'
+                          : 'No items match the search or filter. Change the search or turn off the minimum filter.',
+                    )
                   : RecordsTable(
                 rows: _visible(rows),
                 columns: [
@@ -210,6 +213,10 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
           'minQuantity',
           _arabic ? 'الحد الأدنى' : 'Minimum',
           kind: FieldKind.decimal,
+          section: _arabic ? 'الحدود' : 'Limits',
+          helper: _arabic
+              ? 'إذا نزل المتاح إلى هذا الرقم يظهر الصنف تحت الحد.'
+              : 'Below this number the item shows as under its minimum.',
         ),
         FieldSpec(
           'reorderQuantity',

@@ -295,11 +295,18 @@ class StorageLocationsScreen extends ConsumerWidget {
       initial: row ?? {'warehouseId': warehouseId, 'kind': 'ZONE'},
       fields: [
         if (row != null)
-          FieldSpec('code', arabic ? 'الكود' : 'Code'),
+          FieldSpec(
+            'code',
+            arabic ? 'الكود' : 'Code',
+            section: arabic ? 'بيانات الموقع' : 'Location details',
+          ),
         FieldSpec(
           'nameEn',
           arabic ? 'الاسم بالإنجليزية' : 'Name (English)',
           required: true,
+          section: row == null
+              ? (arabic ? 'بيانات الموقع' : 'Location details')
+              : null,
         ),
         FieldSpec(
           'nameAr',
@@ -311,6 +318,10 @@ class StorageLocationsScreen extends ConsumerWidget {
           arabic ? 'النوع' : 'Kind',
           kind: FieldKind.select,
           required: true,
+          section: arabic ? 'النوع والموقع الأب' : 'Kind and parent',
+          helper: arabic
+              ? 'النوع يحدد الأعلى منه والأدنى منه في المستودع.'
+              : 'The kind decides what may sit above and below it in the warehouse.',
           options: [
             for (final kind in _kinds)
               FieldOption(kind, _label(context, kind)),

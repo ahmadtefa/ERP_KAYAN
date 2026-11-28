@@ -147,7 +147,9 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
         value: async,
         onRetry: () => ref.read(warehousesListProvider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: _arabic ? 'لا توجد مستودعات بعد.' : 'No warehouses yet.',
+        emptyMessage: _arabic
+            ? 'لا توجد مستودعات لعرضها. اضغط «مستودع جديد» لإضافة مستودع، أو امسح البحث.'
+            : 'No warehouses to show. Choose "New warehouse" to add one, or clear the search.',
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           columns: [
@@ -281,8 +283,18 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
       );
     }
     final fields = [
-      if (!isEdit) FieldSpec('code', arabic ? 'الكود' : 'Code', required: true),
-      FieldSpec('nameEn', arabic ? 'الاسم (إنجليزي)' : 'Name (English)'),
+      if (!isEdit)
+        FieldSpec(
+          'code',
+          arabic ? 'الكود' : 'Code',
+          required: true,
+          section: arabic ? 'بيانات المستودع' : 'Warehouse details',
+        ),
+      FieldSpec(
+        'nameEn',
+        arabic ? 'الاسم (إنجليزي)' : 'Name (English)',
+        section: isEdit ? (arabic ? 'بيانات المستودع' : 'Warehouse details') : null,
+      ),
       FieldSpec('nameAr', 'الاسم (عربي)'),
       FieldSpec(
         'branchId',
@@ -290,6 +302,10 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
         kind: FieldKind.select,
         required: true,
         searchable: true,
+        section: arabic ? 'الفرع' : 'Branch',
+        helper: arabic
+            ? 'المخزون والصلاحيات تُحسب داخل هذا الفرع.'
+            : 'Stock and access are counted inside this branch.',
         options: branchOptions,
       ),
       FieldSpec(
@@ -297,11 +313,13 @@ class _WarehousesScreenState extends ConsumerState<WarehousesScreen> {
         arabic ? 'العنوان' : 'Address',
         nullWhenEmpty: isEdit,
         maxLines: 2,
+        section: arabic ? 'العنوان' : 'Address',
       ),
       FieldSpec(
         'isDefault',
         arabic ? 'المستودع الافتراضي للفرع' : 'Default for the branch',
         kind: FieldKind.toggle,
+        section: arabic ? 'الإعداد' : 'Setting',
         helper: arabic
             ? 'أول مستودع في الفرع يصبح افتراضيًا تلقائيًا.'
             : 'The first warehouse of a branch becomes the default.',

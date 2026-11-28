@@ -137,8 +137,8 @@ class _InventoryReportsScreenState
         onRetry: () => ref.invalidate(_catalogueProvider),
         isEmpty: (reports) => reports.isEmpty,
         emptyMessage: _arabic
-            ? 'لا توجد تقارير متاحة.'
-            : 'No reports are available.',
+            ? 'لا توجد تقارير متاحة. اضغط تحديث؛ إن بقيت القائمة فارغة فالخادم لم يرسل قائمة التقارير.'
+            : 'No reports are available. Refresh once; if the list stays empty the server sent no report catalogue.',
         data: (reports) {
           final selected = ref.watch(_selectedReportProvider) ??
               text(reports.first, 'slug');

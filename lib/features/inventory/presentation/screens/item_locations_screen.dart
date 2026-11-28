@@ -316,8 +316,8 @@ class _ItemLocationsScreenState extends ConsumerState<ItemLocationsScreen> {
           return Center(
             child: Text(
               _t(
-                'لا يوجد رصيد ظاهر لهذا الصنف في المخازن المسموح لك بعرضها.',
-                'No stock for this item in the warehouses you may view.',
+                'لا يوجد رصيد ظاهر لهذا الصنف في المخازن المسموح لك بعرضها. إن كنت تتوقع رصيدًا فراجع صلاحيات المستودعات أو سجّل استلامًا أولًا.',
+                'No stock for this item in the warehouses you may view. If you expect stock, review the warehouse access or record a receipt first.',
               ),
             ),
           );

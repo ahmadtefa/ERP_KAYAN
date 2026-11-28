@@ -287,8 +287,8 @@ class _ExpiryAlertsScreenState extends ConsumerState<ExpiryAlertsScreen> {
           ),
           isEmpty: (data) => data.items.isEmpty,
           emptyMessage: _t(
-            'لا توجد دفعات قابلة للتنبيه: كل المخزون إما بلا تاريخ انتهاء أو تم صرفه.',
-            'Nothing to alert on: every lot either has no expiry date or has been issued.',
+            'لا توجد دفعات قابلة للتنبيه: كل المخزون إما بلا تاريخ انتهاء أو تم صرفه. سجّل تاريخ الانتهاء عند استلام الدفعة ليظهر تنبيهها هنا.',
+            'Nothing to alert on: every lot either has no expiry date or has been issued. Record an expiry date when you receive a lot and its alert appears here.',
           ),
           data: (data) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -2,6 +2,7 @@ import '../widgets/location_summary.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
@@ -73,11 +74,17 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
   }
 
   /// A `@db.Date` column arrives as a full ISO timestamp; only the day is
-  /// meaningful, and a missing one is a dash.
+  /// meaningful, and a missing one is a dash. The day is shown the way a
+  /// reader says it, with its year.
   String _dateCell(Object? value) {
     final raw = asString(value);
     if (raw == null || raw.isEmpty) return '—';
-    return raw.split('T').first;
+    final day = raw.split('T').first;
+    final parsed = DateTime.tryParse(day);
+    if (parsed == null) return day;
+    return DateFormat.yMMMMd(
+      Localizations.localeOf(context).toLanguageTag(),
+    ).format(parsed);
   }
 
   /// Runs one batch operation and refetches the list afterwards.
@@ -196,7 +203,9 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
         value: async,
         onRetry: () => ref.read(batchesListProvider.notifier).reload(),
         isEmpty: (rows) => _visible(rows).isEmpty,
-        emptyMessage: _arabic ? 'لا توجد دفعات.' : 'No batches.',
+        emptyMessage: _arabic
+            ? 'لا توجد دفعات لعرضها. اضغط «استلام دفعة» لتسجيل أول دفعة، أو امسح التصفية.'
+            : 'No batches to show. Choose "Receive" to record the first lot, or clear the filter.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
           actions: (row) {
