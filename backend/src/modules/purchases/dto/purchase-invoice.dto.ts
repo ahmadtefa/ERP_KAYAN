@@ -87,6 +87,12 @@ export class CreatePurchaseInvoiceDto {
   @IsOptional() @IsString() discountPercent?: string;
   @IsOptional() @IsString() discountAmount?: string;
 
+  /// A foreign currency code (for example USD). Omit for the company currency. When given,
+  /// every line price and any amount discount is typed in that currency.
+  @IsOptional() @IsString() @MaxLength(3) currency?: string;
+  /// Company-currency units for one unit of `currency`. Omit to use the saved rate on or before the invoice date.
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() @MaxLength(30) exchangeRate?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

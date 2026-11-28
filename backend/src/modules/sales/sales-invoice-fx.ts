@@ -91,11 +91,14 @@ export async function saveInvoiceFx(
   invoiceId: string,
   fx: InvoiceFx | null,
   foreign: { subTotal: Prisma.Decimal; taxAmount: Prisma.Decimal; totalAmount: Prisma.Decimal } | null,
+  kind: 'SALES' | 'PURCHASE' = 'SALES',
 ): Promise<void> {
-  await tx.$executeRaw(Prisma.sql`DELETE FROM sales_invoice_fx WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid`);
+  // The table name comes from this closed choice, never from input.
+  const table = Prisma.raw(kind === 'PURCHASE' ? 'purchase_invoice_fx' : 'sales_invoice_fx');
+  await tx.$executeRaw(Prisma.sql`DELETE FROM ${table} WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid`);
   if (!fx || !foreign) return;
   await tx.$executeRaw(Prisma.sql`
-    INSERT INTO sales_invoice_fx ("invoiceId", "companyId", currency, rate, "rateSource", "foreignSubTotal", "foreignTaxAmount", "foreignTotal")
+    INSERT INTO ${table} ("invoiceId", "companyId", currency, rate, "rateSource", "foreignSubTotal", "foreignTaxAmount", "foreignTotal")
     VALUES (${invoiceId}::uuid, ${companyId}::uuid, ${fx.currency}, ${fx.rate.toFixed(8)}::numeric, ${fx.source},
             ${foreign.subTotal.toFixed(4)}::numeric, ${foreign.taxAmount.toFixed(4)}::numeric, ${foreign.totalAmount.toFixed(4)}::numeric)`);
 }

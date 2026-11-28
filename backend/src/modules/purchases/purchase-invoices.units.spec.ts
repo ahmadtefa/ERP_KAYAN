@@ -127,6 +127,8 @@ function makeService(itemOverrides: Record<string, any> = {}) {
   };
 
   const prisma = {
+    // No foreign-currency invoice exists in this suite: the lookup finds nothing.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     supplier: { findFirst: jest.fn().mockResolvedValue({ id: SUPPLIER, isActive: true }) },
     item: { findFirst: itemFind },
     purchaseInvoice: {

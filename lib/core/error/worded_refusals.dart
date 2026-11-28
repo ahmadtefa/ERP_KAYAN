@@ -462,6 +462,10 @@ const Map<String, List<String>> wordedRefusals = {
     'لم يتم تسجيل الدخول لأن البرنامج يضم أكثر من شركة ولم يُكتب كود الشركة. اكتب كود شركتك في خانة كود الشركة ثم أعد المحاولة.',
     'You were not signed in because the program holds more than one company and no company code was typed. Type your company code in the Company code field and try again.',
   ],
+  'INVOICE_FX_LANDED_COST': [
+    'فاتورة الشراء بعملة أجنبية لا تقبل تكاليف إضافية مثل الشحن. احذف التكاليف الإضافية من الفاتورة أو سجّلها في فاتورة منفصلة بعملة الشركة ثم احفظ. لم يُحفظ شيء.',
+    'A purchase invoice in a foreign currency cannot carry extra costs such as freight. Remove the extra costs from this invoice, or record them on a separate invoice in the company currency, and save again. Nothing was saved.',
+  ],
   'EOS_PERCENT_BAD': [
     'نسبة المخصص غير صحيحة. اكتب رقمًا أكبر من صفر ولا يزيد على 100 ثم احفظ مرة أخرى. لم يُحفظ شيء.',
     'The accrual percent is not valid. Type a number above 0 and not more than 100, then save again. Nothing was saved.',

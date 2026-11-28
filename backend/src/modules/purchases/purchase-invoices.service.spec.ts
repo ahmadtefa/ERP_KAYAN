@@ -94,11 +94,15 @@ function makeService() {
       }),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ status: InvoiceStatus.DRAFT }]),
+    // Clearing the foreign-currency row of a draft that has none.
+    $executeRaw: jest.fn().mockResolvedValue(0),
   };
   const prisma = {
     supplier: { findFirst: supplierFind },
     item: { findFirst: itemFind },
     purchaseInvoice: { findFirst: jest.fn(async () => detail) },
+    // No foreign-currency invoice exists in this suite: the lookup finds nothing.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
   };
   const numbers = { next: jest.fn().mockResolvedValue('PI-0001') };

@@ -1,3 +1,4 @@
+import { documentInBase, resolveInvoiceFx, saveInvoiceFx } from '../sales/sales-invoice-fx';
 import { branchWhere } from '../../common/auth/branch-read-scope';
 import {
   BadRequestException,
@@ -166,9 +167,26 @@ export class PurchaseInvoicesService {
     });
     if (!invoice) throw new NotFoundException({ code: 'PURCHASE_INVOICE_NOT_FOUND', message: 'Purchase invoice not found' });
 
+    const [fxRow] = await this.prisma.$queryRaw<Array<{ currency: string; rate: Prisma.Decimal; rateSource: string; foreignSubTotal: Prisma.Decimal; foreignTaxAmount: Prisma.Decimal; foreignTotal: Prisma.Decimal; foreignPaid: Prisma.Decimal }>>(Prisma.sql`
+      SELECT currency, rate, "rateSource", "foreignSubTotal", "foreignTaxAmount", "foreignTotal", "foreignPaid"
+        FROM purchase_invoice_fx WHERE "invoiceId" = ${id}::uuid AND "companyId" = ${companyId}::uuid`);
+
     return {
       ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
+      // Present only on a foreign-currency invoice. Every other figure on the invoice is
+      // in the company currency, converted once at this rate.
+      foreign: fxRow
+        ? {
+            currency: fxRow.currency,
+            rate: new Prisma.Decimal(fxRow.rate).toFixed(8),
+            rateSource: fxRow.rateSource,
+            subTotal: new Prisma.Decimal(fxRow.foreignSubTotal).toFixed(MONEY_SCALE),
+            taxAmount: new Prisma.Decimal(fxRow.foreignTaxAmount).toFixed(MONEY_SCALE),
+            totalAmount: new Prisma.Decimal(fxRow.foreignTotal).toFixed(MONEY_SCALE),
+            paidAmount: new Prisma.Decimal(fxRow.foreignPaid).toFixed(MONEY_SCALE),
+          }
+        : null,
       warehouseId: invoice.warehouseId ?? null,
       orderId: invoice.purchaseOrderId,
       updatedAt: invoice.updatedAt.toISOString(),
@@ -264,6 +282,12 @@ export class PurchaseInvoicesService {
     if (!supplier) throw new BadRequestException({ code: 'SUPPLIER_MISSING', message: 'The supplier does not exist' });
     if (!supplier.isActive) throw new BadRequestException({ code: 'SUPPLIER_INACTIVE', message: 'The supplier is inactive' });
 
+    // A foreign-currency invoice is priced twice: once as the supplier billed it, and once
+    // converted at the rate, which is what the books and every report use.
+    const fx = await resolveInvoiceFx(tx, companyId, dto);
+    const foreignPrepared = fx ? await this.foreignFigures(companyId, dto, orderUnits, tx) : null;
+    if (fx) dto = documentInBase(dto, fx.rate);
+
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
     const prepared = await this.prepareLines(
@@ -289,7 +313,7 @@ export class PurchaseInvoicesService {
         'PI',
       );
 
-      return tx.purchaseInvoice.create({
+      const createdInvoice = await tx.purchaseInvoice.create({
         data: {
           warehouseId: dto.warehouseId ?? null,
           companyId,
@@ -343,7 +367,36 @@ export class PurchaseInvoicesService {
         },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
+      if (fx) await saveInvoiceFx(tx, companyId, createdInvoice.id, fx, foreignPrepared, 'PURCHASE');
+      return createdInvoice;
+  }
 
+  /// The figures as the supplier billed them, in the foreign currency, before conversion.
+  /// Freight and other landed costs stay in the company currency and are not part of a
+  /// foreign supplier invoice, so they are refused here instead of being converted by guess.
+  private async foreignFigures(
+    companyId: string,
+    dto: CreatePurchaseInvoiceDto,
+    orderUnits: readonly TrustedOrderUnit[] | undefined,
+    q: Prisma.TransactionClient | PrismaService,
+  ) {
+    const landed = this.prepareLandedCosts(dto);
+    if (landed.total.greaterThan(0)) {
+      throw new BadRequestException({ code: 'INVOICE_FX_LANDED_COST', message: 'A foreign-currency purchase invoice cannot carry landed costs' });
+    }
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.supplierId,
+      landed.total,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      orderUnits,
+      q,
+      landed.tax,
+    );
+    const subTotal = prepared.lines.reduce((sum, l) => sum.plus(l.lineTotal), new Prisma.Decimal(0));
+    const taxAmount = prepared.lines.reduce((sum, l) => sum.plus(l.taxAmount), new Prisma.Decimal(0));
+    return { subTotal, taxAmount, totalAmount: subTotal.plus(taxAmount) };
   }
 
   /**
@@ -386,6 +439,10 @@ export class PurchaseInvoicesService {
     if (!supplier) throw new BadRequestException({ code: 'SUPPLIER_MISSING', message: 'The supplier does not exist' });
     if (!supplier.isActive) throw new BadRequestException({ code: 'SUPPLIER_INACTIVE', message: 'The supplier is inactive' });
 
+    const fx = await resolveInvoiceFx(this.prisma, companyId, dto);
+    const foreignPrepared = fx ? await this.foreignFigures(companyId, dto, undefined, this.prisma) : null;
+    if (fx) dto = documentInBase(dto, fx.rate);
+
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
     const prepared = await this.prepareLines(
@@ -421,6 +478,7 @@ export class PurchaseInvoicesService {
 
       if (locked[0].purchaseOrderId) throw new BadRequestException({ code: 'ORDER_REVIEW_REQUIRED', message: 'Order-linked draft editing requires allocation reconciliation; manual review required' });
 
+      await saveInvoiceFx(tx, companyId, id, fx, foreignPrepared, 'PURCHASE');
       await tx.purchaseInvoice.update({
         where: { id },
         data: {
