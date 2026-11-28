@@ -82,14 +82,14 @@ CREATE TABLE payroll_settings (
 );
 
 INSERT INTO permissions (id, code, "nameEn", "nameAr", module) VALUES
-  (gen_random_uuid(), 'hr.employee.read', 'View the employee file', 'عرض ملف الموظفين', 'hr'),
-  (gen_random_uuid(), 'hr.employee.manage', 'Add and edit employees', 'إضافة الموظفين وتعديلهم', 'hr'),
-  (gen_random_uuid(), 'hr.attendance.read', 'View monthly attendance', 'عرض الحضور الشهري', 'hr'),
-  (gen_random_uuid(), 'hr.attendance.manage', 'Enter monthly attendance', 'إدخال الحضور الشهري', 'hr'),
-  (gen_random_uuid(), 'hr.salary.read', 'View salary figures', 'عرض أرقام الرواتب', 'hr'),
-  (gen_random_uuid(), 'hr.salary.manage', 'Set salary structures', 'تحديد هياكل الرواتب', 'hr'),
-  (gen_random_uuid(), 'hr.loan.read', 'View employee loans and advances', 'عرض سلف وقروض الموظفين', 'hr'),
-  (gen_random_uuid(), 'hr.loan.manage', 'Record employee loans and advances', 'تسجيل سلف وقروض الموظفين', 'hr'),
+  (gen_random_uuid(), 'hr.employee.read', 'View the employee file', 'عرض ملف الموظفين', 'payroll'),
+  (gen_random_uuid(), 'hr.employee.manage', 'Add and edit employees', 'إضافة الموظفين وتعديلهم', 'payroll'),
+  (gen_random_uuid(), 'hr.attendance.read', 'View monthly attendance', 'عرض الحضور الشهري', 'payroll'),
+  (gen_random_uuid(), 'hr.attendance.manage', 'Enter monthly attendance', 'إدخال الحضور الشهري', 'payroll'),
+  (gen_random_uuid(), 'hr.salary.read', 'View salary figures', 'عرض أرقام الرواتب', 'payroll'),
+  (gen_random_uuid(), 'hr.salary.manage', 'Set salary structures', 'تحديد هياكل الرواتب', 'payroll'),
+  (gen_random_uuid(), 'hr.loan.read', 'View employee loans and advances', 'عرض سلف وقروض الموظفين', 'payroll'),
+  (gen_random_uuid(), 'hr.loan.manage', 'Record employee loans and advances', 'تسجيل سلف وقروض الموظفين', 'payroll'),
   (gen_random_uuid(), 'payroll.run.read', 'View payroll runs', 'عرض مسيرات الرواتب', 'payroll'),
   (gen_random_uuid(), 'payroll.run.create', 'Prepare and calculate payroll runs', 'إعداد مسيرات الرواتب واحتسابها', 'payroll'),
   (gen_random_uuid(), 'payroll.run.approve', 'Approve payroll runs', 'اعتماد مسيرات الرواتب', 'payroll'),
