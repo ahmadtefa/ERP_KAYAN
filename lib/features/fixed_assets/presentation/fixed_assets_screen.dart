@@ -73,6 +73,8 @@ class FixedAssetsScreen extends ConsumerStatefulWidget {
 }
 
 class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
+  bool _can(String permission) => ref.watch(currentUserProvider)?.can(permission) ?? false;
+
   bool _busy = false;
   bool _actionUncertain = false;
   final _exitRelay = DraftExitRelay();
@@ -606,17 +608,19 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
             icon: const Icon(Icons.history_outlined),
           ),
           const SizedBox(width: 4),
-          OutlinedButton.icon(
-            onPressed: _busy || _actionUncertain ? null : _runDepreciation,
-            icon: const Icon(Icons.trending_down_outlined),
-            label: Text(l10n.runDepreciation),
-          ),
+          if (_can('accounting.fixedassets.depreciate'))
+            OutlinedButton.icon(
+              onPressed: _busy || _actionUncertain ? null : _runDepreciation,
+              icon: const Icon(Icons.trending_down_outlined),
+              label: Text(l10n.runDepreciation),
+            ),
           const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: _busy || _actionUncertain ? null : () => _save(),
-            icon: const Icon(Icons.add),
-            label: Text(l10n.newAsset),
-          ),
+          if (_can('accounting.fixedassets.manage'))
+            FilledButton.icon(
+              onPressed: _busy || _actionUncertain ? null : () => _save(),
+              icon: const Icon(Icons.add),
+              label: Text(l10n.newAsset),
+            ),
         ],
       ),
       body: Column(
@@ -841,7 +845,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                   actions: (row) {
                     final status = text(row, 'status');
                     return [
-                      if (status == 'DRAFT')
+                      if (_can('accounting.fixedassets.manage') && status == 'DRAFT')
                         IconButton(
                           tooltip: l10n.edit,
                           icon: const Icon(Icons.edit_outlined, size: 20),
@@ -849,7 +853,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                               ? null
                               : () => _save(existing: row),
                         ),
-                      if (status == 'DRAFT')
+                      if (_can('accounting.fixedassets.manage') && status == 'DRAFT')
                         IconButton(
                           tooltip: l10n.activateAsset,
                           icon: const Icon(Icons.play_circle_outline, size: 20),
@@ -857,7 +861,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                               ? null
                               : () => _activate(row),
                         ),
-                      if (status == 'ACTIVE' || status == 'FULLY_DEPRECIATED')
+                      if (_can('accounting.fixedassets.manage') && (status == 'ACTIVE' || status == 'FULLY_DEPRECIATED'))
                         IconButton(
                           tooltip: l10n.disposeAsset,
                           icon: const Icon(Icons.outbox_outlined, size: 20),

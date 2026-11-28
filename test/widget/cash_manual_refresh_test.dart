@@ -63,7 +63,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            apiClientProvider.overrideWithValue(api),
+            apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(fullAccessTestUser),
             exportCapabilitiesProvider.overrideWith(
               (ref) async => ExportCapabilities.unknown,
             ),

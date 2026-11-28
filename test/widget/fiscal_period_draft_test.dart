@@ -30,7 +30,7 @@ void main() {
       tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_FiscalApi();
-      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(fullAccessTestUser),
         exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
       addTearDown(container.dispose);
       final router=GoRouter(initialLocation:'/periods',routes:[

@@ -262,13 +262,14 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
             icon: const Icon(Icons.refresh),
           ),
           const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: _busy ? null : _openEditor,
-            icon: const Icon(Icons.add),
-            label: Text(
-              isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+          if (user?.can(isSales ? 'sales.invoices.create' : 'purchases.invoices.create') == true)
+            FilledButton.icon(
+              onPressed: _busy ? null : _openEditor,
+              icon: const Icon(Icons.add),
+              label: Text(
+                isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+              ),
             ),
-          ),
         ],
       ),
       body: AsyncStateView<List<Json>>(

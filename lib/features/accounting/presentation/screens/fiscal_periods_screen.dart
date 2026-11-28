@@ -42,6 +42,8 @@ class FiscalPeriodsScreen extends ConsumerStatefulWidget {
 }
 
 class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
+  bool _can(String permission) => ref.watch(currentUserProvider)?.can(permission) ?? false;
+
   bool _busy = false;
   final _exitRelay = DraftExitRelay();
   late final DraftExitGuard _exitGuard;
@@ -193,11 +195,12 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
             icon: const Icon(Icons.refresh),
           ),
           const SizedBox(width: 4),
-          FilledButton.icon(
-            onPressed: _busy ? null : () => _save(),
-            icon: const Icon(Icons.add),
-            label: Text(l10n.newPeriod),
-          ),
+          if (_can('accounting.periods.manage'))
+            FilledButton.icon(
+              onPressed: _busy ? null : () => _save(),
+              icon: const Icon(Icons.add),
+              label: Text(l10n.newPeriod),
+            ),
         ],
       ),
       body: AsyncStateView<List<Json>>(
@@ -245,6 +248,7 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
             ),
           ],
           actions: (row) => [
+            if (_can('accounting.periods.manage'))
             IconButton(
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),
@@ -252,6 +256,7 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
                   ? null
                   : () => _save(existing: row),
             ),
+            if (_can('accounting.periods.close'))
             IconButton(
               tooltip: _t(context, 'إقفال السنة المالية', 'Year-end close'),
               icon: const Icon(Icons.event_busy_outlined, size: 20),
@@ -259,6 +264,7 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
                   ? null
                   : () => _closeYear(row),
             ),
+            if (_can('accounting.periods.manage'))
             IconButton(
               tooltip: l10n.closePeriod,
               icon: const Icon(Icons.lock_outline, size: 20),

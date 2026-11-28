@@ -46,6 +46,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _busy = false;
+
+  bool _can(String permission) => ref.watch(currentUserProvider)?.can(permission) ?? false;
   bool _refreshing = false;
   final _exitRelay = DraftExitRelay();
   late final DraftExitGuard _exitGuard;
@@ -576,11 +578,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
               alignment: WrapAlignment.end,
               children: [
                 const ListExportActions(list: 'cash-accounts'),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _newAccount,
-                  icon: const Icon(Icons.add),
-                  label: Text(l10n.newCashAccount),
-                ),
+                if (_can('cash.accounts.manage'))
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _newAccount,
+                    icon: const Icon(Icons.add),
+                    label: Text(l10n.newCashAccount),
+                  ),
               ],
             ),
           ),
@@ -640,6 +643,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   icon: const Icon(Icons.receipt_long_outlined, size: 20),
                   onPressed: () => _showStatement(row),
                 ),
+                if (_can('cash.accounts.manage'))
                 IconButton(
                   tooltip: l10n.deactivate,
                   icon: const Icon(Icons.block_outlined, size: 20),
@@ -678,11 +682,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
               alignment: WrapAlignment.end,
               children: [
                 const ListExportActions(list: 'cash-vouchers'),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _newVoucher,
-                  icon: const Icon(Icons.add),
-                  label: Text(l10n.newVoucher),
-                ),
+                if (_can('cash.vouchers.create'))
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _newVoucher,
+                    icon: const Icon(Icons.add),
+                    label: Text(l10n.newVoucher),
+                  ),
               ],
             ),
           ),
@@ -769,7 +774,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                     icon: const Icon(Icons.percent_outlined, size: 20),
                     onPressed: _busy ? null : () => showVoucherWithholding(context, ref, row),
                   ),
-                if (text(row, 'status').toUpperCase() == 'DRAFT')
+                if (_can('cash.vouchers.post') && text(row, 'status').toUpperCase() == 'DRAFT')
                   IconButton(
                     tooltip: l10n.post,
                     icon: const Icon(Icons.check_circle_outline, size: 20),
@@ -781,7 +786,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                             l10n.posted,
                           ),
                   ),
-                if (text(row, 'status').toUpperCase() == 'POSTED')
+                if (_can('cash.vouchers.post') && text(row, 'status').toUpperCase() == 'POSTED')
                   IconButton(
                     tooltip: l10n.reverse,
                     icon: const Icon(Icons.undo, size: 20),
@@ -815,11 +820,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
               alignment: WrapAlignment.end,
               children: [
                 const ListExportActions(list: 'cash-transfers'),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _newTransfer,
-                  icon: const Icon(Icons.swap_horiz),
-                  label: Text(l10n.newTransfer),
-                ),
+                if (_can('cash.vouchers.create'))
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _newTransfer,
+                    icon: const Icon(Icons.swap_horiz),
+                    label: Text(l10n.newTransfer),
+                  ),
               ],
             ),
           ),
@@ -857,7 +863,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
               ],
               actions: (row) => [
-                if (text(row, 'status').toUpperCase() == 'DRAFT')
+                if (_can('cash.vouchers.post') && text(row, 'status').toUpperCase() == 'DRAFT')
                   IconButton(
                     tooltip: l10n.post,
                     icon: const Icon(Icons.check_circle_outline, size: 20),
@@ -869,7 +875,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                             l10n.posted,
                           ),
                   ),
-                if (text(row, 'status').toUpperCase() == 'POSTED')
+                if (_can('cash.vouchers.post') && text(row, 'status').toUpperCase() == 'POSTED')
                   IconButton(
                     tooltip: l10n.reverse,
                     icon: const Icon(Icons.undo, size: 20),

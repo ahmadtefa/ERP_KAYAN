@@ -1,7 +1,7 @@
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/fiscal_periods_screen.dart';
-import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart' show apiClientProvider;
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart' show apiClientProvider, currentUserProvider;
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart'
     show ExportCapabilities, exportCapabilitiesProvider;
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -45,6 +45,7 @@ Future<void> _pump(WidgetTester tester) async {
     ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(_FiscalApi()),
+        currentUserProvider.overrideWithValue(fullAccessTestUser),
         exportCapabilitiesProvider.overrideWith(
           (ref) async => ExportCapabilities.unknown,
         ),

@@ -53,6 +53,17 @@ const testUser = AppUser(
   branchId: 'branch-1',
 );
 
+/// A signed-in user who may use every screen action. Used by tests that open a screen
+/// and press its buttons, since the screens now hide actions the user may not use.
+const fullAccessTestUser = AppUser(
+  id: 'u1',
+  username: 'accountant',
+  fullName: 'Test Accountant',
+  companyId: 'company-1',
+  branchId: 'branch-1',
+  isSuperAdmin: true,
+);
+
 class FakeAuthRepository implements AuthRepository {
   FakeAuthRepository({this.signInResult = const Success(testUser)});
 
