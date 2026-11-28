@@ -126,6 +126,13 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
               icon: const Icon(Icons.add, size: 18),
               label: Text(_arabic ? 'مسيّر شهر جديد' : 'New monthly run'),
             ),
+          if (view == 'runs' && _can('payroll.report.read'))
+            OutlinedButton.icon(
+              key: const ValueKey('payroll-report'),
+              onPressed: _report,
+              icon: const Icon(Icons.assessment_outlined, size: 18),
+              label: Text(_arabic ? 'تقرير الرواتب للسنة' : 'Payroll report for the year'),
+            ),
           if (view == 'employees' && _can('hr.employee.manage'))
             FilledButton.icon(
               onPressed: () => _employeeForm(null),
@@ -318,6 +325,62 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
       if (mounted) showMessage(context, error, error: true);
     }
     _reloadAll();
+  }
+
+  Future<void> _report() async {
+    final year = DateTime.now().year;
+    Json report;
+    try {
+      report = await ref.read(apiClientProvider).getObject('/hr/payroll/report', query: {'from': '$year-01', 'to': '$year-12'});
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    final months = (report['months'] as List? ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_arabic ? 'تقرير الرواتب لسنة $year (المسيّرات المرحّلة والمدفوعة)' : 'Payroll report for $year (posted and paid runs)'),
+        content: SizedBox(
+          width: 900,
+          height: 420,
+          child: months.isEmpty
+              ? Center(child: Text(_arabic ? 'لا توجد مسيّرات مرحّلة في هذه السنة بعد.' : 'No posted runs in this year yet.'))
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      columns: [
+                        DataColumn(label: Text(_arabic ? 'الشهر' : 'Month')),
+                        DataColumn(label: Text(_arabic ? 'عدد العاملين' : 'Employees')),
+                        DataColumn(label: Text(_arabic ? 'الإجمالي' : 'Gross')),
+                        DataColumn(label: Text(_arabic ? 'تأمينات العامل' : 'Employee insurance')),
+                        DataColumn(label: Text(_arabic ? 'تأمينات صاحب العمل' : 'Employer insurance')),
+                        DataColumn(label: Text(_arabic ? 'الضريبة' : 'Tax')),
+                        DataColumn(label: Text(_arabic ? 'استقطاعات أخرى' : 'Other deductions')),
+                        DataColumn(label: Text(_arabic ? 'الصافي' : 'Net')),
+                      ],
+                      rows: [
+                        for (final m in months)
+                          DataRow(cells: [
+                            DataCell(Text(text(m, 'month'))),
+                            DataCell(Text(text(m, 'employees'))),
+                            DataCell(Text(text(m, 'gross'))),
+                            DataCell(Text(text(m, 'employeeSI'))),
+                            DataCell(Text(text(m, 'employerSI'))),
+                            DataCell(Text(text(m, 'tax'))),
+                            DataCell(Text(text(m, 'otherDeductions'))),
+                            DataCell(Text(text(m, 'net'))),
+                          ]),
+                      ],
+                    ),
+                  ),
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(_arabic ? 'إغلاق' : 'Close'))],
+      ),
+    );
   }
 
   Future<void> _showPayslip(String runId, String employeeId) async {

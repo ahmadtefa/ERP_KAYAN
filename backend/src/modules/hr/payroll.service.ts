@@ -109,6 +109,41 @@ export class PayrollService {
     return { items: rows.map((r) => this.runView(r)) };
   }
 
+  /// Company totals per month and per cost centre for posted and paid runs. Never per employee.
+  async summaryReport(companyId: string, from: string, to: string) {
+    try {
+      const a = monthKey(from);
+      const b = monthKey(to);
+      if (a > b) throw new HrError('HR_MONTH_BAD', 'The first month is after the last month');
+      const months = await this.prisma.$queryRaw<Record<string, string | number | Prisma.Decimal>[]>(Prisma.sql`
+        SELECT r.month, r.status, count(l.id)::int AS employees,
+               COALESCE(sum(l.basic),0) basic, COALESCE(sum(l.allowances),0) allowances, COALESCE(sum(l.overtime),0) overtime,
+               COALESCE(sum(l.gross),0) gross, COALESCE(sum(l."employeeSI"),0) "employeeSI", COALESCE(sum(l."employerSI"),0) "employerSI",
+               COALESCE(sum(l.tax),0) tax, COALESCE(sum(l.deductions + l."loanInstalment" + l."absenceDeduction" + l.penalty),0) "otherDeductions",
+               COALESCE(sum(l.net),0) net
+          FROM payroll_runs r JOIN payroll_run_lines l ON l."runId" = r.id
+         WHERE r."companyId" = ${companyId}::uuid AND r.status IN ('POSTED','PAID') AND r.month BETWEEN ${a} AND ${b}
+         GROUP BY r.month, r.status ORDER BY r.month`);
+      const centres = await this.prisma.$queryRaw<Record<string, string | number | Prisma.Decimal | null>[]>(Prisma.sql`
+        SELECT cc.code, cc."nameAr", COALESCE(sum(l.gross + l."employerSI"),0) cost
+          FROM payroll_runs r JOIN payroll_run_lines l ON l."runId" = r.id
+          LEFT JOIN cost_centers cc ON cc.id = l."costCenterId"
+         WHERE r."companyId" = ${companyId}::uuid AND r.status IN ('POSTED','PAID') AND r.month BETWEEN ${a} AND ${b}
+         GROUP BY cc.code, cc."nameAr" ORDER BY cc.code NULLS LAST`);
+      const f = (v: unknown) => new Prisma.Decimal(String(v ?? 0)).toFixed(2);
+      return {
+        from: a, to: b,
+        months: months.map((x) => ({
+          month: x.month, status: x.status, employees: Number(x.employees), basic: f(x.basic), allowances: f(x.allowances), overtime: f(x.overtime),
+          gross: f(x.gross), employeeSI: f(x.employeeSI), employerSI: f(x.employerSI), tax: f(x.tax), otherDeductions: f(x.otherDeductions), net: f(x.net),
+        })),
+        costCentres: centres.map((x) => ({ code: x.code ?? null, nameAr: x.nameAr ?? null, cost: f(x.cost) })),
+      };
+    } catch (e) {
+      asHttp(e);
+    }
+  }
+
   async getRun(companyId: string, id: string) {
     try {
       const run = await this.mustRun(this.prisma, companyId, id);

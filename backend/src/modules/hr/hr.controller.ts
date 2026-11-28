@@ -93,6 +93,12 @@ export class HrController {
     return this.payroll.setAccounts(user.companyId, user.userId, body ?? {});
   }
 
+  @Get('payroll/report')
+  @RequirePermissions('payroll.report.read')
+  report(@CurrentUser() user: AuthUser, @Query() query: { from?: string; to?: string }) {
+    return this.payroll.summaryReport(user.companyId, query.from ?? '', query.to ?? '');
+  }
+
   @Get('payroll/runs')
   @RequirePermissions('payroll.run.read')
   runs(@CurrentUser() user: AuthUser) {

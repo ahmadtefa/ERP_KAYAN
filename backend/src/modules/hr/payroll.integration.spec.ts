@@ -125,4 +125,14 @@ const vmReady =
     expect(l.r).toBe('1000.0000');
     expect((await svc.listLoans(COMPANY)).items[0]).toMatchObject({ code: 'E1', remainingBalance: '1000.0000', status: 'OPEN' });
   });
+
+  it('the summary report gives company totals for posted runs only, never per employee', async () => {
+    const [{ month }] = await query(`SELECT month FROM payroll_runs WHERE id = '${run1}'`);
+    const r = await svc.summaryReport(COMPANY, month, month);
+    expect(r.months).toHaveLength(1);
+    expect(r.months[0]).toMatchObject({ month, status: 'PAID', net: '2170.00' });
+    expect(r.months[0]).not.toHaveProperty('lines');
+    await expect(svc.summaryReport(COMPANY, '2026-05', '2026-01')).rejects.toMatchObject({ response: { code: 'HR_MONTH_BAD' } });
+    await expect(svc.summaryReport(COMPANY, 'x', 'y')).rejects.toMatchObject({ response: { code: 'HR_MONTH_BAD' } });
+  });
 });
