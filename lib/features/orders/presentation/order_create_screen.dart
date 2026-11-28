@@ -245,6 +245,16 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
             Text(tr('تعذر تحميل الجهات أو الأصناف. أعد فتح الشاشة للمحاولة.', 'Could not load parties or items. Reopen the screen to retry.')),
           if (parties.isLoading || items.isLoading) const LinearProgressIndicator(),
           Form(key: _form, autovalidateMode: AutovalidateMode.onUserInteraction, child: IgnorePointer(ignoring: disabled, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  tr('بيانات الأمر', 'Order details'),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
             DropdownButtonFormField<String>(
               key: ValueKey('party-$_party-${parties.hasValue}'),
               initialValue: (parties.value ?? <Json>[]).any((row) => text(row, 'id') == _party) ? _party : null, isExpanded: true,
@@ -267,6 +277,16 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
               }),
             TextFormField(controller: _notes, onChanged: (_) => _edited('notes'), validator: (_) => _srv('notes'), decoration: InputDecoration(labelText: tr('ملاحظات', 'Notes'))),
             const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  tr('الأصناف', 'Items'),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
             for (final line in _lines) _lineEditor(line, items.value ?? <Json>[]),
             Align(alignment: AlignmentDirectional.centerStart, child: TextButton.icon(
               onPressed: () { setState(() => _lines.add(_OrderLine())); _changed(); },

@@ -9,6 +9,7 @@ import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/draft_exit_guard.dart';
@@ -40,6 +41,18 @@ final quotationBackgroundPickerProvider =
 /// The biggest letterhead file the server takes (it sends it as base64 inside
 /// a 6 MB request body).
 const quotationBackgroundMaxBytes = 4 * 1024 * 1024;
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+///
+/// The value that travels to the server stays the plain yyyy-mm-dd string; only
+/// what the button shows is spelled out.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class _QLineDraft {
   _QLineDraft({
@@ -1256,7 +1269,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                                 _pickDate(validUntil: false),
                                             icon: const Icon(Icons.event),
                                             label: Text(
-                                              '${l10n.quotationDate}: $_date',
+                                              '${l10n.quotationDate}: '
+                                              '${_dateLabel(context, _date)}',
                                             ),
                                           ),
                                           if (_serverErrors['quotationDate'] !=
@@ -1288,7 +1302,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                             label: Text(
                                               _validUntil == null
                                                   ? l10n.validUntil
-                                                  : '${l10n.validUntil}: $_validUntil',
+                                                  : '${l10n.validUntil}: '
+                                                        '${_dateLabel(context, _validUntil!)}',
                                             ),
                                           ),
                                           if (_serverErrors['validUntil'] !=

@@ -207,6 +207,16 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
             trailing: FilledButton(onPressed: _busy ? null : () => _send(_pending!), child: Text(tr('إعادة المحاولة', 'Retry'))),
           )),
           Form(key: _form, autovalidateMode: AutovalidateMode.onUserInteraction, child: IgnorePointer(ignoring: disabled, child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  tr('الأصناف', 'Items'),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
             for (final line in _lines) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
               Text('${line.name} • ${line.unit}'),
               if (widget.amendApproved) Text('${tr('المخصص بالوحدة الأساسية', 'Allocated in base units')}: ${line.allocated ?? '—'}'),

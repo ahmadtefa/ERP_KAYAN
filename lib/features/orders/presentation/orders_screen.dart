@@ -1,5 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../operations/ops_auto_create.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/router/draft_exit_guard.dart';
 import '../../../core/error/failure.dart';
+import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/state_views.dart';
@@ -19,6 +21,13 @@ import '../../accounting/presentation/screens/journal_entries_screen.dart';
 import 'order_retry_store.dart';
 import 'order_create_screen.dart';
 import 'order_edit_screen.dart';
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _orderDate(String raw, {required bool arabic}) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(arabic ? 'ar' : 'en').format(parsed);
+}
 
 /// Sales and purchase order monitoring, conversion and linked draft actions.
 class OrdersScreen extends ConsumerStatefulWidget {
@@ -100,15 +109,28 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         if (snapshot.hasError) return ErrorView(message: snapshot.error!, onRetry: _refresh);
         if (!snapshot.hasData) return const LoadingView();
         final orders = snapshot.data!;
-        if (orders.isEmpty) return EmptyView(message: tr('لا توجد أوامر', 'No orders'));
+        if (orders.isEmpty) {
+          return EmptyView(
+            message: tr(
+              'لا توجد أوامر. اضغط أمر جديد لتسجيل أول أمر.',
+              'No orders. Choose New order to record the first one.',
+            ),
+          );
+        }
         return ListView.builder(
           itemCount: orders.length,
           itemBuilder: (context, index) {
             final order = orders[index];
             return ListTile(
               title: Text(text(order, 'orderNumber')),
-              subtitle: Text('${partnerName(order, arabic: _ar)} • ${text(order, 'orderDate')}'),
-              trailing: Text('${text(order, 'status')}  •  ${text(order, 'totalAmount')}'),
+              subtitle: Text(
+                '${partnerName(order, arabic: _ar)} • '
+                '${_orderDate(text(order, 'orderDate'), arabic: _ar)}',
+              ),
+              trailing: Text(
+                '${text(order, 'status')}  •  '
+                '${formatAmount(text(order, 'totalAmount'))}',
+              ),
               onTap: () => _open(order),
             );
           },

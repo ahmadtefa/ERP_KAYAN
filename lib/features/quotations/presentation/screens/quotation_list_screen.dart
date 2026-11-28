@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/error/failure.dart';
@@ -18,6 +19,15 @@ import '../../../data/presentation/providers/data_providers.dart';
 import '../providers/quotation_providers.dart';
 import '../quotation_status.dart';
 import 'quotation_detail_dialog.dart';
+
+/// A date the way a reader says it: 5 يناير 2026, or 5 January 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 /// The quotation register.
 ///
@@ -202,7 +212,9 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
         value: async,
         onRetry: () => ref.invalidate(quotationsProvider),
         isEmpty: (rows) => rows.isEmpty,
-        emptyMessage: l10n.noQuotations,
+        emptyMessage: language == 'ar'
+            ? 'لا توجد عروض أسعار بعد. اضغط «عرض سعر جديد» لتسجيل أول عرض.'
+            : 'No quotations yet. Choose "New quotation" to record the first one.',
         data: (rows) => Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
@@ -225,11 +237,17 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
                     ),
                     ColumnSpec(
                       l10n.quotationDate,
-                      value: (row) => text(row, 'quotationDate'),
+                      value: (row) => _dateLabel(
+                        context,
+                        text(row, 'quotationDate'),
+                      ),
                     ),
                     ColumnSpec(
                       l10n.validUntil,
-                      value: (row) => text(row, 'validUntil'),
+                      value: (row) => _dateLabel(
+                        context,
+                        text(row, 'validUntil'),
+                      ),
                     ),
                     ColumnSpec(
                       l10n.customer,
