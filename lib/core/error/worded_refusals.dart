@@ -391,12 +391,12 @@ const Map<String, List<String>> wordedRefusals = {
     'The shipping and customs costs could not be spread over the invoice lines. Check the cost amount and the invoice lines, then try again. Nothing was saved.',
   ],
   'APPROVAL_DECIDE_NEEDS_PERMISSION': [
-    'هذا المستوى من الاعتماد يتطلب الصلاحية {permission} وليست لديك. اطلب من مدير النظام منح دورك هذه الصلاحية، أو اطلب من شخص لديه الصلاحية أن يعتمد. لم يتغير شيء.',
-    'This approval level requires the permission {permission}, which you do not have. Ask the system administrator to give your role this permission, or ask a person who has it to approve. Nothing changed.',
+    'لا تملك الصلاحية المطلوبة لهذا المستوى من الاعتماد. اطلب من مدير النظام منحها لدورك من شاشة الأدوار والصلاحيات، أو اطلب من شخص يملكها أن يعتمد. لم يتغير شيء.',
+    'You do not have the permission this approval level requires. Ask the system administrator to grant it to your role from the Roles and Permissions screen, or ask someone who has it to approve. Nothing changed.',
   ],
   'APPROVAL_DECIDE_ROLE': [
-    'هذا المستوى من الاعتماد مخصص للدور {role} فقط وليس هذا دورك. اطلب من صاحب هذا الدور أن يعتمد، أو اطلب من مدير النظام مراجعة سلسلة الاعتماد. لم يتغير شيء.',
-    'This approval level is only for the role {role}, and that is not your role. Ask a person with that role to approve, or ask the system administrator to review the approval chain. Nothing changed.',
+    'هذا المستوى من الاعتماد لا يعتمده إلا أصحاب دور محدد في سلسلة الاعتماد، ودورك ليس منه. اطلب من صاحب ذلك الدور أن يعتمد، أو اطلب من مدير النظام مراجعة سلسلة الاعتماد. لم يتغير شيء.',
+    'Only people with a specific role in the approval chain can decide this level, and that is not your role. Ask a person with that role to approve, or ask the system administrator to review the approval chain. Nothing changed.',
   ],
   'APPROVAL_DECIDE_SELF': [
     'لا يمكنك اتخاذ قرار في طلب اعتماد أنشأته أنت. اطلب من شخص آخر لديه صلاحية الاعتماد أن يقرر. لم يتغير شيء.',
@@ -683,8 +683,8 @@ const Map<String, List<String>> wordedRefusals = {
     'Monthly attendance has not been entered for some employees ({employees}) for {month}. Enter attendance for every employee, even with zero absence, and try again. No run was created.',
   ],
   'PAYROLL_RUN_STATE': [
-    'لا يمكن تنفيذ هذه الخطوة على المسيّر وهو في حالته الحالية ({status}). افتح المسيّر وانظر الخطوة التالية المتاحة ثم أعد المحاولة. لم يتغير شيء.',
-    'This step cannot be done while the run is in its current state ({status}). Open the run, see which step comes next and try again. Nothing changed.',
+    'لا يمكن تنفيذ هذه الخطوة على المسيّر في وضعه الحالي. افتح المسيّر واتبع الخطوة التالية المتاحة فيه، ثم أعد المحاولة. لم يتغير شيء.',
+    'This step cannot be done while the run is in its current state. Open the run, follow the next step it allows, then try again. Nothing changed.',
   ],
   'PAYROLL_APPROVER_IS_PREPARER': [
     'لا يجوز لمن أعدّ المسيّر أن يعتمده بنفسه. اطلب من شخص آخر لديه صلاحية الاعتماد أن يعتمده. لم يتغير شيء.',
@@ -811,8 +811,8 @@ const Map<String, List<String>> wordedRefusals = {
     'An original lot no longer exists, so its quantity cannot be given back. Choose another lot or contact support.',
   ],
   'PERMISSIONS_CAN_ACTIVATE_E006': [
-    'ليس لديك الصلاحية المطلوبة لتنفيذ هذا الإجراء ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
-    'You do not have the required permission for this action ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+    'ليس لديك الصلاحية المطلوبة لتنفيذ هذا الإجراء. اطلب من مدير النظام منحها لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have the required permission for this action. Ask the system administrator to grant it to your role from the Roles and Permissions screen. Nothing changed.',
   ],
   'STOCK_LEDGER_APPLY_BRANCH_E024': [
     'الرصيد غير كافٍ في هذا الفرع: المتاح {available} والمطلوب {requested}. خفّض الكمية أو انقل رصيدًا إلى الفرع، ثم أعد المحاولة. لم يتغير شيء.',
@@ -839,12 +839,12 @@ const Map<String, List<String>> wordedRefusals = {
     'The selected file {label} is not a valid database archive. Choose a valid archive file created by the backup tool.',
   ],
   'IMPORT_UPLOAD_E116': [
-    'ليس لديك صلاحية تعديل السجلات الموجودة عن طريق الاستيراد ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
-    'You do not have permission to modify existing records through import ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+    'ليس لديك صلاحية تعديل السجلات الموجودة عن طريق الاستيراد. اطلب من مدير النظام منحها لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have permission to modify existing records through import. Ask the system administrator to grant it to your role from the Roles and Permissions screen. Nothing changed.',
   ],
   'IMPORT_ALLOWED_E117': [
-    'ليس لديك صلاحية استخدام هذا الاستيراد ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة.',
-    'You do not have permission to use this import ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen, then try again.',
+    'ليس لديك صلاحية استخدام هذا الاستيراد. اطلب من مدير النظام منحها لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة.',
+    'You do not have permission to use this import. Ask the system administrator to grant it to your role from the Roles and Permissions screen, then try again.',
   ],
   'BATCHES_ISSUE_TX_E122': [
     'الرصيد غير كافٍ في الدفعات المتاحة: ينقص {shortfall}. خفّض الكمية أو أضف رصيدًا، وإن وُجدت دفعات منتهية الصلاحية فصرفها يحتاج صلاحية. لم يُحفظ شيء.',
@@ -855,8 +855,8 @@ const Map<String, List<String>> wordedRefusals = {
     'This branch already has an opening balance ({documentNumber}). Add the item there instead of entering opening stock here.',
   ],
   'STOCK_DOCUMENTS_CREATE_E132': [
-    'ليس لديك صلاحية تنفيذ هذا الإجراء ({permission}). اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
-    'You do not have permission to perform this action ({permission}). Ask the system administrator to grant this permission to your role from the Roles and Permissions screen. Nothing changed.',
+    'لا تملك صلاحية تنفيذ هذا الإجراء. اطلب من مدير النظام منح الصلاحية لدورك من شاشة الأدوار والصلاحيات. لم يتغير شيء.',
+    'You do not have permission to perform this action. Ask the system administrator to grant it to your role from the Roles and Permissions screen. Nothing changed.',
   ],
   'STOCK_DOCUMENTS_APPROVE_E140': [
     'تم اعتماد مستند الإعدام هذا مسبقًا ({documentNumber}). لا حاجة لاعتماده مرة أخرى.',
@@ -1143,24 +1143,24 @@ const Map<String, List<String>> wordedRefusals = {
     'The report could not be turned into a PDF on this machine. Use the print button and choose "Save as PDF".',
   ],
   'BACKUP_INSERT_TABLE_E046': [
-    'تعذّرت استعادة الجدول {table} لأن معالج بياناته غير متاح. تواصل مع الدعم. لم يتغير شيء.',
-    'The table {table} could not be restored because its data handler is unavailable. Contact support. Nothing was changed.',
+    'تعذّرت استعادة أحد جداول البيانات لأن معالج بياناته غير متاح. تواصل مع الدعم. لم يتغير شيء.',
+    'One of the data tables could not be restored because its data handler is unavailable. Contact support. Nothing was changed.',
   ],
   'BACKUP_INSERT_TABLE_E047': [
-    'عدد الصفوف المستعادة للجدول {table} لا يطابق قاعدة البيانات. تواصل مع الدعم. لم يتغير شيء.',
-    'The number of restored rows for the table {table} did not match the database. Contact support. Nothing was changed.',
+    'عدد الصفوف المستعادة لأحد الجداول لا يطابق ما في قاعدة البيانات. تواصل مع الدعم. لم يتغير شيء.',
+    'The number of restored rows for one of the tables did not match the database. Contact support. Nothing was changed.',
   ],
   'FULL_BACKUP_LIST_E050': [
-    'تعذّرت قراءة مجلد النسخ الاحتياطية ({reason}). تأكد من وجود المجلد ومن قدرة البرنامج على الوصول إليه، ثم أعد المحاولة.',
-    'The backup folder could not be read ({reason}). Make sure the folder exists and the program can access it, then try again.',
+    'تعذّرت قراءة مجلد النسخ الاحتياطية. تأكد من وجود المجلد ومن قدرة البرنامج على الوصول إليه، ثم أعد المحاولة.',
+    'The backup folder could not be read. Make sure the folder exists and the program can access it, then try again.',
   ],
   'FULL_BACKUP_READ_E051': [
-    'تعذّرت قراءة ملف النسخة الاحتياطية {name}؛ قد يكون تالفًا أو لا يستطيع البرنامج الوصول إليه ({reason}). اختر نسخة أخرى أو تواصل مع الدعم. لم تتغير قاعدة البيانات.',
-    'The backup file {name} could not be read; it may be damaged or the program cannot access it ({reason}). Choose another backup or contact support. The database was not changed.',
+    'تعذّرت قراءة ملف النسخة الاحتياطية {name}؛ قد يكون تالفًا أو لا يستطيع البرنامج الوصول إليه. اختر نسخة أخرى أو تواصل مع الدعم. لم تتغير قاعدة البيانات.',
+    'The backup file {name} could not be read; it may be damaged or the program cannot access it. Choose another backup or contact support. The database was not changed.',
   ],
   'FULL_BACKUP_VERIFY_E052': [
-    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه ({reason}). أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم يتغير شيء.',
-    'The backup file {name} could not be re-read for checking ({reason}). Try again, and use another backup if the problem continues. Nothing was changed.',
+    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه. أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم يتغير شيء.',
+    'The backup file {name} could not be re-read for checking. Try again, and use another backup if the problem continues. Nothing was changed.',
   ],
   'FULL_BACKUP_VERIFY_E053': [
     'الملف {name} ليس أرشيفًا صالحًا لقاعدة البيانات. اختر ملف نسخة احتياطية صالحًا. لم يتغير شيء.',
@@ -1179,12 +1179,12 @@ const Map<String, List<String>> wordedRefusals = {
     'The backup file {name} contains data that could not be read. Choose another file or contact support. Nothing was changed.',
   ],
   'FULL_BACKUP_REMOVE_E057': [
-    'تعذّر حذف ملف النسخة الاحتياطية {name} ({reason}). تأكد من أن الملف غير مستخدم من برنامج آخر، ثم أعد المحاولة. لم يتغير أي شيء آخر.',
-    'The backup file {name} could not be deleted ({reason}). Make sure it is not in use by another program, then try again. Nothing else was changed.',
+    'تعذّر حذف ملف النسخة الاحتياطية {name}. تأكد من أن الملف غير مستخدم من برنامج آخر، ثم أعد المحاولة. لم يتغير أي شيء آخر.',
+    'The backup file {name} could not be deleted. Make sure it is not in use by another program, then try again. Nothing else was changed.',
   ],
   'FULL_BACKUP_PERFORM_RESTORE_E063': [
-    'تعذّرت كتابة الملف المرفوع في مجلد النسخ الاحتياطية ({reason}). غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
-    'The uploaded file could not be written to the backup folder ({reason}). Change the backup folder setting to a folder the program can write to, then try again.',
+    'تعذّرت كتابة الملف المرفوع في مجلد النسخ الاحتياطية. غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
+    'The uploaded file could not be written to the backup folder. Change the backup folder setting to a folder the program can write to, then try again.',
   ],
   'FULL_BACKUP_PERFORM_RESTORE_E066': [
     'فشلت الاستعادة في منتصفها، وأُعيدت البيانات تلقائيًا من نسخة الأمان {safety}. البيانات عادت إلى حالتها السابقة. تواصل مع الدعم مع ذكر تفاصيل المشكلة.',
@@ -1195,16 +1195,16 @@ const Map<String, List<String>> wordedRefusals = {
     'The restore and the automatic recovery both failed, and the system is still in maintenance mode. Restore the data manually from the safety backup file {name}.',
   ],
   'FULL_BACKUP_ENSURE_BACKUP_DIR_E079': [
-    'تعذّرت كتابة النسخ الاحتياطية في المجلد ({reason}). غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
-    'Backups cannot be written to the folder ({reason}). Change the backup folder setting to a folder the program can write to, then try again.',
+    'تعذّرت كتابة النسخ الاحتياطية في المجلد. غيّر إعداد مجلد النسخ الاحتياطية إلى مجلد يمكن للبرنامج الكتابة فيه، ثم أعد المحاولة.',
+    'Backups cannot be written to the folder. Change the backup folder setting to a folder the program can write to, then try again.',
   ],
   'FULL_BACKUP_VALIDATE_AND_DESCRIBE_E081': [
-    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه ({reason}). أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
-    'The backup file {name} could not be re-read for checking ({reason}). Try again, and use another backup if the problem continues. The database was not changed.',
+    'تعذّرت إعادة قراءة ملف النسخة الاحتياطية {name} للتحقق منه. أعد المحاولة، واستخدم نسخة أخرى إن استمرت المشكلة. لم تتغير قاعدة البيانات.',
+    'The backup file {name} could not be re-read for checking. Try again, and use another backup if the problem continues. The database was not changed.',
   ],
   'SYSTEM_RESTORE_RESTORE_E101': [
-    'استعادة سابقة توقفت عند مرحلة "{phase}" ولم تُعالج. نفّذ خيار استكمال الاسترداد أولًا حتى تُعاد نسخة الأمان، ثم أعد المحاولة. لم يتغير شيء.',
-    'An earlier restore stopped at the stage "{phase}" and has not been resolved. Run the resume recovery option first so the safety backup is put back, then try again. Nothing was changed.',
+    'استعادة سابقة توقفت قبل أن تكتمل ولم تُعالج. نفّذ خيار استكمال الاسترداد أولًا حتى تُعاد نسخة الأمان، ثم أعد المحاولة. لم يتغير شيء.',
+    'An earlier restore stopped before it finished and has not been resolved. Run the resume recovery option first so the safety backup is put back, then try again. Nothing was changed.',
   ],
   'SYSTEM_RESTORE_RESTORE_E109': [
     'لم تكتمل الاستعادة، وأُعيدت البيانات السابقة تلقائيًا من نسخة الأمان {backup}، ولم تُفقد أي بيانات. ما يزال النظام في وضع الصيانة؛ تواصل مع الدعم.',
