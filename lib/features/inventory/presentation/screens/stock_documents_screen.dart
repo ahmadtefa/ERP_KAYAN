@@ -331,8 +331,8 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         onRetry: () => ref.read(stockDocumentsProvider.notifier).reload(),
         isEmpty: (rows) => _visible(rows).isEmpty,
         emptyMessage: _arabic
-            ? 'لا توجد مستندات مخزون.'
-            : 'No stock documents.',
+            ? 'لا توجد مستندات مخزون. اضغط «مستند جديد» لتسجيل أول مستند.'
+            : 'No stock documents. Use "New document" to record the first one.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
           actions: canAdjust

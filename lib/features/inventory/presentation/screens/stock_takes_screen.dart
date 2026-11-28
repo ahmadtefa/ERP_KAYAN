@@ -121,8 +121,8 @@ class _StockTakesScreenState extends ConsumerState<StockTakesScreen> {
         onRetry: () => ref.read(stockTakesProvider.notifier).reload(),
         isEmpty: (rows) => _visible(rows).isEmpty,
         emptyMessage: _arabic
-            ? 'لا توجد عمليات جرد بعد.'
-            : 'No stock takes yet.',
+            ? 'لا توجد عمليات جرد بعد. اضغط «جرد جديد» لتسجيل أول جرد.'
+            : 'No stock takes yet. Use "New count" to record the first one.',
         data: (rows) => RecordsTable(
           rows: _visible(rows),
           columns: [

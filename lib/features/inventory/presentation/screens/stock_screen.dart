@@ -128,7 +128,10 @@ class _StockScreenState extends ConsumerState<StockScreen> {
         value: async,
         onRetry: () => ref.read(stockListProvider.notifier).reload(),
         isEmpty: (rows) => _filter(rows).isEmpty,
-        emptyMessage: l10n.noStock,
+        emptyMessage:
+            Localizations.localeOf(context).languageCode == 'ar'
+            ? 'لا يوجد رصيد لعرضه. اضغط تحديث بعد أول استلام، أو ابحث بكود صنف آخر.'
+            : 'No stock to show. Refresh after the first receipt, or search another item code.',
         data: (rows) {
           final visible = _filter(rows);
           return Column(
@@ -168,8 +171,25 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                       value: (r) => text(r, 'itemCode'),
                       emphasise: true,
                     ),
-                    ColumnSpec('Name', value: (r) => text(r, 'itemNameEn')),
-                    ColumnSpec('الاسم', value: (r) => text(r, 'itemNameAr')),
+                    ColumnSpec(
+                      Localizations.localeOf(context).languageCode == 'ar'
+                          ? 'الصنف'
+                          : 'Item',
+                      value: (r) {
+                        final arabic =
+                            Localizations.localeOf(context).languageCode ==
+                            'ar';
+                        final name = text(
+                          r,
+                          arabic ? 'itemNameAr' : 'itemNameEn',
+                        );
+                        // An item saved in one language only still shows a
+                        // name rather than an empty cell.
+                        return name.isEmpty
+                            ? text(r, arabic ? 'itemNameEn' : 'itemNameAr')
+                            : name;
+                      },
+                    ),
                     ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
                     ColumnSpec(
                       l10n.onHand,

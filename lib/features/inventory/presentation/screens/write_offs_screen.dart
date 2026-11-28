@@ -302,6 +302,7 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
           _arabic ? 'المخزن' : 'Warehouse',
           kind: FieldKind.select,
           required: true,
+          section: _arabic ? 'الصنف والكمية' : 'Item and quantity',
           options: warehouseOptions,
         ),
         FieldSpec(
@@ -337,6 +338,10 @@ class _WriteOffsScreenState extends ConsumerState<WriteOffsScreen> {
           kind: FieldKind.multiline,
           maxLines: 3,
           maxLength: 500,
+          section: _arabic ? 'السبب' : 'Reason',
+          helper: _arabic
+              ? 'اكتب سببًا يقرأه المعتمد: تلف، انتهاء صلاحية، أو فرق جرد.'
+              : 'Write a reason the approver can read: damage, expiry, or a count difference.',
         ),
       ],
       onSubmit: (values) async {

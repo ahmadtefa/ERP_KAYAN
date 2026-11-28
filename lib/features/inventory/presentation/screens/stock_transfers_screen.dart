@@ -119,7 +119,10 @@ class _StockTransfersScreenState extends ConsumerState<StockTransfersScreen> {
         value: rows,
         onRetry: () => ref.read(stockTransfersProvider.notifier).reload(),
         isEmpty: (x) => _visible(x).isEmpty,
-        emptyMessage: t('لا توجد تحويلات مخزنية.', 'No stock transfers yet.'),
+        emptyMessage: t(
+          'لا توجد تحويلات مخزنية. اضغط «طلب تحويل» لبدء أول تحويل.',
+          'No stock transfers yet. Use "Request transfer" to start the first one.',
+        ),
         data: (items) => ListView.separated(
           padding: const EdgeInsets.all(12),
           itemCount: _visible(items).length,
