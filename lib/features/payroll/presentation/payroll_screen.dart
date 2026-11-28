@@ -77,6 +77,7 @@ class PayrollScreen extends ConsumerStatefulWidget {
 class _PayrollScreenState extends ConsumerState<PayrollScreen> {
   String? _view;
   String _attendanceMonth = '';
+  Future<Map<String, dynamic>>? _eosFuture;
 
   bool get _arabic => Localizations.localeOf(context).languageCode == 'ar';
 
@@ -100,6 +101,7 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
     ref.invalidate(payrollEmployeesProvider);
     ref.invalidate(payrollLoansProvider);
     ref.invalidate(payrollSettingsProvider);
+    setState(() => _eosFuture = null);
   }
 
   @override
@@ -110,6 +112,7 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
       if (_can('hr.employee.read')) 'employees': _arabic ? 'الموظفون' : 'Employees',
       if (_can('hr.attendance.read')) 'attendance': _arabic ? 'الحضور' : 'Attendance',
       if (_can('hr.loan.read')) 'loans': _arabic ? 'السلف' : 'Loans',
+      if (_can('payroll.eos.read')) 'eos': _arabic ? 'مخصص نهاية الخدمة' : 'End-of-service provision',
       if (_can('payroll.settings.read')) 'settings': _arabic ? 'إعدادات التأمينات والضريبة' : 'Insurance and tax settings',
     };
     final view = views.containsKey(_view) ? _view! : (views.isEmpty ? '' : views.keys.first);
@@ -145,6 +148,12 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
               icon: const Icon(Icons.add, size: 18),
               label: Text(_arabic ? 'سلفة جديدة' : 'New loan'),
             ),
+          if (view == 'eos' && _can('payroll.eos.manage'))
+            OutlinedButton(onPressed: _eosSettingsForm, child: Text(_arabic ? 'النسبة والحسابات' : 'Percent and accounts')),
+          if (view == 'eos' && _can('payroll.eos.post')) ...[
+            OutlinedButton(onPressed: _eosAccrueForm, child: Text(_arabic ? 'ترحيل مخصص شهر' : 'Accrue a month')),
+            FilledButton(onPressed: _eosPayForm, child: Text(_arabic ? 'صرف مستحقات نهاية الخدمة' : 'Pay out end of service')),
+          ],
           if (view == 'settings' && _can('payroll.settings.manage')) ...[
             OutlinedButton(onPressed: _accountsForm, child: Text(_arabic ? 'حسابات الرواتب' : 'Payroll accounts')),
             FilledButton.icon(
@@ -181,6 +190,7 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
                   'attendance' => _attendance(),
                   'loans' => _loans(),
                   'settings' => _settings(),
+                  'eos' => _eos(),
                   _ => _runs(),
                 }),
               ],
@@ -772,6 +782,220 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
     if (saved != null && mounted) {
       showMessage(context, _arabic ? 'تم تسجيل السلفة.' : 'The loan was recorded.');
       ref.invalidate(payrollLoansProvider);
+    }
+  }
+
+  // ---- end of service ----
+
+  Future<Map<String, dynamic>> _loadEos() async {
+    final api = ref.read(apiClientProvider);
+    return {
+      'settings': await api.getObject('/hr/eos/settings'),
+      'balances': await api.getList('/hr/eos/balances'),
+      'accruals': await api.getList('/hr/eos/accruals'),
+    };
+  }
+
+  void _eosReload() => setState(() => _eosFuture = null);
+
+  Widget _eos() {
+    _eosFuture ??= _loadEos();
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _eosFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(_arabic ? 'تعذر تحميل مخصص نهاية الخدمة.' : 'Could not load the end-of-service provision.'),
+              TextButton(onPressed: _eosReload, child: Text(_arabic ? 'إعادة المحاولة' : 'Try again')),
+            ]),
+          );
+        }
+        final data = snapshot.data!;
+        final settings = Map<String, dynamic>.from(data['settings'] as Map);
+        final balances = (data['balances'] as List).cast<Json>();
+        final accruals = (data['accruals'] as List).cast<Json>();
+        final configured = settings['configured'] == true;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  configured
+                      ? (_arabic ? 'نسبة الترحيل الشهري: ${text(settings, 'accrualPercent')}% من الأجر الأساسي.' : 'Monthly accrual: ${text(settings, 'accrualPercent')}% of basic pay.')
+                      : (_arabic ? 'لم تُضبط النسبة والحسابات بعد. اضبطهما أولًا ثم رحِّل مخصص أول شهر.' : 'The percent and accounts are not set yet. Set them first, then accrue the first month.'),
+                ),
+              ),
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: balances,
+                columns: [
+                  ColumnSpec(_arabic ? 'كود الموظف' : 'Employee code', value: (r) => text(r, 'code'), emphasise: true),
+                  ColumnSpec(_arabic ? 'الاسم' : 'Name', value: (r) => text(r, 'nameAr')),
+                  ColumnSpec(_arabic ? 'المرحَّل' : 'Accrued', numeric: true, value: (r) => text(r, 'accrued')),
+                  ColumnSpec(_arabic ? 'المصروف' : 'Paid', numeric: true, value: (r) => text(r, 'paid')),
+                  ColumnSpec(_arabic ? 'الرصيد' : 'Balance', numeric: true, value: (r) => text(r, 'balance')),
+                ],
+              ),
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: accruals,
+                columns: [
+                  ColumnSpec(_arabic ? 'الشهر' : 'Month', value: (r) => text(r, 'month'), emphasise: true),
+                  ColumnSpec(_arabic ? 'النسبة %' : 'Percent %', numeric: true, value: (r) => text(r, 'accrualPercent')),
+                  ColumnSpec(_arabic ? 'الإجمالي' : 'Total', numeric: true, value: (r) => text(r, 'total')),
+                  ColumnSpec(_arabic ? 'الحالة' : 'Status', value: (r) => _eosStatus(text(r, 'status'))),
+                ],
+                actions: (row) => [
+                  if (_can('payroll.eos.post') && text(row, 'status') == 'POSTED')
+                    IconButton(
+                      tooltip: _arabic ? 'عكس ترحيل هذا الشهر' : 'Reverse this month',
+                      icon: const Icon(Icons.undo, size: 20),
+                      onPressed: () => _eosReverse(text(row, 'id')),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _eosStatus(String s) => switch (s) {
+        'POSTED' => _arabic ? 'مرحَّل' : 'Posted',
+        'REVERSED' => _arabic ? 'معكوس' : 'Reversed',
+        _ => s,
+      };
+
+  Future<void> _eosSettingsForm() async {
+    List<FieldOption> expense;
+    List<FieldOption> provision;
+    Json current;
+    try {
+      expense = await _accountOptions({'EXPENSE'});
+      provision = await _accountOptions({'LIABILITY'});
+      current = await ref.read(apiClientProvider).getObject('/hr/eos/settings');
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    final saved = await showFormSheet(
+      context,
+      title: _arabic ? 'نسبة وحسابات مخصص نهاية الخدمة' : 'End-of-service percent and accounts',
+      submitLabel: _arabic ? 'حفظ' : 'Save',
+      initial: {
+        if (current['configured'] == true) ...{
+          'accrualPercent': text(current, 'accrualPercent'),
+          'expenseAccountId': text(current, 'expenseAccountId'),
+          'provisionAccountId': text(current, 'provisionAccountId'),
+        },
+      },
+      fields: [
+        FieldSpec('accrualPercent', _arabic ? 'نسبة الترحيل الشهري % من الأجر الأساسي' : 'Monthly accrual % of basic pay', kind: FieldKind.decimal, required: true, helper: _arabic ? 'اكتب النسبة التي تعتمدها شركتك. لا توجد نسبة جاهزة في البرنامج.' : 'Type the percent your company uses. The program has no built-in percent.'),
+        FieldSpec('expenseAccountId', _arabic ? 'حساب المصروف' : 'Expense account', kind: FieldKind.select, required: true, searchable: true, options: expense),
+        FieldSpec('provisionAccountId', _arabic ? 'حساب المخصص (التزام)' : 'Provision account (liability)', kind: FieldKind.select, required: true, searchable: true, options: provision),
+      ],
+      onSubmit: (values) async {
+        await ref.read(apiClientProvider).put('/hr/eos/settings', body: {
+          'accrualPercent': text(values, 'accrualPercent').trim(),
+          'expenseAccountId': text(values, 'expenseAccountId'),
+          'provisionAccountId': text(values, 'provisionAccountId'),
+        });
+      },
+    );
+    if (saved != null && mounted) {
+      showMessage(context, _arabic ? 'تم حفظ الإعدادات.' : 'The settings were saved.');
+      _eosReload();
+    }
+  }
+
+  Future<void> _eosAccrueForm() async {
+    final saved = await showFormSheet(
+      context,
+      title: _arabic ? 'ترحيل مخصص شهر' : 'Accrue a month',
+      submitLabel: _arabic ? 'ترحيل' : 'Accrue',
+      fields: [
+        FieldSpec('month', _arabic ? 'الشهر (سنة-شهر، مثل 2026-04)' : 'Month (like 2026-04)', required: true, helper: _arabic ? 'يلزم أن يكون مسيّر رواتب هذا الشهر مرحَّلًا. يُرحَّل الشهر مرة واحدة.' : 'The month\'s payroll run must be posted. A month is accrued once.'),
+      ],
+      onSubmit: (values) async {
+        await ref.read(apiClientProvider).post('/hr/eos/accruals', body: {'month': text(values, 'month').trim()});
+      },
+    );
+    if (saved != null && mounted) {
+      showMessage(context, _arabic ? 'تم ترحيل مخصص الشهر.' : 'The month was accrued.');
+      _eosReload();
+    }
+  }
+
+  Future<void> _eosReverse(String id) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_arabic ? 'عكس ترحيل الشهر؟' : 'Reverse this month?'),
+        content: Text(_arabic ? 'يبقى القيد الأصلي في الدفاتر ويُضاف قيد عكسي يلغي أثره.' : 'The original entry stays in the books and a mirror entry cancels it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: Text(_arabic ? 'إلغاء' : 'Cancel')),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: Text(_arabic ? 'عكس' : 'Reverse')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await ref.read(apiClientProvider).post('/hr/eos/accruals/$id/reverse');
+      if (!mounted) return;
+      showMessage(context, _arabic ? 'تم عكس ترحيل الشهر.' : 'The month was reversed.');
+      _eosReload();
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+    }
+  }
+
+  Future<void> _eosPayForm() async {
+    List<Json> people;
+    List<FieldOption> funding;
+    try {
+      people = _can('hr.employee.read')
+          ? await ref.read(apiClientProvider).getList('/hr/employees')
+          : await ref.read(apiClientProvider).getList('/hr/eos/balances');
+      funding = await _accountOptions({'ASSET'});
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    final saved = await showFormSheet(
+      context,
+      title: _arabic ? 'صرف مستحقات نهاية الخدمة' : 'Pay out end of service',
+      submitLabel: _arabic ? 'صرف' : 'Pay',
+      fields: [
+        FieldSpec('employeeId', _arabic ? 'الموظف' : 'Employee', kind: FieldKind.select, required: true, searchable: true, options: [
+          for (final e in people) FieldOption(text(e, 'employeeId', fallback: text(e, 'id')), '${text(e, 'code')}  ${text(e, 'nameAr')}'),
+        ]),
+        FieldSpec('payoutDate', _arabic ? 'تاريخ الصرف' : 'Payment date', kind: FieldKind.date, required: true),
+        FieldSpec('amount', _arabic ? 'المبلغ' : 'Amount', kind: FieldKind.decimal, required: true, helper: _arabic ? 'يُخصم من رصيد المخصص، وما زاد عنه يُسجَّل مصروفًا.' : 'It is taken from the provision balance; anything above it is booked as expense.'),
+        FieldSpec('fundingAccountId', _arabic ? 'يُصرف من (صندوق أو بنك)' : 'Paid from (cash or bank)', kind: FieldKind.select, required: true, options: funding),
+        FieldSpec('note', _arabic ? 'ملاحظة' : 'Note', maxLength: 200),
+      ],
+      onSubmit: (values) async {
+        await ref.read(apiClientProvider).post('/hr/eos/payouts', body: {
+          'employeeId': text(values, 'employeeId'),
+          'payoutDate': text(values, 'payoutDate'),
+          'amount': text(values, 'amount').trim(),
+          'fundingAccountId': text(values, 'fundingAccountId'),
+          if (text(values, 'note').trim().isNotEmpty) 'note': text(values, 'note').trim(),
+        });
+      },
+    );
+    if (saved != null && mounted) {
+      showMessage(context, _arabic ? 'تم صرف المستحقات.' : 'The payment was recorded.');
+      _eosReload();
     }
   }
 
