@@ -283,9 +283,9 @@ async function main() {
   const total = (
     await client.query('SELECT count(*)::int AS n FROM roles WHERE "companyId" = $1 AND "deletedAt" IS NULL', [COMPANY])
   ).rows[0];
-  // 17 shipped roles plus the CUSTOM template, which is created on demand: the
+  // 18 shipped roles (the HR manager role included) plus the CUSTOM template, which is created on demand: the
   // two the company already had are counted once, not duplicated.
-  check('the company now has the whole catalogue', total.n === 17, `${total.n} roles`);
+  check('the company now has the whole catalogue', total.n === 18, `${total.n} roles`);
 
   const accountantGrants = (
     await client.query(
