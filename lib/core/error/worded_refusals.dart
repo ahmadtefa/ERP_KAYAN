@@ -1222,4 +1222,12 @@ const Map<String, List<String>> wordedRefusals = {
     'مبلغ الصرف أكبر من المحتجز المتبقي ({held}). اكتب مبلغًا أقل من المحتجز أو يساويه ثم أعد الحفظ. لم يُحفظ شيء.',
     'The release amount is above the retention still held ({held}). Enter an amount not more than the retention held, then save again. Nothing was saved.',
   ],
+  'VOUCHER_FX_NO_PARTY': [
+    'لا يمكن ربط سند على حساب بعملة أجنبية بعميل أو مورد أو بفواتير، لأن أرصدة العملاء والموردين تُحفظ بالجنيه. اختر حسابًا مقابلًا بدل العميل أو المورد ثم أعد الحفظ. لم يُحفظ شيء.',
+    'A voucher on a foreign-currency account cannot name a customer, a supplier or invoices, because customer and supplier balances are kept in pounds. Choose a counter account instead of the customer or supplier, then save again. Nothing was saved.',
+  ],
+  'VOUCHER_FX_WITHHOLDING': [
+    'لا تُطبَّق ضريبة الخصم على سند بعملة أجنبية. أزل ضريبة الخصم من السند ثم رحّله. لم يتغير شيء.',
+    'Withholding tax cannot be applied to a voucher in a foreign currency. Remove the withholding from the voucher, then post it. Nothing was changed.',
+  ],
 };

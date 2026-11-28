@@ -243,6 +243,17 @@ class _CashScreenState extends ConsumerState<CashScreen>
     }
     if (!mounted) return;
 
+    // For an account in a foreign currency the voucher names a counter account and, if it
+    // wants a rate other than the newest one entered, the rate itself.
+    var ledgerAccounts = const <Json>[];
+    try {
+      ledgerAccounts = await ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
+    } catch (_) {
+      ledgerAccounts = const <Json>[];
+    }
+    if (!mounted) return;
+    final arabicForm = Localizations.localeOf(context).languageCode == 'ar';
+
     final values = await showFormSheet(
       context,
       exitRelay: _exitRelay,
@@ -304,6 +315,24 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
             ],
           ),
+        if (ledgerAccounts.isNotEmpty)
+          FieldSpec(
+            'counterAccountId',
+            arabicForm ? 'الحساب المقابل (لحسابات العملة الأجنبية)' : 'Counter account (for foreign-currency accounts)',
+            kind: FieldKind.select,
+            options: [
+              FieldOption('', l10n.noAllocation),
+              for (final a in ledgerAccounts)
+                if (a['isPostable'] != false && a['isActive'] != false)
+                  FieldOption(text(a, 'id'), '${text(a, 'code')} — ${arabicForm ? text(a, 'nameAr', fallback: text(a, 'nameEn')) : text(a, 'nameEn', fallback: text(a, 'nameAr'))}'),
+            ],
+          ),
+        FieldSpec(
+          'exchangeRate',
+          arabicForm ? 'سعر الصرف (اختياري، لحسابات العملة الأجنبية)' : 'Exchange rate (optional, for foreign-currency accounts)',
+          kind: FieldKind.decimal,
+          helper: arabicForm ? 'إن تُرك فارغًا استُخدم أحدث سعر مكتوب في شاشة العملات حتى تاريخ السند.' : 'If left empty, the newest rate entered in the currencies screen up to the voucher date is used.',
+        ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {
@@ -331,6 +360,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
         final body = <String, dynamic>{
           ...values,
           'kind': isReceipt ? 'RECEIPT' : 'PAYMENT',
+          if (text(values, 'counterAccountId').isEmpty) 'counterAccountId': null,
+          if (text(values, 'exchangeRate').trim().isEmpty) 'exchangeRate': null,
           if (allocations.isNotEmpty) 'allocations': allocations,
         };
         await _submitCreation('/cash/vouchers', body);

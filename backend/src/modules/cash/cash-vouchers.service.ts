@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
+import { CurrencyError, parseRate as parseFxRate, toBase } from '../currency/currency-rules';
 import { applyWithholdingToLines, WithholdingError } from '../withholding/withholding-rules';
 
 const MONEY_SCALE = 4;
@@ -165,6 +166,40 @@ export class CashVouchersService {
     };
   }
 
+  private async voucherRate(
+    companyId: string,
+    accountCurrency: string,
+    dto: { exchangeRate?: string | number; allocations?: AllocationInput[] },
+    party: { customerId: string | null; supplierId: string | null; counterAccountId: string | null },
+    date: Date,
+  ): Promise<{ rate: Prisma.Decimal; source: 'TYPED' | 'TABLE' } | null> {
+    if (accountCurrency === 'EGP') return null;
+    const [co] = await this.prisma.$queryRaw<{ currency: string }[]>(Prisma.sql`SELECT currency FROM companies WHERE id = ${companyId}::uuid`);
+    if (accountCurrency === (co?.currency ?? 'EGP')) return null;
+    if (party.customerId || party.supplierId || (dto.allocations ?? []).length > 0) {
+      throw new BadRequestException({ code: 'VOUCHER_FX_NO_PARTY', message: 'A voucher on a foreign-currency account cannot name a customer or supplier or settle invoices' });
+    }
+    if (!party.counterAccountId) {
+      throw new BadRequestException({ code: 'VOUCHER_NEEDS_COUNTERPART', message: 'Give the voucher a counter account' });
+    }
+    try {
+      if (dto.exchangeRate !== undefined && String(dto.exchangeRate).trim() !== '') {
+        return { rate: parseFxRate(dto.exchangeRate), source: 'TYPED' };
+      }
+      const on = date.toISOString().slice(0, 10);
+      const [row] = await this.prisma.$queryRaw<{ rate: Prisma.Decimal }[]>(Prisma.sql`
+        SELECT rate FROM exchange_rates WHERE "companyId" = ${companyId}::uuid AND "currencyCode" = ${accountCurrency} AND "rateDate" <= ${on}::date
+         ORDER BY "rateDate" DESC LIMIT 1`);
+      if (!row) throw new CurrencyError('FX_RATE_MISSING', 'No exchange rate has been entered for this currency on or before that date', { code: accountCurrency, date: on });
+      return { rate: new Prisma.Decimal(row.rate), source: 'TABLE' };
+    } catch (error) {
+      if (error instanceof CurrencyError) {
+        throw new BadRequestException({ code: error.code, message: error.message, ...(error.params ? { params: error.params } : {}) });
+      }
+      throw error;
+    }
+  }
+
   /** Creates a DRAFT voucher. Nothing reaches the ledger until it is posted. */
   async create(
     companyId: string,
@@ -182,6 +217,7 @@ export class CashVouchersService {
       description?: string;
       reference?: string;
       allocations?: AllocationInput[];
+      exchangeRate?: string | number;
     },
     options: { discloseBalance?: boolean } = {},
   ) {
@@ -200,6 +236,11 @@ export class CashVouchersService {
 
     const date = this.date(dto.voucherDate, 'voucherDate');
     const party = await this.resolveParty(companyId, dto);
+
+    // A voucher on a foreign-currency account is booked at a rate: typed on the voucher, or the
+    // newest rate entered for that currency on or before the date. Nothing is ever guessed.
+    // It names a counter account only: customer and supplier balances stay in company currency.
+    const fx = await this.voucherRate(companyId, cashAccount.currency, dto, party, date);
 
     // The counter account is the only line a voucher can attribute: the
     // customer/supplier side is a balance, not a cost or a revenue.
@@ -242,13 +283,14 @@ export class CashVouchersService {
     // fund this payment. Balance figures leave this method only for a user
     // the controller has confirmed may read them (cash.accounts.read).
     if (kind === CashVoucherKind.PAYMENT) {
+      const needed = fx ? toBase(amount, fx.rate) : amount;
       const available = await this.posting.lowestCashBalanceFrom(
         this.prisma as never,
         companyId,
         cashAccount.accountId,
         date,
       );
-      if (amount.greaterThan(available)) {
+      if (needed.greaterThan(available)) {
         if (options.discloseBalance) {
           throw new BadRequestException({
             code: 'CASH_SAVE_BALANCE_SHORT',
@@ -259,7 +301,7 @@ export class CashVouchersService {
               `Lower the amount to the available balance or record a receipt dated no later than the payment, then save again. No voucher was created.`,
             errors: {
               cashAccountCode: cashAccount.code,
-              requested: amount.toFixed(MONEY_SCALE),
+              requested: needed.toFixed(MONEY_SCALE),
               available: available.toFixed(MONEY_SCALE),
             },
           });
@@ -308,6 +350,10 @@ export class CashVouchersService {
           },
         },
       });
+      if (fx) {
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO voucher_exchange_rates ("voucherId", rate, "rateSource") VALUES (${voucher.id}::uuid, ${fx.rate.toString()}::numeric, ${fx.source})`);
+      }
       return voucher;
     });
 
@@ -551,6 +597,11 @@ export class CashVouchersService {
         }
       }
 
+      const [fxRow] = await tx.$queryRaw<{ rate: Prisma.Decimal }[]>(Prisma.sql`
+        SELECT rate FROM voucher_exchange_rates WHERE "voucherId" = ${voucher.id}::uuid`);
+      if (fxRow && withholding) {
+        throw new BadRequestException({ code: 'VOUCHER_FX_WITHHOLDING', message: 'Withholding tax is not supported on a foreign-currency voucher' });
+      }
       const journal = await this.posting.post(tx, {
         companyId,
         branchId: voucher.branchId,
@@ -564,6 +615,7 @@ export class CashVouchersService {
         sourceNumber: voucher.voucherNumber,
         currency: voucher.currency,
         lines: journalLines,
+        ...(fxRow ? { fx: { currency: voucher.currency, rate: new Prisma.Decimal(fxRow.rate) } } : {}),
         discloseBalance: options.discloseBalance,
       });
 

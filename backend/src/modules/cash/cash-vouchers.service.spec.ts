@@ -66,6 +66,8 @@ describe('CashVouchersService allocation validation', () => {
       },
     };
     const prisma = {
+      // The company currency, read only when the cash account is not in the usual EGP.
+      $queryRaw: jest.fn().mockResolvedValue([{ currency: 'SAR' }]),
       cashAccount: { findFirst: jest.fn().mockResolvedValue(cashAccount) },
       customer: { findFirst: jest.fn().mockResolvedValue({ id: customerId, isActive: true }) },
       supplier: { findFirst: jest.fn().mockResolvedValue({ id: supplierId, isActive: true }) },
