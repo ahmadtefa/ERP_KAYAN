@@ -566,7 +566,7 @@ void main() {
           findsNothing,
         );
         if (target == 'list') {
-          expect(find.text('No vouchers on this page'), findsOneWidget);
+          expect(find.textContaining('No vouchers to show.'), findsOneWidget);
         }
         if (target == 'detail') {
           expect(find.textContaining('SA-1'), findsOneWidget);
