@@ -264,6 +264,7 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
               for (final l in lines)
                 ListTile(
                   dense: true,
+                  onTap: _can('payroll.payslip.print') ? () => _showPayslip(id, text(l, 'employeeId')) : null,
                   title: Text('${text(l, 'code')}  ${text(l, 'nameAr')}'),
                   subtitle: Text(_arabic
                       ? 'مستحق ${text(l, 'gross')}، تأمينات ${text(l, 'employeeSI')}، ضريبة ${text(l, 'tax')}، استقطاعات ${text(l, 'deductions')}، قسط سلفة ${text(l, 'loanInstalment')}'
@@ -317,6 +318,51 @@ class _PayrollScreenState extends ConsumerState<PayrollScreen> {
       if (mounted) showMessage(context, error, error: true);
     }
     _reloadAll();
+  }
+
+  Future<void> _showPayslip(String runId, String employeeId) async {
+    Json slip;
+    try {
+      slip = await ref.read(apiClientProvider).getObject('/hr/payroll/runs/$runId/payslips/$employeeId');
+    } catch (error) {
+      if (mounted) showMessage(context, error, error: true);
+      return;
+    }
+    if (!mounted) return;
+    final l = slip['line'] is Map ? Map<String, dynamic>.from(slip['line'] as Map) : <String, dynamic>{};
+    final rows = <(String, String)>[
+      (_arabic ? 'الأجر الأساسي' : 'Basic pay', text(l, 'basic')),
+      (_arabic ? 'البدلات' : 'Allowances', text(l, 'allowances')),
+      (_arabic ? 'العمل الإضافي' : 'Overtime', text(l, 'overtime')),
+      (_arabic ? 'خصم الغياب' : 'Absence deduction', text(l, 'absenceDeduction')),
+      (_arabic ? 'الجزاءات' : 'Penalties', text(l, 'penalty')),
+      (_arabic ? 'الإجمالي' : 'Gross', text(l, 'gross')),
+      (_arabic ? 'تأمينات العامل' : 'Employee insurance', text(l, 'employeeSI')),
+      (_arabic ? 'ضريبة كسب العمل' : 'Payroll tax', text(l, 'tax')),
+      (_arabic ? 'استقطاعات أخرى' : 'Other deductions', text(l, 'deductions')),
+      (_arabic ? 'قسط السلفة' : 'Loan instalment', text(l, 'loanInstalment')),
+      (_arabic ? 'الصافي' : 'Net pay', text(l, 'net')),
+    ];
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_arabic ? 'قسيمة ${text(l, 'nameAr')} عن ${text(slip, 'month')}' : 'Payslip of ${text(l, 'nameAr')} for ${text(slip, 'month')}'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final r in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(children: [Expanded(child: Text(r.$1)), Text(r.$2)]),
+                ),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(_arabic ? 'إغلاق' : 'Close'))],
+      ),
+    );
   }
 
   Future<List<FieldOption>> _accountOptions(Set<String> types) async {

@@ -141,6 +141,12 @@ export class HrController {
     return this.payroll.pay(user.companyId, user.userId, id, body?.fundingAccountId ?? '');
   }
 
+  @Get('payroll/runs/:id/payslips/:employeeId')
+  @RequirePermissions('payroll.payslip.print')
+  payslip(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('employeeId', ParseUUIDPipe) employeeId: string) {
+    return this.payroll.payslip(user.companyId, id, employeeId);
+  }
+
   @Get('loans')
   @RequirePermissions('hr.loan.read')
   loans(@CurrentUser() user: AuthUser, @Query() query: { employeeId?: string }) {

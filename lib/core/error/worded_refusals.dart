@@ -638,6 +638,10 @@ const Map<String, List<String>> wordedRefusals = {
     'الاستقطاعات أكبر من صافي ما يستحقه الموظف هذا الشهر. راجع الاستقطاعات وقسط السلفة ثم أعد المحاولة. لم يُنشأ مسيّر.',
     'Deductions are more than the employee is owed this month. Check the deductions and the loan instalment and try again. No run was created.',
   ],
+  'PAYROLL_PAYSLIP_NOT_FOUND': [
+    'هذا الموظف ليس ضمن مسيّر الرواتب المفتوح، فلا توجد له قسيمة. افتح مسيّرًا يضم الموظف ثم أعد المحاولة. لم يتغير شيء.',
+    'This employee is not part of the payroll run, so there is no payslip. Open a run that includes the employee and try again. Nothing changed.',
+  ],
   'INVOICE_DISCOUNT_X_E166': [
     'اختر إما خصمًا بنسبة مئوية أو خصمًا بمبلغ ثابت، لا كليهما. احذف أحدهما، ثم أعد المحاولة.',
     'Choose either a percentage discount or a fixed discount, not both. Remove one of them, then try again.',

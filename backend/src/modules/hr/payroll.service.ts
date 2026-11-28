@@ -328,6 +328,17 @@ export class PayrollService {
     } catch (e) { return asHttp(e); }
   }
 
+  /** One employee's payslip for a calculated run: the same figures as the run line, with the company and month. */
+  async payslip(companyId: string, runId: string, employeeId: string) {
+    try {
+      const run = await this.getRun(companyId, runId);
+      const line = run.lines.find((l) => l.employeeId === employeeId);
+      if (!line) throw new HrError('PAYROLL_PAYSLIP_NOT_FOUND', 'This employee is not in the payroll run');
+      const [company] = await this.prisma.$queryRaw<{ nameAr: string }[]>(Prisma.sql`SELECT "nameAr" FROM companies WHERE id = ${companyId}::uuid`);
+      return { company: company?.nameAr ?? '', month: run.month, status: run.status, line };
+    } catch (e) { return asHttp(e); }
+  }
+
   // ---- employee loans ----
 
   async listLoans(companyId: string, employeeId?: string) {
