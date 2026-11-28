@@ -309,7 +309,13 @@ void main() {
       findsOneWidget,
       reason: 'the section that was just tapped must open',
     );
-    // And the other seven headings are still there.
+    // And the other seven headings are still there. The open sales section is long
+    // and the menu has scrolled down to it, so go back to the top first.
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(of: _menu, matching: find.byType(Scrollable)).first,
+    );
+    scrollable.position.jumpTo(0);
+    await tester.pumpAndSettle();
     for (final key in _groupKeys) {
       expect(find.byKey(ValueKey(key)), findsOneWidget);
     }
