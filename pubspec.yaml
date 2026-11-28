@@ -33,6 +33,7 @@ flutter:
   generate: true
   assets:
     - 1.png
+    - assets/branding/almarwa-emblem.png
 
   # Redistributed under SIL OFL 1.1; available offline in every Flutter build.
   fonts:

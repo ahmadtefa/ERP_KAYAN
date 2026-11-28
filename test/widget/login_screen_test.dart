@@ -132,6 +132,8 @@ void main() {
     expect(find.text('Username'), findsOneWidget);
     expect(find.text('Password'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Sign In'), findsOneWidget);
+    // The product emblem sits above the sign-in form.
+    expect(find.byKey(const ValueKey('login-brand-emblem')), findsOneWidget);
   });
 
   testWidgets('offers pre-login password change and its bilingual secure fields', (

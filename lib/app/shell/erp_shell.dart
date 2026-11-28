@@ -989,7 +989,7 @@ class _SidebarBrand extends StatelessWidget {
           BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
         ],
       ),
-      child: Image.asset('1.png', fit: BoxFit.contain),
+      child: Image.asset('assets/branding/almarwa-emblem.png', fit: BoxFit.contain),
     );
     if (!extended) {
       return Padding(

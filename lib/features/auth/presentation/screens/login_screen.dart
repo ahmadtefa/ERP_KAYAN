@@ -581,6 +581,17 @@ class _SignInForm extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Center(
+            child: Image.asset(
+              'assets/branding/almarwa-emblem.png',
+              key: const ValueKey('login-brand-emblem'),
+              width: 88,
+              height: 88,
+              fit: BoxFit.contain,
+              excludeFromSemantics: true,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
           Text(
             l10n.signIn,
             style: theme.textTheme.headlineSmall?.copyWith(
