@@ -60,17 +60,13 @@ class _BatchesScreenState extends ConsumerState<BatchesScreen> {
   String _itemName(Json row) {
     final item = row['item'];
     if (item is! Map) return '';
-    return _arabic
-        ? text(Map<String, dynamic>.from(item), 'nameAr')
-        : text(Map<String, dynamic>.from(item), 'nameEn');
+    return localizedRecordName(Map<String, dynamic>.from(item), arabic: _arabic);
   }
 
   String _warehouseName(Json row) {
     final warehouse = row['warehouse'];
     if (warehouse is! Map) return '';
-    return _arabic
-        ? text(Map<String, dynamic>.from(warehouse), 'nameAr')
-        : text(Map<String, dynamic>.from(warehouse), 'nameEn');
+    return localizedRecordName(Map<String, dynamic>.from(warehouse), arabic: _arabic);
   }
 
   /// A `@db.Date` column arrives as a full ISO timestamp; only the day is

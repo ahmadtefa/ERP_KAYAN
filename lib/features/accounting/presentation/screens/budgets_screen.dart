@@ -325,9 +325,7 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
                 final center = row['costCenter'];
                 if (center is! Map) return '';
                 final map = Map<String, dynamic>.from(center);
-                final name = language == 'ar'
-                    ? text(map, 'nameAr')
-                    : text(map, 'nameEn');
+                final name = localizedRecordName(map, arabic: language == 'ar');
                 return '${text(map, 'code')} — $name';
               },
             ),
@@ -337,9 +335,7 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
                 final account = row['account'];
                 if (account is! Map) return '';
                 final map = Map<String, dynamic>.from(account);
-                final name = language == 'ar'
-                    ? text(map, 'nameAr')
-                    : text(map, 'nameEn');
+                final name = localizedRecordName(map, arabic: language == 'ar');
                 return '${text(map, 'code')} — $name';
               },
             ),

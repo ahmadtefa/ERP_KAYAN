@@ -136,7 +136,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         .map(
           (a) => FieldOption(
             text(a, 'id'),
-            '${text(a, 'code')} — ${text(a, 'nameEn')}',
+            '${text(a, 'code')} — ${localizedRecordName(a, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
           ),
         )
         .toList();

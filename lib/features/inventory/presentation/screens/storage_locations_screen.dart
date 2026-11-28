@@ -185,9 +185,7 @@ class StorageLocationsScreen extends ConsumerWidget {
                           ),
                           ColumnSpec(
                             arabic ? 'الاسم' : 'Name',
-                            value: (r) => arabic
-                                ? text(r, 'nameAr')
-                                : text(r, 'nameEn'),
+                            value: (r) => localizedRecordName(r, arabic: arabic),
                           ),
                           ColumnSpec(
                             arabic ? 'النوع' : 'Kind',

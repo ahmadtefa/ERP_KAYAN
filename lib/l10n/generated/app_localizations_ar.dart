@@ -543,11 +543,11 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get confirmPost =>
-      'ترحيل المستند؟ هيتم تحديث المخزون والدفاتر ومش هينفع تعدّله بعد كده.';
+      'ترحيل المستند؟ سيتم تحديث المخزون والدفاتر، ولا يمكن تعديل المستند بعد الترحيل.';
 
   @override
   String get confirmReverse =>
-      'عكس المستند؟ القيد الأصلي هيفضل في الدفاتر وقيد عكسي هيلغيه.';
+      'عكس المستند؟ يبقى القيد الأصلي في الدفاتر ويُضاف قيد عكسي يلغي أثره.';
 
   @override
   String get invoicePosted => 'تم ترحيل الفاتورة';
@@ -700,7 +700,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get entryNeedsTwoLines => 'القيد يحتاج بندين على الأقل';
 
   @override
-  String get journalDeleted => 'القيد المُرحَّل يتصحّح بالعكس، مش بالتعديل';
+  String get journalDeleted => 'يُصحَّح القيد المُرحَّل بالعكس لا بالتعديل';
 
   @override
   String get add => 'إضافة';
@@ -778,7 +778,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get editUser => 'تعديل مستخدم';
 
   @override
-  String get usernameHelper => 'ده اسم الدخول. الاسم admin محجوز للنظام.';
+  String get usernameHelper => 'هذا هو اسم الدخول. الاسم admin محجوز للنظام.';
 
   @override
   String get fullNameEn => 'الاسم بالإنجليزية';
@@ -797,7 +797,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get confirmDeactivateUser =>
-      'المستخدم ده مش هينفع يدخل تاني. تحب نكمل؟';
+      'لن يتمكن هذا المستخدم من الدخول بعد الآن. هل تريد المتابعة؟';
 
   @override
   String get searchUsers => 'ابحث عن مستخدم…';
@@ -839,7 +839,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get deleteRole => 'حذف الدور';
 
   @override
-  String get confirmDeleteRole => 'الدور ده هيتحذف نهائياً. تحب نكمل؟';
+  String get confirmDeleteRole => 'سيُحذف هذا الدور نهائيًا. هل تريد المتابعة؟';
 
   @override
   String get permissions => 'الصلاحيات';
@@ -858,7 +858,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get permissionsNote =>
-      'دور نظامي: تقدر تعدّل صلاحياته، لكن مش ينفع تسمّيه من جديد ولا تحذفه.';
+      'دور نظامي: يمكنك تعديل صلاحياته، لكن لا يمكن تغيير اسمه ولا حذفه.';
 
   @override
   String get action => 'الإجراء';
@@ -873,7 +873,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get by => 'بواسطة';
 
   @override
-  String get noAuditLogs => 'مفيش تسجيلات لسه';
+  String get noAuditLogs => 'لا توجد تسجيلات بعد';
 
   @override
   String get refresh => 'تحديث';
@@ -1002,13 +1002,13 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get confirmClosePeriod =>
-      'بعد الإقفال مش هينفع أي ترحيل جوه الفترة دي، لا فواتير ولا قيود يدوية. تحب نكمل؟';
+      'بعد الإقفال لا يمكن ترحيل أي مستند داخل هذه الفترة، لا فواتير ولا قيود يدوية. هل تريد المتابعة؟';
 
   @override
   String get periodClosed => 'تم إقفال الفترة';
 
   @override
-  String get noPeriods => 'مفيش فترات مالية لسه';
+  String get noPeriods => 'لا توجد فترات مالية بعد';
 
   @override
   String get dataTools => 'البيانات';
@@ -1089,7 +1089,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get importModeUpdateHint =>
-      'الأعمدة اللي في الملف بتتكتب على السجل. الخانة الفاضية مش بتغيّر حاجة.';
+      'تُكتب الأعمدة الموجودة في الملف على السجل، أما الخانة الفارغة فلا تغيّر شيئًا.';
 
   @override
   String get clearBlankImportTax => 'تصفير خلايا ضريبة الأصناف الفارغة';
@@ -1103,25 +1103,25 @@ class AppLocalizationsAr extends AppLocalizations {
       'أصناف موجودة ستُصفّر ضريبتها الفارغة';
 
   @override
-  String get readResult => 'اللي في الملف';
+  String get readResult => 'المقروء من الملف';
 
   @override
-  String get importResult => 'اللي تم استيراده';
+  String get importResult => 'ما تم استيراده';
 
   @override
   String get rowsInFile => 'صفوف في الملف';
 
   @override
-  String get willBeAdded => 'هيتضاف';
+  String get willBeAdded => 'سيُضاف';
 
   @override
-  String get willBeUpdated => 'هيتحدّث';
+  String get willBeUpdated => 'سيُحدَّث';
 
   @override
   String get willBeSkipped => 'موجود بالفعل';
 
   @override
-  String get columnsNotUnderstood => 'أعمدة مش مفهومة';
+  String get columnsNotUnderstood => 'أعمدة غير مفهومة';
 
   @override
   String get rowsWithProblems => 'صفوف فيها مشاكل';
@@ -1134,13 +1134,13 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get fixErrorsThenRetry =>
-      'صحّح الصفوف دي في الملف وارفعه تاني. مفيش حاجة اتكتبت منها.';
+      'صحّح هذه الصفوف في الملف ثم ارفعه مرة أخرى. لم يُكتب منها شيء.';
 
   @override
   String get importForReal => 'نفّذ الاستيراد';
 
   @override
-  String get importDone => 'تم الاستيراد. القوائم فيها السجلات دي دلوقتي.';
+  String get importDone => 'تم الاستيراد. تظهر هذه السجلات الآن في القوائم.';
 
   @override
   String get takeBackup => 'خد نسخة من البيانات';
@@ -1160,7 +1160,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get restoreWarning =>
-      'الاسترجاع بيستبدل كل اللي في الشركة باللي في الملف. وأي حاجة اتسجلت بعد أخذ النسخة بتضيع.';
+      'يستبدل الاسترجاع كل ما في الشركة بما في الملف، وتضيع أي حركة سُجّلت بعد أخذ النسخة.';
 
   @override
   String get restoreChooseFile =>
@@ -1173,16 +1173,16 @@ class AppLocalizationsAr extends AppLocalizations {
   String get inspectBackup => 'اقرأ الملف الأول';
 
   @override
-  String get inBackupFile => 'اللي في الملف';
+  String get inBackupFile => 'ما في الملف';
 
   @override
-  String get inTheProgramNow => 'اللي في البرنامج دلوقتي';
+  String get inTheProgramNow => 'ما في البرنامج الآن';
 
   @override
   String get backupTakenAt => 'تاريخ النسخة';
 
   @override
-  String get backupOtherCompany => 'الملف ده لشركة تانية ومش ينفع يترجع هنا.';
+  String get backupOtherCompany => 'هذا الملف لشركة أخرى ولا يمكن استرجاعه هنا.';
 
   @override
   String get restoreNow => 'استرجع الآن';
@@ -1192,7 +1192,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get confirmRestoreBody =>
-      'بيانات الشركة هتتبدل باللي في الملف، ومش هينفع نرجع في الخطوة دي. تحب نكمل؟';
+      'ستُستبدل بيانات الشركة بما في الملف، ولا يمكن التراجع بعد هذه الخطوة. هل تريد المتابعة؟';
 
   @override
   String get restoreDone => 'تم الاسترجاع';
@@ -1205,7 +1205,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get printHintWhenNoPdf =>
-      'بيفتح صفحة نضيفة للورق. من نافذة الطباعة اختار «حفظ كـ PDF» عشان تحفظها ملف PDF.';
+      'يفتح صفحة نظيفة للطباعة. من نافذة الطباعة اختر «حفظ كـ PDF» لحفظها ملفًا.';
 
   @override
   String get downloadList => 'تنزيل الملف';

@@ -852,7 +852,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       final ok = await confirmAction(
         context,
         title: l10n.deactivate,
-        message: l10n.confirmReverse,
+        message: Localizations.localeOf(context).languageCode == 'ar'
+            ? 'سيصبح الصنف غير نشط ولن يظهر عند إنشاء مستندات جديدة، وتبقى المستندات السابقة كما هي. يمكنك إعادة تفعيله لاحقًا.'
+            : 'The item will become inactive and will not appear when new documents are created. Past documents stay as they are. You can activate it again later.',
         confirmLabel: l10n.deactivate,
         destructive: true,
       );
