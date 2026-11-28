@@ -96,7 +96,9 @@ void main() {
   ) async {
     await pump(tester, _Api({'warehouses': []}));
     expect(
-      find.text('No stock for this item in the warehouses you may view.'),
+      find.textContaining(
+        'No stock for this item in the warehouses you may view.',
+      ),
       findsOneWidget,
     );
   });

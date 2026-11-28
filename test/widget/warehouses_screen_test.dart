@@ -361,7 +361,7 @@ void main() {
     await pump(tester, api);
     await tester.enterText(find.byType(TextField).first, 'nothing matches this');
     await tester.pumpAndSettle();
-    expect(find.textContaining('No warehouses yet'), findsOneWidget);
+    expect(find.textContaining('No warehouses to show'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

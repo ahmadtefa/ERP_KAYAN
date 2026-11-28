@@ -7,6 +7,7 @@ import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'test_harness.dart';
 
@@ -63,11 +64,20 @@ void main() {
           apiClientProvider.overrideWithValue(_EmptyApi()),
           currentUserProvider.overrideWithValue(_user),
         ],
-        child: const MaterialApp(
-          locale: Locale('en'),
+        child: MaterialApp.router(
+          locale: const Locale('en'),
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(body: StockTransfersScreen()),
+          routerConfig: GoRouter(
+            initialLocation: '/transfers',
+            routes: [
+              GoRoute(
+                path: '/transfers',
+                builder: (_, _) =>
+                    const Scaffold(body: StockTransfersScreen()),
+              ),
+            ],
+          ),
         ),
       ),
     );

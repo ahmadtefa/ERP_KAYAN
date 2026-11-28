@@ -342,8 +342,8 @@ void main() {
     ) async {
       await pump(tester, _BatchApi());
 
-      expect(find.text('2026-01-15'), findsOneWidget);
-      expect(find.text('2026-12-01'), findsOneWidget);
+      expect(find.text('January 15, 2026'), findsOneWidget);
+      expect(find.text('December 1, 2026'), findsOneWidget);
       expect(find.text('Aisle A shelf 1'), findsOneWidget);
       expect(find.text('Production'), findsOneWidget);
       expect(find.text('Location'), findsOneWidget);

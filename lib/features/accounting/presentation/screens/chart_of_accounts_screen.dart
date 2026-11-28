@@ -477,16 +477,6 @@ Future<void> _editAccount(
                         : 'The save result is uncertain. Review the refreshed accounts before trying again.'),
                     const SizedBox(height: 12),
                   ],
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        arabic ? 'بيانات الحساب' : 'Account details',
-                        style: Theme.of(dialogContext).textTheme.titleSmall,
-                      ),
-                    ),
-                  ),
                   TextField(
                     controller: codeController,
                     keyboardType: eightDigit ? TextInputType.number : null,
@@ -548,18 +538,6 @@ Future<void> _editAccount(
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        arabic
-                            ? 'التبعية والتصنيف'
-                            : 'Parent and classification',
-                        style: Theme.of(dialogContext).textTheme.titleSmall,
-                      ),
-                    ),
-                  ),
                   DropdownButtonFormField<AccountType>(
                     key: ValueKey(selectedType),
                     initialValue: selectedType,
@@ -689,18 +667,6 @@ Future<void> _editAccount(
                     ),
                     const SizedBox(height: 12),
                   ],
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, bottom: 4),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        arabic
-                            ? 'الترحيل والتدفقات النقدية'
-                            : 'Posting and cash flow',
-                        style: Theme.of(dialogContext).textTheme.titleSmall,
-                      ),
-                    ),
-                  ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(dialogL10n.postable),

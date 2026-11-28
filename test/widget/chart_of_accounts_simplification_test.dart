@@ -124,9 +124,6 @@ void main() {
     await tester.tap(find.text('New account'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Account details'), findsOneWidget);
-    expect(find.text('Parent and classification'), findsOneWidget);
-    expect(find.text('Posting and cash flow'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
