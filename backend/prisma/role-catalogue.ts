@@ -65,6 +65,7 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     descriptionAr: 'يرى العمل كله ويعتمد ما يعده الآخرون، دون إدارة المستخدمين أو النسخ الاحتياطي.',
     category: 'MANAGEMENT',
     permissions: [
+      'contracts.',
       'dashboard.',
       'dashboard.view',
       'reports.',
@@ -91,6 +92,7 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     descriptionAr: 'يملك الحسابات والخزينة والبنوك، ويرى التكلفة والربح.',
     category: 'FINANCE',
     permissions: [
+      'contracts.read',
       'accounting.',
       'cash.',
       'reports.',
@@ -207,6 +209,7 @@ export const ROLE_CATALOGUE: readonly RoleDefinition[] = [
     descriptionAr: 'يدير المبيعات: الفواتير والأوامر وعروض الأسعار والمرتجعات وقائمة العملاء.',
     category: 'SALES',
     permissions: [
+      'contracts.',
       'sales.',
       'sales.price.read',
       'parties.customers.',

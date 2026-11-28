@@ -728,6 +728,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.sales,
       ),
       _NavItem(
+        AppRoutes.contracts,
+        Icons.engineering_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'العقود والمستخلصات' : 'Contracts and progress claims',
+        permissions: const ['contracts.read'],
+        group: _NavGroup.sales,
+      ),
+      _NavItem(
         AppRoutes.currencies,
         Icons.currency_exchange,
         Localizations.localeOf(context).languageCode == 'ar' ? 'العملات وأسعار الصرف' : 'Currencies and rates',
