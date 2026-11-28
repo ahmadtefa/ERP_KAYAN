@@ -41,13 +41,13 @@ Simplified: 45. Reviewed, no change needed: 7. Not changed or not reviewed: 2 of
 | warehouse_access_screen | simplified |
 | warehouses_screen | simplified |
 | write_offs_screen | simplified |
-| invoice_editor_screen | reviewed, already has labels, helper texts and error text; extra helpers would shift layout and goldens: not changed |
+| invoice_editor_screen | header simplified (two titled blocks, helpers on date, customer/supplier, supplier reference); per-line tax helper and pickers deliberately not changed (they alter row height) |
 | invoice_list_screen | simplified |
 | return_editor_screen | simplified |
 | returns_screen | simplified |
 | licence_screen | reviewed, no change needed |
 | notification_center_screen | reviewed, no change needed |
-| operations_center_screen | not reviewed |
+| operations_center_screen | simplified (search helper, empty-state next steps) |
 | order_create_screen | simplified |
 | order_edit_screen | simplified |
 | orders_screen | simplified |

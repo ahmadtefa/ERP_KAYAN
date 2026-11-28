@@ -18,7 +18,7 @@ Status: DESIGN, revision 4 (after two engineering reviews). Prototype tests are 
    First admin of each additional company (user decision 13:12, relayed by main): a company-only administrator. Never an installation super administrator; installation functions (reset, full backup, company activation) stay with the installation super administrator. Test: the provisioned first admin has isSuperAdmin false and is refused the installation endpoints.
 3. A key for company A cannot be applied to company B, including on first use.
 4. The existing company and its existing v1 activation keep working unchanged.
-5. Login is routed by username (usernames are globally unique today) with no company chooser.
+5. Login: a username is unique inside its company, not across the installation (migration 20261128110000). Sign-in takes username, password and the company code; the code is required once the installation holds more than one active company (user agreed 2026-11-28 15:34, relayed by main). This replaces the earlier "routed by username" rule. There is still no company chooser.
 
 ## 3. Key format v2 (recommended)
 
