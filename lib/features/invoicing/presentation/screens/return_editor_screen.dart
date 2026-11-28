@@ -364,7 +364,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                         ),
                         Text(
                           '${widget.kind.isSales ? l10n.customer : l10n.supplier}: '
-                          '${text(partyOf(_invoice!, widget.kind), 'nameEn', fallback: '—')}',
+                          '${localizedRecordName(partyOf(_invoice!, widget.kind), arabic: Localizations.localeOf(context).languageCode == 'ar').isEmpty ? '—' : localizedRecordName(partyOf(_invoice!, widget.kind), arabic: Localizations.localeOf(context).languageCode == 'ar')}',
                         ),
                         TextButton.icon(
                           onPressed: _saving || _saved ? null : _chooseDate,

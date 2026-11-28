@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../invoicing/presentation/invoice_status.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -173,7 +174,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
             for (final account in postable)
               FieldOption(
                 text(account, 'id'),
-                '${text(account, 'code')} — ${text(account, 'nameEn')}',
+                '${text(account, 'code')} — ${localizedRecordName(account, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
               ),
           ],
         ),
@@ -268,7 +269,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
             for (final account in accounts)
               FieldOption(
                 text(account, 'id'),
-                '${text(account, 'code')} — ${text(account, 'nameEn')}',
+                '${text(account, 'code')} — ${localizedRecordName(account, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
               ),
           ],
          section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات السند' : 'Voucher details'),
@@ -281,7 +282,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
               for (final party in parties)
                 FieldOption(
                   text(party, 'id'),
-                  '${text(party, 'code')} — ${text(party, 'nameEn')}',
+                  '${text(party, 'code')} — ${localizedRecordName(party, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
                 ),
             ],
           ),
@@ -399,7 +400,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
             for (final account in accounts)
               FieldOption(
                 text(account, 'id'),
-                '${text(account, 'code')} — ${text(account, 'nameEn')}',
+                '${text(account, 'code')} — ${localizedRecordName(account, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
               ),
           ],
         ),
@@ -412,7 +413,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
             for (final account in accounts)
               FieldOption(
                 text(account, 'id'),
-                '${text(account, 'code')} — ${text(account, 'nameEn')}',
+                '${text(account, 'code')} — ${localizedRecordName(account, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
               ),
           ],
         ),
@@ -472,7 +473,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('${text(account, 'code')} — ${text(account, 'nameEn')}'),
+        title: Text('${text(account, 'code')} — ${localizedRecordName(account, arabic: Localizations.localeOf(context).languageCode == 'ar')}'),
         content: SizedBox(
           width: 640,
           height: 420,
@@ -723,7 +724,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
                 ColumnSpec(
                   l10n.status,
-                  value: (r) => text(r, 'status'),
+                  value: (r) => statusLabel(context, r),
                   tone: (r) => toneForStatus(text(r, 'status')),
                 ),
               ],
@@ -851,7 +852,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
                 ColumnSpec(
                   l10n.status,
-                  value: (r) => text(r, 'status'),
+                  value: (r) => statusLabel(context, r),
                   tone: (r) => toneForStatus(text(r, 'status')),
                 ),
               ],
@@ -866,6 +867,16 @@ class _CashScreenState extends ConsumerState<CashScreen>
                             '/cash/transfers/${text(row, 'id')}/post',
                             l10n.confirmPost,
                             l10n.posted,
+                          ),
+                  ),
+                if (text(row, 'status').toUpperCase() == 'POSTED')
+                  IconButton(
+                    tooltip: l10n.reverse,
+                    icon: const Icon(Icons.undo, size: 20),
+                    onPressed: _busy
+                        ? null
+                        : () => _reverse(
+                            '/cash/transfers/${text(row, 'id')}/reverse',
                           ),
                   ),
               ],

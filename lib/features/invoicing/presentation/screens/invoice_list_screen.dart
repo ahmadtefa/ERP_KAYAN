@@ -298,7 +298,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
               isSales ? l10n.customer : l10n.supplier,
               value: (r) {
                 final party = partyOf(r, widget.kind);
-                return party.isEmpty ? '—' : text(party, 'nameEn');
+                return party.isEmpty ? '—' : localizedRecordName(party, arabic: Localizations.localeOf(context).languageCode == 'ar');
               },
             ),
             ColumnSpec(
@@ -327,7 +327,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
           actions: (row) {
             final status = text(row, 'status').toLowerCase();
             return [
-              if (status == 'draft' && !isSales)
+              if (status == 'draft')
                 IconButton(
                   tooltip: l10n.editDraftInvoice,
                   icon: const Icon(Icons.edit_outlined, size: 20),

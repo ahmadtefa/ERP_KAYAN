@@ -190,7 +190,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
           DropdownButton<String>(
             value: _status,
             items: [
-              DropdownMenuItem(value: '', child: Text(l10n.reports)),
+              DropdownMenuItem(value: '', child: Text(l10n.allStatuses)),
               DropdownMenuItem(value: 'draft', child: Text(l10n.draft)),
               DropdownMenuItem(value: 'posted', child: Text(l10n.posted)),
               DropdownMenuItem(value: 'reversed', child: Text(l10n.reversed)),
@@ -242,7 +242,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
               value: (row) {
                 final party = row[widget.kind.partyKey];
                 return party is Map
-                    ? text(Map<String, dynamic>.from(party), 'nameEn')
+                    ? localizedRecordName(Map<String, dynamic>.from(party), arabic: Localizations.localeOf(context).languageCode == 'ar')
                     : '—';
               },
             ),

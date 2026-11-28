@@ -198,7 +198,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                             party.isEmpty
                                 ? '—'
                                 : '${text(party, 'code')} — '
-                                    '${text(party, 'nameEn')}',
+                                    '${localizedRecordName(party, arabic: Localizations.localeOf(context).languageCode == 'ar')}',
                           ),
                           field(l10n.status, statusLabel(context, invoice)),
                           if (hasDiscount)
