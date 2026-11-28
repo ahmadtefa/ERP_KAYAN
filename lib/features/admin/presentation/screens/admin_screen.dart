@@ -246,8 +246,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           maxLength: 60,
           required: true,
           helper: l10n.usernameHelper,
-        ),
-      FieldSpec('fullNameEn', l10n.fullNameEn, maxLength: 200, required: true),
+         section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات الدخول' : 'Sign-in details'),
+      FieldSpec('fullNameEn', l10n.fullNameEn, maxLength: 200, required: true, section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات المستخدم' : 'User details'),
       FieldSpec('fullNameAr', l10n.fullNameAr, maxLength: 200, required: true),
       FieldSpec('email', l10n.email, maxLength: 200, email: true),
       if (!isEdit)
@@ -265,7 +265,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         l10n.roles,
         kind: FieldKind.multiSelect,
         options: roles,
-      ),
+       section: (Localizations.localeOf(context).languageCode == 'ar') ? 'الصلاحيات والفروع' : 'Roles and branches'),
       FieldSpec(
         'branchIds',
         Localizations.localeOf(context).languageCode == 'ar'

@@ -106,7 +106,7 @@ class _CurrenciesScreenState extends ConsumerState<CurrenciesScreen> {
           ? const <String, dynamic>{'isActive': true}
           : <String, dynamic>{'nameAr': text(row, 'nameAr'), 'nameEn': text(row, 'nameEn'), 'symbol': text(row, 'symbol'), 'isActive': row['isActive'] != false},
       fields: [
-        if (!editing) FieldSpec('code', _arabic ? 'رمز العملة (ثلاثة أحرف، مثل USD)' : 'Currency code (three letters, like USD)', required: true, maxLength: 3, minLength: 3),
+        if (!editing) FieldSpec('code', _arabic ? 'رمز العملة (ثلاثة أحرف، مثل USD)' : 'Currency code (three letters, like USD)', required: true, maxLength: 3, minLength: 3, section: _arabic ? 'بيانات العملة' : 'Currency details'),
         FieldSpec('nameAr', _arabic ? 'الاسم بالعربية' : 'Name in Arabic', required: true, maxLength: 60),
         FieldSpec('nameEn', _arabic ? 'الاسم بالإنجليزية' : 'Name in English', required: true, maxLength: 60),
         FieldSpec('symbol', _arabic ? 'الرمز المختصر' : 'Symbol', maxLength: 6),
@@ -142,7 +142,7 @@ class _CurrenciesScreenState extends ConsumerState<CurrenciesScreen> {
       submitLabel: _arabic ? 'حفظ السعر' : 'Save the rate',
       initial: {'rateDate': '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}'},
       fields: [
-        FieldSpec('rateDate', _arabic ? 'التاريخ' : 'Date', kind: FieldKind.date, required: true),
+        FieldSpec('rateDate', _arabic ? 'التاريخ' : 'Date', kind: FieldKind.date, required: true, section: _arabic ? 'سعر الصرف' : 'Exchange rate'),
         FieldSpec(
           'rate',
           _arabic ? 'عدد الجنيهات للوحدة الواحدة' : 'Pounds for one unit',

@@ -152,7 +152,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
       exitRelay: _exitRelay,
       title: l10n.newCashAccount,
       fields: [
-        FieldSpec('code', l10n.accountCode, required: true),
+        FieldSpec('code', l10n.accountCode, required: true, section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات الحساب' : 'Account details'),
         FieldSpec('nameEn', l10n.fullNameEn),
         FieldSpec('nameAr', l10n.fullNameAr),
         FieldSpec(
@@ -177,7 +177,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
               ),
           ],
         ),
-        FieldSpec('bankName', l10n.bankName),
+        FieldSpec('bankName', l10n.bankName, section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات البنك' : 'Bank details'),
         FieldSpec('iban', l10n.iban),
       ],
       onSubmit: (values) => _submitCreation('/cash/accounts', values),
@@ -271,7 +271,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 '${text(account, 'code')} — ${text(account, 'nameEn')}',
               ),
           ],
-        ),
+         section: (Localizations.localeOf(context).languageCode == 'ar') ? 'بيانات السند' : 'Voucher details'),
         if (parties.isNotEmpty)
           FieldSpec(
             isReceipt ? 'customerId' : 'supplierId',
@@ -297,7 +297,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
           kind: FieldKind.decimal,
           required: true,
           helper: l10n.settleOldestFirst,
-        ),
+         section: (Localizations.localeOf(context).languageCode == 'ar') ? 'المبلغ والبيان' : 'Amount and note'),
         if (costCenters.isNotEmpty)
           FieldSpec(
             'costCenterId',
