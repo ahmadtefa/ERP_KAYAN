@@ -171,7 +171,6 @@ class _AccountTreeState extends ConsumerState<_AccountTree> {
   @override
   Widget build(BuildContext context) {
     final nodes = ref.watch(accountTreeProvider);
-    final l10n = context.l10n;
     if (nodes.isEmpty) {
       return EmptyView(
         message: _t(
