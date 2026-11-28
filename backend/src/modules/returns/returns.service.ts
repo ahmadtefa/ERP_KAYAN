@@ -263,6 +263,7 @@ export class ReturnsService {
       include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
     if (!original) throw new BadRequestException({ code: 'RETURN_INVOICE_MISSING', message: 'The original sales invoice does not exist' });
+    await this.refuseForeignOriginal('sales_invoice_fx', companyId, originalInvoiceId);
     if (original.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException({ code: 'RETURN_INVOICE_NOT_POSTED', message: 'Only a posted sales invoice can be returned' });
     }
@@ -1147,6 +1148,17 @@ export class ReturnsService {
     return this.findOne(companyId, 'sales', id, mayReadCost);
   }
 
+  /// A return against a foreign-currency invoice would change the company-currency balance
+  /// without the foreign balance and the exchange difference, so it is refused until the
+  /// foreign-currency return exists. Nothing is saved.
+  private async refuseForeignOriginal(table: 'sales_invoice_fx' | 'purchase_invoice_fx', companyId: string, invoiceId: string): Promise<void> {
+    const rows = await this.prisma.$queryRaw<Array<{ invoiceId: string }>>(Prisma.sql`
+      SELECT "invoiceId" FROM ${Prisma.raw(table)} WHERE "invoiceId" = ${invoiceId}::uuid AND "companyId" = ${companyId}::uuid`);
+    if (rows.length > 0) {
+      throw new BadRequestException({ code: 'RETURN_FX_INVOICE', message: 'A return against a foreign-currency invoice is not supported yet' });
+    }
+  }
+
   // --------------------------------------------------------- purchase return
 
   async createPurchaseReturn(
@@ -1171,6 +1183,7 @@ export class ReturnsService {
       include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
     if (!original) throw new BadRequestException({ code: 'RETURN_INVOICE_MISSING', message: 'The original purchase invoice does not exist' });
+    await this.refuseForeignOriginal('purchase_invoice_fx', companyId, originalInvoiceId);
     if (original.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException({ code: 'RETURN_INVOICE_NOT_POSTED', message: 'Only a posted purchase invoice can be returned' });
     }

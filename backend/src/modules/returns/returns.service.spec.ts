@@ -76,6 +76,7 @@ function summaryFields(overrides: Record<string, unknown> = {}) {
 
 function transactionPrisma(tx: Record<string, any>, model: 'salesInvoice' | 'purchaseInvoice', findResults: unknown[]) {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(async (work: unknown) =>
       typeof work === 'function'
         ? (work as (transaction: unknown) => unknown)(tx)
@@ -97,7 +98,7 @@ describe('ReturnsService', () => {
   it('refuses a return that does not name its source invoice instead of selecting one', async () => {
     // Prisma reads a missing id as "no filter". A request that leaves the
     // source out must be refused before any invoice is picked.
-    const prisma = { salesInvoice: { findFirst: jest.fn() }, purchaseInvoice: { findFirst: jest.fn() } };
+    const prisma = { $queryRaw: jest.fn().mockResolvedValue([]), salesInvoice: { findFirst: jest.fn() }, purchaseInvoice: { findFirst: jest.fn() } };
     const { service } = dependencies(prisma as never);
 
     await expect(
@@ -116,6 +117,21 @@ describe('ReturnsService', () => {
 
     expect(prisma.salesInvoice.findFirst).not.toHaveBeenCalled();
     expect(prisma.purchaseInvoice.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('refuses a return against a foreign-currency invoice on both sides, saving nothing', async () => {
+    const original = { id: SOURCE_INVOICE_ID, status: InvoiceStatus.POSTED, documentType: InvoiceDocumentType.INVOICE, branchId: BRANCH_ID, lines: [] };
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ invoiceId: SOURCE_INVOICE_ID }]),
+      $transaction: jest.fn(),
+      salesInvoice: { findFirst: jest.fn().mockResolvedValue(original) },
+      purchaseInvoice: { findFirst: jest.fn().mockResolvedValue(original) },
+    };
+    const { service } = dependencies(prisma as never);
+    const dto = { originalInvoiceId: SOURCE_INVOICE_ID, returnDate: '2026-10-20', lines: [{ originalLineId: SOURCE_LINE_ID, quantity: '1' }] } as never;
+    await expect(service.createSalesReturn(COMPANY_ID, BRANCH_ID, USER_ID, dto)).rejects.toMatchObject({ response: { code: 'RETURN_FX_INVOICE' } });
+    await expect(service.createPurchaseReturn(COMPANY_ID, BRANCH_ID, USER_ID, dto)).rejects.toMatchObject({ response: { code: 'RETURN_FX_INVOICE' } });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('refuses a return line that does not name the original line', async () => {
@@ -139,7 +155,7 @@ describe('ReturnsService', () => {
         },
       ],
     };
-    const prisma = { salesInvoice: { findFirst: jest.fn().mockResolvedValue(original) }, purchaseInvoice: { findFirst: jest.fn() } };
+    const prisma = { $queryRaw: jest.fn().mockResolvedValue([]), salesInvoice: { findFirst: jest.fn().mockResolvedValue(original) }, purchaseInvoice: { findFirst: jest.fn() } };
     const { service } = dependencies(prisma as never);
 
     await expect(

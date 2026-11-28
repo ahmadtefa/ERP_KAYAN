@@ -65,6 +65,7 @@ function makeService(originalLines: any[]) {
       })),
     },
     $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
   const numbers = { next: jest.fn(async () => 'SR-0001') };
   const service = new ReturnsService(

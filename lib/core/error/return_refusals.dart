@@ -9,6 +9,10 @@ const Map<String, List<String>> returnRefusals = {
     'لا يُرتجع إلا من فاتورة مرحّلة. رحّل الفاتورة أولًا أو اختر فاتورة مرحّلة. لم يُحفظ شيء.',
     'Only a posted invoice can be returned against. Post the invoice first or choose a posted one. Nothing was saved.',
   ],
+  'RETURN_FX_INVOICE': [
+    'هذه الفاتورة بعملة أجنبية، ومرتجعاتها غير متاحة بعد حتى لا يختلّ رصيد العملة الأجنبية. صحّح المبلغ بقيد تسوية محاسبي بدلًا من ذلك. لم يُحفظ شيء.',
+    'This invoice is in a foreign currency and returns against it are not available yet, so the foreign balance stays correct. Correct the amount with an accounting adjustment entry instead. Nothing was saved.',
+  ],
   'RETURN_OF_RETURN': [
     'المستند المختار مرتجع بالفعل، ولا يُرتجع المرتجع. اختر الفاتورة الأصلية. لم يُحفظ شيء.',
     'The chosen document is already a return and a return cannot be returned. Choose the original invoice. Nothing was saved.',
