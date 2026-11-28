@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/json/json_utils.dart';
@@ -27,6 +28,15 @@ List<String> serialNextActions(String status) => switch (status) {
   'RETURNED' => const ['scrap'],
   _ => const [],
 };
+
+/// A date the way a reader says it: 3 فبراير 2026, or 3 February 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class SerialsScreen extends ConsumerStatefulWidget {
   const SerialsScreen({super.key});
@@ -60,9 +70,11 @@ class _SerialsScreenState extends ConsumerState<SerialsScreen> {
     final w = text(r, 'warranty');
     return switch (w) {
       'ACTIVE' => _arabic
-          ? 'ساري حتى ${text(r, 'warrantyEndsOn')}'
-          : 'Active until ${text(r, 'warrantyEndsOn')}',
-      'EXPIRED' => _arabic ? 'انتهى ${text(r, 'warrantyEndsOn')}' : 'Expired ${text(r, 'warrantyEndsOn')}',
+          ? 'ساري حتى ${_dateLabel(context, text(r, 'warrantyEndsOn'))}'
+          : 'Active until ${_dateLabel(context, text(r, 'warrantyEndsOn'))}',
+      'EXPIRED' => _arabic
+          ? 'انتهى ${_dateLabel(context, text(r, 'warrantyEndsOn'))}'
+          : 'Expired ${_dateLabel(context, text(r, 'warrantyEndsOn'))}',
       'NONE' => _arabic ? 'بدون ضمان' : 'No warranty',
       _ => '',
     };

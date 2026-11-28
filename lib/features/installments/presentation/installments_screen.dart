@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../../../core/json/amount_format.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/json/json_utils.dart';
@@ -33,6 +35,15 @@ String installmentStatusText(String status, {required bool arabic}) => switch (s
   'OVERDUE' => arabic ? 'متأخر' : 'Overdue',
   _ => arabic ? 'لم يحن موعده' : 'Not due yet',
 };
+
+/// A date the way a reader says it: 3 فبراير 2026, or 3 February 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class InstallmentsScreen extends ConsumerStatefulWidget {
   const InstallmentsScreen({super.key});
@@ -120,12 +131,20 @@ class _InstallmentsScreenState extends ConsumerState<InstallmentsScreen> {
         columns: [
           ColumnSpec(_arabic ? 'الفاتورة' : 'Invoice', value: (r) => text(r, 'invoiceNumber'), emphasise: true),
           ColumnSpec(_arabic ? 'العميل' : 'Customer', value: _customer),
-          ColumnSpec(_arabic ? 'الإجمالي' : 'Total', value: (r) => '${r['total']}'),
-          ColumnSpec(_arabic ? 'المسدد' : 'Paid', value: (r) => '${r['paid']}'),
-          ColumnSpec(_arabic ? 'القسط القادم' : 'Next due', value: (r) => text(r, 'nextDue', fallback: _arabic ? 'سُدد بالكامل' : 'All paid')),
+          ColumnSpec(_arabic ? 'الإجمالي' : 'Total', value: (r) => formatAmount(asString(r['total']))),
+          ColumnSpec(_arabic ? 'المسدد' : 'Paid', value: (r) => formatAmount(asString(r['paid']))),
+          ColumnSpec(
+            _arabic ? 'القسط القادم' : 'Next due',
+            value: (r) {
+              final next = text(r, 'nextDue');
+              return next.isEmpty
+                  ? (_arabic ? 'سُدد بالكامل' : 'All paid')
+                  : _dateLabel(context, next);
+            },
+          ),
           ColumnSpec(
             _arabic ? 'المتأخر' : 'Overdue',
-            value: (r) => '${r['overdueAmount']}',
+            value: (r) => formatAmount(asString(r['overdueAmount'])),
             tone: (r) => (r['overdueCount'] is num && (r['overdueCount'] as num) > 0) ? AppTone.warning : AppTone.neutral,
           ),
         ],
@@ -168,8 +187,8 @@ class _InstallmentsScreenState extends ConsumerState<InstallmentsScreen> {
           ColumnSpec(_arabic ? 'الفاتورة' : 'Invoice', value: (r) => text(r, 'invoiceNumber'), emphasise: true),
           ColumnSpec(_arabic ? 'العميل' : 'Customer', value: _customer),
           ColumnSpec(_arabic ? 'القسط رقم' : 'Installment no.', value: (r) => '${r['no']}'),
-          ColumnSpec(_arabic ? 'تاريخ الاستحقاق' : 'Due date', value: (r) => text(r, 'dueDate')),
-          ColumnSpec(_arabic ? 'المتبقي' : 'Remaining', value: (r) => '${r['remaining']}', tone: (r) => AppTone.warning),
+          ColumnSpec(_arabic ? 'تاريخ الاستحقاق' : 'Due date', value: (r) => _dateLabel(context, text(r, 'dueDate'))),
+          ColumnSpec(_arabic ? 'المتبقي' : 'Remaining', value: (r) => formatAmount(asString(r['remaining'])), tone: (r) => AppTone.warning),
           ColumnSpec(_arabic ? 'أيام التأخير' : 'Days late', value: (r) => '${r['daysLate']}'),
         ],
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/json/amount_format.dart';
@@ -34,6 +35,15 @@ List<String> chequeNextActions(String direction, String status) {
     'BOUNCED' => ['represent', 'cancel'],
     _ => const [],
   };
+}
+
+/// A date the way a reader says it: 3 فبراير 2026, or 3 February 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
 }
 
 class ChequesScreen extends ConsumerStatefulWidget {
@@ -162,7 +172,7 @@ class _ChequesScreenState extends ConsumerState<ChequesScreen> {
                   ColumnSpec(_arabic ? 'رقم الشيك' : 'Cheque no.', value: (r) => text(r, 'chequeNumber'), emphasise: true),
                   ColumnSpec(_arabic ? 'البنك' : 'Bank', value: (r) => text(r, 'bankName')),
                   ColumnSpec(_arabic ? 'الطرف' : 'Party', value: _party),
-                  ColumnSpec(_arabic ? 'الاستحقاق' : 'Due', value: (r) => text(r, 'dueDate')),
+                  ColumnSpec(_arabic ? 'الاستحقاق' : 'Due', value: (r) => _dateLabel(context, text(r, 'dueDate'))),
                   ColumnSpec(
                     _arabic ? 'المبلغ' : 'Amount',
                     numeric: true,

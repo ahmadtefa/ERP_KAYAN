@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../../../core/json/amount_format.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/json/json_utils.dart';
@@ -52,6 +54,15 @@ int unpaidNetPiasters(List<Json> entries, {String? repId}) {
 }
 
 String piastersText(int piasters) => (piasters / 100).toStringAsFixed(2);
+
+/// A date the way a reader says it: 3 فبراير 2026, or 3 February 2026.
+String _dateLabel(BuildContext context, String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return raw;
+  return DateFormat.yMMMMd(
+    Localizations.localeOf(context).toLanguageTag(),
+  ).format(parsed);
+}
 
 class CommissionsScreen extends ConsumerStatefulWidget {
   const CommissionsScreen({super.key});
@@ -151,13 +162,13 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
         rows: rows,
         columns: [
           ColumnSpec(_arabic ? 'المستند' : 'Document', value: (r) => text(r, 'invoiceNumber'), emphasise: true),
-          ColumnSpec(_arabic ? 'التاريخ' : 'Date', value: (r) => text(r, 'documentDate')),
+          ColumnSpec(_arabic ? 'التاريخ' : 'Date', value: (r) => _dateLabel(context, text(r, 'documentDate'))),
           ColumnSpec(_arabic ? 'المندوب' : 'Rep', value: (r) => _name(r, en: 'repEn', ar: 'repAr')),
-          ColumnSpec(_arabic ? 'قبل الضريبة' : 'Before VAT', value: (r) => '${r['basis']}'),
+          ColumnSpec(_arabic ? 'قبل الضريبة' : 'Before VAT', value: (r) => formatAmount(asString(r['basis']))),
           ColumnSpec(_arabic ? 'النسبة %' : 'Rate %', value: (r) => '${r['ratePercent']}'),
           ColumnSpec(
             _arabic ? 'العمولة' : 'Commission',
-            value: (r) => '${r['amount']}',
+            value: (r) => formatAmount(asString(r['amount'])),
             tone: (r) => text(r, 'kind') == 'RETURN' ? AppTone.warning : AppTone.neutral,
           ),
           ColumnSpec(
@@ -224,7 +235,7 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
           ColumnSpec(_arabic ? 'النوع' : 'Type', value: (r) => text(r, 'documentType') == 'CREDIT_NOTE' ? (_arabic ? 'إشعار دائن' : 'Credit note') : (_arabic ? 'فاتورة' : 'Invoice')),
           ColumnSpec(_arabic ? 'التاريخ' : 'Date', value: (r) => text(r, 'invoiceDate')),
           ColumnSpec(_arabic ? 'العميل' : 'Customer', value: (r) => _name(r, en: 'customerEn', ar: 'customerAr')),
-          ColumnSpec(_arabic ? 'قبل الضريبة' : 'Before VAT', value: (r) => '${r['basis']}'),
+          ColumnSpec(_arabic ? 'قبل الضريبة' : 'Before VAT', value: (r) => formatAmount(asString(r['basis']))),
         ],
         actions: (row) => [
           if (canManage)
@@ -252,7 +263,7 @@ class _CommissionsScreenState extends ConsumerState<CommissionsScreen> {
           ColumnSpec(_arabic ? 'المندوب' : 'Rep', value: (r) => _name(r, en: 'repEn', ar: 'repAr'), emphasise: true),
           ColumnSpec(_arabic ? 'من' : 'From', value: (r) => text(r, 'from')),
           ColumnSpec(_arabic ? 'إلى' : 'To', value: (r) => text(r, 'to')),
-          ColumnSpec(_arabic ? 'المبلغ' : 'Amount', value: (r) => '${r['amount']}'),
+          ColumnSpec(_arabic ? 'المبلغ' : 'Amount', value: (r) => formatAmount(asString(r['amount']))),
           ColumnSpec(_arabic ? 'عدد المستندات' : 'Documents', value: (r) => '${r['entryCount']}'),
           ColumnSpec(_arabic ? 'ملاحظة' : 'Note', value: (r) => text(r, 'note')),
         ],
