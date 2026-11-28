@@ -46,6 +46,14 @@ const Map<String, List<String>> guardSettingsRefusals = {
     'التثبيت يحتوي بيانات شركة أو مستخدمين بالفعل، فالإعداد الأول مغلق. استخدم المسار المعتمد لإضافة شركة أو استعادة بيانات. لم يتغير شيء.',
     'This installation already has company or user data, so the first setup is closed. Use the approved way to add a company or restore data. Nothing changed.',
   ],
+  'COMPANY_CREATE_DISABLED': [
+    'هذا التثبيت غير مرخّص لأكثر من شركة واحدة، فلا يمكن إضافة شركة الآن. فعّل ترخيص الشركات المتعددة من المورّد ثم أعد المحاولة. لم تُضف شركة.',
+    'This installation is not licensed for more than one company, so a company cannot be added now. Get the multi-company licence from the vendor and try again. No company was added.',
+  ],
+  'COMPANY_CODE_TAKEN': [
+    'رمز الشركة مستخدم لشركة أخرى بالفعل. اكتب رمزًا مختلفًا للشركة الجديدة. لم تُضف شركة.',
+    'This company code is already used by another company. Enter a different code for the new company. No company was added.',
+  ],
   'PRINT_SETTINGS_TOO_MANY': [
     'عدد إعدادات الطباعة في الطلب أكبر من المسموح. احفظ على دفعات أصغر. لم يُحفظ شيء.',
     'There are too many print settings in one request. Save in smaller batches. Nothing was saved.',

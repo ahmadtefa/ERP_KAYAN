@@ -21,7 +21,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
-import { UpdateCompanyProfileDto } from './dto/company.dto';
+import { InitialSetupDto, UpdateCompanyProfileDto } from './dto/company.dto';
+import { SetupService } from './setup.service';
 import {
   CompanyService,
   LOGO_UPLOAD_MAX_BYTES,
@@ -41,7 +42,14 @@ interface UploadedLogo {
 /// and the same.
 @Controller('companies')
 export class CompaniesController {
-  constructor(private readonly companies: CompanyService) {}
+  constructor(private readonly companies: CompanyService, private readonly setup: SetupService) {}
+
+  /// Add a company. Program administrator only; refused while the installation is single-company.
+  @Post()
+  @UseGuards(AuditedSuperAdminGuard)
+  create(@CurrentUser() user: AuthUser, @Body() dto: InitialSetupDto) {
+    return this.setup.createCompany(dto, { userId: user.userId, companyId: user.companyId });
+  }
 
   /// Deprecated, kept for older clients: lists only a sole active company (see
   /// `CompanyService.publicOptions`). Never lists several companies.

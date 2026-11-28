@@ -149,6 +149,64 @@ export class SetupService {
     };
   }
 
+  /// Whether this installation may hold more than one company. The switch is a row
+  /// that no API writes; it stays off until the vendor-licensed activation path owns it.
+  async multiCompanyEnabled(q: { $queryRaw: <T>(sql: Prisma.Sql) => Promise<T> } = this.prisma as never): Promise<boolean> {
+    const rows = await q.$queryRaw<Array<{ enabled: boolean }>>(
+      Prisma.sql`SELECT enabled FROM installation_flags WHERE key = 'multi_company'`,
+    );
+    return rows[0]?.enabled === true;
+  }
+
+  /// Adds a company to a running installation. Only the program administrator may call it
+  /// (the controller guards that) and only while the multi-company switch is on. The new
+  /// company's first administrator belongs to that company alone: never a program administrator.
+  async createCompany(dto: InitialSetupDto, actor: { userId: string; companyId: string }, ip?: string, userAgent?: string) {
+    if (!(await this.multiCompanyEnabled())) {
+      throw new ConflictException({ code: 'COMPANY_CREATE_DISABLED', message: 'This installation is not licensed for more than one company.' });
+    }
+    let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
+    if (dto.logoBase64) {
+      logo = await normalizeLogo(Buffer.from(dto.logoBase64, 'base64'), dto.logoMime ?? 'image/png');
+    }
+    const passwordHash = await argon2.hash(dto.adminPassword);
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(172895144, 485774)`);
+      // Checked again under the lock: the switch may have been turned off since the first look.
+      if (!(await this.multiCompanyEnabled(tx as never))) {
+        throw new ConflictException({ code: 'COMPANY_CREATE_DISABLED', message: 'This installation is not licensed for more than one company.' });
+      }
+      const clash = await tx.company.findFirst({ where: { code: { equals: dto.companyCode, mode: 'insensitive' } }, select: { id: true } });
+      if (clash) {
+        throw new ConflictException({ code: 'COMPANY_CODE_TAKEN', message: 'A company with this code already exists.' });
+      }
+      const created = await this.provisionCompany(tx, dto, { logo, passwordHash, isSuperAdmin: false });
+      await this.audit.recordRequired({
+        companyId: created.company.id,
+        userId: actor.userId,
+        action: 'CREATE',
+        entity: 'companies',
+        entityId: created.company.id,
+        after: {
+          code: created.company.code,
+          nameEn: created.company.nameEn,
+          nameAr: created.company.nameAr,
+          adminUsername: created.admin.username,
+          createdFromCompanyId: actor.companyId,
+        },
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      }, tx);
+      return created;
+    }, { maxWait: 10000, timeout: 30000 });
+    return {
+      companyId: result.company.id,
+      companyCode: result.company.code,
+      headquartersId: result.hq.id,
+      adminUsername: result.admin.username,
+    };
+  }
+
   /// Everything a new company needs, inside the caller's transaction: the
   /// company, its head office and default warehouse, the permission catalogue,
   /// its two starter roles, its first administrator, the fiscal period and the

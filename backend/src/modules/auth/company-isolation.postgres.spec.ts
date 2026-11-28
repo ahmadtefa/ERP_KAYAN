@@ -20,7 +20,7 @@ import { AuthService } from './auth.service';
  *
  * Runs on its own throwaway database, migrated with the real migration files
  * and dropped afterwards. It first checks that the shipped schema refuses a
- * second live company, then drops that index in the throwaway database only
+ * second live company, then turns the multi-company switch on in the throwaway database only
  * to prove the application's isolation with two companies. That is not
  * production multi-company support. Runs on the isolated scratch database (its name ends in
  * "specs" or "test") or when KAYAN_COMPANY_ISOLATION_PG=1.
@@ -141,7 +141,7 @@ const password = 'initial-password-123';
     // application's company isolation can be exercised with two companies.
     // This is NOT production multi-company support. That needs an approved
     // migration, which the acceptance run must execute for real.
-    await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS "Company_one_active_company_idx"');
+    await prisma.$executeRawUnsafe(`INSERT INTO installation_flags (key, enabled) VALUES ('multi_company', true) ON CONFLICT (key) DO UPDATE SET enabled = true`);
     await prisma.branch.deleteMany({ where: { companyId: B.companyId } });
     await prisma.user.deleteMany({ where: { id: B.userId } });
     await seed(B, 'B');

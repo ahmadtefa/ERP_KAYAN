@@ -20,7 +20,7 @@ function response() {
 
 describe('company logo by id', () => {
   const companies = { getLogo: jest.fn() };
-  const controller = new CompaniesController(companies as never);
+  const controller = new CompaniesController(companies as never, {} as never);
   const user = { userId: 'u', companyId: OWN } as never;
 
   beforeEach(() => {
