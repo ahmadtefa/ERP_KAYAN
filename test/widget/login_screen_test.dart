@@ -80,6 +80,12 @@ void main() {
     Locale locale = const Locale('en'),
     ApiClient? apiClient,
   }) async {
+    // The form has a company code field now; a taller window keeps every
+    // button on screen, as on a real desktop.
+    tester.view.physicalSize = const Size(900, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -146,11 +152,11 @@ void main() {
     expect(find.text('Current password'), findsOneWidget);
     expect(find.text('New password'), findsOneWidget);
     expect(find.text('Confirm new password'), findsOneWidget);
-    // The username alone finds the company: no company chooser and no
-    // company code field. The login form stays mounted behind the dialog.
+    // No company chooser: the company is named by typing its code (optional
+    // with a single company). The login form stays mounted behind the dialog.
     expect(find.byType(SearchableSelectField), findsNothing);
     expect(find.text('Company'), findsNothing);
-    expect(find.byType(TextField), findsNWidgets(6));
+    expect(find.byType(TextField), findsNWidgets(7));
     expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(4));
   });
 
@@ -169,9 +175,9 @@ void main() {
     expect(find.text('Acme · ACME'), findsNothing);
 
     final fields = find.byType(TextField);
-    await tester.enterText(fields.at(3), 'CurrentPassword!123');
-    await tester.enterText(fields.at(4), 'NewPassword!12345');
+    await tester.enterText(fields.at(4), 'CurrentPassword!123');
     await tester.enterText(fields.at(5), 'NewPassword!12345');
+    await tester.enterText(fields.at(6), 'NewPassword!12345');
     await tester.tap(find.widgetWithText(FilledButton, 'Change password'));
     await tester.pumpAndSettle();
 

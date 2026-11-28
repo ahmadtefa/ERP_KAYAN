@@ -641,10 +641,9 @@ class _SignInForm extends StatelessWidget {
               labelText: Localizations.localeOf(context).languageCode == 'ar'
                   ? 'كود الشركة'
                   : 'Company code',
-              helperText: Localizations.localeOf(context).languageCode == 'ar'
-                  ? 'اتركه فارغاً إذا كان البرنامج يضم شركة واحدة فقط.'
-                  : 'Leave it empty if the program holds only one company.',
-              helperMaxLines: 2,
+              hintText: Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'اتركه فارغاً إذا كانت هناك شركة واحدة'
+                  : 'Leave empty if there is one company',
               prefixIcon: const Icon(Icons.apartment_outlined),
             ),
           ),
